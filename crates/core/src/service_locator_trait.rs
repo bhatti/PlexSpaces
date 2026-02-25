@@ -445,6 +445,107 @@ pub trait ServiceLocator: Send + Sync {
     /// from the shared KeyValueStore.
     async fn register_process_group_registry(&self, _registry: std::sync::Arc<dyn std::any::Any + Send + Sync>) {
     }
+
+    // ============================================================================
+    // CAPABILITY PROVIDER METHODS
+    // ============================================================================
+
+    /// Register a capability provider
+    ///
+    /// ## Purpose
+    /// Registers a capability provider that extends PlexSpaces with new service types.
+    /// Providers implement the CapabilityProvider trait and can fulfill WIT interfaces.
+    ///
+    /// ## Arguments
+    /// * `provider` - The capability provider to register
+    async fn register_capability_provider(&self, _provider: std::sync::Arc<dyn crate::CapabilityProvider>) {
+    }
+
+    /// Get a capability provider by ID
+    ///
+    /// ## Arguments
+    /// * `provider_id` - Unique provider identifier (e.g., "plexspaces:http-client")
+    ///
+    /// ## Returns
+    /// The provider if registered, None otherwise
+    async fn get_capability_provider(&self, _provider_id: &str) -> Option<std::sync::Arc<dyn crate::CapabilityProvider>> {
+        None
+    }
+
+    /// List all registered capability provider IDs
+    async fn list_capability_providers(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    // ============================================================================
+    // SERVICE LIFECYCLE METHODS
+    // ============================================================================
+
+    /// Register a service that participates in lifecycle management
+    ///
+    /// ## Arguments
+    /// * `name` - Service name for logging
+    /// * `service` - The lifecycle service to register
+    async fn register_lifecycle_service(&self, _name: &str, _service: std::sync::Arc<dyn crate::ServiceLifecycle>) {
+    }
+
+    /// Start all lifecycle services in priority order (lower priority first)
+    async fn start_lifecycle_services(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+
+    /// Stop all lifecycle services in priority order (lower priority first)
+    async fn stop_lifecycle_services(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+
+    // ============================================================================
+    // HTTP CLIENT SERVICE
+    // ============================================================================
+
+    /// Get HttpClientService for outbound HTTP requests
+    ///
+    /// ## Returns
+    /// Some(Arc<dyn HttpClientService>) if registered, None otherwise
+    async fn get_http_client(&self) -> Option<std::sync::Arc<dyn crate::HttpClientService>> {
+        None
+    }
+
+    /// Register HttpClientService
+    async fn register_http_client(&self, _service: std::sync::Arc<dyn crate::HttpClientService>) {
+    }
+
+    // ============================================================================
+    // CRON SERVICE
+    // ============================================================================
+
+    /// Get CronService for durable scheduled jobs
+    ///
+    /// ## Returns
+    /// Some(Arc<dyn CronService>) if registered, None otherwise
+    async fn get_cron_service(&self) -> Option<std::sync::Arc<dyn crate::CronService>> {
+        None
+    }
+
+    /// Register CronService
+    async fn register_cron_service(&self, _service: std::sync::Arc<dyn crate::CronService>) {
+    }
+
+    // ============================================================================
+    // SERVICE INVOKER
+    // ============================================================================
+
+    /// Get ServiceInvoker for cross-node service invocation
+    ///
+    /// ## Returns
+    /// Some(Arc<dyn ServiceInvoker>) if registered, None otherwise
+    async fn get_service_invoker(&self) -> Option<std::sync::Arc<dyn crate::ServiceInvoker>> {
+        None
+    }
+
+    /// Register ServiceInvoker
+    async fn register_service_invoker(&self, _invoker: std::sync::Arc<dyn crate::ServiceInvoker>) {
+    }
 }
 
 /// Trait for WASM Runtime (defined in wasm-runtime crate)

@@ -90,6 +90,16 @@ pub mod actor_factory;
 pub use actor_factory::ActorFactory;
 pub mod constants;
 pub use constants::TEMP_SENDER_PREFIX;
+pub mod capability_provider;
+pub use capability_provider::{CapabilityProvider, ProviderConfig, ProviderLink, ProviderHealth, ProviderError};
+pub mod service_lifecycle;
+pub use service_lifecycle::ServiceLifecycle;
+pub mod http_client_trait;
+pub use http_client_trait::{HttpClientService, HttpRequest, HttpResponse, HttpMethod, HttpClientError};
+pub mod cron_service_trait;
+pub use cron_service_trait::{CronService, CronSchedule, ScheduledJob, JobStatus, CronError};
+pub mod service_invoker;
+pub use service_invoker::{ServiceInvoker, InvocationOptions, BackoffStrategy, InvocationError};
 
 // Re-export enhanced ActorContext
 pub use actor_context::{

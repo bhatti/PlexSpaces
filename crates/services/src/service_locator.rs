@@ -436,6 +436,22 @@ pub struct ServiceLocatorImpl {
     /// Shutdown flag: when true, node is shutting down gracefully
     /// Components should stop accepting new requests but complete in-progress ones
     shutdown_flag: Arc<RwLock<bool>>,
+
+    /// Registered capability providers (provider_id -> provider)
+    /// Providers are plugins that extend PlexSpaces with new service types
+    capability_providers: Arc<RwLock<HashMap<String, Arc<dyn plexspaces_core::CapabilityProvider>>>>,
+
+    /// Registered lifecycle services (name -> service) for ordered startup/shutdown
+    lifecycle_services: Arc<RwLock<Vec<(String, Arc<dyn plexspaces_core::ServiceLifecycle>)>>>,
+
+    /// Registered HttpClientService for outbound HTTP requests
+    http_client: Arc<RwLock<Option<Arc<dyn plexspaces_core::HttpClientService>>>>,
+
+    /// Registered CronService for durable scheduled jobs
+    cron_service: Arc<RwLock<Option<Arc<dyn plexspaces_core::CronService>>>>,
+
+    /// Registered ServiceInvoker for cross-node service invocation
+    service_invoker: Arc<RwLock<Option<Arc<dyn plexspaces_core::ServiceInvoker>>>>,
 }
 
 impl ServiceLocatorImpl {
@@ -470,6 +486,11 @@ impl ServiceLocatorImpl {
             security_config: Arc::new(tokio::sync::Mutex::new(None)),
             runtime_config: Arc::new(tokio::sync::Mutex::new(None)),
             shutdown_flag: Arc::new(RwLock::new(false)),
+            capability_providers: Arc::new(RwLock::new(HashMap::new())),
+            lifecycle_services: Arc::new(RwLock::new(Vec::new())),
+            http_client: Arc::new(RwLock::new(None)),
+            cron_service: Arc::new(RwLock::new(None)),
+            service_invoker: Arc::new(RwLock::new(None)),
         }
     }
     
@@ -1691,6 +1712,108 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
     async fn register_process_group_registry(&self, registry: std::sync::Arc<dyn std::any::Any + Send + Sync>) {
         let mut pg_registry = self.process_group_registry.write().await;
         *pg_registry = Some(registry);
+    }
+
+    // ============================================================================
+    // CAPABILITY PROVIDER METHODS
+    // ============================================================================
+
+    async fn register_capability_provider(&self, provider: std::sync::Arc<dyn plexspaces_core::CapabilityProvider>) {
+        let provider_id = provider.provider_id().to_string();
+        let mut providers = self.capability_providers.write().await;
+        tracing::info!(provider_id = %provider_id, description = %provider.description(), "Registered capability provider");
+        providers.insert(provider_id, provider);
+    }
+
+    async fn get_capability_provider(&self, provider_id: &str) -> Option<std::sync::Arc<dyn plexspaces_core::CapabilityProvider>> {
+        let providers = self.capability_providers.read().await;
+        providers.get(provider_id).cloned()
+    }
+
+    async fn list_capability_providers(&self) -> Vec<String> {
+        let providers = self.capability_providers.read().await;
+        providers.keys().cloned().collect()
+    }
+
+    // ============================================================================
+    // SERVICE LIFECYCLE METHODS
+    // ============================================================================
+
+    async fn register_lifecycle_service(&self, name: &str, service: std::sync::Arc<dyn plexspaces_core::ServiceLifecycle>) {
+        let mut services = self.lifecycle_services.write().await;
+        tracing::info!(service = %name, startup_priority = service.startup_priority(), shutdown_priority = service.shutdown_priority(), "Registered lifecycle service");
+        services.push((name.to_string(), service));
+    }
+
+    async fn start_lifecycle_services(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let services = self.lifecycle_services.read().await;
+        let mut sorted: Vec<_> = services.iter().collect();
+        sorted.sort_by_key(|(_, s)| s.startup_priority());
+
+        for (name, service) in sorted {
+            tracing::info!(service = %name, priority = service.startup_priority(), "Starting lifecycle service");
+            if let Err(e) = service.on_start().await {
+                tracing::error!(service = %name, error = %e, "Failed to start lifecycle service");
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    async fn stop_lifecycle_services(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let services = self.lifecycle_services.read().await;
+        let mut sorted: Vec<_> = services.iter().collect();
+        sorted.sort_by_key(|(_, s)| s.shutdown_priority());
+
+        for (name, service) in sorted {
+            tracing::info!(service = %name, priority = service.shutdown_priority(), "Stopping lifecycle service");
+            if let Err(e) = service.on_stop().await {
+                tracing::warn!(service = %name, error = %e, "Error stopping lifecycle service (continuing shutdown)");
+            }
+        }
+        Ok(())
+    }
+
+    // ============================================================================
+    // HTTP CLIENT SERVICE
+    // ============================================================================
+
+    async fn get_http_client(&self) -> Option<std::sync::Arc<dyn plexspaces_core::HttpClientService>> {
+        let client = self.http_client.read().await;
+        client.clone()
+    }
+
+    async fn register_http_client(&self, service: std::sync::Arc<dyn plexspaces_core::HttpClientService>) {
+        let mut client = self.http_client.write().await;
+        *client = Some(service);
+    }
+
+    // ============================================================================
+    // CRON SERVICE
+    // ============================================================================
+
+    async fn get_cron_service(&self) -> Option<std::sync::Arc<dyn plexspaces_core::CronService>> {
+        let service = self.cron_service.read().await;
+        service.clone()
+    }
+
+    async fn register_cron_service(&self, service: std::sync::Arc<dyn plexspaces_core::CronService>) {
+        let mut cron = self.cron_service.write().await;
+        *cron = Some(service);
+    }
+
+    // ============================================================================
+    // SERVICE INVOKER
+    // ============================================================================
+
+    async fn get_service_invoker(&self) -> Option<std::sync::Arc<dyn plexspaces_core::ServiceInvoker>> {
+        let invoker = self.service_invoker.read().await;
+        invoker.clone()
+    }
+
+    async fn register_service_invoker(&self, invoker: std::sync::Arc<dyn plexspaces_core::ServiceInvoker>) {
+        let mut service_invoker = self.service_invoker.write().await;
+        *service_invoker = Some(invoker);
     }
 }
 

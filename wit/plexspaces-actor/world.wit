@@ -19,7 +19,9 @@ world plexspaces-actor {
     import process-groups;
     import locks;
     import registry;
-    
+    import http-client;
+    import cron;
+
     // Actor-implemented interfaces (exports)
     export actor;
 }

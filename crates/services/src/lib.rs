@@ -71,6 +71,11 @@ pub mod node_registry;
 pub mod node_service;
 pub mod wasm_file_saver;
 
+// New service implementations (services framework expansion)
+pub mod http_client_service;
+pub mod cron_service;
+pub mod service_invoker;
+
 // Re-export ProcessGroupServiceImpl for convenience
 pub use process_group_service::ProcessGroupServiceImpl;
 
@@ -82,4 +87,9 @@ pub use node_service::NodeServiceImpl;
 
 // Re-export application deployment helpers for consistent behavior
 pub use application_service::create_default_application_spec;
+
+// Re-export new service implementations
+pub use http_client_service::HttpClientServiceImpl;
+pub use cron_service::CronServiceImpl;
+pub use service_invoker::ServiceInvokerImpl;
 

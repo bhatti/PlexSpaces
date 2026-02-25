@@ -1,0 +1,99 @@
+// PlexSpaces Actor Interface - HTTP Client
+//
+// Outbound HTTP request capability for WASM actors.
+// Host-side implementation provides security controls:
+// - URL allowlist/denylist (prevent SSRF)
+// - Per-actor rate limiting
+// - Response size limits
+// - Configurable timeouts
+
+interface http-client {
+    use types.{payload, actor-error, duration-ms, context};
+
+    /// HTTP method
+    enum http-method {
+        get,
+        post,
+        put,
+        delete,
+        patch,
+        head,
+        options,
+    }
+
+    /// HTTP header (name-value pair)
+    record http-header {
+        name: string,
+        value: string,
+    }
+
+    /// HTTP request
+    record http-request {
+        /// HTTP method
+        method: http-method,
+        /// Request URL (must be absolute, e.g., "https://api.example.com/v1/data")
+        url: string,
+        /// Request headers
+        headers: list<http-header>,
+        /// Optional request body
+        body: option<payload>,
+        /// Request timeout in milliseconds (0 = use default)
+        timeout-ms: duration-ms,
+    }
+
+    /// HTTP response
+    record http-response {
+        /// HTTP status code (e.g., 200, 404, 500)
+        status: u16,
+        /// Response headers
+        headers: list<http-header>,
+        /// Response body
+        body: payload,
+    }
+
+    /// Send an HTTP request
+    ///
+    /// # Arguments
+    /// - `ctx`: Request context (tenant/namespace)
+    /// - `req`: HTTP request to send
+    ///
+    /// # Returns
+    /// - `ok(http-response)`: Response from the server
+    /// - `err`: Request failed (URL not allowed, timeout, network error, etc.)
+    ///
+    /// # Security
+    /// The host validates the URL against allowlist/denylist rules.
+    /// By default, requests to localhost, private networks, and cloud metadata
+    /// endpoints are denied.
+    request: func(ctx: context, req: http-request) -> result<http-response, actor-error>;
+
+    /// Convenience: Send GET request
+    ///
+    /// # Arguments
+    /// - `ctx`: Request context
+    /// - `url`: Request URL
+    /// - `headers`: Request headers
+    /// - `timeout-ms`: Timeout (0 = default)
+    get: func(
+        ctx: context,
+        url: string,
+        headers: list<http-header>,
+        timeout-ms: duration-ms
+    ) -> result<http-response, actor-error>;
+
+    /// Convenience: Send POST request
+    ///
+    /// # Arguments
+    /// - `ctx`: Request context
+    /// - `url`: Request URL
+    /// - `headers`: Request headers
+    /// - `body`: Request body
+    /// - `timeout-ms`: Timeout (0 = default)
+    post: func(
+        ctx: context,
+        url: string,
+        headers: list<http-header>,
+        body: payload,
+        timeout-ms: duration-ms
+    ) -> result<http-response, actor-error>;
+}

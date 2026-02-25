@@ -1,0 +1,93 @@
+// PlexSpaces Actor Interface - Cron Scheduling
+//
+// Durable cron-based job scheduling for WASM actors.
+// Jobs are persisted (survive node restarts) and use distributed locking
+// for exactly-once execution in multi-node deployments.
+
+interface cron {
+    use types.{actor-id, payload, actor-error, duration-ms, context};
+
+    /// Cron schedule specification
+    record cron-schedule {
+        /// Cron expression (6-field: sec min hour day month weekday)
+        /// Examples:
+        ///   "0 */5 * * * *"       = every 5 minutes
+        ///   "0 0 * * * *"         = every hour
+        ///   "0 0 0 * * *"         = daily at midnight
+        ///   "0 30 9 * * MON-FRI"  = weekdays at 9:30 AM
+        expression: string,
+        /// Timezone (e.g., "UTC", "America/New_York"). Empty = UTC.
+        timezone: string,
+    }
+
+    /// Scheduled job definition
+    record scheduled-job {
+        /// Unique job ID (must be unique per tenant/namespace)
+        job-id: string,
+        /// Target actor to receive the trigger message
+        target-actor: actor-id,
+        /// Message type to send to the target actor
+        msg-type: string,
+        /// Message payload to send
+        payload: payload,
+        /// Cron schedule
+        schedule: cron-schedule,
+        /// Whether job is currently enabled
+        enabled: bool,
+    }
+
+    /// Job status information
+    record job-status {
+        /// Job ID
+        job-id: string,
+        /// Whether job is enabled
+        enabled: bool,
+        /// Timestamp of last execution (0 if never run)
+        last-run-at: u64,
+        /// Timestamp of next scheduled execution (0 if disabled)
+        next-run-at: u64,
+        /// Total number of times the job has been executed
+        run-count: u64,
+        /// Last error message (empty if last run succeeded)
+        last-error: string,
+    }
+
+    /// Register a cron job
+    ///
+    /// # Arguments
+    /// - `ctx`: Request context (tenant/namespace for isolation)
+    /// - `job`: Job definition
+    ///
+    /// # Returns
+    /// - `ok(string)`: Job ID on success
+    /// - `err`: Registration failed (invalid cron expression, job already exists)
+    register-job: func(ctx: context, job: scheduled-job) -> result<string, actor-error>;
+
+    /// Unregister (delete) a cron job
+    ///
+    /// # Arguments
+    /// - `ctx`: Request context
+    /// - `job-id`: ID of the job to remove
+    ///
+    /// # Returns
+    /// - `ok`: Job removed
+    /// - `err`: Job not found
+    unregister-job: func(ctx: context, job-id: string) -> result<_, actor-error>;
+
+    /// Enable or disable a job
+    ///
+    /// # Arguments
+    /// - `ctx`: Request context
+    /// - `job-id`: Job ID
+    /// - `enabled`: New enabled state
+    set-job-enabled: func(ctx: context, job-id: string, enabled: bool) -> result<_, actor-error>;
+
+    /// Get status of a specific job
+    ///
+    /// # Returns
+    /// - `ok(option<job-status>)`: Job status if found, none if not found
+    get-job-status: func(ctx: context, job-id: string) -> result<option<job-status>, actor-error>;
+
+    /// List all jobs for the current tenant/namespace
+    list-jobs: func(ctx: context) -> result<list<job-status>, actor-error>;
+}

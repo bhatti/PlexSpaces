@@ -204,7 +204,7 @@ impl CronServiceImpl {
                     ..Default::default()
                 };
 
-                let lock = match lock_manager.acquire(&ctx, lock_opts).await {
+                let lock = match lock_manager.acquire_lock(&ctx, lock_opts).await {
                     Ok(lock) => lock,
                     Err(_) => continue, // Another node is the leader
                 };
@@ -235,19 +235,15 @@ impl CronServiceImpl {
                     // Send message to target actor
                     if let Some(actor_service) = service_locator.get_actor_service().await {
                         let msg = plexspaces_proto::common::v1::Message {
-                            msg_type: job.msg_type.clone(),
+                            message_type: job.msg_type.clone(),
                             payload: job.payload.clone(),
                             sender_id: format!("cron:{}", job.job_id),
+                            receiver_id: job.target_actor.clone(),
                             ..Default::default()
                         };
 
                         let result = actor_service
                             .send(
-                                &plexspaces_common::RequestContext::new_without_auth(
-                                    String::new(),
-                                    String::new(),
-                                )
-                                .with_admin(true),
                                 &job.target_actor,
                                 msg,
                             )
@@ -297,7 +293,7 @@ impl CronServiceImpl {
                     delete_lock: false,
                     ..Default::default()
                 };
-                let _ = lock_manager.release(&ctx, release_opts).await;
+                let _ = lock_manager.release_lock(&ctx, release_opts).await;
             }
             tracing::info!("Cron scheduler stopped");
         });
@@ -356,7 +352,7 @@ impl CronService for CronServiceImpl {
                 CronJobRecord::kv_key(ctx.tenant_id(), ctx.namespace(), &job.job_id);
             let value = serde_json::to_vec(&record)
                 .map_err(|e| CronError::PersistenceError(e.to_string()))?;
-            kv.put(ctx, &key, &value)
+            kv.put(ctx, &key, value)
                 .await
                 .map_err(|e| CronError::PersistenceError(e.to_string()))?;
         }
@@ -422,7 +418,7 @@ impl CronService for CronServiceImpl {
             let key = CronJobRecord::kv_key(ctx.tenant_id(), ctx.namespace(), job_id);
             let value = serde_json::to_vec(&record_clone)
                 .map_err(|e| CronError::PersistenceError(e.to_string()))?;
-            kv.put(ctx, &key, &value)
+            kv.put(ctx, &key, value)
                 .await
                 .map_err(|e| CronError::PersistenceError(e.to_string()))?;
         }

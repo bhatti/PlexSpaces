@@ -102,65 +102,45 @@ impl ServiceInvokerImpl {
         }
     }
 
-    /// Invoke a service on a specific node via gRPC
+    /// Invoke a service on a specific node via the ActorService abstraction
+    ///
+    /// Routes the invocation through the actor messaging layer using a synthetic
+    /// actor ID `__service__:{service_name}:{operation}` so the receiving node
+    /// can dispatch it to the appropriate service handler.
     async fn invoke_remote(
         &self,
         _ctx: &RequestContext,
-        node_id: &str,
+        _node_id: &str,
         service_name: &str,
         operation: &str,
         payload: &[u8],
-        timeout: Duration,
+        _timeout: Duration,
     ) -> Result<Vec<u8>, InvocationError> {
-        // Get gRPC channel to the target node
-        let channel = self
+        // Use the ActorService abstraction for cross-node messaging
+        let actor_service = self
             .service_locator
-            .get_actor_service_client(node_id)
+            .get_actor_service()
             .await
-            .map_err(|e| InvocationError::TransportError(e.to_string()))?;
+            .ok_or_else(|| {
+                InvocationError::ServiceNotFound("ActorService not available".to_string())
+            })?;
 
-        // Create a generic service invocation request
-        // Using the existing actor service proto for generic invocation
-        use plexspaces_proto::common::v1::Message;
-        let request_msg = Message {
-            msg_type: format!("{}:{}", service_name, operation),
+        // Create a message targeting a synthetic service actor
+        let target_actor_id = format!("__service__:{}:{}", service_name, operation);
+        let msg = plexspaces_proto::common::v1::Message {
+            message_type: format!("{}:{}", service_name, operation),
             payload: payload.to_vec(),
             sender_id: self.node_id.clone(),
+            receiver_id: target_actor_id.clone(),
             ..Default::default()
         };
 
-        // Send via the gRPC channel with timeout
-        use plexspaces_proto::v1::actors::actor_service_client::ActorServiceClient;
-        let mut client = ActorServiceClient::new(channel);
-        client = client.max_decoding_message_size(64 * 1024 * 1024); // 64MB
-
-        let mut tonic_request =
-            tonic::Request::new(plexspaces_proto::v1::actors::InvokeActorRequest {
-                actor_id: format!("__service__:{}:{}", service_name, operation),
-                message: Some(request_msg),
-                timeout_ms: timeout.as_millis() as u64,
-                ..Default::default()
-            });
-
-        tonic_request.set_timeout(timeout);
-
-        let response = client
-            .invoke_actor(tonic_request)
+        // Send via the actor service (handles routing to correct node)
+        actor_service
+            .send(&target_actor_id, msg)
             .await
-            .map_err(|e| InvocationError::TransportError(e.to_string()))?;
-
-        let inner = response.into_inner();
-        if !inner.error.is_empty() {
-            return Err(InvocationError::RemoteError {
-                service: service_name.to_string(),
-                message: inner.error,
-            });
-        }
-
-        Ok(inner
-            .response
-            .map(|m| m.payload)
-            .unwrap_or_default())
+            .map(|msg_id| msg_id.into_bytes())
+            .map_err(|e| InvocationError::TransportError(e.to_string()))
     }
 }
 

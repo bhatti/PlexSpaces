@@ -100,11 +100,7 @@ message ResourceSpec {
 }
 ```
 
-The node selector uses a **bin-packing algorithm** that scores nodes by resource utilization:
-
-```
-Score = (cpu_utilization × 0.4) + (memory_utilization × 0.4) + (balance × 0.2)
-```
+The node selector uses a **bin-packing algorithm** that scores candidate nodes by resource utilization and label matching. Nodes that satisfy the required labels (hard constraints) are scored by available capacity, with preference for balanced utilization across the cluster. Placement preferences (affinity, anti-affinity) provide soft hints — co-locate related actors for locality, spread replicas across failure domains.
 
 This means inference workers automatically land on GPU nodes, preprocessing workers land on CPU nodes, and the framework balances load across the cluster without manual placement rules.
 
@@ -157,10 +153,72 @@ class DataPipeline:
 
 Workflow actors support:
 - **Durable execution**: State checkpointed via journaling; crash recovery replays to exact state
-- **Signals**: External control events (pause, resume, cancel)
-- **Queries**: Status inspection while pipeline is running
+- **Signals**: External control events (pause, resume, cancel) delivered to running workflows
+- **Queries**: Status inspection while pipeline is running (e.g., "how many documents processed?")
 - **Retry policies**: Exponential backoff with jitter per step
 - **Saga compensation**: Rollback steps on failure
+- **Conditional steps**: Choice/branch based on data properties (e.g., route PDFs vs HTMLs differently)
+
+### Durable Execution: Journaling, Snapshots, and Replay
+
+PlexSpaces durability goes beyond simple state persistence. Every message an actor processes is **journaled** — creating an append-only log of the actor's complete execution history. If the actor crashes, the framework replays the journal from the last snapshot to restore exact state.
+
+```
+Timeline:  msg1 → msg2 → msg3 → [SNAPSHOT] → msg4 → msg5 → [CRASH]
+Recovery:  Load snapshot → replay msg4 → replay msg5 → resume from msg6
+```
+
+Three journal entry types:
+- **MessageReceived**: Incoming message logged before processing
+- **MessageProcessed**: Handler result logged after processing
+- **StateCheckpoint**: Full state snapshot at configurable intervals
+
+For data pipelines, this means: if an ingestion coordinator crashes after processing 500 of 1000 documents, it recovers from the last checkpoint and resumes at document 501 — not document 1. No duplicate processing, no lost progress.
+
+Durability is enabled via the **facets** system (see below):
+
+```python
+@workflow_actor(facets=["durability"])
+class IngestionCoordinator:
+    pipeline_state: str = state(default="idle")
+    docs_processed: int = state(default=0)
+    # State is automatically checkpointed and restored on crash
+```
+
+### Facets: Composable Actor Capabilities
+
+**Facets** are PlexSpaces' extensibility mechanism — pluggable capabilities that attach to actors at deployment time. Think of them as middleware for actors. Instead of baking durability, timers, or HTTP capabilities into every actor, you compose them declaratively:
+
+| Facet | What It Adds | Use Case |
+|-------|-------------|----------|
+| **durability** | Journaling + checkpoint + replay | Long-running pipelines |
+| **event_sourcing** | Full audit trail + time-travel | Compliance, debugging |
+| **timer** | Durable delayed messages (reminders) | Scheduled batch ingestion |
+| **virtual_actor** | Grain-style lifecycle (activate on demand) | Elastic scaling |
+| **registry** | Service discovery registration | Microservices |
+
+Facets are declared in `app-config.toml`:
+
+```toml
+[[supervisor.children]]
+id = "ingestion-coordinator"
+type = "worker"
+restart = "permanent"
+facets = [
+  { type = "durability", priority = 10, config = { checkpoint_interval = 100 } },
+  { type = "timer", priority = 20, config = {} }
+]
+```
+
+Or in Python decorators:
+
+```python
+@workflow_actor(facets=["durability"])
+class DurablePipeline:
+    ...
+```
+
+This composition model means you pay only for the capabilities you use. A stateless preprocessing worker needs no durability facet. A long-running ingestion coordinator needs durability + timers. A service registry actor needs the registry facet.
 
 ### Channels: Queue-Based Task Distribution
 
@@ -175,7 +233,165 @@ For AWS Lambda+SQS-style patterns, PlexSpaces provides **channels** — message 
 | **Process Group** | No external deps | At-most-once |
 | **PostgreSQL** | LISTEN/NOTIFY, transactional | At-least-once |
 
-Channels support consumer groups, dead-letter queues, backpressure strategies, and ack/nack for reliable processing.
+Channels support consumer groups, dead-letter queues, backpressure strategies (block, drop, overflow), and ack/nack for reliable processing. Backpressure is critical for AI pipelines: if GPU inference is slower than CPU preprocessing, the channel automatically throttles the producer instead of overwhelming the consumer.
+
+### Distributed Locks: Coordinating Critical Sections
+
+When multiple actors need exclusive access to a shared resource — preventing duplicate document ingestion, coordinating shard rebalancing, acquiring a leader role — PlexSpaces provides **distributed locks** with lease-based expiration:
+
+```python
+# Acquire lock before writing to shared index (prevents duplicate ingestion)
+lock_id = host.lock_acquire("ingestion-lock", lease_ms=30000, timeout_ms=5000)
+try:
+    # Only one actor executes this block at a time
+    host.kv_put(f"index:{doc_id}", embedding_data)
+finally:
+    host.lock_release("ingestion-lock", lock_id)
+```
+
+Locks automatically expire if the holder crashes (lease-based), preventing deadlocks. Holders can `host.lock_renew()` to extend the lease for long operations. This is the same pattern as Redis Redlock or ZooKeeper ephemeral nodes, but built into the framework.
+
+### Blob Storage: Large Data Transfer
+
+For data too large for the KV store — image batches, model weights, embedding vectors, intermediate pipeline results — PlexSpaces provides **blob storage** with S3-compatible semantics:
+
+```python
+# Store a batch of embeddings as a binary blob
+embedding_bytes = serialize_embeddings(embeddings)
+host.blob_upload(f"embeddings/{batch_id}", embedding_bytes, "application/octet-stream")
+
+# Download on another actor (e.g., vector index builder)
+data = host.blob_download(f"embeddings/{batch_id}")
+embeddings = deserialize_embeddings(data)
+
+# List all embedding blobs
+blob_keys = host.blob_list("embeddings/")
+```
+
+The KV store handles metadata (document IDs, index mappings). Blob storage handles payloads (raw images, serialized tensors, model checkpoints). This separation mirrors the S3 + DynamoDB pattern used in production data lakes.
+
+### Timers and Scheduled Tasks
+
+Actors can schedule delayed messages using `host.send_after()` — useful for retry logic, periodic health checks, and scheduled batch ingestion:
+
+```python
+@actor
+class BatchScheduler:
+    @handler("schedule_ingestion")
+    def schedule(self, interval_ms: int = 3600000) -> dict:
+        # Schedule next ingestion run in 1 hour
+        host.send_after(interval_ms, "run_ingestion", {"source": "s3://data-lake/"})
+        return {"status": "scheduled", "next_run_ms": interval_ms}
+
+    @handler("run_ingestion")
+    def run_ingestion(self, source: str = "") -> dict:
+        # Process data, then reschedule
+        result = self._ingest_from(source)
+        host.send_after(3600000, "run_ingestion", {"source": source})
+        return result
+```
+
+For durable scheduling that survives crashes, combine timers with the **timer facet** — which persists scheduled messages and re-fires them after recovery.
+
+### Actor Lifecycle: Dynamic Spawning and Linking
+
+Beyond static supervisor configurations, actors can dynamically spawn, stop, link, and monitor other actors at runtime:
+
+```python
+# Dynamically spawn extra workers when load increases
+worker_id = host.spawn("extra-preprocessor-5", "preprocessor-module")
+
+# Link: if worker crashes, coordinator crashes too (fail-fast)
+host.link(worker_id)
+
+# Monitor: get notified if worker crashes (without crashing ourselves)
+monitor_ref = host.monitor(worker_id)
+
+# Stop a worker gracefully
+host.stop(worker_id)
+```
+
+**Linking** implements the Erlang "let it crash" philosophy: linked actors fail together, and the supervisor restarts the entire group. **Monitoring** provides one-directional failure notification without cascading crashes — useful for coordinators that need to know when workers die but should not die themselves.
+
+### Supervision Strategies
+
+The `app-config.toml` examples show `one_for_one`, but PlexSpaces supports three Erlang/OTP supervision strategies:
+
+| Strategy | Behavior | When to Use |
+|----------|----------|-------------|
+| **one_for_one** | Restart only the crashed actor | Independent workers (default) |
+| **rest_for_one** | Restart crashed actor + all actors started after it | Ordered dependencies (pipeline stages) |
+| **one_for_all** | Restart entire group if any actor crashes | Tightly coupled actors (shared state) |
+
+For data pipelines with stage dependencies (preprocessor → inference), `rest_for_one` ensures downstream actors restart when an upstream actor crashes:
+
+```toml
+[supervisor]
+strategy = "rest_for_one"    # Restart downstream stages on upstream failure
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "preprocessor"          # If this crashes...
+restart = "permanent"
+
+[[supervisor.children]]
+id = "inference"             # ...this also restarts (started after preprocessor)
+restart = "permanent"
+```
+
+For coordinators with shared state, `one_for_all` ensures consistency by restarting the entire group:
+
+```toml
+[supervisor]
+strategy = "one_for_all"     # Any crash restarts everything
+```
+
+### Behavior Types: GenServer, GenEvent, FSM, Workflow
+
+PlexSpaces actors support four Erlang-inspired behavior types, each optimized for different communication patterns:
+
+```python
+@actor                  # GenServer: request-reply (default)
+class BankAccount:      # Client sends request, gets response
+    ...
+
+@event_actor            # GenEvent: fire-and-forget event handling
+class TelemetryLogger:  # Receives events, no response needed
+    ...                 # Ideal for logging, metrics, audit trails
+
+@fsm_actor              # GenStateMachine: state transitions
+class DocumentFSM:      # Models explicit state machine with guards
+    current_state: str = state(default="pending")
+
+    @handler("process")
+    def process(self, doc_id: str = "") -> dict:
+        if self.current_state != "pending":
+            return {"error": "invalid_transition"}
+        self.current_state = "processing"
+        return {"state": self.current_state}
+
+@workflow_actor          # Workflow: multi-step durable orchestration
+class IngestionPipeline: # Long-running with checkpoints
+    ...
+```
+
+For AI pipelines, the pattern is typically: **GenServer** coordinators and workers (request-reply for scatter-gather), **event actors** for telemetry (fire-and-forget metrics), **FSM actors** for document state tracking, and **workflow actors** for pipeline orchestration.
+
+### Multi-Actor Modules: ACTOR_ROLES
+
+A single WASM module can contain multiple actor classes. The framework uses the `ACTOR_ROLES` dictionary to route actor IDs to the correct class via prefix matching:
+
+```python
+# One module, three actor types
+ACTOR_ROLES = {
+    "coordinator":  PipelineCoordinator,   # "coordinator" → PipelineCoordinator
+    "preprocessor": ImagePreprocessor,     # "preprocessor-0" → ImagePreprocessor
+    "inference":    ModelInferenceWorker,   # "inference-0" → ModelInferenceWorker
+}
+```
+
+This means you deploy a single `.wasm` binary that contains the entire pipeline — coordinator, preprocessors, and inference workers. The `app-config.toml` supervisor configuration maps child IDs to actor classes via prefix matching. No separate deployments per actor type.
 
 ---
 
@@ -475,6 +691,16 @@ curl -X POST http://localhost:8001/api/v1/actors/coordinator/ask \
 
 The fundamental difference: Ray treats functions as the compute unit and manages state externally. PlexSpaces treats actors as the compute unit with built-in state, supervision, and coordination. For stateless batch inference, both work well. For stateful pipelines — incremental ingestion, accumulating metrics, maintaining model state — the actor model eliminates the external state store entirely.
 
+### Why Actors for Batch Inference?
+
+The actor model adds three capabilities that Ray's stateless `map_batches()` lacks:
+
+1. **Persistent per-worker state**: Each inference worker maintains `model_loaded`, `batches_processed`, and `total_inference_ms` across requests. In Ray, you get this with class-based actors, but state is lost on worker failure. In PlexSpaces, state survives crashes via durability facets.
+
+2. **Supervision-tree recovery**: If an inference worker crashes mid-batch (OOM, GPU fault), the supervisor restarts it automatically and the coordinator retries the failed partition. No external monitoring, no manual intervention.
+
+3. **Resource-based routing at the actor level**: Each actor specifies its hardware requirements declaratively. The framework places preprocessors on CPU nodes and inference workers on GPU nodes without Kubernetes affinity rules or KubeRay operator configuration.
+
 ---
 
 ## Example 2: Data Lake Ingestion Pipeline
@@ -679,23 +905,21 @@ class EmbeddingWorker:
 
 ### Channel-Based Alternative (SQS Pattern)
 
-For even looser coupling, you can connect pipeline stages with channels instead of direct `host.ask()` calls. This decouples producers from consumers — the same pattern as AWS Lambda + SQS:
+For even looser coupling, you can connect pipeline stages with channels instead of direct `host.ask()` calls. Channels are configured at the infrastructure level (node config) and actors interact with them through message routing — the framework handles the queue mechanics. This decouples producers from consumers, the same pattern as AWS Lambda + SQS but without external infrastructure.
 
-```python
-# Producer: write parsed document to chunk queue
-host.send_to_queue("chunk-queue", "chunk_request", {
-    "doc_id": doc_id, "text": parsed_text,
-})
+When to use channels vs direct `host.ask()`:
+- **`host.ask()` (scatter-gather)**: When the coordinator needs results immediately and controls parallelism. Best for batch pipelines where all stages complete before returning.
+- **Channels (queue-based)**: When stages run at different speeds and you need backpressure. Best for streaming ingestion where documents arrive continuously.
 
-# Consumer: chunker pulls from queue, processes, writes to embed queue
-msg = host.receive_from_queue("chunk-queue", timeout_ms=5000)
-chunks = self._chunk(msg.payload)
-for chunk in chunks:
-    host.send_to_queue("embed-queue", "embed_request", chunk)
-host.ack("chunk-queue", msg.id)
-```
+### Why Actors for Data Lake Ingestion?
 
-PlexSpaces channels support the same delivery guarantees as SQS (at-least-once with dead-letter queues) but without external infrastructure.
+Three properties of the actor model make it superior to stateless function pipelines for data lake workloads:
+
+1. **Durable state eliminates external stores**: The ingestion coordinator tracks progress (docs processed, chunks created, embeddings stored) in its own state — no Redis, no DynamoDB, no checkpoint files. If it crashes at document 500, it resumes from the last checkpoint, not from zero.
+
+2. **Process groups replace service registries**: Workers discover each other via `host.process_groups.join()` — no Consul, no Eureka, no Kubernetes service objects. Add a new parser node and it joins the group automatically.
+
+3. **Supervision trees replace retry logic**: Instead of wrapping every function call in try/except with exponential backoff, the supervision tree automatically restarts crashed workers. The coordinator does not handle worker failures — the supervisor does.
 
 ---
 
@@ -780,6 +1004,16 @@ class SimulationCoordinator:
 
 The TupleSpace coordination pattern replaces MPI ghost cell exchange with a higher-level abstraction: actors write tuples, neighbors read matching patterns. No explicit send/receive, no rank management, no communicator setup.
 
+### Why Actors for Scientific Computing?
+
+Three advantages over MPI:
+
+1. **Dynamic membership via process groups**: MPI requires static rank allocation at launch time — you cannot add workers mid-simulation. PlexSpaces actors join process groups dynamically. Scale from 4 to 16 grid regions mid-simulation by spawning new actors that join the "heat-regions" group.
+
+2. **Fault tolerance for long-running simulations**: MPI has no built-in fault tolerance — one crashed rank kills the entire job. PlexSpaces supervision trees restart crashed regions, and durable state preserves temperature data across restarts. A 48-hour simulation survives node failures.
+
+3. **Heterogeneous hardware**: MPI assumes uniform ranks. PlexSpaces resource-based routing places compute-intensive regions on high-CPU nodes and I/O-intensive regions on high-memory nodes — within the same simulation.
+
 ---
 
 ## Example 4: Genomics Pipeline (Workflow Actor)
@@ -852,6 +1086,16 @@ class GenomicsPipelineCoordinator:
 ```
 
 Each stage uses specialized workers joined via process groups. The coordinator distributes work across workers using round-robin partitioning, and each stage's output feeds directly into the next.
+
+### Why Actors for Genomics Pipelines?
+
+Genomics pipelines are the canonical use case for workflow actors:
+
+1. **Pause/resume for operational control**: A running pipeline can be paused via `@handler("pause")` when downstream storage is full, then resumed when capacity is available. In Airflow/Nextflow, you would have to kill the job and restart from scratch.
+
+2. **Durable progress tracking**: The coordinator's `total_reads_passed_qc`, `total_reads_aligned`, and `total_variants` state fields are checkpointed automatically. If the coordinator crashes after QC completes but before alignment finishes, it recovers and resumes alignment — it does not re-run QC.
+
+3. **Heterogeneous resource allocation**: QC workers need CPU only. Alignment workers need high memory (hg38 reference genome is ~3GB in RAM). Variant callers need CPU + moderate memory. Resource-based routing places each stage on appropriate hardware automatically.
 
 ---
 
@@ -959,6 +1203,26 @@ GridRegionActor          {accelerator: cpu}             cpu-node-1
 MatrixWorker             {accelerator: cpu}             cpu-node-1
 ```
 
+### HTTP Gateway: Serverless Actor Invocation
+
+Every deployed actor is automatically accessible via PlexSpaces' HTTP gateway — no additional configuration needed. This turns actors into serverless functions callable with plain `curl`:
+
+```bash
+# Request-reply (ask): POST returns the handler's response
+curl -X POST http://localhost:8001/api/v1/actors/coordinator/ask \
+    -H "Content-Type: application/json" \
+    -d '{"message_type": "classify_images", "payload": {...}}'
+
+# Fire-and-forget (tell): POST returns immediately, processing is async
+curl -X POST http://localhost:8001/api/v1/actors/coordinator/tell \
+    -d '{"message_type": "log_event", "payload": {...}}'
+
+# GET for read-only queries (routed via ask)
+curl http://localhost:8001/api/v1/actors/coordinator/ask?msg_type=pipeline_stats
+```
+
+This means external systems — data loaders, monitoring dashboards, CI/CD pipelines — can invoke actors via HTTP without client libraries or SDKs. Webhooks trigger ingestion pipelines. Monitoring tools query pipeline stats. The gateway handles routing, serialization, and timeout management.
+
 ### Scaling the Pipeline
 
 ```bash
@@ -987,8 +1251,8 @@ curl -X POST http://localhost:8001/api/v1/shard-groups/inference-pool/scale \
 | **Coordination** | TupleSpace, process groups | Object store | Shuffle | SQS, Step Functions |
 | **Scaling** | Shard groups, worker pools | Autoscaler | Executors | Concurrency limits |
 | **Multi-step pipelines** | Workflow actors | Ray DAG | Spark SQL | Step Functions |
-| **Cold start** | ~50us (WASM) | ~100ms (Python) | ~10s (JVM) | 100ms-10s |
-| **Message queues** | Built-in channels (9 backends) | External (Kafka/SQS) | External | SQS |
+| **Cold start** | Microseconds (WASM AOT) | ~100ms (Python) | ~10s (JVM) | 100ms-10s |
+| **Message queues** | Built-in channels (6+ backends) | External (Kafka/SQS) | External | SQS |
 | **Polyglot** | Rust, Python, Go, TS (same runtime) | Python primary | JVM + PySpark | Per-runtime images |
 | **Deployment** | `plexspaces start` or Docker | `ray start` + KubeRay | Spark submit + YARN | CloudFormation |
 

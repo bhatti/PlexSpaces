@@ -8,15 +8,36 @@ I spent three decades watching the same pattern repeat itself. Teams pick a lang
 
 WebAssembly changes this equation entirely. It compiles code from any language into a universal binary format, runs it in a sandboxed environment, and delivers near-native performance — all without containers, VMs, or language-specific runtimes cluttering your production stack.
 
-When I built [PlexSpaces](https://github.com/bhatti/PlexSpaces), I designed its polyglot layer on top of WebAssembly and the WASI Component Model. Today, you write actors in **Python, Rust, Go, or TypeScript**, compile them to WASM, and deploy them to the same runtime. The framework handles persistence, fault tolerance, supervision, and scaling — regardless of which language produced the binary.
+When I built [PlexSpaces](https://github.com/bhatti/PlexSpaces), I designed its polyglot layer on top of WebAssembly and the WASI Component Model. Today, you write actors in **Python, Rust, Go, or TypeScript**, compile them to WASM, and deploy them to the same runtime. The framework handles persistence, fault tolerance, supervision, and scaling — regardless of which language produced the binary. You can even invoke these actors as serverless functions over plain HTTP — no SDKs, no client libraries, just curl.
 
-This post walks you through the core concepts of WebAssembly, shows how PlexSpaces leverages the Component Model for polyglot development, and then gets hands-on: we build, test, and deploy a real application in each of the four supported languages.
+This post walks you through the core concepts of WebAssembly, shows how PlexSpaces leverages the Component Model for polyglot development, and then gets hands-on: we build, test, and deploy a real application in each of the four supported languages. We also explore how PlexSpaces bridges the gap between actor systems and serverless FaaS platforms — and where this convergence heads next.
 
 ---
 
-## Why WebAssembly Matters Beyond the Browser
+## WebAssembly: The Engine Under the Hood
 
-Most developers first encountered WebAssembly as a browser technology — a way to run C++ games or Rust crypto libraries inside Chrome. But the server-side story has matured dramatically.
+Most developers first encountered WebAssembly as a browser technology — a way to run C++ games or Rust crypto libraries inside Chrome. But the server-side story has matured dramatically. To understand why WebAssembly works so well for polyglot distributed systems, you need to understand what it actually *is* at the execution level.
+
+### How WebAssembly Executes Code
+
+WebAssembly is a **stack-based virtual machine** that executes a compact binary instruction format. Every language that compiles to WASM follows the same pipeline:
+
+```
+Source Code  ->  Compiler Frontend  ->  Intermediate Rep.  ->  WASM Bytecode  ->  Runtime (JIT/AOT)
+(Rust/Go/       (rustc, tinygo,       (LLVM IR, MIR,         (.wasm binary      (wasmtime, wasmer)
+ Python/TS)      componentize-py,      Binaryen IR)            ~100KB-40MB)
+                 jco)
+```
+
+The WASM binary format encodes typed functions, a **linear memory** model (a contiguous, growable byte array that the module reads and writes), and a set of imports and exports. The runtime validates the binary at load time, then executes it using either just-in-time (JIT) compilation or ahead-of-time (AOT) compilation to native machine code.
+
+Three properties make this execution model powerful for distributed systems:
+
+**Deterministic execution.** Given the same inputs, a WASM module produces the same outputs. This property underpins PlexSpaces' durable execution — the framework replays journaled messages through the same WASM binary and arrives at the exact same state.
+
+**Memory isolation.** Each WASM instance gets its own linear memory. One module cannot read, write, or corrupt another module's memory. No shared-memory race conditions. No buffer overflows escaping the sandbox. The runtime enforces these boundaries at the hardware level.
+
+**Capability-based security.** A WASM module starts with *zero* capabilities. It cannot access the filesystem, the network, or even a clock unless the host explicitly provides each capability through imported functions. PlexSpaces grants actors exactly the capabilities they need — messaging, key-value storage, tuple spaces — and nothing more.
 
 ### The Component Model: WebAssembly's Missing Piece
 
@@ -29,6 +50,17 @@ The key building blocks:
 - **Components**: Self-contained WASM modules that declare their imports (what they need from the host) and exports (what they provide). A Rust component and a Python component that implement the same WIT interface become interchangeable at the binary level.
 
 - **WASI (WebAssembly System Interface)**: The standardized API that gives WASM modules access to system resources — file I/O, networking, clocks, and random number generation — without breaking the sandbox. WASI Preview 2 shipped in 2024 with HTTP, filesystem, and socket support. WASI 0.3, released in February 2026, added native async support for concurrent I/O.
+
+### Wasm 3.0 and WasmGC: The 2025-2026 Leap
+
+The WebAssembly ecosystem crossed a critical threshold. **Wasm 3.0** became the W3C standard in September 2025, standardizing nine production features in a single release:
+
+- **WasmGC** — garbage collection support built into the runtime, eliminating the need for languages like Go, Python, and Java to ship their own GC inside the WASM binary. This shrinks binary sizes and improves performance for GC-dependent languages dramatically.
+- **Exception handling** — structured try/catch at the WASM level, replacing the expensive setjmp/longjmp workarounds that inflated binaries.
+- **Tail calls** — proper tail call optimization for functional programming patterns without stack overflow.
+- **SIMD (Single Instruction, Multiple Data)** — vector operations for parallel numeric computation, critical for ML inference and scientific workloads.
+
+For PlexSpaces, WasmGC means Go and Python actors run faster with smaller binaries. SIMD means computational actors — n-body simulations, matrix multiplies, genomics pipelines — process data at near-native throughput inside the sandbox.
 
 ### What This Means in Practice
 
@@ -45,61 +77,145 @@ PlexSpaces is a unified distributed actor framework that combines patterns from 
 ### Architecture at a Glance
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    PlexSpaces Node                       │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  WASM Runtime (wasmtime)                          │  │
-│  │  • Loads and executes WASM modules                │  │
-│  │  • Provides WIT host functions                    │  │
-│  │  • Enforces resource limits and sandboxing        │  │
-│  └───────────────────────────────────────────────────┘  │
-│                          │                              │
-│                          ▼                              │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  Polyglot WASM Actors                             │  │
-│  │                                                   │  │
-│  │  ┌──────────┐ ┌──────────┐ ┌────────┐ ┌───────┐  │  │
-│  │  │ Python   │ │TypeScript│ │  Rust  │ │  Go   │  │  │
-│  │  │ Actor    │ │  Actor   │ │ Actor  │ │ Actor │  │  │
-│  │  └──────────┘ └──────────┘ └────────┘ └───────┘  │  │
-│  │        │            │           │          │      │  │
-│  │        └────────────┼───────────┼──────────┘      │  │
-│  │                     ▼                             │  │
-│  │  ┌───────────────────────────────────────────┐    │  │
-│  │  │  WIT Host Functions (Unified Interface)   │    │  │
-│  │  │  messaging · tuplespace · keyvalue        │    │  │
-│  │  │  blob · channels · durability · locks     │    │  │
-│  │  │  process-groups · registry · workflow      │    │  │
-│  │  └───────────────────────────────────────────┘    │  │
-│  └───────────────────────────────────────────────────┘  │
-│                          │                              │
-│                          ▼                              │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  Framework Services                               │  │
-│  │  ActorService · TupleSpace · KeyValue · Blob      │  │
-│  │  Channels · Locks · Registry · Workflow            │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
++-----------------------------------------------------------+
+|                    PlexSpaces Node                         |
++-----------------------------------------------------------+
+|                                                           |
+|  +-----------------------------------------------------+ |
+|  |  WASM Runtime (wasmtime)                             | |
+|  |  - Loads and executes WASM modules                   | |
+|  |  - Provides WIT host functions                       | |
+|  |  - Enforces resource limits and sandboxing           | |
+|  +-----------------------------------------------------+ |
+|                          |                                |
+|                          v                                |
+|  +-----------------------------------------------------+ |
+|  |  Polyglot WASM Actors                                | |
+|  |                                                      | |
+|  |  +---------+ +-----------+ +-------+ +------+       | |
+|  |  | Python  | |TypeScript | | Rust  | |  Go  |       | |
+|  |  | Actor   | |  Actor    | | Actor | | Actor|       | |
+|  |  +---------+ +-----------+ +-------+ +------+       | |
+|  |       |           |            |         |           | |
+|  |       +-----------|------------|---------|           | |
+|  |                   v                                  | |
+|  |  +-----------------------------------------------+  | |
+|  |  |  WIT Host Functions (Unified Interface)        |  | |
+|  |  |  messaging - tuplespace - keyvalue             |  | |
+|  |  |  blob - channels - durability - locks          |  | |
+|  |  |  process-groups - registry - workflow          |  | |
+|  |  +-----------------------------------------------+  | |
+|  +-----------------------------------------------------+ |
+|                          |                                |
+|                          v                                |
+|  +-----------------------------------------------------+ |
+|  |  Framework Services                                  | |
+|  |  ActorService - TupleSpace - KeyValue - Blob         | |
+|  |  Channels - Locks - Registry - Workflow              | |
+|  +-----------------------------------------------------+ |
+|                                                           |
+|  +-----------------------------------------------------+ |
+|  |  HTTP/gRPC Gateway                                   | |
+|  |  REST API - FaaS Invocation - Swagger UI             | |
+|  +-----------------------------------------------------+ |
++-----------------------------------------------------------+
 ```
 
-Every actor — regardless of source language — targets the same **WIT world** (`plexspaces-simple-actor`). The runtime provides ten categories of host functions through WIT interfaces:
+### The WIT Contract: What Every Actor Implements
 
-| WIT Interface | Purpose | Key Operations |
-|---------------|---------|----------------|
-| **Messaging** | Actor-to-actor communication | `send_message`, `ask_message`, `spawn_actor` |
-| **TupleSpace** | Linda-style distributed coordination | `write`, `read`, `take`, `read_all` |
-| **KeyValue** | Distributed key-value storage | `get`, `put`, `delete`, `compare_and_swap` |
-| **Blob** | Large object storage | `upload`, `download`, `list_blobs` |
-| **Channels** | Queues and pub/sub | `send_to_queue`, `publish_to_topic` |
-| **Durability** | State persistence and recovery | `persist`, `checkpoint`, `is_replaying` |
-| **Locks** | Distributed locking | `acquire`, `release`, `try_acquire` |
-| **ProcessGroups** | Actor group management | `create_group`, `join_group`, `publish_to_group` |
-| **Registry** | Service discovery | `register`, `lookup`, `discover` |
-| **Workflow** | Durable orchestration | `start_workflow`, `schedule_activity`, `await_workflow` |
+Every actor — regardless of source language — targets the same **WIT world**. PlexSpaces defines two WIT packages: a full-featured `plexspaces-actor` world and a simplified `plexspaces-simple-actor` world optimized for Python/TypeScript/Go compatibility.
 
-The critical insight: these host functions form the same contract for every language. A Python actor calls `host.keyvalue_put(ctx, key, value)` through the same WIT binding that a Rust actor calls. The framework multiplexes all of them onto the same backend services — the same distributed key-value store, the same tuple space, the same journal.
+Here is the simplified world that most polyglot actors use:
+
+```wit
+// wit/plexspaces-simple-actor/world.wit
+package plexspaces:simple-actor@0.1.0;
+
+interface actor {
+    // Initialize with JSON config string
+    init: func(config-json: string) -> string;
+
+    // Handle a message: route by msg-type, return JSON result
+    handle: func(from-actor: string, msg-type: string,
+                 payload-json: string) -> string;
+
+    // Snapshot state for persistence
+    get-state: func() -> string;
+
+    // Restore state from snapshot
+    set-state: func(state-json: string) -> string;
+}
+
+interface host {
+    // Messaging
+    send: func(to: string, msg-type: string, payload-json: string) -> string;
+    ask: func(to: string, msg-type: string, payload-json: string,
+              timeout-ms: u64) -> string;
+    spawn: func(module-ref: string, actor-id: string,
+                init-config-json: string) -> string;
+    stop: func(actor-id: string) -> string;
+    self-id: func() -> string;
+
+    // Erlang/OTP-style linking and monitoring
+    link: func(actor-id: string) -> string;
+    monitor: func(actor-id: string) -> string;
+
+    // Timers
+    send-after: func(delay-ms: u64, msg-type: string,
+                     payload-json: string) -> string;
+
+    // Process groups
+    pg-join: func(group-name: string) -> string;
+    pg-broadcast: func(group-name: string, msg-type: string,
+                       payload-json: string) -> string;
+
+    // Key-value store
+    kv-get: func(key: string) -> string;
+    kv-put: func(key: string, value: string) -> string;
+    kv-delete: func(key: string) -> string;
+    kv-list: func(prefix: string) -> string;
+
+    // TupleSpace (Linda-style coordination)
+    ts-write: func(tuple-json: string) -> string;
+    ts-read: func(pattern-json: string) -> string;
+    ts-take: func(pattern-json: string) -> string;
+    ts-read-all: func(pattern-json: string) -> string;
+
+    // Distributed locks
+    lock-acquire: func(tenant-id: string, namespace: string,
+                       holder-id: string, lock-name: string,
+                       lease-duration-secs: u32, timeout-ms: u64) -> string;
+    lock-release: func(lock-id: string, tenant-id: string,
+                       namespace: string, holder-id: string,
+                       lock-version: string) -> string;
+
+    // Blob storage
+    blob-upload: func(blob-id: string, data: string,
+                      content-type: string) -> string;
+    blob-download: func(blob-id: string) -> string;
+
+    // Logging and time
+    log: func(level: string, message: string);
+    now-ms: func() -> u64;
+}
+
+world actor-world {
+    import host;
+    export actor;
+}
+```
+
+The full-featured `plexspaces-actor` package adds dedicated WIT interfaces for workflows, channels, durability/journaling, registry/service discovery, HTTP client, and cron scheduling. PlexSpaces also defines specialized worlds that import only the capabilities each actor needs:
+
+| WIT World | Imports | Use Case |
+|-----------|---------|----------|
+| `plexspaces-actor` | All 13 interfaces | Full-featured actors needing every capability |
+| `simple-actor` | Messaging + Logging | Lightweight stateless workers |
+| `durable-actor` | Messaging + Durability | Actors with crash recovery and journaling |
+| `coordination-actor` | Messaging + TupleSpace | Actors coordinating through shared tuple space |
+| `event-actor` | Messaging + Channels | Event-driven actors using queues and topics |
+
+This design keeps WASM binaries small. A simple actor that only needs messaging imports two interfaces — not thirteen.
 
 ### Language Toolchains
 
@@ -107,12 +223,114 @@ Each language uses a different compiler to produce WASM, but the output targets 
 
 | Language | Compiler | WASM Size | Performance | Best For |
 |----------|----------|-----------|-------------|----------|
-| **Rust** | `cargo` (wasm32-wasip2) | 100KB–1MB | Excellent | Production, performance-critical paths |
-| **Go** | `tinygo` | 2–5MB | Good | Balanced performance, fast iteration |
-| **TypeScript** | `jco componentize` | 500KB–2MB | Good | Web integration, rapid development |
-| **Python** | `componentize-py` | 30–40MB | Moderate | ML inference, data processing, prototyping |
+| **Rust** | `cargo` (wasm32-wasip2) | 100KB-1MB | Excellent | Production, performance-critical paths |
+| **Go** | `tinygo` | 2-5MB | Good | Balanced performance, fast iteration |
+| **TypeScript** | `jco componentize` | 500KB-2MB | Good | Web integration, rapid development |
+| **Python** | `componentize-py` | 30-40MB | Moderate | ML inference, data processing, prototyping |
 
 Now let's build something real in each language.
+
+---
+
+## Getting Started: Prerequisites and Quickstart
+
+Before diving into the language examples, set up your development environment.
+
+### Prerequisites
+
+- **Rust 1.70+** (for building PlexSpaces itself)
+- **Docker** (optional — for the fastest path to a running node)
+- One or more WASM compilers for your target languages (see below)
+
+### Option 1: Docker Quickstart (Fastest)
+
+Pull and run a PlexSpaces node in seconds:
+
+```bash
+# Pull the official image
+docker pull plexobject/plexspaces:latest
+
+# Run a single node with HTTP API on port 8001
+docker run -d \
+    --name plexspaces-node \
+    -p 8000:8000 \
+    -p 8001:8001 \
+    -e PLEXSPACES_NODE_ID=node1 \
+    -e PLEXSPACES_DISABLE_AUTH=1 \
+    plexobject/plexspaces:latest
+```
+
+The node exposes a gRPC endpoint on port 8000 and an HTTP/REST gateway on port 8001 with interactive Swagger UI documentation.
+
+For production, use Docker Compose with PostgreSQL and MinIO backends:
+
+```bash
+docker compose up -d
+# Starts: PostgreSQL 16 + MinIO (S3 blob storage) + PlexSpaces node
+```
+
+### Option 2: Build from Source
+
+```bash
+git clone https://github.com/bhatti/PlexSpaces.git
+cd PlexSpaces
+
+# One-command setup: install tools, generate code, build, test
+./scripts/setup.sh
+
+# Or use the Makefile step by step
+make install-tools    # Install required dev tools
+make proto            # Generate code from proto files
+make build            # Build all crates
+make test             # Run all tests
+```
+
+### Install Language Compilers
+
+Install the WASM compiler for each language you plan to use:
+
+```bash
+# Rust (produces the smallest, fastest WASM)
+rustup target add wasm32-wasip2
+
+# Go (pragmatic balance of performance and dev speed)
+# macOS:
+brew install tinygo
+# Also need wasm-tools for component creation:
+cargo install wasm-tools
+
+# TypeScript (rapid development, web ecosystem)
+npm install -g @bytecodealliance/jco
+
+# Python (ML, data processing, prototyping)
+pip install componentize-py
+
+# Optional: WASM binary optimizer (shrinks binaries further)
+cargo install wasm-opt
+```
+
+### Start the Node and Deploy Your First Actor
+
+```bash
+# Start a PlexSpaces node (from source)
+cargo run --release --bin plexspaces -- start \
+    --node-id dev-node \
+    --listen-addr 0.0.0.0:8000
+
+# Deploy a WASM actor (from any language)
+curl -X POST http://localhost:8001/api/v1/applications/deploy \
+    -F "application_id=my-app" \
+    -F "name=my-actor" \
+    -F "version=1.0.0" \
+    -F "wasm_file=@my_actor.wasm"
+
+# Send it a message
+curl -X POST http://localhost:8001/api/v1/actors/my-app/ask \
+    -H "Content-Type: application/json" \
+    -d '{"message_type": "hello", "payload": {}}'
+```
+
+Now let's build real actors in each language.
 
 ---
 
@@ -131,7 +349,7 @@ from plexspaces import actor, state, handler, init_handler
 class Calculator:
     """Calculator actor implementing basic math operations."""
 
-    # Persistent state fields
+    # Persistent state fields -- survive crashes via journaling
     last_operation: str = state(default=None)
     last_result: float = state(default=None)
     history: list = state(default_factory=list)
@@ -210,18 +428,13 @@ Notice how the `@actor` decorator marks the class, `state()` declares persistent
 ### Build and Deploy
 
 ```bash
-# Install the Python-to-WASM compiler
-pip install componentize-py
+# Install the Python SDK
+pip install -e "sdks/python/[dev]"
 
-# Compile to a WASM component
-componentize-py calculator_actor.py \
+# Build WASM using the SDK CLI
+plexspaces-py build calculator_actor.py \
     -o calculator_actor.wasm \
-    --wit wit/plexspaces-actor/actor.wit
-
-# Start a PlexSpaces node
-cargo run --release --bin plexspaces -- start \
-    --node-id calc-node \
-    --listen-addr 0.0.0.0:8000
+    --wit-dir wit/plexspaces-simple-actor
 
 # Deploy the WASM module
 curl -X POST http://localhost:8001/api/v1/applications/deploy \
@@ -278,18 +491,12 @@ export class BankAccountActor extends PlexSpacesActor<BankAccountState> {
     this.state.transactions = [];
   }
 
-  onBalance(): Record<string, unknown> {
-    return { account: this.state.account_id, balance: this.state.balance };
-  }
-
   onDeposit(payload: Record<string, unknown>): Record<string, unknown> {
     const amount = Number(payload.amount ?? 0);
     if (amount <= 0) return { error: "invalid_amount" };
     this.state.balance += amount;
     this.state.transactions.push({
-      type: "deposit",
-      amount,
-      balance_after: this.state.balance,
+      type: "deposit", amount, balance_after: this.state.balance,
     });
     return { status: "ok", balance: this.state.balance };
   }
@@ -302,17 +509,14 @@ export class BankAccountActor extends PlexSpacesActor<BankAccountState> {
     }
     this.state.balance -= amount;
     this.state.transactions.push({
-      type: "withdraw",
-      amount,
-      balance_after: this.state.balance,
+      type: "withdraw", amount, balance_after: this.state.balance,
     });
     return { status: "ok", balance: this.state.balance };
   }
 
   onHistory(payload: Record<string, unknown>): Record<string, unknown> {
     const count = Math.min(
-      Number(payload.count ?? 5),
-      this.state.transactions.length
+      Number(payload.count ?? 5), this.state.transactions.length
     );
     return { transactions: this.state.transactions.slice(-count) };
   }
@@ -331,7 +535,7 @@ export class BankAccountActor extends PlexSpacesActor<BankAccountState> {
   }
 }
 
-// WIT actor export
+// WIT actor export -- bridges TypeScript class to the WIT interface
 const instance = new BankAccountActor();
 export const actor = {
   init: (c: string) => instance.init(c),
@@ -349,7 +553,6 @@ The `BankAccountActor` manages deposits, withdrawals, and transaction history wi
 PlexSpaces deploys actors under Erlang-style supervision trees. Define the topology in `app-config.toml`:
 
 ```toml
-# app-config.toml
 [supervisor]
 strategy = "one_for_one"
 max_restarts = 10
@@ -378,17 +581,14 @@ This configuration deploys three bank account actors under a supervisor that res
 
 ### Build and Deploy
 
+The TypeScript build uses a three-step pipeline: compile TypeScript, bundle with esbuild, then create a WASM component with jco:
+
 ```bash
-# Install dependencies
+# Install dependencies (SDK is a file: dependency)
 npm install
 
-# Compile TypeScript to JavaScript
-tsc -p .
-
-# Bundle actor + SDK into one ESM file
-node build-bundle.mjs
-
-# Build WASM component using jco
+# Compile TypeScript -> JavaScript -> ESM bundle -> WASM component
+npm run build              # tsc + esbuild bundle
 jco componentize actor_bundle.mjs \
     --wit wit/plexspaces-simple-actor \
     -o account_actor.wasm \
@@ -427,7 +627,7 @@ curl -X POST http://localhost:8001/api/v1/actors/account-alice/ask \
 
 ## Go: An Erlang/OTP-Style Rate Limiter
 
-Go delivers a pragmatic balance between performance and developer productivity. The PlexSpaces Go SDK uses an interface-based pattern: implement the `Actor` interface, embed `BaseActor` for automatic state serialization, and register your actor for WASM export.
+Go delivers a pragmatic balance between performance and developer productivity. The PlexSpaces Go SDK uses an interface-based pattern: implement the `Actor` interface, embed `BaseActor` for automatic state serialization, and register your actor for WASM export via `plexspaces.Register()`.
 
 ### The Actor Code
 
@@ -443,7 +643,6 @@ import (
     "github.com/plexobject/plexspaces/sdks/go/plexspaces"
 )
 
-// SlidingWindowLimiter implements per-client sliding window rate limiting.
 type SlidingWindowLimiter struct {
     plexspaces.BaseActor
 
@@ -507,9 +706,7 @@ func (s *SlidingWindowLimiter) Handle(from, msgType, payloadJSON string) string 
 }
 
 func (s *SlidingWindowLimiter) checkRate(payloadJSON string) string {
-    var req struct {
-        ClientID string `json:"client_id"`
-    }
+    var req struct { ClientID string `json:"client_id"` }
     json.Unmarshal([]byte(payloadJSON), &req)
 
     window, exists := s.Clients[req.ClientID]
@@ -524,9 +721,7 @@ func (s *SlidingWindowLimiter) checkRate(payloadJSON string) string {
     // Slide the window: remove expired timestamps
     var active []uint64
     for _, ts := range window.Timestamps {
-        if ts > cutoff {
-            active = append(active, ts)
-        }
+        if ts > cutoff { active = append(active, ts) }
     }
     window.Timestamps = active
 
@@ -534,30 +729,32 @@ func (s *SlidingWindowLimiter) checkRate(payloadJSON string) string {
     allowed := len(window.Timestamps) < s.MaxRequests
     if allowed {
         window.Timestamps = append(window.Timestamps, now)
-        window.Allowed++
-        s.TotalAllowed++
+        window.Allowed++; s.TotalAllowed++
     } else {
-        window.Denied++
-        s.TotalDenied++
+        window.Denied++; s.TotalDenied++
     }
     s.TotalChecks++
 
     remaining := s.MaxRequests - len(window.Timestamps)
-    if remaining < 0 {
-        remaining = 0
-    }
+    if remaining < 0 { remaining = 0 }
 
     data, _ := json.Marshal(map[string]any{
-        "allowed":   allowed,
-        "remaining": remaining,
-        "limit":     s.MaxRequests,
-        "client_id": req.ClientID,
+        "allowed": allowed, "remaining": remaining,
+        "limit": s.MaxRequests, "client_id": req.ClientID,
     })
     return string(data)
 }
+
+// Register the actor for WASM export -- runs during _initialize,
+// before the host calls any exported functions.
+func init() {
+    plexspaces.Register(NewSlidingWindowLimiter())
+}
+
+func main() {}
 ```
 
-The comparison to Erlang/OTP maps directly:
+The Go SDK pattern uses `plexspaces.NewHost()` to access all host functions (messaging, KV, tuple space, etc.) and `plexspaces.Register()` in the `init()` function to wire the actor to the WASM export interface. The comparison to Erlang/OTP maps directly:
 
 | Erlang/OTP | PlexSpaces Go |
 |---|---|
@@ -565,12 +762,24 @@ The comparison to Erlang/OTP maps directly:
 | `handle_call/3` | `Handle(from, msgType, payload)` |
 | `#state{}` record | Go struct with JSON tags |
 | `gen_server:call(Pid, Msg)` | `host.Ask(actorID, msgType, data)` |
+| `application:start/2` | `app-config.toml` |
 
 ### Build and Deploy
 
+The Go build uses a three-step TinyGo pipeline: compile to core WASM, embed WIT metadata, then create a WASM component with a WASI adapter:
+
 ```bash
-# Compile to WASM using TinyGo
-tinygo build -target=wasi -o rate_limiter.wasm .
+# Step 1: Compile Go to core WASM
+tinygo build -target=wasi -o rate_limiter_core.wasm .
+
+# Step 2: Embed WIT metadata
+wasm-tools component embed wit/plexspaces-simple-actor \
+    -w actor-world rate_limiter_core.wasm -o rate_limiter_embed.wasm
+
+# Step 3: Create WASM component with WASI adapter
+wasm-tools component new rate_limiter_embed.wasm \
+    --adapt wasi_snapshot_preview1.reactor.wasm \
+    -o rate_limiter.wasm
 
 # Deploy
 curl -X POST http://localhost:8001/api/v1/applications/deploy \
@@ -580,25 +789,7 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
     -F "wasm_file=@rate_limiter.wasm"
 ```
 
-### Configuration
-
-```toml
-# app-config.toml
-[supervisor]
-strategy = "one_for_one"
-max_restarts = 10
-max_restart_window_seconds = 60
-
-[[supervisor.children]]
-id = "rate-limiter"
-type = "worker"
-restart = "permanent"
-shutdown_timeout_seconds = 10
-
-[supervisor.children.args]
-window_size_ms = "60000"
-max_requests = "100"
-```
+Each Go example includes a `build.sh` script that automates this pipeline and resolves the WASI adapter automatically.
 
 ### Test Rate Limiting
 
@@ -634,12 +825,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
-pub enum Operation {
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-}
+pub enum Operation { Add, Subtract, Multiply, Divide }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CalculatorState {
@@ -654,8 +840,7 @@ pub struct CalculationRequest {
 }
 
 static mut STATE: CalculatorState = CalculatorState {
-    calculation_count: 0,
-    last_result: None,
+    calculation_count: 0, last_result: None,
 };
 
 /// Initialize actor with optional persisted state
@@ -689,13 +874,11 @@ pub extern "C" fn handle_message(
         match msg_type {
             "calculate" => {
                 let payload = slice::from_raw_parts(payload_ptr, payload_len);
-                let request: CalculationRequest = match serde_json::from_slice(payload) {
-                    Ok(req) => req,
-                    Err(_) => return core::ptr::null(),
-                };
-                if let Ok(result) = execute(&request) {
-                    STATE.calculation_count += 1;
-                    STATE.last_result = Some(result);
+                if let Ok(req) = serde_json::from_slice::<CalculationRequest>(payload) {
+                    if let Ok(result) = execute(&req) {
+                        STATE.calculation_count += 1;
+                        STATE.last_result = Some(result);
+                    }
                 }
                 core::ptr::null()
             }
@@ -720,7 +903,6 @@ fn execute(req: &CalculationRequest) -> Result<f64, &'static str> {
 ### Cargo Configuration
 
 ```toml
-# Cargo.toml
 [package]
 name = "calculator-wasm-actor"
 version = "0.1.0"
@@ -745,10 +927,7 @@ strip = true        # Strip debug symbols
 ### Build and Deploy
 
 ```bash
-# Add the WASM target
 rustup target add wasm32-wasip2
-
-# Build with release optimizations
 cargo build --target wasm32-wasip2 --release
 
 # Optimize the binary further
@@ -764,7 +943,108 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
     -F "wasm_file=@calculator_actor.wasm"
 ```
 
-The resulting binary? Under 200KB. Compare that to a Python actor at 30–40MB or even a TypeScript actor at 1–2MB. When you deploy hundreds of actors per node, those size differences translate directly into memory savings and faster cold starts.
+The resulting binary? Under 200KB. Compare that to a Python actor at 30-40MB or even a TypeScript actor at 1-2MB. When you deploy hundreds of actors per node, those size differences translate directly into memory savings and faster cold starts.
+
+---
+
+## FaaS and Serverless: Actors as HTTP Functions
+
+Here is where PlexSpaces bridges the worlds of actor systems and serverless platforms. Every actor you deploy — in any language — doubles as a **serverless function** that you invoke over plain HTTP. No client SDK required. No message queue setup. Just HTTP.
+
+### HTTP Invocation Model
+
+PlexSpaces exposes a FaaS-style API that routes HTTP requests to actors using a simple URL pattern:
+
+```
+/api/v1/actors/{tenant}/{namespace}/{actor_type}
+```
+
+The HTTP method determines the invocation pattern:
+
+| HTTP Method | Pattern | Behavior |
+|-------------|---------|----------|
+| **GET** | Request-reply (ask) | Sends query params as payload, waits for response |
+| **POST** | Fire-and-forget (tell) | Sends JSON body, returns immediately |
+| **PUT** | Fire-and-forget (tell) | Same as POST, for update semantics |
+| **DELETE** | Request-reply (ask) | Sends query params, waits for confirmation |
+
+Add `?invocation=call` to any POST/PUT to switch from fire-and-forget to request-reply.
+
+### FaaS in Action: A Webhook Handler
+
+This Rust example shows a FaaS-style webhook handler that receives HTTP POST payloads and stores delivery history — the kind of thing you would build on AWS Lambda or Cloudflare Workers, but here using PlexSpaces SDK annotations:
+
+```rust
+// Using PlexSpaces Rust SDK annotations (like Python @actor, @handler)
+#[gen_server_actor]
+struct WebhookHandler {
+    deliveries: Vec<WebhookDelivery>,
+    total_received: u64,
+}
+
+#[plexspaces_handlers]
+impl WebhookHandler {
+    #[handler("deliver")]
+    async fn deliver(&mut self, ctx: &ActorContext, msg: &Message)
+        -> Result<Value, BehaviorError>
+    {
+        let delivery = WebhookDelivery::new(
+            ulid::Ulid::new().to_string(), &msg.payload,
+        );
+        self.deliveries.push(delivery);
+        self.total_received += 1;
+        Ok(json!({ "status": "received", "total": self.total_received }))
+    }
+
+    #[handler("list")]
+    async fn list_deliveries(&self, _ctx: &ActorContext, _msg: &Message)
+        -> Result<Value, BehaviorError>
+    {
+        Ok(json!({ "deliveries": self.deliveries, "total": self.total_received }))
+    }
+}
+```
+
+Invoke this actor over HTTP — no SDK, no message queue, just curl:
+
+```bash
+# POST a webhook delivery (fire-and-forget)
+curl -X POST http://localhost:8001/api/v1/actors/acme-corp/webhooks/webhook_handler \
+    -H "Content-Type: application/json" \
+    -d '{"event": "order.completed", "order_id": "ORD-12345"}'
+
+# GET recent deliveries (request-reply)
+curl "http://localhost:8001/api/v1/actors/acme-corp/webhooks/webhook_handler?action=list"
+```
+
+### Multi-Tenant Isolation
+
+The URL path embeds tenant and namespace for built-in multi-tenant isolation. Tenant `acme-corp` cannot access tenant `globex-inc`'s actors. The framework enforces this boundary at the routing layer with JWT-based authentication:
+
+```bash
+# Tenant A's rate limiter
+curl -X POST http://localhost:8001/api/v1/actors/acme-corp/api/rate-limiter \
+    -d '{"client_id": "user-123"}'
+
+# Tenant B's rate limiter -- completely isolated state
+curl -X POST http://localhost:8001/api/v1/actors/globex-inc/api/rate-limiter \
+    -d '{"client_id": "user-456"}'
+```
+
+### How PlexSpaces Compares to Traditional FaaS
+
+The critical difference: **PlexSpaces actors retain state between invocations**. Traditional FaaS platforms treat functions as stateless — you manage state externally in DynamoDB, Redis, or S3. PlexSpaces actors carry durable state *inside* the actor, persisted via journaling and checkpointing. This eliminates the "stateless function + external state store" tax that adds latency and complexity to every serverless application.
+
+| Capability | AWS Lambda | Cloudflare Workers | PlexSpaces FaaS |
+|---|---|---|---|
+| **Cold start** | 100ms-10s | ~5ms | ~50us (WASM) |
+| **State** | External (DynamoDB) | External (KV/D1) | Built-in (durable actors) |
+| **Polyglot** | Per-runtime images | JS/WASM only | Rust, Go, TS, Python on same runtime |
+| **Coordination** | SQS/Step Functions | Durable Objects | TupleSpace, process groups, workflows |
+| **Supervision** | None | None | Erlang-style supervision trees |
+| **Isolation** | Container/Firecracker | V8 isolates | WASM sandbox + optional Firecracker |
+
+PlexSpaces includes migration examples that show how to port existing Lambda functions, Step Functions workflows, Azure Durable Functions, Cloudflare Workers, and Orleans grains — check `examples/rust/embedded/migrating_aws_durable_lambda/`, `examples/typescript/apps/migrating_cloudflare_workers/`, and `examples/typescript/apps/migrating_orleans/`.
 
 ---
 
@@ -779,32 +1059,28 @@ Here is where PlexSpaces truly differentiates itself. You don't pick one languag
 
 All four actors deploy to the same PlexSpaces node. They communicate through the framework's message passing. They share the same tuple space for coordination. They persist state through the same durability layer. The runtime treats them identically because they all compile to the same WASM Component Model target.
 
-### A Polyglot Deployment
+### Cross-Language Communication via Host Functions
 
-```bash
-# Deploy Python ML actor
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
-    -F "application_id=ml-pipeline" \
-    -F "name=ml-inference" \
-    -F "wasm_file=@ml_actor.wasm"
+Any actor can message any other actor regardless of language:
 
-# Deploy Rust event processor
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
-    -F "application_id=event-processor" \
-    -F "name=event-stream" \
-    -F "wasm_file=@event_actor.wasm"
+```python
+# Python actor calling a Go rate limiter before processing a request
+from plexspaces import actor, handler
 
-# Deploy TypeScript API gateway
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
-    -F "application_id=api-gateway" \
-    -F "name=api-layer" \
-    -F "wasm_file=@api_actor.wasm"
+@actor
+class OrderProcessor:
+    @handler("process_order")
+    def process_order(self, order: dict) -> dict:
+        # Ask the Go rate limiter (request-reply, 5s timeout)
+        result = self.host.ask("rate-limiter", "check_rate",
+                               {"client_id": order["customer_id"]}, 5000)
+        if not result.get("allowed"):
+            return {"error": "rate_limited"}
 
-# Deploy Go rate limiter
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
-    -F "application_id=rate-limiter" \
-    -F "name=rate-limiter" \
-    -F "wasm_file=@rate_limiter.wasm"
+        # Write to shared tuple space (Rust event processor reads these)
+        self.host.ts_write(["order", order["id"], "pending"])
+
+        return {"status": "accepted", "order_id": order["id"]}
 ```
 
 Each actor runs in its own WASM sandbox with enforced resource limits. A buggy Python actor cannot crash a Rust actor. A memory leak in TypeScript cannot affect Go. The isolation comes free — it is a fundamental property of WebAssembly, not something the framework adds on top.
@@ -815,19 +1091,19 @@ Each actor runs in its own WASM sandbox with enforced resource limits. A buggy P
 
 PlexSpaces provides comprehensive testing at multiple levels — all designed to run offline without external services.
 
-### Unit Tests
+### Unit Tests (Per Language)
 
 Each language tests actors natively before compilation:
 
 ```bash
 # Python
-python -m pytest tests/
+cd sdks/python && pip install -e ".[dev]" && python -m pytest tests/
 
 # TypeScript
-npm test
+cd examples/typescript/apps/bank_account && npm test
 
 # Go
-go test ./...
+cd examples/go/apps/migrating_erlang_otp && go test ./...
 
 # Rust
 cargo test --lib
@@ -839,91 +1115,69 @@ After compilation, run integration tests against the real WASM runtime:
 
 ```bash
 # Run all WASM integration tests (offline, in-memory services)
+make test-wasm
+
+# Or directly:
 cargo test --package plexspaces-wasm-runtime --test '*integration*' --no-fail-fast
 
-# Test specific capabilities
+# Test specific host function categories
 cargo test --package plexspaces-wasm-runtime --test messaging_host_functions_integration
 cargo test --package plexspaces-wasm-runtime --test durability_host_functions_integration
 cargo test --package plexspaces-wasm-runtime --test blob_host_functions_integration
+cargo test --package plexspaces-wasm-runtime --test new_host_functions_integration
 ```
 
 These integration tests use in-memory backends — `InMemoryKVStore`, `MemoryLockManager`, `MemoryJournalStorage`, `MockChannelService` — so they run fast and require no infrastructure.
 
-### End-to-End Tests
+### End-to-End and Example Tests
 
-Deploy to a local node and verify the full stack:
+Test the full stack from build through deployment:
 
 ```bash
-# Start a test node
-cargo run --release --bin plexspaces -- start \
-    --node-id test-node \
-    --listen-addr 0.0.0.0:8000
+# Run comprehensive E2E tests
+make test-e2e
 
-# Deploy and test
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
-    -F "application_id=test-app" \
-    -F "wasm_file=@actor.wasm"
+# Test all examples (compiles, runs unit + integration tests, builds binaries)
+./scripts/test-all-examples.sh
 
-# Send test messages and verify responses
-curl -X POST http://localhost:8001/api/v1/actors/test-app/ask \
-    -d '{"message_type": "add", "payload": {"operands": [1, 2]}}'
+# Build all WASM actors across all languages
+./scripts/build-all-wasm.sh
 ```
 
 ---
 
-## The Tooling Landscape
+## Build Scripts and Automation
 
-### Setting Up Your Environment
-
-Install the compilers for whichever languages you plan to use:
+PlexSpaces ships the Makefile as your command center for the entire development workflow:
 
 ```bash
-# Rust (produces the smallest, fastest WASM)
-rustup target add wasm32-wasip2
+# Setup & Build
+make install-tools          # Install all required dev tools
+make build                  # Build all crates
+make build-wasm             # Build all WASM actors
+make release                # Build release version
 
-# Go (good balance of size and speed)
-# macOS: brew install tinygo
-# Linux: see https://tinygo.org/getting-started/install/
+# Testing
+make test                   # Run all tests (unit + integration)
+make test-wasm              # Run WASM-specific tests
+make test-all-examples      # Run all example tests
+make test-quick             # Fast unit tests (dev loop)
+make test-e2e               # Comprehensive end-to-end tests
+make test-coverage          # Run tests with coverage report
+make check-coverage         # Check 90% coverage requirement
 
-# TypeScript (rapid development, web ecosystem)
-npm install -g @bytecodealliance/jco
+# Quality
+make fmt                    # Format all code
+make lint                   # Run clippy + buf linters
+make validate               # Full validation before push
 
-# Python (ML, data processing, prototyping)
-pip install componentize-py
+# Docker
+make docker-build           # Build Docker image (framework-only)
+make docker-build-wasm      # Build Docker image (WASM-enabled)
+make docker-build-postgres  # Build image with PostgreSQL backends
 
-# Optional: WASM binary optimizer
-cargo install wasm-opt
-```
-
-### Optimizing WASM Binaries
-
-Size matters when you deploy hundreds of actors:
-
-```bash
-# Strip debug symbols and optimize for size
-wasm-opt -Oz --strip-debug actor.wasm -o actor_opt.wasm
-
-# Check the result
-ls -lh actor_opt.wasm
-```
-
-### Deployment via CLI or HTTP
-
-```bash
-# CLI deployment (files < 5MB)
-./target/release/plexspaces deploy \
-    --node localhost:8000 \
-    --app-id my-app \
-    --name my-actor \
-    --version 1.0.0 \
-    --wasm actor.wasm
-
-# HTTP multipart upload (any size, recommended for production)
-curl -X POST http://localhost:8001/api/v1/applications/deploy \
-    -F "application_id=my-app" \
-    -F "name=my-actor" \
-    -F "version=1.0.0" \
-    -F "wasm_file=@actor.wasm"
+# Full CI pipeline
+make ci                     # Run complete CI pipeline locally
 ```
 
 ---
@@ -948,16 +1202,40 @@ PlexSpaces actually supports *both*: WASM sandboxing for lightweight actors and 
 
 ---
 
-## Where WebAssembly Is Heading
+## Where This Is Heading: The Serverless Convergence
+
+### The WASM Ecosystem Roadmap
 
 The ecosystem moves fast. Here are the milestones that matter:
 
-- **Wasm 3.0** became the W3C standard in September 2025, standardizing nine production features including WasmGC, exception handling, and tail calls
-- **WASI 0.3** shipped in February 2026 with native async support, enabling concurrent I/O without blocking
-- **WASI 1.0** is on track for late 2026 or early 2027, providing the stability guarantees that enterprise adopters need
+- **Wasm 3.0** became the W3C standard in September 2025, standardizing nine production features including WasmGC, exception handling, tail calls, and SIMD
+- **WASI 0.3** shipped in February 2026 with native async support — actors can now handle concurrent I/O without blocking
+- **WASI 1.0** is on track for late 2026 or early 2027, providing the stability guarantees that enterprise adopters require
 - **Wasmtime** leads the runtime ecosystem with full Component Model and WASI 0.2 support
 - **Wasmer 6.0** achieved ~95% of native speed on benchmarks
 - **Docker** now runs WASM components alongside containers in Docker Desktop and Docker Engine
+
+### The FaaS-Actor Convergence
+
+The most consequential trend is the convergence of **serverless FaaS platforms** and **stateful actor systems**. Today these exist as separate categories — AWS Lambda handles stateless functions, Temporal handles durable workflows, Orleans handles virtual actors, and Erlang/OTP handles fault-tolerant supervision. PlexSpaces unifies them into a single abstraction.
+
+This convergence accelerates along three axes:
+
+**HTTP-native invocation.** Every PlexSpaces actor is already a serverless function — callable over HTTP with automatic routing, multi-tenant isolation, and load balancing. As the WASM ecosystem matures, the cold start advantage (microseconds vs. seconds) makes WASM actors a compelling replacement for traditional Lambda functions, especially at the edge.
+
+**Durable serverless.** Traditional FaaS treats functions as stateless. PlexSpaces combines serverless invocation with durable execution — actors retain state, the framework journals every message, and crash recovery replays the journal to restore exact state. This eliminates the "Lambda + DynamoDB + Step Functions" stack that every non-trivial serverless application ends up building.
+
+**Edge-native polyglot.** WASM runs everywhere — cloud servers, edge nodes, IoT devices, even browsers. PlexSpaces actors compiled to WASM deploy to any environment that runs wasmtime. A Python ML model runs at the edge. A Rust event processor runs in the cloud. A TypeScript API actor runs in the CDN. All three communicate through the same framework, sharing state through tuple spaces and coordinating through process groups.
+
+### PlexSpaces Roadmap
+
+PlexSpaces continues to expand its polyglot and serverless capabilities:
+
+- **WASI 0.3 async integration** — leveraging native async WASM for non-blocking actor I/O, enabling actors to handle thousands of concurrent requests
+- **Component-to-component linking** — composing actors from different languages into a single WASM component, eliminating even intra-process serialization overhead
+- **Edge deployment** — lightweight PlexSpaces nodes for CDN edge locations and IoT devices, with automatic state synchronization to cloud nodes
+- **GPU passthrough for WASM** — exposing GPU compute to WASM actors for ML inference workloads
+- **Kubernetes-native autoscaling** — scaling actor pools based on message queue depth, with WASM's microsecond cold starts enabling true scale-to-zero
 
 The gaps are real — threading support remains limited, and language parity outside Rust is still a work in progress. But adoption grew 28% year-over-year, and the Component Model is no longer a research project. It is becoming the infrastructure layer that WebAssembly's "run anything, anywhere, safely" promise always required.
 
@@ -971,21 +1249,30 @@ PlexSpaces is open source. Clone the repository and start building:
 git clone https://github.com/bhatti/PlexSpaces.git
 cd PlexSpaces
 
-# Build the framework
-cargo build --release
+# Quick setup (installs tools, builds, tests)
+./scripts/setup.sh
+
+# Or use Docker for the fastest path
+docker pull plexobject/plexspaces:latest
+docker run -d -p 8000:8000 -p 8001:8001 \
+    -e PLEXSPACES_NODE_ID=node1 \
+    plexobject/plexspaces:latest
 
 # Explore the examples
-ls examples/python/apps/   # calculator, bank_account, chat_room, nbody, ...
-ls examples/typescript/apps/ # bank_account, migrating_cloudflare_workers, ...
-ls examples/go/apps/        # migrating_erlang_otp, migrating_cloudflare_workers, ...
-ls examples/rust/apps/      # calculator, nbody, session_manager, ...
+ls examples/python/apps/     # calculator, bank_account, chat_room, nbody, ...
+ls examples/typescript/apps/  # bank_account, migrating_cloudflare_workers, migrating_orleans
+ls examples/go/apps/          # migrating_erlang_otp, migrating_cloudflare_workers, ...
+ls examples/rust/apps/        # calculator, nbody, session_manager, ...
+
+# Build and test everything
+make all
 ```
 
-Each example includes its own `app-config.toml`, build scripts, and test instructions. Pick a language, pick a pattern, and deploy your first polyglot actor in minutes.
+Each example includes its own `app-config.toml`, `build.sh` script, and test instructions. The `examples/` directory also contains migration guides from 24+ frameworks — Erlang/OTP, Temporal, Ray, Cloudflare Workers, Orleans, Restate, Azure Durable Functions, AWS Step Functions, wasmCloud, Dapr, and more.
 
-The distributed systems problems I spent thirty years solving — fault tolerance, state management, multi-language support, coordination, scaling — PlexSpaces distills them into one framework. WebAssembly makes the polyglot piece real. The Component Model makes it composable. And the WASI standard makes it portable.
+The distributed systems problems I spent thirty years solving — fault tolerance, state management, multi-language support, coordination, serverless invocation, scaling — PlexSpaces distills them into one framework. WebAssembly makes the polyglot piece real. The Component Model makes it composable. WASI makes it portable. And HTTP invocation makes it accessible to every developer who knows how to use curl.
 
-Pick the right language for each job. Compile it to WASM. Deploy it to PlexSpaces. Let the framework handle the rest.
+Pick the right language for each job. Compile it to WASM. Deploy it to PlexSpaces. Invoke it over HTTP. Let the framework handle the rest.
 
 ---
 

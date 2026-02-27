@@ -1,0 +1,60 @@
+# Matrix Multiplication - Scatter-Gather Data Parallel
+#
+# Parallel matrix multiply using worker pool sharding.
+# Ported from examples/rust/embedded/matrix_multiply/
+#
+# ACTOR_ROLES mapping:
+#   "matrix-master" -> MatrixMaster
+#   "matworker"     -> MatrixWorker
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Matrix master (coordinator)
+[[supervisor.children]]
+id = "matrix-master"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+num_workers = "4"
+
+# Matrix workers (data-parallel shards)
+[[supervisor.children]]
+id = "matworker-0"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+shard_id = "0"
+
+[[supervisor.children]]
+id = "matworker-1"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+shard_id = "1"
+
+[[supervisor.children]]
+id = "matworker-2"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+shard_id = "2"
+
+[[supervisor.children]]
+id = "matworker-3"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+shard_id = "3"

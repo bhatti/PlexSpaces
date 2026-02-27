@@ -1,0 +1,92 @@
+# Data Lake Ingestion Pipeline
+#
+# Multi-stage document processing pipeline:
+#   - IngestionCoordinator: workflow orchestration
+#   - DocumentParser pool: CPU-bound document parsing
+#   - TextChunker pool: text splitting with overlap
+#   - EmbeddingWorker shard group: GPU-accelerated embedding generation
+#
+# ACTOR_ROLES mapping (prefix match):
+#   "ingestion-coordinator" -> IngestionCoordinator
+#   "parser"                -> DocumentParser
+#   "chunker"               -> TextChunker
+#   "embedder"              -> EmbeddingWorker
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Pipeline coordinator (workflow orchestration)
+[[supervisor.children]]
+id = "ingestion-coordinator"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+num_parsers = "2"
+num_chunkers = "2"
+num_embedders = "2"
+
+# ---- Document Parser Pool ----
+
+[[supervisor.children]]
+id = "parser-0"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[[supervisor.children]]
+id = "parser-1"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+# ---- Text Chunker Pool ----
+
+[[supervisor.children]]
+id = "chunker-0"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+chunk_size = "1500"
+overlap = "150"
+
+[[supervisor.children]]
+id = "chunker-1"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+chunk_size = "1500"
+overlap = "150"
+
+# ---- Embedding Worker Shard Group (GPU nodes) ----
+
+[[supervisor.children]]
+id = "embedder-0"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+shard_id = "0"
+model_name = "all-mpnet-base-v2"
+embedding_dim = "768"
+batch_size = "32"
+
+[[supervisor.children]]
+id = "embedder-1"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+shard_id = "1"
+model_name = "all-mpnet-base-v2"
+embedding_dim = "768"
+batch_size = "32"

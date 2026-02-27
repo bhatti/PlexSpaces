@@ -1,0 +1,74 @@
+# Genomics Pipeline - DNA Sequencing Analysis
+#
+# Multi-step workflow: QC -> Alignment -> Variant Calling
+# Ported from examples/rust/embedded/genomics_pipeline/
+#
+# ACTOR_ROLES mapping:
+#   "genomics-coordinator" -> GenomicsPipelineCoordinator
+#   "qc"                   -> QCWorker
+#   "align"                -> AlignmentWorker
+#   "variant"              -> VariantCaller
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Pipeline coordinator (workflow actor)
+[[supervisor.children]]
+id = "genomics-coordinator"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+num_qc_workers = "2"
+num_align_workers = "2"
+num_variant_workers = "1"
+
+# QC workers
+[[supervisor.children]]
+id = "qc-0"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+min_quality = "30"
+min_length = "50"
+
+[[supervisor.children]]
+id = "qc-1"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+min_quality = "30"
+min_length = "50"
+
+# Alignment workers
+[[supervisor.children]]
+id = "align-0"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+reference_genome = "hg38"
+
+[[supervisor.children]]
+id = "align-1"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+reference_genome = "hg38"
+
+# Variant caller
+[[supervisor.children]]
+id = "variant-0"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10

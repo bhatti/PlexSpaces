@@ -1,0 +1,71 @@
+# Heat Diffusion Simulation
+#
+# 2D stencil computation with TupleSpace ghost cell exchange.
+# Ported from examples/rust/embedded/heat_diffusion/
+#
+# ACTOR_ROLES mapping:
+#   "sim-coordinator" -> SimulationCoordinator
+#   "region"          -> GridRegionActor
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Simulation coordinator
+[[supervisor.children]]
+id = "sim-coordinator"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+num_regions = "4"
+grid_width = "100"
+max_iterations = "100"
+tolerance = "0.5"
+
+# Grid regions (horizontal strips)
+[[supervisor.children]]
+id = "region-0"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+region_id = "0"
+width = "100"
+num_regions = "4"
+
+[[supervisor.children]]
+id = "region-1"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+region_id = "1"
+width = "100"
+num_regions = "4"
+
+[[supervisor.children]]
+id = "region-2"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+region_id = "2"
+width = "100"
+num_regions = "4"
+
+[[supervisor.children]]
+id = "region-3"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+region_id = "3"
+width = "100"
+num_regions = "4"

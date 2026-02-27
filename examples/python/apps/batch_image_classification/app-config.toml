@@ -1,0 +1,102 @@
+# Batch Image Classification Pipeline
+#
+# Deploys a multi-stage inference pipeline with resource-based routing:
+#   - PipelineCoordinator: orchestrates scatter-gather across stages
+#   - ImagePreprocessor pool: CPU-bound image preprocessing (shard group)
+#   - ModelInferenceWorker pool: GPU-bound model inference (shard group)
+#
+# ACTOR_ROLES mapping (prefix match):
+#   "coordinator"  -> PipelineCoordinator
+#   "preprocessor" -> ImagePreprocessor
+#   "inference"    -> ModelInferenceWorker
+#
+# Resource-based routing ensures:
+#   - Preprocessors run on nodes with {accelerator: "cpu"}
+#   - Inference workers run on nodes with {accelerator: "gpu"}
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Pipeline coordinator (orchestration)
+[[supervisor.children]]
+id = "coordinator"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+num_preprocessors = "4"
+num_inference_workers = "2"
+
+# ---- Preprocessor Shard Group (CPU nodes) ----
+# Each preprocessor handles a partition of images via hash(image_id) % 4
+
+[[supervisor.children]]
+id = "preprocessor-0"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+shard_id = "0"
+target_size = "224"
+
+[[supervisor.children]]
+id = "preprocessor-1"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+shard_id = "1"
+target_size = "224"
+
+[[supervisor.children]]
+id = "preprocessor-2"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+shard_id = "2"
+target_size = "224"
+
+[[supervisor.children]]
+id = "preprocessor-3"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+
+[supervisor.children.args]
+shard_id = "3"
+target_size = "224"
+
+# ---- Inference Worker Shard Group (GPU nodes) ----
+# Each inference worker handles a partition via hash(image_id) % 2
+# Resource requirements: gpu_count=1, gpu_type="nvidia"
+
+[[supervisor.children]]
+id = "inference-0"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+shard_id = "0"
+model_name = "vit-base-patch16-224"
+num_classes = "1000"
+batch_size = "64"
+
+[[supervisor.children]]
+id = "inference-1"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+shard_id = "1"
+model_name = "vit-base-patch16-224"
+num_classes = "1000"
+batch_size = "64"

@@ -1,0 +1,46 @@
+graph TB
+    subgraph PlexNode ["PlexSpaces Node"]
+        direction TB
+
+        subgraph Runtime ["WASM Runtime (wasmtime)"]
+            RT_Desc["- Loads & executes modules<br/>- Provides WIT host functions<br/>- Enforces sandboxing"]
+        end
+
+        subgraph Actors ["Polyglot WASM Actors"]
+            direction LR
+            PY[Python] --- TS[TS] --- RS[Rust] --- GO[Go]
+        end
+
+        subgraph WIT ["WIT Host Functions (Unified Interface)"]
+            WIT_S["messaging • tuplespace • keyvalue<br/>blob • channels • durability • locks<br/>process-groups • registry • workflow"]
+        end
+
+        subgraph Framework ["Framework Services"]
+            FS["ActorService • TupleSpace • KeyValue<br/>Blob • Channels • Locks • Registry • Workflow"]
+        end
+
+        subgraph Gateway ["HTTP/gRPC Gateway"]
+            GW["REST API • FaaS Invocation • Swagger UI"]
+        end
+
+        %% Connections
+        Runtime --> Actors
+        Actors --> WIT
+        WIT --> Framework
+        Framework --- Gateway
+    end
+
+    %% Styles for Visibility
+    classDef plex fill:#222,stroke:#fff,stroke-width:4px,color:#fff
+    classDef runtime fill:#FFD700,stroke:#333,stroke-width:2px,color:#000
+    classDef actors fill:#00CCFF,stroke:#333,stroke-width:2px,color:#000
+    classDef wit fill:#FF66B2,stroke:#333,stroke-width:2px,color:#000
+    classDef framework fill:#33FF99,stroke:#333,stroke-width:2px,color:#000
+    classDef gateway fill:#FF5733,stroke:#333,stroke-width:2px,color:#000
+
+    class PlexNode plex
+    class Runtime runtime
+    class Actors actors
+    class WIT wit
+    class Framework framework
+    class Gateway gateway

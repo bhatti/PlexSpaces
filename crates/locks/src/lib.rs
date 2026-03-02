@@ -84,7 +84,10 @@
 //! ```
 
 pub mod error;
+pub mod factory;
 pub mod manager;
+
+pub mod memory;
 
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 pub mod sql;
@@ -96,7 +99,9 @@ pub mod redis;
 pub mod ddb;
 
 pub use error::{LockError, LockResult};
+pub use factory::{create_lock_manager, LockBackend};
 pub use manager::LockManager;
+pub use memory::MemoryLockManager;
 
 // Re-export proto types for convenience
 pub use plexspaces_proto::locks::prv::{AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions};

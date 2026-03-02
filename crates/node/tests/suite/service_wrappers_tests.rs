@@ -102,7 +102,7 @@ async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
     );
 
     use plexspaces_services::actor_service::ActorServiceImpl;
-    let actor_service = Arc::new(ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string()));
+    let actor_service = Arc::new(ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string()));
 
     // Try to send to remote actor (will fail because actor doesn't exist or remote not implemented)
     let message = create_test_message(b"hello".to_vec());

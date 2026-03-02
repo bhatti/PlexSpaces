@@ -566,8 +566,9 @@ impl plexspaces_core::NodeConnectionInfo for NodeConnectionInfoWrapper {
     async fn connected_nodes(&self) -> Vec<String> {
         // Get connected nodes from NodeRegistry
         let service_locator = self.node.service_locator();
-        if let Some(node_registry) = service_locator.get_node_registry().await {
-            let ctx = service_locator.request_context_for_system_operations().await;
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        if let Some(node_registry) = service_locator_trait.get_node_registry().await {
+            let ctx = service_locator_trait.request_context_for_system_operations().await;
             match node_registry.list_nodes(&ctx, None, 1000, "").await {
                 Ok((nodes, _)) => {
                     nodes.into_iter()

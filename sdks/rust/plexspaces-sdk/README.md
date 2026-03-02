@@ -300,6 +300,54 @@ let actor_ref = spawn_with_storage(
 ).await?;
 ```
 
+### Virtual Actor Auto-Registration
+
+When spawning an actor with the `virtual_actor` facet, the SDK automatically registers that actor type for automatic activation. This enables Orleans-style virtual actor behavior where any actor ID matching the type pattern can be activated on-demand.
+
+**How it works:**
+
+1. When you spawn an actor with `virtual_actor` facet (via `spawn()`, `spawn_with_facets()`, or `spawn_with_storage()`), the SDK:
+   - Detects the `virtual_actor` facet
+   - Extracts the actor type from `behavior.behavior_type()` (e.g., `"GenServer"`, `"CustomActor"`)
+   - Registers the actor type with `VirtualActorManager` for automatic activation
+
+2. After registration, any message sent to an actor ID of that type will automatically activate the actor if it's not already active.
+
+**Example:**
+
+```rust
+#[gen_server_actor(facets = ["virtual_actor"])]
+struct UserProfile {
+    user_id: String,
+    preferences: HashMap<String, String>,
+}
+
+// Spawn first instance - automatically registers "UserProfile" type
+let ctx = RequestContext::new_without_auth("tenant".into(), "namespace".into());
+let actor_ref1 = spawn(
+    &ctx,
+    service_locator,
+    "user-123@node",
+    "ns",
+    UserProfile::new("user-123"),
+).await?;
+
+// Later, spawn a different instance of the same type
+// This actor will also be automatically activated on-demand
+let actor_ref2 = spawn(
+    &ctx,
+    service_locator,
+    "user-456@node",  // Different ID, same type
+    "ns",
+    UserProfile::new("user-456"),
+).await?;
+
+// Any message to "user-789@node" (same type, different ID) will automatically
+// activate a new UserProfile actor for that user ID
+```
+
+**Note:** Type registration is idempotent - registering the same type multiple times is safe and overwrites previous registration. Registration failures are logged but don't prevent actor spawning (the actor will still work, but auto-activation may fail).
+
 ## Message Creation Helpers
 
 The SDK provides helper functions for creating messages with correct invocation semantics:

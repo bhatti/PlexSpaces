@@ -46,6 +46,9 @@ plexspaces-keyvalue = { workspace = true, features = ["sql-backend"] }  # For Se
 plexspaces-node = { workspace = true }  # For create_default_service_locator in tests
 plexspaces-services = { path = "../services" }  # For ServiceLocatorImpl in tests
 plexspaces-channel = { path = "../channel" }  # For channel integration tests
+plexspaces-journaling = { workspace = true, features = ["sqlite-backend"] }  # For facet factory tests
+plexspaces-locks = { path = "../locks" }  # For facet factory tests
+plexspaces-process-groups = { workspace = true }  # For facet factory tests
 chrono = { workspace = true }  # For timestamp in integration tests
 prost-types = "0.12"  # For proto types in integration tests
 async-trait = { workspace = true }  # For trait implementations in tests

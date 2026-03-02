@@ -258,6 +258,66 @@ pub struct SqliteJournalStorage {
     sequences: Arc<RwLock<HashMap<String, u64>>>,
 }
 
+/// Create journal + checkpoint + actor_events + reminders schema for :memory: SQLite.
+async fn run_memory_schema_sqlite(pool: &Pool<Sqlite>) -> Result<(), String> {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS journal_entries (
+            id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, sequence BIGINT NOT NULL, timestamp BIGINT NOT NULL,
+            correlation_id TEXT, entry_type TEXT NOT NULL, entry_data BLOB NOT NULL, UNIQUE(actor_id, sequence))"#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_journal_actor_sequence ON journal_entries (actor_id, sequence)")
+        .execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_journal_timestamp ON journal_entries (timestamp)")
+        .execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_journal_entry_type ON journal_entries (entry_type)")
+        .execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS checkpoints (
+            actor_id TEXT NOT NULL, sequence BIGINT NOT NULL, timestamp BIGINT NOT NULL, state_data BLOB NOT NULL,
+            compression INTEGER NOT NULL DEFAULT 0, metadata TEXT, state_schema_version INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (actor_id, sequence))"#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_checkpoint_actor_latest ON checkpoints (actor_id, sequence DESC)")
+        .execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS actor_events (
+            id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, sequence BIGINT NOT NULL, event_type TEXT NOT NULL,
+            event_data BLOB NOT NULL, timestamp BIGINT NOT NULL, caused_by TEXT, metadata TEXT, UNIQUE(actor_id, sequence))"#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_actor_events_actor_sequence ON actor_events(actor_id, sequence)")
+        .execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_actor_events_timestamp ON actor_events(timestamp)")
+        .execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_actor_events_caused_by ON actor_events(caused_by) WHERE caused_by IS NOT NULL")
+        .execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS reminders (
+            actor_id TEXT NOT NULL, reminder_name TEXT NOT NULL, interval_seconds INTEGER, interval_nanos INTEGER,
+            first_fire_time_seconds INTEGER, first_fire_time_nanos INTEGER, callback_data BLOB,
+            persist_across_activations INTEGER NOT NULL DEFAULT 1, max_occurrences INTEGER NOT NULL DEFAULT 0,
+            last_fired_seconds INTEGER, last_fired_nanos INTEGER, next_fire_time_seconds INTEGER, next_fire_time_nanos INTEGER,
+            fire_count INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL,
+            PRIMARY KEY(actor_id, reminder_name))"#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_reminders_next_fire_time ON reminders(next_fire_time_seconds, next_fire_time_nanos) WHERE is_active = 1")
+        .execute(pool).await.map_err(|e| e.to_string())?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_reminders_actor_id ON reminders(actor_id) WHERE is_active = 1")
+        .execute(pool).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 impl SqliteJournalStorage {
     /// Create a new SQLite journal storage.
     ///
@@ -329,20 +389,18 @@ impl SqliteJournalStorage {
             .await
             .unwrap_or_else(|_| "unknown".to_string());
 
-        // Run migrations
-        sqlx::migrate!("./migrations/sqlite")
-            .run(&pool)
-            .await
-            .map_err(|e| {
-                error!(db_path = %display_path, error = %e, "Journal migration failed");
-                JournalError::Storage(format!("Migration failed: {}", e))
+        // For :memory: only: create schema inline. File-based uses unified db/migrations at init.
+        if path == ":memory:" {
+            run_memory_schema_sqlite(&pool).await.map_err(|e| {
+                error!(db_path = %display_path, error = %e, "Journal schema creation failed");
+                JournalError::Storage(e)
             })?;
+        }
 
         info!(
             db_path = %display_path,
             db_version = %format!("SQLite {}", db_version),
-            tables = "journal_entries, checkpoints, actor_events, reminders",
-            "Journal storage migration completed"
+            "Journal storage connected"
         );
 
         Ok(Self {
@@ -1411,11 +1469,7 @@ impl PostgresJournalStorage {
             .await
             .map_err(|e| JournalError::Storage(e.to_string()))?;
 
-        // Run migrations
-        sqlx::migrate!("./migrations/postgres")
-            .run(&pool)
-            .await
-            .map_err(|e| JournalError::Storage(format!("Migration failed: {}", e)))?;
+        // Schema is created by unified db/migrations at init. Assume it exists.
 
         // Mask credentials in connection string for logging
         let display_url = connection_string

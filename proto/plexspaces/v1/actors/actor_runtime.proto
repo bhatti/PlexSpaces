@@ -3122,22 +3122,14 @@ message VirtualActorLifecycle {
 // Config is stored as string map in Facet (simplicity, flexibility).
 // This message is for documentation and type safety in Rust code.
 message VirtualActorConfig {
-  // Activation strategy
-  ActivationStrategy activation_strategy = 1;
+  // Activation strategy (from common.proto)
+  plexspaces.common.v1.ActivationStrategy activation_strategy = 1;
 
   // Idle timeout before deactivation
   google.protobuf.Duration idle_timeout = 2;
 
   // Should actor persist state on deactivation?
   bool persist_on_deactivation = 3;
-}
-
-// Activation strategy for virtual actors
-enum ActivationStrategy {
-  ACTIVATION_STRATEGY_UNSPECIFIED = 0;
-  ACTIVATION_STRATEGY_LAZY = 1;      // Activate on first message (default)
-  ACTIVATION_STRATEGY_EAGER = 2;     // Activate immediately on creation
-  ACTIVATION_STRATEGY_PREWARM = 3;   // Pre-activate based on schedule
 }
 
 // ============================================================================

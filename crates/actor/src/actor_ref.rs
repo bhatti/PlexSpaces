@@ -780,10 +780,9 @@ impl ActorRef {
         const MAX_RECURSION_DEPTH: usize = 10;
         if depth > MAX_RECURSION_DEPTH {
             let _ = TELL_DEPTH.with(|d| d.set(0)); // Reset on error
-            let backtrace = std::backtrace::Backtrace::capture();
             tracing::error!(
-                "INFINITE RECURSION DETECTED IN ActorRef::tell! depth={}, max={}, actor_ref_id={}, sender={:?}, receiver={}, correlation_id={:?}, backtrace={:?}",
-                depth, MAX_RECURSION_DEPTH, self.id, message.sender_id, message.receiver_id, message.correlation_id, backtrace
+                "Infinite recursion detected in ActorRef::tell (depth: {})",
+                depth
             );
             return Err(ActorRefError::SendFailed(format!(
                 "Infinite recursion detected in ActorRef::tell (depth: {})",
@@ -819,25 +818,17 @@ impl ActorRef {
             message.id = format!("req-{}", message.id);
         }
 
-        // VALIDATION: Check for self-messaging (sender == receiver)
-        // Temporary senders prevent this for ask(), but we keep the check for direct tell() calls.
-        if !message.sender_id.is_empty() {
-            let sender_id = &message.sender_id;
-            if sender_id == &actor_id {
-                let _ = TELL_DEPTH.with(|d| d.set(0)); // Reset on error
-                tracing::error!(
-                    "ActorRef::tell: SELF-MESSAGING DETECTED! sender_id={}, target_actor_id={}, message_type={}, correlation_id={:?}",
-                    sender_id, actor_id, message_type, message.correlation_id
+        // OBSERVABILITY: Log self-messaging (safe in async tell(), but worth observing)
+        if !message.sender_id.is_empty() && message.sender_id == actor_id {
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    message_id = %message.id,
+                    sender_id = %message.sender_id,
+                    receiver_id = %actor_id,
+                    message_type = %message_type,
+                    correlation_id = ?message.correlation_id,
+                    "ActorRef::tell: self-messaging detected (safe in async context)"
                 );
-                let backtrace = std::backtrace::Backtrace::capture();
-                tracing::error!(
-                    "SELF-MESSAGING DETECTED IN ActorRef::tell! actor_id={}, message_type={}, correlation_id={:?}, backtrace={:?}",
-                    sender_id, message_type, message.correlation_id, backtrace
-                );
-                return Err(ActorRefError::SendFailed(format!(
-                    "Self-messaging detected: actor {} cannot send message to itself",
-                    sender_id
-                )));
             }
         }
         
@@ -867,26 +858,30 @@ impl ActorRef {
         // but the actor isn't active yet. We need to trigger activation via VirtualActorWrapper.
         // CRITICAL: This check MUST happen BEFORE sending to mailbox to ensure lazy activation works
         
-        if let Some(manager) = self.service_locator().virtual_actor_manager().await {
-            let is_virtual = manager.is_virtual(&actor_id).await;
-            let is_active = manager.is_active(&actor_id).await;
-            if is_virtual && !is_active {
-                // Lazy virtual actor that isn't active - use VirtualActorWrapper to trigger activation
-                // Get VirtualActorWrapper from registry (it should be there for lazy virtual actors)
-                
-                if let Some(registry) = self.service_locator().actor_registry().await {
-                    if let Some(virtual_wrapper) = registry.lookup_actor(&actor_id).await {
-                        // VirtualActorWrapper will handle activation and message delivery
-                        return virtual_wrapper.tell(message).await
-                            .map_err(|e| ActorRefError::SendFailed(format!("VirtualActorWrapper.tell() failed: {}", e)));
-                    } else {
-                        tracing::warn!("[TELL] VirtualActorWrapper not found in registry: actor_id={}", actor_id);
-                    }
-                } else {
-                    tracing::warn!("[TELL] ActorRegistry not found: actor_id={}", actor_id);
-                }
-            }
-        }
+        // COMMENTED OUT: Testing if this virtual actor check is redundant
+        // if let Some(manager) = self.service_locator().virtual_actor_manager().await {
+        //     let is_virtual = manager.is_virtual(&actor_id).await;
+        //     let is_active = manager.is_active(&actor_id).await;
+        //     if is_virtual && !is_active {
+        //         // Lazy virtual actor that isn't active - use VirtualActorWrapper to trigger activation
+        //         // Get VirtualActorWrapper from registry (it should be there for lazy virtual actors)
+        //         
+        //         if let Some(registry) = self.service_locator().actor_registry().await {
+        //             if let Some(virtual_wrapper) = registry.lookup_actor(&actor_id).await {
+        //                 // VirtualActorWrapper will handle activation and message delivery
+        //                 return virtual_wrapper.tell(message).await
+        //                     .map_err(|e| ActorRefError::SendFailed(format!("VirtualActorWrapper.tell() failed: {}", e)));
+        //             } else {
+        //                 tracing::warn!("[TELL] VirtualActorWrapper not found in registry: actor_id={}", actor_id);
+        //             }
+        //         } else {
+        //             tracing::warn!("[TELL] ActorRegistry not found: actor_id={}", actor_id);
+        //         }
+        //     } else if is_virtual && is_active {
+        //         // Active virtual actor - update last_access for LRU tracking
+        //         manager.update_last_access(&actor_id).await;
+        //     }
+        // }
         
         // Get ReplyWaiterRegistry once for all reply routing checks
         let waiter_registry: Option<Arc<plexspaces_core::ReplyWaiterRegistry>> = self.service_locator().reply_waiter_registry().await;
@@ -1258,6 +1253,23 @@ impl ActorRef {
             message.receiver_id.clone()
         };
         message.receiver_id = target_actor_id.clone();
+
+        // VALIDATION: Check for self-ask (sender == receiver) - blocks forever in synchronous ask()
+        if !message.sender_id.is_empty() && message.sender_id == target_actor_id {
+            tracing::error!(
+                message_id = %message.id,
+                sender_id = %message.sender_id,
+                receiver_id = %target_actor_id,
+                message_type = %message_type,
+                correlation_id = ?message.correlation_id,
+                "ActorRef::ask: SELF-ASK DETECTED! actor {} cannot ask itself (message_id={})",
+                target_actor_id, message.id
+            );
+            return Err(ActorRefError::SendFailed(format!(
+                "Self-ask detected: actor {} cannot ask itself (message_id={})",
+                target_actor_id, message.id
+            )));
+        }
 
         // Use unified route_message for both local and remote routing
         // CRITICAL: Use tenant_id from ActorRef (flows from API → ActorBuilder → ActorRef)

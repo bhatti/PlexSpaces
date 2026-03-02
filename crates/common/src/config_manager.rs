@@ -933,6 +933,7 @@ mod tests {
             listen_addr: None, // Not set in "env"
             grpc_address: None,
             wasm_apps_dir: Some("/env/apps".to_string()),
+            save_wasm_apps: false,
             base_dir: Some("/env/base".to_string()),
             database_url: Some("sqlite::memory:".to_string()),
             jwt_secret: None,

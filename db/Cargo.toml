@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+#
+# Unified database migrations for PlexSpaces.
+# Run once per database connection (SQLite or PostgreSQL) from service startup.
+
+[package]
+name = "plexspaces-db"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Unified database migrations for PlexSpaces (SQLite and PostgreSQL)"
+
+[dependencies]
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "postgres", "migrate"] }
+tracing = "0.1"

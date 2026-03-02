@@ -322,7 +322,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
         metrics::counter!("plexspaces_wasm_messaging_tell_total").increment(1);
 
         let message_str = String::from_utf8_lossy(&payload).to_string();
-        match self.host_functions.send_message(&self.actor_id, &to, &message_str).await {
+        match self.host_functions.send_message(&self.actor_id, &to, &msg_type, &message_str).await {
             Ok(_) => {
                 let message_id = ulid::Ulid::new().to_string();
                 let duration = start_time.elapsed();
@@ -522,7 +522,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
         let message_str = String::from_utf8_lossy(&payload).to_string();
         // Drop span before await to ensure Send
         drop(_span);
-        match self.host_functions.send_message(&original_sender, &to, &message_str).await {
+        match self.host_functions.send_message(&original_sender, &to, &msg_type, &message_str).await {
             Ok(_) => {
                 let message_id = ulid::Ulid::new().to_string();
                 let duration = start_time.elapsed();
@@ -939,7 +939,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             
             // Send message to actor's mailbox
             let message_str = String::from_utf8_lossy(&payload_clone).to_string();
-            if let Err(e) = host_functions_clone.send_message(&actor_id_str, &actor_id_str, &message_str).await {
+            if let Err(e) = host_functions_clone.send_message(&actor_id_str, &actor_id_str, &msg_type_clone, &message_str).await {
                 tracing::warn!(
                     actor_id = %actor_id_clone,
                     timer_id = timer_id,

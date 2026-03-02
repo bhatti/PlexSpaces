@@ -26,6 +26,7 @@ authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
 
 [dependencies]
 # PlexSpaces crates
+plexspaces-common = { path = "../common" }
 plexspaces-core = { path = "../core" }
 plexspaces-proto = { path = "../proto" }
 plexspaces-mailbox = { path = "../mailbox" }
@@ -95,5 +96,6 @@ plexspaces-services = { path = "../services" }
 plexspaces-node = { path = "../node" }
 tokio-test = "0.4"
 plexspaces-actor = { path = "../actor" }
+plexspaces-locks = { path = "../locks" }  # For facet factory tests
 # Test helpers for checking DynamoDB Local availability
 plexspaces-common = { path = "../common", features = ["test-helpers"] }

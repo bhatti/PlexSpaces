@@ -178,11 +178,12 @@ async fn create_sqlite_lock_manager(
         format!("sqlite:///tmp/plexspaces-{}.db?mode=rwc", sanitized_node_id)
     };
     
-    tracing::info!(
-        backend = "SQLite",
-        db_url = %lock_db_url,
-        "Lock manager using shared SQLite database"
-    );
+        tracing::info!(
+            backend = "SQLite",
+            db_url = %lock_db_url,
+            implementation = "SqliteLockManager",
+            "🔧 Lock manager initialized: SqliteLockManager (shared SQLite database)"
+        );
     
     match SqliteLockManager::new(&lock_db_url).await {
         Ok(manager) => Arc::new(manager),
@@ -224,9 +225,7 @@ use plexspaces_core::behavior_factory::BehaviorRegistry;
 use plexspaces_core::ServiceLocator;
 use plexspaces_actor::ActorRef;
 
-// Service names moved to plexspaces-core::service_names
 pub use plexspaces_core::service_names;
-// Import Service trait
 use plexspaces_core::Service;
 
 /// Wrapper to store Arc<T> with type name for TypeId-independent extraction
@@ -1811,6 +1810,24 @@ async fn initialize_services_impl(
         .map(|s| s.contains(":memory:"))
         .unwrap_or(false);
     
+    // Run unified migrations once (SQLite or PostgreSQL) before any store uses the DB.
+    // Skip for :memory: (each connection gets its own empty DB; stores run their own schema if needed).
+    let connection_string_for_migrations = db_url.clone().unwrap_or_else(|| {
+        let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
+        format!("sqlite:///tmp/plexspaces-kv-{}.db?mode=rwc", sanitized_node_id)
+    });
+    let use_memory_for_migrations = connection_string_for_migrations.contains(":memory:");
+    if !use_memory_for_migrations {
+        if let Err(e) = plexspaces_db::run_migrations(&connection_string_for_migrations).await {
+            let error_msg = format!(
+                "FATAL: Database migrations failed: {}. Ensure db/migrations/sqlite or db/migrations/postgres exist.",
+                e
+            );
+            tracing::error!(error = %e, "FATAL: Database migrations failed.");
+            fatal_exit(&error_msg);
+        }
+    }
+
     // Extract db_path from URL (used for both KV store and Lock manager)
     // SqliteKVStore::new() expects just a path (it adds sqlite: prefix and ?mode=rwc internally)
     // We need to strip any existing scheme prefix and query params
@@ -1835,7 +1852,7 @@ async fn initialize_services_impl(
 
     // Create KeyValueStore based on environment configuration.
     // If PLEXSPACES_KV_BACKEND is set, use create_keyvalue_stores_from_env() to select the backend.
-    // Otherwise, fall back to SQLite with the config-derived path for backward compatibility.
+    // Otherwise, use SQLite with the config-derived path.
     // Each backend implements both plexspaces_keyvalue::KeyValueStore (rich) and
     // plexspaces_common::KeyValueStore (consumer-facing for WASM actors).
     let effective_db_path = if use_memory { ":memory:".to_string() } else { db_path.clone() };
@@ -1857,7 +1874,7 @@ async fn initialize_services_impl(
             }
         }
     } else {
-        // Default: SQLite with config-derived path (backward compatible)
+        // Default: SQLite with config-derived path
         let config = plexspaces_keyvalue::KVConfig::new(plexspaces_keyvalue::BackendType::Sqlite {
             path: effective_db_path.clone(),
         });
@@ -1922,25 +1939,23 @@ async fn initialize_services_impl(
     
     // Create LockManager based on locks_provider from config
     // Config manager has already resolved this: Redis (if available) > Shared DB
-    // Always use SQLite - use :memory: for in-memory mode
+    // Use MemoryLockManager for in-memory SQLite (more efficient than SQLite :memory:)
     let lock_manager: Arc<dyn plexspaces_locks::LockManager> = if use_memory {
-        #[cfg(feature = "sqlite-backend")]
-        {
-            tracing::info!(backend = "SQLite :memory:", "Lock manager using in-memory SQLite");
-            match SqliteLockManager::new(":memory:").await {
-                Ok(manager) => Arc::new(manager),
-                Err(e) => {
-                    let error_msg = format!("FATAL: Failed to create SQLite :memory: lock manager: {}", e);
-                    tracing::error!("{}", error_msg);
-                    fatal_exit(&error_msg);
-                }
+        // Use in-memory lock manager (tokio primitives) - more efficient than SQLite :memory:
+        use plexspaces_locks::factory::{create_lock_manager, LockBackend};
+        tracing::info!(
+            backend = "Memory",
+            implementation = "MemoryLockManager",
+            details = "tokio::sync::Semaphore + Mutex",
+            "🔧 Lock manager initialized: MemoryLockManager (in-memory tokio primitives)"
+        );
+            match create_lock_manager(LockBackend::Memory, None).await {
+            Ok(manager) => manager,
+            Err(e) => {
+                let error_msg = format!("FATAL: Failed to create in-memory lock manager: {}", e);
+                tracing::error!("{}", error_msg);
+                fatal_exit(&error_msg);
             }
-        }
-        #[cfg(not(feature = "sqlite-backend"))]
-        {
-            let error_msg = "FATAL: SQLite backend not available. Enable 'sqlite-backend' feature for plexspaces-locks.";
-            tracing::error!("{}", error_msg);
-            fatal_exit(error_msg);
         }
     } else {
         // Read locks_provider from config (already resolved by config_manager)
@@ -1952,10 +1967,9 @@ async fn initialize_services_impl(
         match locks_provider {
             Some(lp) if lp.provider == plexspaces_proto::storage::v1::StorageProvider::StorageProviderRedis as i32 => {
                 // Use Redis for locks
+                use plexspaces_locks::factory::{create_lock_manager, LockBackend};
                 #[cfg(feature = "redis-backend")]
                 {
-                    use plexspaces_locks::redis::RedisLockManager;
-                    
                     let redis_url = lp.config.as_ref()
                         .and_then(|c| match c {
                             plexspaces_proto::storage::v1::storage_provider_config::Config::Redis(r) => Some(r.url.clone()),
@@ -1963,9 +1977,14 @@ async fn initialize_services_impl(
                         })
                         .unwrap_or_else(|| "redis://localhost:6379".to_string());
                     
-                    tracing::info!(backend = "Redis", redis_url = %redis_url, "Lock manager using Redis backend");
-                    match RedisLockManager::new(&redis_url).await {
-                        Ok(manager) => Arc::new(manager),
+                            tracing::info!(
+                                backend = "Redis",
+                                redis_url = %redis_url,
+                                implementation = "RedisLockManager",
+                                "🔧 Lock manager initialized: RedisLockManager (Redis backend)"
+                            );
+                    match create_lock_manager(LockBackend::Redis, Some(redis_url)).await {
+                        Ok(manager) => manager,
                         Err(e) => {
                             tracing::warn!(
                                 error = %e,
@@ -1998,6 +2017,43 @@ async fn initialize_services_impl(
     // Register ProcessGroupRegistry in ServiceLocator so WASM actors can use pg_join/pg_leave/pg_members/pg_broadcast
     service_locator.register_process_group_registry(process_group_registry.clone() as Arc<dyn std::any::Any + Send + Sync>).await;
     
+    // Create and register JournalStorage for durability facets and event sourcing
+    // Use same database URL as KeyValueStore/ObjectRegistry for consistency
+    // CRITICAL: Migrations run automatically in SqliteJournalStorage::new() (same pattern as other repositories)
+    use plexspaces_journaling::{JournalStorage, create_journal_storage};
+    tracing::info!(
+        db_path = %effective_db_path,
+        use_memory = %use_memory,
+        "Creating JournalStorage (migrations will run automatically on startup)"
+    );
+    let journal_storage: Arc<dyn JournalStorage + Send + Sync> = match create_journal_storage(&effective_db_path).await {
+        Ok(storage) => storage,
+        Err(e) => {
+            let error_msg = format!(
+                "FATAL: Failed to create journal storage at '{}': {}. \
+                Journal storage is required for durability facets. \
+                Ensure the database path is correct and migrations can run.",
+                effective_db_path, e
+            );
+            tracing::error!("{}", error_msg);
+            fatal_exit(&error_msg);
+        }
+    };
+    
+    if use_memory {
+        tracing::info!(backend = "SQLite :memory:", "Journal storage using in-memory SQLite");
+    } else {
+        tracing::info!(
+            backend = "SQLite",
+            path = %effective_db_path,
+            "Journal storage using file-based SQLite (migrations completed - checkpoints table created)"
+        );
+    }
+    service_locator.register_journal_storage(journal_storage).await;
+    if tracing::enabled!(tracing::Level::TRACE) {
+        tracing::trace!("✅ JournalStorage registered for durability facets");
+    }
+    
     // Create ActorRegistry with ObjectRegistry (ObjectRegistry implements the trait directly)
     let object_registry_trait: Arc<dyn plexspaces_core::ObjectRegistry> = object_registry.clone();
     let actor_registry = Arc::new(ActorRegistry::new(
@@ -2015,19 +2071,53 @@ async fn initialize_services_impl(
     use plexspaces_facet::FacetRegistry;
     use plexspaces_core::facet_service_wrapper::{FacetRegistryServiceWrapper, FacetManagerServiceWrapper};
     
-    // Create FacetRegistry and register default facet factories (LockFacetFactory, RegistryFacetFactory, ProcessGroupFacetFactory)
-    // Services crate depends on actor crate, so we can create these directly
-    use plexspaces_actor::{LockFacetFactory, RegistryFacetFactory, ProcessGroupFacetFactory};
+    // Create FacetRegistry and register all facet factories
+    // Factories are split between core (non-journaling) and journaling (journaling-related) to avoid circular dependencies
+    use plexspaces_core::facet_factories::{
+        LockFacetFactory, RegistryFacetFactory, ProcessGroupFacetFactory,
+        KeyValueFacetFactory, HttpClientFacetFactory, EventEmitterFacetFactory,
+        LoggingFacetFactory, CachingFacetFactory, MetricsFacetFactory,
+    };
+    use plexspaces_journaling::facet_factories::{
+        VirtualActorFacetFactory, DurabilityFacetFactory, TimerFacetFactory,
+        ReminderFacetFactory, EventSourcingFacetFactory,
+    };
     use std::sync::Arc as StdArc;
     let service_locator_for_factories: Arc<dyn plexspaces_core::ServiceLocator> = service_locator_impl.clone();
     
     let mut facet_registry = FacetRegistry::new();
+    
+    // Register core factories (non-journaling)
     let lock_factory = StdArc::new(LockFacetFactory::new(service_locator_for_factories.clone()));
     facet_registry.register("locks".to_string(), lock_factory);
     let registry_factory = StdArc::new(RegistryFacetFactory::new(service_locator_for_factories.clone()));
     facet_registry.register("registry".to_string(), registry_factory);
     let process_group_factory = StdArc::new(ProcessGroupFacetFactory::new(service_locator_for_factories.clone()));
     facet_registry.register("process_groups".to_string(), process_group_factory);
+    let keyvalue_factory = StdArc::new(KeyValueFacetFactory::new(service_locator_for_factories.clone()));
+    facet_registry.register("keyvalue".to_string(), keyvalue_factory);
+    let http_client_factory = StdArc::new(HttpClientFacetFactory);
+    facet_registry.register("http_client".to_string(), http_client_factory);
+    let event_emitter_factory = StdArc::new(EventEmitterFacetFactory);
+    facet_registry.register("event_emitter".to_string(), event_emitter_factory);
+    let logging_factory = StdArc::new(LoggingFacetFactory);
+    facet_registry.register("logging".to_string(), logging_factory);
+    let caching_factory = StdArc::new(CachingFacetFactory);
+    facet_registry.register("caching".to_string(), caching_factory);
+    let metrics_factory = StdArc::new(MetricsFacetFactory);
+    facet_registry.register("metrics".to_string(), metrics_factory);
+    
+    // Register journaling factories
+    let virtual_actor_factory = StdArc::new(VirtualActorFacetFactory);
+    facet_registry.register("virtual_actor".to_string(), virtual_actor_factory);
+    let durability_factory = StdArc::new(DurabilityFacetFactory::new(service_locator_for_factories.clone()));
+    facet_registry.register("durability".to_string(), durability_factory);
+    let timer_factory = StdArc::new(TimerFacetFactory::new(service_locator_for_factories.clone()));
+    facet_registry.register("timer".to_string(), timer_factory);
+    let reminder_factory = StdArc::new(ReminderFacetFactory::new(service_locator_for_factories.clone()));
+    facet_registry.register("reminder".to_string(), reminder_factory);
+    let event_sourcing_factory = StdArc::new(EventSourcingFacetFactory::new(service_locator_for_factories.clone()));
+    facet_registry.register("event_sourcing".to_string(), event_sourcing_factory);
     
     let facet_registry = Arc::new(facet_registry);
     let facet_registry_wrapper = Arc::new(FacetRegistryServiceWrapper::new(facet_registry.clone()));
@@ -2062,13 +2152,18 @@ async fn initialize_services_impl(
     let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = service_locator_impl.clone();
     let actor_factory_impl = ActorFactoryImpl::new_arc(service_locator_trait).await;
     
-    // Register ActorFactoryImpl (it implements Service trait) in services map for backward compat
+    // Register ActorFactoryImpl (implements Service trait) in services map
     service_locator_impl.register_service_by_name(service_names::ACTOR_FACTORY_IMPL, actor_factory_impl.clone()).await;
     
     // Register ActorFactory as trait object (ActorFactoryImpl implements ActorFactory from core)
     use plexspaces_core::ActorFactory;
     let factory_trait: Arc<dyn ActorFactory> = actor_factory_impl.clone();
-    service_locator_impl.register_actor_factory(factory_trait).await;
+    service_locator_impl.register_actor_factory(factory_trait.clone()).await;
+    
+    // Set ActorFactory on ActorRegistry for ActivationProvider.activate_actor
+    // This enables ReminderFacet and other facets to activate virtual actors via ActorRegistry
+    actor_registry.set_actor_factory(factory_trait).await;
+    
     if tracing::enabled!(tracing::Level::TRACE) {
         tracing::trace!("✅ ActorFactoryImpl registered and ready for actor spawning");
     }
@@ -2097,9 +2192,27 @@ async fn initialize_services_impl(
     // Register NodeConfig (determined above)
     service_locator.register_node_config(final_node_config.clone()).await;
     
-    // Register SecurityConfig from ReleaseSpec.runtime if available
+    // Register RuntimeConfig and SecurityConfig from ReleaseSpec.runtime if available
     if let Some(ref release) = release_config {
         if let Some(ref runtime) = release.runtime {
+            // Register RuntimeConfig
+            service_locator.register_runtime_config(runtime.clone()).await;
+            
+            // Update VirtualActorManager max_pool_per_actor_type from RuntimeConfig
+            if let Some(ref default_virtual_actor_config) = runtime.default_virtual_actor_config {
+                use plexspaces_common::virtual_actor_config::get_max_pool_per_actor_type;
+                let max_pool = get_max_pool_per_actor_type(Some(default_virtual_actor_config));
+                // Get VirtualActorManager from ServiceLocator (it was registered earlier)
+                if let Some(manager) = service_locator.virtual_actor_manager().await {
+                    manager.set_max_pool_per_actor_type(max_pool).await;
+                    tracing::info!(
+                        max_pool_per_actor_type = max_pool,
+                        "VirtualActorManager max_pool_per_actor_type set from RuntimeConfig"
+                    );
+                }
+            }
+            
+            // Register SecurityConfig
             if let Some(security) = runtime.security.clone() {
                 service_locator.register_security_config(security).await;
             }
@@ -2107,7 +2220,6 @@ async fn initialize_services_impl(
     }
     
     // Create and register GrpcConnectionManager with connection pooling
-    // NOTE: default_tenant_id and default_namespace have been removed from NodeConfig.
     // Tenant comes from auth (JWT/mTLS); namespace from application/actor.
     use plexspaces_core::GrpcConnectionManager;
     let pool_size = final_node_config.grpc_connection_pool_size;

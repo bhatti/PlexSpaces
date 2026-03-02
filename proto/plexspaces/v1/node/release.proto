@@ -453,6 +453,54 @@ message DbBackoffConfig {
   ];
 }
 
+// Default virtual actor configuration (runtime defaults)
+//
+// ## Purpose
+// Default values for virtual actor lifecycle when not specified per-actor or in gRPC request.
+// Used by VirtualActorFacet, actor factory, SDK, and WASM app registration when building
+// facet_config. Idle timeout and pool size are read from here when available.
+//
+// ## Defaults (when not set)
+// - idle_timeout: 5m (300 seconds)
+// - max_pool_per_actor_type: 100
+// - activation_strategy: LAZY
+message DefaultVirtualActorConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Default Virtual Actor Configuration"
+      description: "Runtime defaults for virtual actor idle timeout, pool size, and activation strategy"
+    }
+  };
+
+  // Idle timeout before deactivation (default: 5m)
+  // When not set, code uses 300 seconds. Valid range: 1s to 24h.
+  google.protobuf.Duration idle_timeout = 1 [
+    (buf.validate.field).duration = {gte: {seconds: 1}, lte: {seconds: 86400}},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Idle timeout before deactivation (default: 5m / 300s)"
+    }
+  ];
+
+  // Max instances per actor type (LRU eviction when exceeded). Default: 100
+  uint32 max_pool_per_actor_type = 2 [
+    (buf.validate.field).uint32 = {gte: 1, lte: 10000},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Max instances per actor type (LRU eviction when exceeded)"
+      minimum: 1
+      maximum: 10000
+      default: "100"
+    }
+  ];
+
+  // Activation strategy (from common.proto; default: LAZY when UNSPECIFIED)
+  plexspaces.common.v1.ActivationStrategy activation_strategy = 3 [
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Activation strategy (default: LAZY)"
+      default: "ACTIVATION_STRATEGY_LAZY"
+    }
+  ];
+}
+
 // Runtime configuration
 //
 // ## Purpose
@@ -537,6 +585,13 @@ message RuntimeConfig {
   // Default: false (disabled)
   // Environment variable: PLEXSPACES_SAVE_WASM_APPS
   bool save_wasm_apps = 12;
+
+  // Default virtual actor config (idle_timeout, pool size, activation_strategy)
+  //
+  // When not set, code defaults apply: idle_timeout 5m, max_pool_per_actor_type 100,
+  // activation_strategy LAZY. Used when creating VirtualActorFacet or registering
+  // virtual actor types (WASM, SDK, gRPC fallback).
+  DefaultVirtualActorConfig default_virtual_actor_config = 13;
 }
 
 // gRPC server configuration

@@ -37,3 +37,12 @@ pub mod capabilities;
 
 // Event emitter
 pub mod event_emitter;
+pub use event_emitter::{EventEmitterFacet, EVENT_EMITTER_FACET_DEFAULT_PRIORITY};
+
+// Facet helpers for proto extraction
+pub mod facet_helpers;
+pub use facet_helpers::{
+    extract_facet_config, has_facet_type, extract_all_facet_configs,
+    create_facet_from_json, create_facets_from_config, has_facet_attached,
+    extract_facet_config_for_registration,
+};

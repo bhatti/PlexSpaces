@@ -26,9 +26,11 @@ plexspaces-application = { path = "../application" }
 plexspaces-wasm-runtime = { path = "../wasm-runtime" }
 plexspaces-actor = { workspace = true }
 plexspaces-blob = { path = "../blob" }
+plexspaces-journaling = { workspace = true, features = ["sqlite-backend"] }
 plexspaces-workflow = { workspace = true }
 plexspaces-firecracker = { workspace = true, optional = true }
 plexspaces-scheduler = { path = "../scheduler" }
+plexspaces-db = { path = "../../db" }
 sysinfo = "0.30"
 
 # Blob service dependencies
@@ -128,3 +130,7 @@ path = "tests/actor_service/shard_group_tests.rs"
 [[test]]
 name = "shard_group_cohesion_tests"
 path = "tests/actor_service/shard_group_cohesion_tests.rs"
+
+[[test]]
+name = "virtual_actor_activation_integration_tests"
+path = "tests/actor_service/virtual_actor_activation_integration_tests.rs"

@@ -2,18 +2,18 @@
 # Test Guild Chat - Discord-style Real-Time Chat Server (TypeScript WASM)
 #
 # Usage: ./test.sh [HTTP_PORT]
-#   HTTP_PORT: PlexSpaces HTTP gateway port (default: 7993)
+#   HTTP_PORT: PlexSpaces HTTP gateway port (default: 8092)
 #
 # Prerequisites: Start PlexSpaces node first:
-#   PLEXSPACES_JWT_SECRET=test cargo run -p plexspaces-cli -- start --node-id test-node --listen-addr 0.0.0.0:7992
-# (HTTP gateway will be on 7992 + 1 = 7993)
+#   PLEXSPACES_JWT_SECRET=test cargo run -p plexspaces-cli -- start --node-id test-node --listen-addr 0.0.0.0:8091
+# (HTTP gateway will be on 8091 + 1 = 8092)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/guild_chat_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
-HTTP_PORT="${1:-7993}"
+HTTP_PORT="${1:-8092}"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

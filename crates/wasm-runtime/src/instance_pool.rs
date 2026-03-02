@@ -150,6 +150,7 @@ impl InstancePool {
             None, // JournalStorage not available at pool level
             None, // BlobService not available at pool level
             self.config.durability_enabled,
+            None, // global_reinstantiation_semaphore - pool not tied to runtime
         )
         .await
     }

@@ -37,6 +37,7 @@ use async_trait::async_trait;
 use crate::{Application, ApplicationError, ApplicationNode};
 use plexspaces_proto::v1::application::HealthStatus;
 use plexspaces_core::{Actor, BehaviorError, BehaviorType, ActorError};
+use plexspaces_core::actor_id::{build_actor_id, parse_actor_id};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
 use prost::Message as ProstMessage;
@@ -48,15 +49,30 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-/// Tries to get application-level msg_type (handler name) from JSON payload, e.g. {"msg_type":"ingest","payload":{...}}.
-/// Returns None if payload is not valid JSON or has no msg_type, or msg_type is transport-only ("call"/"cast").
+/// Tries to get application-level msg_type (handler name) from JSON payload.
+/// Checks for "op" field first (Python SDK convention), then "msg_type" field.
+/// Returns None if payload is not valid JSON or has no handler field, or field value is transport-only ("call"/"cast").
 fn try_msg_type_from_payload(payload: &[u8]) -> Option<String> {
     let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
-    let s = value.get("msg_type")?.as_str()?.trim();
-    if s.is_empty() || s.eq_ignore_ascii_case("call") || s.eq_ignore_ascii_case("cast") {
-        return None;
+    // Check "op" field first (Python SDK convention: {"op": "handler_name", ...})
+    if let Some(op_value) = value.get("op") {
+        if let Some(s) = op_value.as_str() {
+            let s = s.trim();
+            if !s.is_empty() && !s.eq_ignore_ascii_case("call") && !s.eq_ignore_ascii_case("cast") {
+                return Some(s.to_string());
+            }
+        }
     }
-    Some(s.to_string())
+    // Fall back to "msg_type" field (legacy/alternative convention)
+    if let Some(msg_type_value) = value.get("msg_type") {
+        if let Some(s) = msg_type_value.as_str() {
+            let s = s.trim();
+            if !s.is_empty() && !s.eq_ignore_ascii_case("call") && !s.eq_ignore_ascii_case("cast") {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// WASM actor behavior that wraps a WasmInstance
@@ -532,7 +548,7 @@ impl WasmApplication {
     ///
     /// ## Returns
     /// Ok(()) if registration succeeds, ApplicationError otherwise
-    async fn register_behaviors_from_supervisor_tree(
+    pub async fn register_behaviors_from_supervisor_tree(
         &self,
         node: Arc<dyn ApplicationNode>,
     ) -> Result<(), ApplicationError> {
@@ -713,9 +729,10 @@ impl WasmApplication {
         };
         let final_namespace = namespace; // Must come from user request; never substitute with config
 
-        // Precompute expected actor_id for error logging.
-        // Actor IDs always use name:namespace@node_id format (namespace required for WASM apps).
-        let expected_actor_id = format!("{}:{}@{}", self.name, final_namespace, node.id());
+        // Precompute expected actor_id for error logging using factory method
+        let actor_id = ulid::Ulid::new().to_string();
+        let actor_type = format!("{}Supervisor", self.name);
+        let expected_actor_id = build_actor_id(&actor_id, &actor_type, Some(&final_namespace), node.id());
 
         // Create a simple ChildSpec for the actor
         use plexspaces_proto::application::v1::{ChildSpec, ChildType, RestartPolicy};
@@ -877,8 +894,10 @@ impl WasmApplication {
         // Convert proto supervision strategy to Rust enum
         let strategy = Self::convert_supervision_strategy(supervisor_spec)?;
         
-        // Create root supervisor
-        let supervisor_id = format!("{}@{}", self.name, node.id());
+        // Create root supervisor using factory method
+        let supervisor_id_ulid = ulid::Ulid::new().to_string();
+        let supervisor_type = format!("{}Supervisor", self.name);
+        let supervisor_id = build_actor_id(&supervisor_id_ulid, &supervisor_type, None, node.id());
         let (supervisor, mut event_rx) = Supervisor::new(
             supervisor_id.clone(),
             strategy,
@@ -1083,8 +1102,9 @@ impl WasmApplication {
     ) -> Result<ActorChildSpec, ApplicationError> {
         let node_id = node.id().to_string();
         let child_id = proto_child_spec.id.clone();
-        // Actor IDs always use name:namespace@node_id format (namespace required for WASM apps).
-        let actor_id = format!("{}:{}@{}", child_id, namespace, node_id);
+        // Actor IDs use factory method (proto-first: actor_type from ChildSpec.id)
+        let actor_id_ulid = ulid::Ulid::new().to_string();
+        let actor_id = build_actor_id(&actor_id_ulid, &child_id, Some(&namespace), &node_id);
         
         // Capture context for factory
         let node_clone = node.clone();
@@ -1181,9 +1201,10 @@ impl WasmApplication {
             .ok_or_else(|| ApplicationError::Other("ServiceLocator not available".to_string()))?;
 
         // Resolve module by hash and create WASM instance using helper.
-        // Actor IDs always use name:namespace@node_id format (namespace required for WASM apps).
+        // Actor IDs use factory method (proto-first: actor_type from ChildSpec.id)
         let node_id = node.id().to_string();
-        let actor_id = format!("{}:{}@{}", child_spec.id, namespace, node_id);
+        let actor_id_ulid = ulid::Ulid::new().to_string();
+        let actor_id = build_actor_id(&actor_id_ulid, &child_spec.id, Some(&namespace), &node_id);
         let wasm_instance = Self::create_wasm_instance_for_behavior(
             node.clone(),
             child_spec,
@@ -1212,11 +1233,18 @@ impl WasmApplication {
             .ok_or_else(|| ApplicationError::Other("ActorRegistry not found".to_string()))?;
         let local_node_id = registry.local_node_id();
         
-        // Normalize actor ID
-        let actor_id = if actor_id.contains('@') { actor_id } else { format!("{}@{}", actor_id, local_node_id) };
+        // Parse actor ID and rebuild with local node_id
+        let actor_id = if let Ok(parsed) = parse_actor_id(&actor_id) {
+            build_actor_id(&parsed.id, &parsed.actor_type, parsed.namespace.as_deref(), &local_node_id)
+        } else {
+            // Invalid format - return error
+            return Err(ApplicationError::Other(format!("Invalid actor ID format: {}", actor_id)));
+        };
         
         // Update context with proper node ID and tenant_id/namespace from API request
         // Use tenant_id/namespace from API request (passed as parameters), not "internal"
+        // Clone namespace before moving it (needed later for virtual actor type registration)
+        let namespace_for_registration = namespace.clone();
         let actor_context = plexspaces_core::ActorContext::new(
             local_node_id.to_string(),
             tenant_id,
@@ -1226,8 +1254,10 @@ impl WasmApplication {
         );
         actor = actor.set_context(std::sync::Arc::new(actor_context));
         
-        // Attach facets from ChildSpec (e.g., LockFacet, RegistryFacet, ProcessGroupFacet)
+        // Attach facets from ChildSpec (e.g., LockFacet, RegistryFacet, ProcessGroupFacet, VirtualActorFacet)
         // Facets are attached BEFORE actor.start() so lifecycle hooks work correctly
+        let mut has_virtual_actor_facet = false;
+        let mut virtual_facet_config = serde_json::Value::Null;
         if !child_spec.facets.is_empty() {
             if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
                 let facet_registry = facet_registry_wrapper.inner_clone();
@@ -1265,6 +1295,28 @@ impl WasmApplication {
                         );
                     }
                 }
+                
+                // Check if VirtualActorFacet was attached (after all facets are attached)
+                use plexspaces_facet::has_facet_attached;
+                let facets_container = actor.facets();
+                has_virtual_actor_facet = has_facet_attached(&facets_container, "virtual_actor").await;
+                
+                // Extract ALL facet configs from ChildSpec using facet helpers
+                // Store all facet configs (virtual_actor, durability, timer, reminder, etc.) for virtual actor type registration
+                use plexspaces_facet::{extract_facet_config, has_facet_type};
+                
+                // Build facet_config JSON object with all facets (for virtual actor type registration)
+                let mut all_facet_configs = serde_json::Map::new();
+                for facet_proto in &child_spec.facets {
+                    if let Some(config) = extract_facet_config(&child_spec.facets, &facet_proto.r#type) {
+                        all_facet_configs.insert(facet_proto.r#type.clone(), config);
+                    }
+                }
+                
+                // Use combined config with all facets
+                if !all_facet_configs.is_empty() {
+                    virtual_facet_config = serde_json::Value::Object(all_facet_configs);
+                }
             } else {
                 tracing::warn!(
                     actor_id = %actor_id,
@@ -1273,6 +1325,55 @@ impl WasmApplication {
                     "FacetRegistry not available - facets not attached to WASM actor"
                 );
             }
+        }
+        
+        // CRITICAL: Register virtual actor TYPE if VirtualActorFacet is attached
+        // This enables automatic activation of any actor ID matching the type pattern
+        // Format: `{id}//{actor_type}::{namespace}@{node_id}` (e.g., `user-1//read-state-tracker::orbit-read-state-ts@node-id`)
+        // Works for both WASM and Rust applications
+        // Uses centralized helper for consistent behavior across SDK, WASM, and app-config.toml
+        if has_virtual_actor_facet {
+            let actor_type = child_spec.id.clone();
+            let namespace_for_type = namespace_for_registration.clone();
+            let config_for_type = actor.context().config.clone();
+            
+            // Build init config template from child_spec.args (same structure as ApplicationSpec deployment)
+            // This preserves the config structure so virtual actors activated via HTTP receive proper config
+            let init_config_template = {
+                let mut init_config = serde_json::Map::new();
+                // actor_id will be replaced when activating virtual actor
+                init_config.insert("actor_id".to_string(), serde_json::Value::String(String::new()));
+                if let Some(ref bk) = child_spec.behavior_kind {
+                    init_config.insert("behavior_kind".to_string(), serde_json::Value::String(bk.clone()));
+                }
+                if !child_spec.args.is_empty() {
+                    let args_obj: serde_json::Map<String, serde_json::Value> = child_spec.args.iter()
+                        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                        .collect();
+                    init_config.insert("args".to_string(), serde_json::Value::Object(args_obj));
+                }
+                let template_result = serde_json::to_vec(&serde_json::Value::Object(init_config));
+                template_result.ok()
+            };
+            
+            // Use centralized helper for consistent registration
+            // Errors are logged but non-fatal (actor will still work, just no auto-activation)
+            let _ = plexspaces_core::register_virtual_actor_type_consistent(
+                &service_locator,
+                actor_type.clone(),
+                namespace_for_type,
+                None, // No facet trait objects for WASM (use proto facets)
+                Some(&child_spec.facets), // Proto facets from app-config.toml
+                config_for_type,
+                None, // tenant_id - None for type-level registration
+                init_config_template, // Init config template for WASM actors
+            ).await;
+            
+            tracing::info!(
+                actor_id = %actor_id,
+                actor_type = %actor_type,
+                "✅ Registered virtual actor type (enables auto-activation for instances)"
+            );
         }
         
         // NOTE: DurabilityFacet is NOT attached to WASM actors because:

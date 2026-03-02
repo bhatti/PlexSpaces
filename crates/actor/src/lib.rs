@@ -93,12 +93,9 @@ pub use supervisor_builder_proto::ProtoSupervisorBuilder;
 pub mod child_spec;
 pub use child_spec::{ChildSpec, StartedChild, StartFn, ShutdownSpec};
 
-// Facet helpers module
-pub mod facet_helpers;
-pub use facet_helpers::{
-    create_facet_from_proto, create_facets_from_proto,
-    LockFacetFactory, RegistryFacetFactory, ProcessGroupFacetFactory,
-};
+// Facet helpers moved to core crate (facet_helpers) and journaling crate (facet_factories)
+// Re-export helpers from core for backward compatibility
+pub use plexspaces_core::facet_helpers::{create_facet_from_proto, create_facets_from_proto};
 
 // Unified routing module
 pub mod routing;

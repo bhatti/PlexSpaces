@@ -16,115 +16,36 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! Virtual Actor Manager - Orleans-inspired automatic activation/deactivation
+//! Virtual Actor Manager for Orleans-inspired virtual actor lifecycle
 //!
 //! ## Purpose
-//! Manages virtual actor lifecycle: registration, activation, passivation, and reactivation.
-//! Inspired by Microsoft Orleans Virtual Actors model.
+//! Manages virtual actors (actors that are always addressable but activated on-demand).
+//! Virtual actors are registered by type and can be messaged without explicit creation.
 //!
-//! ## Virtual Actor States (Orleans-Inspired)
+//! ## Architecture Context
+//! VirtualActorManager is the source of truth for virtual actor metadata. It tracks:
+//! - Virtual actor types (for type-based registration - WASM and Rust applications)
+//! - Individual virtual actor instances (for activation tracking)
+//! - Pending activations (messages queued during activation)
 //!
-//! ### 1. Registered (Always Addressable)
-//! - **Definition**: Virtual actor is registered in ActorRegistry with a MessageSender
-//! - **Lazy Virtual Actors**: Registered with `VirtualActorWrapper` (not running)
-//! - **Eager Virtual Actors**: Registered with `ActorRef` (running immediately)
-//! - **Regular Actors**: Registered with `ActorRef` (always running)
-//! - **Check**: `is_virtual(actor_id)` returns true
-//! - **Note**: All virtual actors are always registered, even when not active
+//! ActorRegistry tracks active instances and MessageSenders, but VirtualActorManager
+//! tracks the virtual actor lifecycle metadata.
 //!
-//! ### 2. Active (Running)
-//! - **Definition**: Actor has a running message loop processing messages from mailbox
-//! - **Lazy Virtual Actors**: Become active on first message (via `VirtualActorWrapper.tell()`)
-//! - **Eager Virtual Actors**: Active immediately after registration
-//! - **Regular Actors**: Always active after registration
-//! - **Check**: `is_active(actor_id)` returns true (checks if ActorRef is in registry, not VirtualActorWrapper)
-//! - **Note**: Active actors can process messages. Inactive actors trigger activation on first message.
-//!
-//! ### 3. Suspended/Passivated (Idle)
-//! - **Definition**: Active actor that has been deactivated due to idle timeout
-//! - **State**: Actor is still registered but message loop is stopped
-//! - **Check**: `is_virtual(actor_id)` returns true, `is_active(actor_id)` returns false
-//! - **Reactivation**: Next message triggers reactivation (same as lazy activation)
-//! - **Note**: State is preserved (if DurabilityFacet is attached) before passivation
-//!
-//! ## Activation Flow (Orleans-Inspired)
-//!
-//! ### Lazy Activation (Default)
-//! ```
-//! 1. Actor registered with VirtualActorWrapper (not active)
-//! 2. First message arrives → VirtualActorWrapper.tell()
-//! 3. VirtualActorWrapper checks is_active() → false
-//! 4. VirtualActorWrapper calls activate_virtual_actor()
-//! 5. activate_virtual_actor() retrieves actor instance
-//! 6. activate_virtual_actor() calls spawn_built_actor() → actor.start()
-//! 7. actor.start() spawns message loop task
-//! 8. ActorRef replaces VirtualActorWrapper in registry
-//! 9. Pending messages are sent to ActorRef
-//! 10. Actor is now active and processing messages
-//! ```
-//!
-//! ### Eager Activation
-//! ```
-//! 1. Actor registered with ActorRef (active immediately)
-//! 2. actor.start() is called during registration
-//! 3. Message loop starts immediately
-//! 4. Actor can process messages right away
-//! ```
-//!
-//! ## Key Design Principles (Orleans)
-//!
-//! 1. **Always Addressable**: Virtual actors always exist (virtually) - registered even when not active
-//! 2. **Automatic Activation**: Activation is transparent - happens automatically on first message
-//! 3. **Single Activation**: Only one instance exists at a time (per actor ID)
-//! 4. **Automatic Passivation**: Actors are deactivated after idle timeout to save resources
-//! 5. **State Preservation**: State is preserved across activation/deactivation cycles (if DurabilityFacet attached)
+//! ## Proto-First Design
+//! - `actor_type` is required (from proto Actor.actor_type field)
+//! - Uses actor_id factory methods for consistent ID parsing/construction
+//! - All metadata follows proto definitions
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
 use crate::{ActorId, ActorRegistry};
+use crate::Service;
+use crate::actor_id::parse_actor_id;
+use crate::virtual_actor_lifecycle_facet::VirtualActorLifecycleFacet;
 use plexspaces_proto::common::v1::Message;
-
-/// Virtual Actor Error types
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum VirtualActorError {
-    /// Actor not found
-    #[error("Virtual actor not found: {0}")]
-    ActorNotFound(ActorId),
-    
-    /// Activation failed
-    #[error("Failed to activate virtual actor: {0}")]
-    ActivationFailed(String),
-    
-    /// Deactivation failed
-    #[error("Failed to deactivate virtual actor: {0}")]
-    DeactivationFailed(String),
-}
-
-/// Virtual Actor Registry - stores virtual actor metadata
-pub struct VirtualActorRegistry {
-    /// Virtual actor metadata: actor_id -> VirtualActorMetadata
-    virtual_actors: Arc<RwLock<HashMap<ActorId, VirtualActorMetadata>>>,
-    /// Pending messages for actors being activated: actor_id -> Vec<Message>
-    pending_activations: Arc<RwLock<HashMap<ActorId, Vec<Message>>>>,
-}
-
-impl VirtualActorRegistry {
-    pub fn new() -> Self {
-        Self {
-            virtual_actors: Arc::new(RwLock::new(HashMap::new())),
-            pending_activations: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    pub fn virtual_actors(&self) -> &Arc<RwLock<HashMap<ActorId, VirtualActorMetadata>>> {
-        &self.virtual_actors
-    }
-
-    pub fn pending_activations(&self) -> &Arc<RwLock<HashMap<ActorId, Vec<Message>>>> {
-        &self.pending_activations
-    }
-}
+use plexspaces_proto::v1::actor::ActorConfig;
 
 /// Virtual Actor Metadata
 /// 
@@ -138,35 +59,156 @@ impl VirtualActorRegistry {
 /// - **ActorRegistry Separation**: ActorRegistry only tracks active instances and MessageSenders
 /// - **No Memory Leaks**: Regular actors don't have metadata here (only in ActorRegistry)
 /// - **Always Rebuildable**: All info needed to rebuild suspended actors is stored here
+/// - **Proto-First**: actor_type is required (from proto Actor message) for consistency
+///
+/// ## Usage
+/// - Instance-level: Stores metadata for specific actor instances (keyed by actor_id)
+/// - Type-level: Stores metadata for virtual actor types (keyed by actor_type)
+///   Used for WASM and Rust applications to enable automatic activation
 #[derive(Clone)]
 pub struct VirtualActorMetadata {
     /// Virtual actor facet (for lifecycle management)
-    pub facet: Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>,
+    /// For type-level registration, this may be None (facet created from facet_config)
+    pub facet: Option<Arc<RwLock<Box<dyn VirtualActorLifecycleFacet>>>>,
     /// Last deactivation time (None if currently active)
     pub last_deactivated: Option<std::time::SystemTime>,
-    /// Actor type (e.g., "GenServer", "GenEvent") - needed to rebuild suspended actors
-    pub actor_type: Option<String>,
+    /// Actor type (e.g., "GenServer", "read-state-tracker") - REQUIRED
+    /// From proto Actor.actor_type field - follows proto-first design
+    pub actor_type: String,
     /// Actor configuration (resource requirements, etc.) - needed to rebuild suspended actors
-    pub config: Option<plexspaces_proto::v1::actor::ActorConfig>,
+    pub config: Option<ActorConfig>,
     /// Tenant ID (for proper isolation) - needed to rebuild suspended actors
     pub tenant_id: String,
     /// Namespace (for proper isolation) - needed to rebuild suspended actors
     pub namespace: String,
+    /// Virtual actor facet config (for creating new instances from type-level registration)
+    /// Only used for type-level registration (when facet is None)
+    /// 
+    /// **Format**: Must be a JSON object keyed by facet type (e.g., `{"virtual_actor": {...}}`).
+    /// This format is required for `create_facets_from_config()` to properly parse and create facets.
+    /// Supports multiple facets: `{"virtual_actor": {...}, "durability": {...}}`.
+    pub facet_config: Option<serde_json::Value>,
+    /// Init config template for WASM actors (JSON bytes)
+    /// 
+    /// **Purpose**: Preserves the config structure from ApplicationSpec's ChildSpec.args
+    /// so that virtual WASM actors activated via HTTP receive the same config structure
+    /// as actors deployed via ApplicationSpec.
+    /// 
+    /// **Format**: JSON bytes matching the structure built in wasm_application.rs:
+    /// ```json
+    /// {
+    ///   "actor_id": "<will be replaced>",
+    ///   "behavior_kind": "...",
+    ///   "args": { ... }
+    /// }
+    /// ```
+    /// 
+    /// **Usage**: When activating a virtual actor, parse this template, replace `actor_id`
+    /// with the actual actor_id, and pass as `initial_state` to `spawn_actor()`.
+    pub init_config_template: Option<Vec<u8>>,
+}
+
+/// Active instance tracking for LRU eviction
+/// Tracks active instances per actor_type with last_access time
+#[derive(Clone)]
+pub(crate) struct ActiveInstance {
+    pub actor_id: ActorId,
+    pub last_access: std::time::SystemTime,
+}
+
+/// Virtual Actor Registry - stores virtual actor metadata
+pub struct VirtualActorRegistry {
+    /// Virtual actor metadata: actor_id -> VirtualActorMetadata
+    virtual_actors: Arc<RwLock<HashMap<ActorId, VirtualActorMetadata>>>,
+    /// Pending messages for actors being activated: actor_id -> Vec<Message>
+    pending_activations: Arc<RwLock<HashMap<ActorId, Vec<Message>>>>,
+    /// Virtual actor types: actor_type -> VirtualActorMetadata
+    /// Used to check if an actor type is virtual (for WASM and Rust applications)
+    /// Key is actor_type (e.g., "read-state-tracker"), value is metadata for creating instances
+    /// Uses VirtualActorMetadata with actor_type field set (required for type-level registration)
+    virtual_actor_types: Arc<RwLock<HashMap<String, VirtualActorMetadata>>>,
+    /// Active instances per actor_type for LRU eviction: actor_type -> Vec<ActiveInstance>
+    /// Used to track active instances and evict LRU when max_pool_per_actor_type is exceeded
+    active_instances_by_type: Arc<RwLock<HashMap<String, Vec<ActiveInstance>>>>,
+}
+
+impl VirtualActorRegistry {
+    fn new() -> Self {
+        Self {
+            virtual_actors: Arc::new(RwLock::new(HashMap::new())),
+            pending_activations: Arc::new(RwLock::new(HashMap::new())),
+            virtual_actor_types: Arc::new(RwLock::new(HashMap::new())),
+            active_instances_by_type: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+    
+    pub fn virtual_actors(&self) -> &Arc<RwLock<HashMap<ActorId, VirtualActorMetadata>>> {
+        &self.virtual_actors
+    }
+    
+    pub fn pending_activations(&self) -> &Arc<RwLock<HashMap<ActorId, Vec<Message>>>> {
+        &self.pending_activations
+    }
+    
+    pub fn virtual_actor_types(&self) -> &Arc<RwLock<HashMap<String, VirtualActorMetadata>>> {
+        &self.virtual_actor_types
+    }
+    
+    pub fn active_instances_by_type(&self) -> &Arc<RwLock<HashMap<String, Vec<ActiveInstance>>>> {
+        &self.active_instances_by_type
+    }
+}
+
+/// Virtual Actor Error
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum VirtualActorError {
+    /// Actor not found
+    #[error("Actor not found: {0}")]
+    ActorNotFound(String),
+    
+    /// Activation failed
+    #[error("Activation failed: {0}")]
+    ActivationFailed(String),
 }
 
 /// Virtual Actor Manager - manages virtual actor lifecycle
 pub struct VirtualActorManager {
     registry: VirtualActorRegistry,
     actor_registry: Arc<ActorRegistry>,
+    /// Max pool size per actor type (for LRU eviction)
+    /// Defaults to DEFAULT_MAX_POOL_PER_ACTOR_TYPE (100) if not set
+    max_pool_per_actor_type: Arc<RwLock<u32>>,
 }
 
 impl VirtualActorManager {
     pub fn new(actor_registry: Arc<ActorRegistry>) -> Self {
+        use plexspaces_common::virtual_actor_config::DEFAULT_MAX_POOL_PER_ACTOR_TYPE;
         Self {
             registry: VirtualActorRegistry::new(),
             actor_registry,
+            max_pool_per_actor_type: Arc::new(RwLock::new(DEFAULT_MAX_POOL_PER_ACTOR_TYPE)),
         }
     }
+    
+    /// Update max_pool_per_actor_type from RuntimeConfig
+    ///
+    /// ## Purpose
+    /// Sets the maximum number of active instances per actor type for LRU eviction.
+    /// Called during node initialization after RuntimeConfig is available.
+    ///
+    /// ## Arguments
+    /// * `max_pool` - Maximum pool size per actor type (from RuntimeConfig.default_virtual_actor_config)
+    pub async fn set_max_pool_per_actor_type(&self, max_pool: u32) {
+        let mut pool_size = self.max_pool_per_actor_type.write().await;
+        *pool_size = max_pool;
+    }
+    
+    /// Get max_pool_per_actor_type
+    pub async fn get_max_pool_per_actor_type(&self) -> u32 {
+        let pool_size = self.max_pool_per_actor_type.read().await;
+        *pool_size
+    }
+    
     
     /// Get virtual actor registry (for node-level access)
     /// 
@@ -191,8 +233,8 @@ impl VirtualActorManager {
     ///
     /// ## Arguments
     /// * `actor_id` - Actor ID
-    /// * `facet` - VirtualActorFacet for lifecycle management
-    /// * `actor_type` - Actor type (e.g., "GenServer") - needed to rebuild suspended actors
+    /// * `facet` - VirtualActorLifecycleFacet for lifecycle management
+    /// * `actor_type` - Actor type (e.g., "GenServer") - REQUIRED, from proto Actor.actor_type
     /// * `config` - Actor configuration - needed to rebuild suspended actors
     /// * `tenant_id` - Tenant ID for isolation
     /// * `namespace` - Namespace for isolation
@@ -205,22 +247,30 @@ impl VirtualActorManager {
     pub async fn register(
         &self,
         actor_id: ActorId,
-        facet: Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>,
-        actor_type: Option<String>,
-        config: Option<plexspaces_proto::v1::actor::ActorConfig>,
+        facet: Arc<RwLock<Box<dyn VirtualActorLifecycleFacet>>>,
+        actor_type: String,
+        config: Option<ActorConfig>,
         tenant_id: String,
         namespace: String,
     ) -> Result<(), VirtualActorError> {
+        if actor_type.is_empty() {
+            return Err(VirtualActorError::ActivationFailed(
+                "actor_type is required (from proto Actor.actor_type)".to_string()
+            ));
+        }
+        
         let mut virtual_actors = self.registry.virtual_actors().write().await;
         virtual_actors.insert(
             actor_id,
             VirtualActorMetadata {
-                facet,
+                init_config_template: None,
+                facet: Some(facet),
                 last_deactivated: None,
                 actor_type,
                 config,
                 tenant_id,
                 namespace,
+                facet_config: None,
             },
         );
         Ok(())
@@ -238,12 +288,12 @@ impl VirtualActorManager {
         &self,
         actor_id: &ActorId,
         actor_type: Option<String>,
-        config: Option<plexspaces_proto::v1::actor::ActorConfig>,
+        config: Option<ActorConfig>,
     ) -> Result<(), VirtualActorError> {
         let mut virtual_actors = self.registry.virtual_actors().write().await;
         if let Some(metadata) = virtual_actors.get_mut(actor_id) {
             if let Some(actor_type) = actor_type {
-                metadata.actor_type = Some(actor_type);
+                metadata.actor_type = actor_type;
             }
             if let Some(config) = config {
                 metadata.config = Some(config);
@@ -254,19 +304,6 @@ impl VirtualActorManager {
         }
     }
     
-    /// Get virtual actor metadata (for rebuilding suspended actors)
-    ///
-    /// ## Purpose
-    /// Retrieves metadata needed to rebuild a suspended virtual actor.
-    /// This is the source of truth for virtual actor metadata.
-    ///
-    /// ## Returns
-    /// `Some(VirtualActorMetadata)` if actor is virtual, `None` otherwise
-    pub async fn get_metadata(&self, actor_id: &ActorId) -> Option<VirtualActorMetadata> {
-        let virtual_actors = self.registry.virtual_actors().read().await;
-        virtual_actors.get(actor_id).cloned()
-    }
-
     /// Check if actor is virtual (registered as virtual actor)
     ///
     /// ## Returns
@@ -277,21 +314,134 @@ impl VirtualActorManager {
     /// Virtual actors are always registered (always addressable), even when not active.
     pub async fn is_virtual(&self, actor_id: &ActorId) -> bool {
         let virtual_actors = self.registry.virtual_actors().read().await;
-        virtual_actors.contains_key(actor_id)
+        if virtual_actors.contains_key(actor_id) {
+            return true;
+        }
+        drop(virtual_actors);
+        
+        // Check if actor type is virtual (for WASM and Rust applications)
+        // Use actor_id factory to parse actor_id and extract actor_type
+        if let Ok(parsed) = parse_actor_id(actor_id) {
+            let virtual_types = self.registry.virtual_actor_types().read().await;
+            if virtual_types.contains_key(&parsed.actor_type) {
+                return true;
+            }
+        }
+        
+        false
+    }
+    
+    /// Register a virtual actor type (for WASM and Rust applications)
+    ///
+    /// ## Purpose
+    /// Registers an actor type as virtual, enabling automatic activation of any actor ID
+    /// matching that type pattern. Uses VirtualActorMetadata with actor_type field set.
+    ///
+    /// ## Arguments
+    /// * `actor_type` - Actor type (e.g., "read-state-tracker") - REQUIRED, from proto Actor.actor_type
+    /// * `config` - Actor configuration template
+    /// * `namespace` - Namespace for isolation
+    /// * `facet_config` - Virtual actor facet configuration (for creating new instances)
+    ///   **MUST be a JSON object keyed by facet type** (e.g., `{"virtual_actor": {"idle_timeout": "5m", "activation_strategy": "lazy"}}`).
+    ///   This format is required for `create_facets_from_config()` to properly parse and create facets.
+    ///   Supports multiple facets: `{"virtual_actor": {...}, "durability": {...}}`.
+    /// * `tenant_id` - Tenant ID for isolation (defaults to empty for type-level registration)
+    /// * `init_config_template` - Init config template for WASM actors (JSON bytes, optional)
+    ///   Preserves config structure from ApplicationSpec's ChildSpec.args for virtual actor activation
+    pub async fn register_virtual_actor_type(
+        &self,
+        actor_type: String,
+        config: Option<ActorConfig>,
+        namespace: String,
+        facet_config: serde_json::Value,
+        tenant_id: Option<String>,
+        init_config_template: Option<Vec<u8>>,
+    ) -> Result<(), VirtualActorError> {
+        if actor_type.is_empty() {
+            return Err(VirtualActorError::ActivationFailed(
+                "actor_type is required (from proto Actor.actor_type)".to_string()
+            ));
+        }
+        
+        let mut virtual_types = self.registry.virtual_actor_types().write().await;
+        
+        // Log facet_config for debugging (show which facets are being registered)
+        let facet_types: Vec<String> = facet_config.as_object()
+            .map(|obj| obj.keys().cloned().collect())
+            .unwrap_or_default();
+        
+        virtual_types.insert(
+            actor_type.clone(),
+            VirtualActorMetadata {
+                facet: None, // Facet created from facet_config when needed
+                last_deactivated: None,
+                actor_type: actor_type.clone(),
+                config,
+                tenant_id: tenant_id.unwrap_or_default(),
+                namespace,
+                facet_config: Some(facet_config),
+                init_config_template,
+            },
+        );
+        tracing::info!(
+            actor_type = %actor_type,
+            facet_types = ?facet_types,
+            "Registered virtual actor type"
+        );
+        Ok(())
+    }
+    
+    /// Get virtual actor type metadata
+    ///
+    /// ## Purpose
+    /// Retrieves metadata for a virtual actor type, used when auto-activating actors.
+    ///
+    /// ## Returns
+    /// `Some(VirtualActorMetadata)` if actor type is virtual, `None` otherwise
+    pub async fn get_virtual_actor_type(&self, actor_type: &str) -> Option<VirtualActorMetadata> {
+        let virtual_types = self.registry.virtual_actor_types().read().await;
+        virtual_types.get(actor_type).cloned()
+    }
+    
+    /// Check if actor type is virtual
+    ///
+    /// ## Purpose
+    /// Checks if an actor type is registered as virtual (for WASM and Rust applications).
+    ///
+    /// ## Returns
+    /// true if actor type is virtual, false otherwise
+    pub async fn is_virtual_actor_type(&self, actor_type: &str) -> bool {
+        let virtual_types = self.registry.virtual_actor_types().read().await;
+        virtual_types.contains_key(actor_type)
     }
 
+    /// Get virtual actor metadata
+    ///
+    /// ## Purpose
+    /// Retrieves metadata for a virtual actor instance. Used when rebuilding suspended actors.
+    ///
+    /// ## Returns
+    /// `Some(VirtualActorMetadata)` if actor is registered as virtual, `None` otherwise
+    pub async fn get_metadata(&self, actor_id: &ActorId) -> Option<VirtualActorMetadata> {
+        let virtual_actors = self.registry.virtual_actors().read().await;
+        virtual_actors.get(actor_id).cloned()
+    }
+    
     /// Get virtual actor facet
     ///
-    /// ## Note
-    /// Returns the facet as Box<dyn Any> so caller can downcast to VirtualActorFacet.
-    /// This avoids circular dependency with journaling crate.
-    pub async fn get_facet(&self, actor_id: &ActorId) -> Result<Arc<RwLock<Box<dyn std::any::Any + Send + Sync>>>, VirtualActorError> {
+    /// ## Returns
+    /// Facet implementing `VirtualActorLifecycleFacet` trait.
+    /// Uses trait-based design instead of `Any` types for type safety.
+    pub async fn get_facet(&self, actor_id: &ActorId) -> Result<Arc<RwLock<Box<dyn VirtualActorLifecycleFacet>>>, VirtualActorError> {
         let virtual_actors = self.registry.virtual_actors().read().await;
         let virtual_meta = virtual_actors
             .get(actor_id)
             .ok_or_else(|| VirtualActorError::ActorNotFound(actor_id.clone()))?;
         
-        Ok(virtual_meta.facet.clone())
+        virtual_meta.facet.clone()
+            .ok_or_else(|| VirtualActorError::ActivationFailed(
+                format!("Virtual actor {} has no facet (type-level registration)", actor_id)
+            ))
     }
     
     /// Queue a message for processing after activation
@@ -316,103 +466,227 @@ impl VirtualActorManager {
     /// - `false`: Actor is not active (VirtualActorWrapper in registry, or actor is passivated)
     ///
     /// ## Design Note (Orleans-Inspired)
-    /// - **Lazy Virtual Actors**: Return `false` until first message activates them
-    /// - **Eager Virtual Actors**: Return `true` immediately after registration
-    /// - **Passivated Actors**: Return `false` after idle timeout (but still registered)
-    ///
-    /// ## Implementation
-    /// Checks if ActorRef (not VirtualActorWrapper) is in ActorRegistry.
-    /// VirtualActorWrapper indicates actor is registered but not active.
+    /// Virtual actors can be registered but not active. This method checks the actual
+    /// activation state via ActorRegistry.
     pub async fn is_active(&self, actor_id: &ActorId) -> bool {
-        // Simple, production-grade check: Actor is active if:
-        // 1. Actor is registered (MessageSender exists)
-        // 2. MessageSender is ActorRef (not VirtualActorWrapper)
-        // 3. Actor instance exists (actor is running)
-        //
-        // Design:
-        // - Lazy virtual actors: Registered with VirtualActorWrapper, instance exists but not started
-        // - Active actors: Registered with ActorRef, instance exists and state is Active
-        // - Suspended actors: Registered with VirtualActorWrapper, no instance
-        //
-        // Uses proto ActorState enum: CREATING -> ACTIVATING -> ACTIVE -> DEACTIVATING -> INACTIVE
-        // We check MessageSender type by checking if it's VirtualActorWrapper (not active) or ActorRef (active)
-        if let Some(sender) = self.actor_registry.lookup_actor(actor_id).await {
-            // Check MessageSender type name to distinguish VirtualActorWrapper from ActorRef
-            // VirtualActorWrapper indicates actor is registered but not active
-            // ActorRef indicates actor is active
-            let type_name = std::any::type_name_of_val(&*sender);
-            if type_name.contains("VirtualActorWrapper") {
-                // VirtualActorWrapper found - actor is registered but not active
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("[VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, MessageSender=VirtualActorWrapper, is_active=false", actor_id);
-                }
-                return false;
-            }
-            // ActorRef found - check if instance exists AND actor state is Active
-            // CRITICAL: For lazy virtual actors, instance exists but actor is NOT started (state is Creating, not Active)
-            // We need to check the actual actor state, not just instance existence
-            let has_instance = self.actor_registry.get_actor_instance(actor_id).await.is_some();
-            if !has_instance {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("[VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, MessageSender=ActorRef, no instance, is_active=false", actor_id);
-                }
-                return false;
-            }
-            
-            // Check actor state - actor is only active if state is Active
-            // Uses ActorStateFetcher trait to fetch state and check if it's Active
-            let is_state_active = self.check_actor_state_active(actor_id).await;
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!("[VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, MessageSender=ActorRef, has_instance=true, state_active={}, is_active={}", actor_id, is_state_active, is_state_active);
-            }
-            is_state_active
-        } else {
-            // Actor not registered
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!("[VIRTUAL_ACTOR_MANAGER] is_active: actor_id={}, not registered, is_active=false", actor_id);
-            }
-            false
+        // Check if actor is registered as virtual
+        if !self.is_virtual(actor_id).await {
+            return false;
         }
-    }
-    
-    /// Helper function to check if actor state is Active
-    /// Uses ActorRegistry's helper method that can check state via callback
-    async fn check_actor_state_active(&self, actor_id: &ActorId) -> bool {
-        // Use ActorRegistry's method to check if actor state is Active
-        // This method uses a callback pattern to avoid circular dependency
+        
+        // Check actor state via ActorRegistry
         self.actor_registry.is_actor_state_active(actor_id).await
     }
     
-    
-    /// Mark actor as activated (updates facet state)
+    /// Mark a virtual actor as activated
     ///
     /// ## Purpose
-    /// Marks a virtual actor as activated after its message loop has started.
-    /// Updates the VirtualActorFacet's lifecycle state.
+    /// Marks a virtual actor as activated (in memory). Used after actor activation completes.
+    /// Updates last_access time for LRU tracking.
     ///
-    /// ## Note
-    /// This method calls mark_activated on the VirtualActorFacet.
-    /// The facet must be downcast by the caller.
+    /// ## Arguments
+    /// * `actor_id` - Actor ID to mark as activated
+    ///
+    /// ## Returns
+    /// Ok(()) if successful, VirtualActorError if failed
     pub async fn mark_activated(&self, actor_id: &ActorId) -> Result<(), VirtualActorError> {
-        let facet_arc = self.get_facet(actor_id).await?;
-        let _facet_guard = facet_arc.write().await;
-        
-        // Try to downcast to VirtualActorFacet and call mark_activated
-        // We can't import VirtualActorFacet here due to circular dependency,
-        // so we use a trait object approach or just update metadata
-        // For now, we'll update the metadata's last_deactivated to None
-        // The actual facet.mark_activated() should be called by the caller after downcasting
-        
-        // Update metadata to indicate actor is active
-        let mut virtual_actors = self.registry.virtual_actors().write().await;
-        if let Some(metadata) = virtual_actors.get_mut(actor_id) {
-            metadata.last_deactivated = None;
+        // Verify actor is virtual
+        if !self.is_virtual(actor_id).await {
+            return Err(VirtualActorError::ActorNotFound(format!("Actor {} is not virtual", actor_id)));
         }
-        drop(virtual_actors);
         
+        // Get actor_type for LRU tracking
+        let actor_type = {
+            let virtual_actors = self.registry.virtual_actors().read().await;
+            if let Some(metadata) = virtual_actors.get(actor_id) {
+                metadata.actor_type.clone()
+            } else {
+                // Try type-level registration
+                use crate::actor_id::parse_actor_id;
+                if let Ok(parsed) = parse_actor_id(actor_id) {
+                    parsed.actor_type
+                } else {
+                    return Ok(()); // Can't track if we can't determine type
+                }
+            }
+        };
+        
+        // Track active instance for LRU eviction
+        let now = std::time::SystemTime::now();
+        let mut active_instances = self.registry.active_instances_by_type().write().await;
+        let instances = active_instances.entry(actor_type).or_insert_with(Vec::new);
+        
+        // Update or add entry
+        if let Some(existing) = instances.iter_mut().find(|i| i.actor_id == *actor_id) {
+            existing.last_access = now;
+        } else {
+            instances.push(ActiveInstance {
+                actor_id: actor_id.clone(),
+                last_access: now,
+            });
+        }
+        
+        // Actor state is managed by ActorRegistry, so we just verify it exists
+        // The actual activation state is tracked in ActorRegistry
         Ok(())
     }
-
+    
+    /// Evict LRU actors if max_pool_per_actor_type is exceeded
+    ///
+    /// ## Purpose
+    /// Checks if activating a new actor would exceed max_pool_per_actor_type.
+    /// If so, evicts the least recently used (LRU) actors of that type.
+    ///
+    /// ## Arguments
+    /// * `actor_type` - Actor type to check
+    /// * `service_locator` - ServiceLocator for deactivating actors (optional, uses default if None)
+    ///
+    /// ## Returns
+    /// Vector of actor IDs that were evicted (for logging/observability)
+    pub async fn evict_lru_if_needed(
+        &self,
+        actor_type: &str,
+        service_locator: Option<Arc<dyn crate::ServiceLocator>>,
+    ) -> Vec<ActorId> {
+        let max_pool = self.get_max_pool_per_actor_type().await;
+        let mut active_instances = self.registry.active_instances_by_type().write().await;
+        
+        let instances = match active_instances.get_mut(actor_type) {
+            Some(instances) => instances,
+            None => return Vec::new(), // No active instances, no eviction needed
+        };
+        
+        // Filter to only currently active instances (check ActorRegistry)
+        let mut active_only: Vec<ActiveInstance> = Vec::new();
+        for instance in instances.iter() {
+            if self.actor_registry.is_actor_state_active(&instance.actor_id).await {
+                active_only.push(instance.clone());
+            }
+        }
+        
+        // If we're under the limit, no eviction needed
+        if active_only.len() < max_pool as usize {
+            // Update instances list (remove inactive ones)
+            *instances = active_only;
+            return Vec::new();
+        }
+        
+        // Sort by last_access (oldest first) for LRU eviction
+        active_only.sort_by_key(|i| i.last_access);
+        
+        // Evict oldest instances until we're under the limit
+        let to_evict = active_only.len() - (max_pool as usize - 1); // Keep one slot for new actor
+        let evicted: Vec<ActorId> = active_only[..to_evict]
+            .iter()
+            .map(|i| i.actor_id.clone())
+            .collect();
+        
+        // Remove evicted actors from tracking
+        instances.retain(|i| !evicted.contains(&i.actor_id));
+        
+        // Deactivate evicted actors (non-blocking, log errors)
+        // For virtual actors, we use suspend_virtual_actor() to preserve metadata while freeing resources
+        // Note: We can't import Actor here (circular dependency), so we rely on ActorRegistry
+        // to handle graceful shutdown when the instance Arc is dropped
+        if let Some(service_locator) = service_locator {
+            for actor_id in &evicted {
+                if let Some(actor_registry) = service_locator.actor_registry().await {
+                    // Suspend virtual actor (preserves metadata, removes instance)
+                    // When instance Arc is dropped, actor will stop gracefully
+                    // This is better than unregister_with_cleanup() which removes everything
+                    actor_registry.suspend_virtual_actor(actor_id).await;
+                    
+                    // Re-register VirtualActorWrapper to keep actor addressable (Orleans design)
+                    // Get tenant/namespace from metadata if available
+                    let (tenant_id, namespace) = {
+                        let virtual_actors = self.registry.virtual_actors().read().await;
+                        if let Some(metadata) = virtual_actors.get(actor_id) {
+                            (metadata.tenant_id.clone(), metadata.namespace.clone())
+                        } else {
+                            (String::new(), String::new())
+                        }
+                    };
+                    
+                    // Note: VirtualActorWrapper should be re-registered to keep actor addressable
+                    // This is handled by the caller (ActorFactory) which has access to ActorFactory
+                    // to create VirtualActorWrapper. We just suspend here to free resources.
+                    
+                    tracing::debug!(
+                        actor_id = %actor_id,
+                        actor_type = %actor_type,
+                        "LRU-evicted virtual actor suspended (metadata preserved)"
+                    );
+                }
+            }
+        }
+        
+        evicted
+    }
+    
+    /// Update last access time for an active actor (for LRU tracking)
+    ///
+    /// ## Purpose
+    /// Updates the last_access time when an actor receives a message or performs an operation.
+    /// Used to maintain accurate LRU ordering.
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor ID to update
+    pub async fn update_last_access(&self, actor_id: &ActorId) {
+        // Get actor_type
+        let actor_type = {
+            let virtual_actors = self.registry.virtual_actors().read().await;
+            if let Some(metadata) = virtual_actors.get(actor_id) {
+                metadata.actor_type.clone()
+            } else {
+                use crate::actor_id::parse_actor_id;
+                if let Ok(parsed) = parse_actor_id(actor_id) {
+                    parsed.actor_type
+                } else {
+                    return; // Can't track if we can't determine type
+                }
+            }
+        };
+        
+        // Update last_access time
+        let now = std::time::SystemTime::now();
+        let mut active_instances = self.registry.active_instances_by_type().write().await;
+        if let Some(instances) = active_instances.get_mut(&actor_type) {
+            if let Some(instance) = instances.iter_mut().find(|i| i.actor_id == *actor_id) {
+                instance.last_access = now;
+            }
+        }
+    }
+    
+    /// Remove actor from active instances tracking (called on deactivation)
+    ///
+    /// ## Purpose
+    /// Removes an actor from active instances tracking when it's deactivated.
+    /// This keeps the LRU tracking accurate.
+    ///
+    /// ## Arguments
+    /// * `actor_id` - Actor ID to remove
+    pub async fn remove_from_active_tracking(&self, actor_id: &ActorId) {
+        // Get actor_type
+        let actor_type = {
+            let virtual_actors = self.registry.virtual_actors().read().await;
+            if let Some(metadata) = virtual_actors.get(actor_id) {
+                metadata.actor_type.clone()
+            } else {
+                use crate::actor_id::parse_actor_id;
+                if let Ok(parsed) = parse_actor_id(actor_id) {
+                    parsed.actor_type
+                } else {
+                    return; // Can't track if we can't determine type
+                }
+            }
+        };
+        
+        // Remove from active instances
+        let mut active_instances = self.registry.active_instances_by_type().write().await;
+        if let Some(instances) = active_instances.get_mut(&actor_type) {
+            instances.retain(|i| i.actor_id != *actor_id);
+        }
+    }
 }
 
 // Implement Service trait for VirtualActorManager (required for ServiceLocator)
@@ -422,3 +696,615 @@ impl crate::Service for VirtualActorManager {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ActorRegistry;
+    use crate::actor_context::ObjectRegistry;
+    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
+    use std::sync::Arc;
+    use async_trait::async_trait;
+
+    // Helper to wrap ObjectRegistry for ActorRegistry
+    struct ObjectRegistryAdapter {
+        inner: Arc<ObjectRegistryImpl>,
+    }
+
+    #[async_trait]
+    impl ObjectRegistry for ObjectRegistryAdapter {
+        async fn lookup(
+            &self,
+            ctx: &crate::RequestContext,
+            object_id: &str,
+            object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+        ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.lookup(ctx, object_id, object_type).await
+        }
+
+        async fn lookup_full(
+            &self,
+            ctx: &crate::RequestContext,
+            object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            object_id: &str,
+        ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.lookup_full(ctx, object_type, object_id).await
+        }
+
+        async fn register(
+            &self,
+            ctx: &crate::RequestContext,
+            registration: plexspaces_proto::object_registry::v1::ObjectRegistration,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.register(ctx, registration).await
+        }
+
+        async fn unregister(
+            &self,
+            ctx: &crate::RequestContext,
+            object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.unregister(ctx, object_type, object_id).await
+        }
+
+        async fn heartbeat(
+            &self,
+            ctx: &crate::RequestContext,
+            object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.heartbeat(ctx, object_type, object_id).await
+        }
+
+        async fn discover(
+            &self,
+            ctx: &crate::RequestContext,
+            object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+            object_category: Option<String>,
+            capabilities: Option<Vec<String>>,
+            labels: Option<Vec<String>>,
+            health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+            offset: usize,
+            limit: usize,
+        ) -> Result<Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            self.inner.discover(ctx, object_type, object_category, capabilities, labels, health_status, offset, limit).await
+        }
+    }
+
+    async fn create_test_manager() -> VirtualActorManager {
+        let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
+        let object_registry: Arc<dyn ObjectRegistry> = 
+            Arc::new(ObjectRegistryAdapter {
+                inner: object_registry_impl,
+            });
+        let actor_registry = Arc::new(ActorRegistry::new(object_registry, "test-node".to_string()));
+        VirtualActorManager::new(actor_registry)
+    }
+
+    #[tokio::test]
+    async fn test_register_virtual_actor_type() {
+        let manager = create_test_manager().await;
+        
+        let actor_type = "read-state-tracker".to_string();
+        let namespace = "orbit-read-state-ts".to_string();
+        let facet_config = serde_json::json!({
+            "idle_timeout": "5m",
+            "activation_strategy": "lazy"
+        });
+        
+        // Register virtual actor type
+        let result = manager.register_virtual_actor_type(
+            actor_type.clone(),
+            None,
+            namespace.clone(),
+            facet_config.clone(),
+            None,
+            None, // init_config_template
+        ).await;
+        
+        assert!(result.is_ok());
+        
+        // Verify it's registered
+        assert!(manager.is_virtual_actor_type(&actor_type).await);
+        
+        // Get metadata
+        let metadata = manager.get_virtual_actor_type(&actor_type).await;
+        assert!(metadata.is_some());
+        let metadata = metadata.unwrap();
+        assert_eq!(metadata.actor_type, actor_type);
+        assert_eq!(metadata.namespace, namespace);
+        assert_eq!(metadata.facet_config, Some(facet_config));
+        assert_eq!(metadata.tenant_id, ""); // Default for type-level registration
+    }
+
+    #[tokio::test]
+    async fn test_register_virtual_actor_type_with_config() {
+        let manager = create_test_manager().await;
+        
+        let actor_type = "configured-type".to_string();
+        let namespace = "namespace".to_string();
+        let facet_config = serde_json::json!({});
+        let config = Some(ActorConfig {
+            max_mailbox_size: Some(1000),
+            ..Default::default()
+        });
+        
+        let result = manager.register_virtual_actor_type(
+            actor_type.clone(),
+            config.clone(),
+            namespace.clone(),
+            facet_config.clone(),
+            None,
+        ).await;
+        
+        assert!(result.is_ok());
+        
+        let metadata = manager.get_virtual_actor_type(&actor_type).await;
+        assert!(metadata.is_some());
+        let metadata = metadata.unwrap();
+        assert_eq!(metadata.config, config);
+    }
+
+    #[tokio::test]
+    async fn test_register_virtual_actor_type_with_tenant_id() {
+        let manager = create_test_manager().await;
+        
+        let actor_type = "tenant-type".to_string();
+        let namespace = "namespace".to_string();
+        let facet_config = serde_json::json!({});
+        let tenant_id = Some("tenant-123".to_string());
+        
+        let result = manager.register_virtual_actor_type(
+            actor_type.clone(),
+            None,
+            namespace.clone(),
+            facet_config.clone(),
+            tenant_id.clone(),
+        ).await;
+        
+        assert!(result.is_ok());
+        
+        let metadata = manager.get_virtual_actor_type(&actor_type).await;
+        assert!(metadata.is_some());
+        let metadata = metadata.unwrap();
+        assert_eq!(metadata.tenant_id, tenant_id.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_register_virtual_actor_type_empty_actor_type() {
+        let manager = create_test_manager().await;
+        
+        let result = manager.register_virtual_actor_type(
+            String::new(),
+            None,
+            "namespace".to_string(),
+            serde_json::Value::Null,
+            None,
+        ).await;
+        
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            VirtualActorError::ActivationFailed(_) => {},
+            _ => panic!("Expected ActivationFailed error"),
+        }
+    }
+
+    /// Helper to create a test VirtualActorFacet
+    fn create_test_virtual_actor_facet() -> Arc<tokio::sync::RwLock<Box<dyn VirtualActorLifecycleFacet>>> {
+        use plexspaces_journaling::{VirtualActorFacet, virtual_actor_facet_to_lifecycle_facet};
+        let facet = VirtualActorFacet::new(serde_json::json!({
+            "idle_timeout": "5m",
+            "activation_strategy": "lazy"
+        }), 100);
+        let lifecycle_facet = virtual_actor_facet_to_lifecycle_facet(facet);
+        Arc::new(tokio::sync::RwLock::new(lifecycle_facet))
+    }
+
+    #[tokio::test]
+    async fn test_register_virtual_actor_with_required_actor_type() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "test-actor@node-1".to_string();
+        let actor_type = "GenServer".to_string();
+        let facet = create_test_virtual_actor_facet();
+        
+        // Register with required actor_type
+        let result = manager.register(
+            actor_id.clone(),
+            facet,
+            actor_type.clone(),
+            None,
+            "tenant".to_string(),
+            "namespace".to_string(),
+        ).await;
+        
+        assert!(result.is_ok());
+        
+        // Verify actor is virtual
+        assert!(manager.is_virtual(&actor_id).await);
+    }
+
+    #[tokio::test]
+    async fn test_register_virtual_actor_with_config() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "configured-actor@node-1".to_string();
+        let actor_type = "GenServer".to_string();
+        let facet = Arc::new(tokio::sync::RwLock::new(
+            create_test_virtual_actor_facet()
+        ));
+        let config = Some(ActorConfig {
+            max_mailbox_size: Some(500),
+            ..Default::default()
+        });
+        
+        let result = manager.register(
+            actor_id.clone(),
+            facet,
+            actor_type.clone(),
+            config.clone(),
+            "tenant".to_string(),
+            "namespace".to_string(),
+        ).await;
+        
+        assert!(result.is_ok());
+        
+        // Verify metadata
+        let virtual_actors = manager.registry().virtual_actors().read().await;
+        let metadata = virtual_actors.get(&actor_id);
+        assert!(metadata.is_some());
+        let metadata = metadata.unwrap();
+        assert_eq!(metadata.config, config);
+        assert_eq!(metadata.tenant_id, "tenant");
+        assert_eq!(metadata.namespace, "namespace");
+        assert_eq!(metadata.actor_type, actor_type);
+    }
+
+    #[tokio::test]
+    async fn test_register_virtual_actor_empty_actor_type() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "test-actor@node-1".to_string();
+        let facet = Arc::new(tokio::sync::RwLock::new(
+            create_test_virtual_actor_facet()
+        ));
+        
+        // Try to register with empty actor_type - should fail
+        let result = manager.register(
+            actor_id.clone(),
+            facet,
+            String::new(), // Empty actor_type
+            None,
+            "tenant".to_string(),
+            "namespace".to_string(),
+        ).await;
+        
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            VirtualActorError::ActivationFailed(_) => {},
+            _ => panic!("Expected ActivationFailed error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_is_virtual_with_actor_type() {
+        let manager = create_test_manager().await;
+        
+        // Register virtual actor type
+        manager.register_virtual_actor_type(
+            "read-state-tracker".to_string(),
+            None,
+            "namespace".to_string(),
+            serde_json::Value::Null,
+            None,
+        ).await.unwrap();
+        
+        // Check if actor ID matching the type is virtual
+        // Format: {id}//{actor_type}::{namespace}@{node_id}
+        use crate::actor_id::build_actor_id;
+        let actor_id = build_actor_id("user-123", "read-state-tracker", Some("namespace"), "node-1");
+        
+        assert!(manager.is_virtual(&actor_id).await);
+    }
+
+    #[tokio::test]
+    async fn test_is_virtual_with_individual_registration() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "individual-actor@node-1".to_string();
+        let actor_type = "GenServer".to_string();
+        let facet = Arc::new(tokio::sync::RwLock::new(
+            create_test_virtual_actor_facet()
+        ));
+        
+        manager.register(
+            actor_id.clone(),
+            facet,
+            actor_type,
+            None,
+            "tenant".to_string(),
+            "namespace".to_string(),
+        ).await.unwrap();
+        
+        assert!(manager.is_virtual(&actor_id).await);
+    }
+
+    #[tokio::test]
+    async fn test_is_virtual_not_registered() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "not-virtual@node-1".to_string();
+        
+        assert!(!manager.is_virtual(&actor_id).await);
+    }
+
+    #[tokio::test]
+    async fn test_get_virtual_actor_type_not_found() {
+        let manager = create_test_manager().await;
+        
+        let metadata = manager.get_virtual_actor_type("nonexistent").await;
+        assert!(metadata.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_is_virtual_actor_type() {
+        let manager = create_test_manager().await;
+        
+        assert!(!manager.is_virtual_actor_type("nonexistent").await);
+        
+        manager.register_virtual_actor_type(
+            "test-type".to_string(),
+            None,
+            "namespace".to_string(),
+            serde_json::Value::Null,
+            None,
+        ).await.unwrap();
+        
+        assert!(manager.is_virtual_actor_type("test-type").await);
+        assert!(!manager.is_virtual_actor_type("other-type").await);
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "test-actor@node-1".to_string();
+        let actor_type = "GenServer".to_string();
+        let facet = Arc::new(tokio::sync::RwLock::new(
+            create_test_virtual_actor_facet()
+        ));
+        
+        manager.register(
+            actor_id.clone(),
+            facet,
+            actor_type.clone(),
+            None,
+            "tenant".to_string(),
+            "namespace".to_string(),
+        ).await.unwrap();
+        
+        // Update metadata
+        let new_type = "UpdatedType".to_string();
+        let new_config = Some(ActorConfig {
+            max_mailbox_size: Some(2000),
+            ..Default::default()
+        });
+        
+        let result = manager.update_metadata(
+            &actor_id,
+            Some(new_type.clone()),
+            new_config.clone(),
+        ).await;
+        
+        assert!(result.is_ok());
+        
+        // Verify update
+        let virtual_actors = manager.registry().virtual_actors().read().await;
+        let metadata = virtual_actors.get(&actor_id).unwrap();
+        assert_eq!(metadata.actor_type, new_type);
+        assert_eq!(metadata.config, new_config);
+    }
+
+    #[tokio::test]
+    async fn test_update_metadata_not_found() {
+        let manager = create_test_manager().await;
+        
+        let result = manager.update_metadata(
+            &"nonexistent@node-1".to_string(),
+            Some("NewType".to_string()),
+            None,
+        ).await;
+        
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            VirtualActorError::ActorNotFound(_) => {},
+            _ => panic!("Expected ActorNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_take_pending_messages() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "test-actor@node-1".to_string();
+        
+        // Initially no pending messages
+        let messages = manager.take_pending_messages(&actor_id).await;
+        assert!(messages.is_empty());
+        
+        // Add pending messages
+        let mut pending = manager.registry().pending_activations().write().await;
+        pending.insert(actor_id.clone(), vec![
+            Message {
+                id: "msg1".to_string(),
+                ..Default::default()
+            },
+            Message {
+                id: "msg2".to_string(),
+                ..Default::default()
+            },
+        ]);
+        drop(pending);
+        
+        // Take pending messages
+        let messages = manager.take_pending_messages(&actor_id).await;
+        assert_eq!(messages.len(), 2);
+        
+        // Verify messages are removed
+        let messages = manager.take_pending_messages(&actor_id).await;
+        assert!(messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_queue_message() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "test-actor@node-1".to_string();
+        let message = Message {
+            id: "msg1".to_string(),
+            ..Default::default()
+        };
+        
+        // Queue message
+        manager.queue_message(&actor_id, message.clone()).await;
+        
+        // Verify message is queued
+        let messages = manager.take_pending_messages(&actor_id).await;
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, message.id);
+    }
+
+    #[tokio::test]
+    async fn test_get_facet() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "test-actor@node-1".to_string();
+        let actor_type = "GenServer".to_string();
+        let facet = Arc::new(tokio::sync::RwLock::new(
+            create_test_virtual_actor_facet()
+        ));
+        
+        manager.register(
+            actor_id.clone(),
+            facet.clone(),
+            actor_type,
+            None,
+            "tenant".to_string(),
+            "namespace".to_string(),
+        ).await.unwrap();
+        
+        // Get facet
+        let retrieved_facet = manager.get_facet(&actor_id).await;
+        assert!(retrieved_facet.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_facet_not_found() {
+        let manager = create_test_manager().await;
+        
+        let result = manager.get_facet(&"nonexistent@node-1".to_string()).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            VirtualActorError::ActorNotFound(_) => {},
+            _ => panic!("Expected ActorNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_facet_type_level_registration() {
+        let manager = create_test_manager().await;
+        
+        // Register virtual actor type (no facet instance)
+        manager.register_virtual_actor_type(
+            "test-type".to_string(),
+            None,
+            "namespace".to_string(),
+            serde_json::json!({}),
+            None,
+        ).await.unwrap();
+        
+        // Try to get facet for type-level registration - should fail
+        // (type-level registrations don't have facet instances, only config)
+        use crate::actor_id::build_actor_id;
+        let actor_id = build_actor_id("instance-1", "test-type", Some("namespace"), "node-1");
+        
+        // This actor_id is virtual (type-level) but has no facet instance
+        assert!(manager.is_virtual(&actor_id).await);
+        
+        // get_facet() should fail for type-level registrations
+        let result = manager.get_facet(&actor_id).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            VirtualActorError::ActivationFailed(_) => {},
+            _ => panic!("Expected ActivationFailed error for type-level registration"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mark_activated() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "test-actor@node-1".to_string();
+        let actor_type = "GenServer".to_string();
+        let facet = Arc::new(tokio::sync::RwLock::new(
+            create_test_virtual_actor_facet()
+        ));
+        
+        manager.register(
+            actor_id.clone(),
+            facet,
+            actor_type,
+            None,
+            "tenant".to_string(),
+            "namespace".to_string(),
+        ).await.unwrap();
+        
+        // Mark as activated
+        let result = manager.mark_activated(&actor_id).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_mark_activated_not_virtual() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "not-virtual@node-1".to_string();
+        
+        let result = manager.mark_activated(&actor_id).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            VirtualActorError::ActorNotFound(_) => {},
+            _ => panic!("Expected ActorNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_is_active() {
+        let manager = create_test_manager().await;
+        
+        let actor_id = "test-actor@node-1".to_string();
+        
+        // Not registered, should return false
+        assert!(!manager.is_active(&actor_id).await);
+        
+        // Register as virtual
+        let actor_type = "GenServer".to_string();
+        let facet = Arc::new(tokio::sync::RwLock::new(
+            create_test_virtual_actor_facet()
+        ));
+        
+        manager.register(
+            actor_id.clone(),
+            facet,
+            actor_type,
+            None,
+            "tenant".to_string(),
+            "namespace".to_string(),
+        ).await.unwrap();
+        
+        // Registered but not active (ActorRegistry doesn't have it)
+        // is_active() checks ActorRegistry.is_actor_state_active() which will return false
+        assert!(!manager.is_active(&actor_id).await);
+    }
+}

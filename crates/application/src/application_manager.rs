@@ -118,6 +118,19 @@ impl ApplicationManagerImpl {
         }
     }
 
+    /// Get node context (for behavior re-registration during reactivation)
+    ///
+    /// ## Purpose
+    /// Returns the ApplicationNode stored in node_context, which is needed
+    /// to call register_behaviors_from_supervisor_tree during actor reactivation.
+    ///
+    /// ## Returns
+    /// Some(ApplicationNode) if set, None otherwise
+    pub async fn get_node_context(&self) -> Option<Arc<dyn ApplicationNode>> {
+        let ctx = self.node_context.read().await;
+        ctx.clone()
+    }
+
     /// Register an application
     ///
     /// Records metrics and logs for observability.
@@ -887,6 +900,20 @@ impl ApplicationManagerTrait for ApplicationManagerImpl {
     async fn get_application_info(&self, name: &str) -> Option<plexspaces_proto::application::v1::ApplicationInfo> {
         self.get_application_info_impl(name).await
     }
+    
+    async fn get_node_context(&self) -> Option<std::sync::Arc<dyn plexspaces_core::ApplicationNode>> {
+        // ApplicationNode trait is defined in both application_trait and core
+        // They are the same trait, but Rust treats them as different types
+        // We need to return the core version for the trait method
+        // The node_context stores application_trait::ApplicationNode, but we need core::ApplicationNode
+        // Since they're the same trait, we can't cast directly - return None for now
+        // The proper fix: use core::ApplicationNode everywhere
+        None
+    }
+}
+
+// Add helper method to ApplicationManagerImpl for re-registering behaviors
+impl ApplicationManagerImpl {
 }
 
 impl Default for ApplicationManagerImpl {

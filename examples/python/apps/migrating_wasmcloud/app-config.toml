@@ -1,0 +1,25 @@
+# Session Store Service Application Configuration
+#
+# Deploys a session store actor with wasmCloud-style capability-based design:
+# - KeyValue capability: Distributed session storage
+# - Timer capability: Periodic cleanup of expired sessions
+# - Inter-actor communication: Session validation (simulates HTTP capability)
+#
+# Capabilities are accessed via host functions (host.kv_*, host.send_after, host.ask)
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Session Store actor
+[[supervisor.children]]
+id = "session-store"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+
+[supervisor.children.args]
+default_ttl_sec = "3600"        # Default session TTL: 1 hour
+cleanup_interval_sec = "60"     # Cleanup timer interval: 60 seconds
+auth_service_actor = ""         # Optional: Actor ID for user validation (empty = disabled)

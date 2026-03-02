@@ -153,14 +153,9 @@ impl MessageSender for VirtualActorWrapper {
             
             // Check if activation is already in progress and try to start activation
             // This uses the is_activating flag internally to prevent concurrent activations
-            
-            use plexspaces_journaling::VirtualActorFacet;
-            let activation_started = if let Some(virtual_facet) = facet_guard.as_ref().downcast_ref::<VirtualActorFacet>() {
-                // Try to start activation (returns false if already activating)
-                virtual_facet.start_activation().await
-            } else {
-                true // If we can't downcast, assume we should activate
-            };
+            // facet_guard is RwLockReadGuard<Box<dyn VirtualActorLifecycleFacet>>
+            // Use trait methods directly - no downcasting needed
+            let activation_started = facet_guard.start_activation().await;
             drop(facet_guard);
             
             if !activation_started {
@@ -219,6 +214,9 @@ impl MessageSender for VirtualActorWrapper {
                 tracing::warn!("[VIRTUAL_ACTOR_WRAPPER] Actor not active after activation: actor_id={}", self.actor_id);
                 return Err(format!("Actor {} is not active after synchronous activation", self.actor_id).into());
             }
+            
+            // Update last_access for LRU tracking (actor is now active)
+            manager.update_last_access(&self.actor_id).await;
             
             // Message was queued and sent by activate_virtual_actor after activation
             // The message preserves correlation_id and sender, so reply routing will work correctly

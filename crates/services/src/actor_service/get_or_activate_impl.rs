@@ -25,7 +25,7 @@
 //! 4. Handles both existing and new actors correctly
 
 use std::sync::Arc;
-use plexspaces_core::{ActorRegistry, VirtualActorManager, RequestContext};
+use plexspaces_core::{ActorRegistry, VirtualActorManager, RequestContext, ServiceLocator};
 use plexspaces_actor::ActorFactory;
 use plexspaces_proto::actor::v1::GetOrActivateActorRequest;
 use tonic::Status;
@@ -155,16 +155,66 @@ pub async fn get_or_activate_actor_impl(
                 ));
             }
             
-            // Ensure actor_id has local node_id
-            let local_actor_id = if actor_id.contains('@') {
-                // Parse and replace node_id with local node_id
-                if let Some((actor_name, _)) = actor_id.split_once('@') {
-                    format!("{}@{}", actor_name, local_node_id)
-                } else {
-                    actor_id.clone()
+            // CRITICAL: Check if this is a virtual actor type (for WASM and Rust applications)
+            // If so, we need to recreate facets from VirtualActorMetadata
+            // Supports all facets: virtual_actor, durability, timer, reminder, etc.
+            let virtual_actor_manager = service_locator.virtual_actor_manager().await;
+            let mut facets_to_attach = vec![];
+            if let Some(manager) = &virtual_actor_manager {
+                if let Some(type_metadata) = manager.get_virtual_actor_type(&req.actor_type).await {
+                    // Virtual actor type - recreate facets from metadata using facet helpers
+                    if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
+                        let facet_registry: Arc<plexspaces_facet::FacetRegistry> = facet_registry_wrapper.inner_clone();
+                        
+                        // Create all facets from stored config (supports all facet types)
+                        if let Some(facet_config) = &type_metadata.facet_config {
+                            use plexspaces_facet::facet_helpers::create_facets_from_config;
+                            facets_to_attach = create_facets_from_config(facet_config, &facet_registry).await;
+                        }
+                    }
                 }
+            }
+            
+            // Use actor_id factory to build actor_id with proper format
+            use plexspaces_core::actor_id::{build_actor_id, parse_actor_id};
+            let local_actor_id = if let Ok(parsed) = parse_actor_id(&actor_id) {
+                // Rebuild with local node_id
+                build_actor_id(&parsed.id, &parsed.actor_type, parsed.namespace.as_deref(), local_node_id)
             } else {
-                format!("{}@{}", actor_id, local_node_id)
+                return Err(tonic::Status::invalid_argument(format!("Invalid actor ID format: {}", actor_id)));
+            };
+            
+            // CRITICAL: Build init config for WASM actors from template if available
+            // This preserves the config structure from ApplicationSpec's ChildSpec.args
+            // so virtual WASM actors activated via HTTP receive proper config
+            let initial_state_for_spawn = {
+                // Check if this is a virtual actor type with init_config_template
+                let mut state = req.initial_state.clone();
+                if let Some(manager) = &virtual_actor_manager {
+                    if let Some(type_metadata) = manager.get_virtual_actor_type(&req.actor_type).await {
+                        if let Some(ref template) = type_metadata.init_config_template {
+                            // Parse template JSON and replace actor_id
+                            if let Ok(mut config_json) = serde_json::from_slice::<serde_json::Value>(template) {
+                                if let Some(config_obj) = config_json.as_object_mut() {
+                                    // Replace actor_id with actual local_actor_id
+                                    config_obj.insert("actor_id".to_string(), serde_json::Value::String(local_actor_id.clone()));
+                                    // Serialize back to bytes
+                                    if let Ok(updated_config) = serde_json::to_vec(&config_json) {
+                                        state = updated_config;
+                                        if tracing::enabled!(tracing::Level::DEBUG) {
+                                            tracing::debug!(
+                                                actor_id = %local_actor_id,
+                                                actor_type = %req.actor_type,
+                                                "Using init_config_template for WASM actor activation"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                state
             };
             
             // Create actor using ActorFactory
@@ -176,10 +226,10 @@ pub async fn get_or_activate_actor_impl(
                     ctx,
                     &local_actor_id,
                     &req.actor_type,
-                    req.initial_state.clone(),
+                    initial_state_for_spawn, // Use config built from template if available
                     req.config.clone(),
                     std::collections::HashMap::new(), // labels (empty for now)
-                    vec![], // facets (empty - facets should be attached via config or separate API)
+                    facets_to_attach, // Pass virtual actor facets if this is a virtual actor type
                 )
                 .await
                 .map_err(|e| {

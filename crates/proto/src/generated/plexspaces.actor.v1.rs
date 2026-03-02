@@ -1841,8 +1841,8 @@ pub struct VirtualActorLifecycle {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct VirtualActorConfig {
-    /// Activation strategy
-    #[prost(enumeration="ActivationStrategy", tag="1")]
+    /// Activation strategy (from common.proto)
+    #[prost(enumeration="super::super::common::v1::ActivationStrategy", tag="1")]
     pub activation_strategy: i32,
     /// Idle timeout before deactivation
     #[prost(message, optional, tag="2")]
@@ -2593,42 +2593,6 @@ impl DropPolicy {
             "DROP_POLICY_DROP_OLDEST" => Some(Self::DropPolicyDropOldest),
             "DROP_POLICY_DROP_NEWEST" => Some(Self::DropPolicyDropNewest),
             "DROP_POLICY_BLOCK" => Some(Self::DropPolicyBlock),
-            _ => None,
-        }
-    }
-}
-/// Activation strategy for virtual actors
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
-#[repr(i32)]
-pub enum ActivationStrategy {
-    ActivationStrategyUnspecified = 0,
-    /// Activate on first message (default)
-    ActivationStrategyLazy = 1,
-    /// Activate immediately on creation
-    ActivationStrategyEager = 2,
-    /// Pre-activate based on schedule
-    ActivationStrategyPrewarm = 3,
-}
-impl ActivationStrategy {
-    /// String value of the enum field names used in the ProtoBuf definition.
-    ///
-    /// The values are not transformed in any way and thus are considered stable
-    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
-    pub fn as_str_name(&self) -> &'static str {
-        match self {
-            ActivationStrategy::ActivationStrategyUnspecified => "ACTIVATION_STRATEGY_UNSPECIFIED",
-            ActivationStrategy::ActivationStrategyLazy => "ACTIVATION_STRATEGY_LAZY",
-            ActivationStrategy::ActivationStrategyEager => "ACTIVATION_STRATEGY_EAGER",
-            ActivationStrategy::ActivationStrategyPrewarm => "ACTIVATION_STRATEGY_PREWARM",
-        }
-    }
-    /// Creates an enum from field names used in the ProtoBuf definition.
-    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
-        match value {
-            "ACTIVATION_STRATEGY_UNSPECIFIED" => Some(Self::ActivationStrategyUnspecified),
-            "ACTIVATION_STRATEGY_LAZY" => Some(Self::ActivationStrategyLazy),
-            "ACTIVATION_STRATEGY_EAGER" => Some(Self::ActivationStrategyEager),
-            "ACTIVATION_STRATEGY_PREWARM" => Some(Self::ActivationStrategyPrewarm),
             _ => None,
         }
     }

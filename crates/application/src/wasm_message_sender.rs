@@ -37,6 +37,13 @@ pub struct ActorServiceMessageSender {
 
 impl ActorServiceMessageSender {
     /// Create new MessageSender from ActorService
+    ///
+    /// ## Arguments
+    /// * `actor_service` - ActorService for routing messages
+    /// * `service_locator` - ServiceLocator for accessing registry and other services
+    ///
+    /// ## Returns
+    /// New ActorServiceMessageSender instance
     pub fn new(
         actor_service: Arc<dyn ActorService + Send + Sync>,
         service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
@@ -51,14 +58,15 @@ impl ActorServiceMessageSender {
 
 #[async_trait]
 impl MessageSender for ActorServiceMessageSender {
-    async fn send_message(&self, from: &str, to: &str, message: &str) -> Result<(), String> {
-        trace!(from = %from, to = %to, "WASM send_message (tell)");
+    async fn send_message(&self, from: &str, to: &str, message_type: &str, message: &str) -> Result<(), String> {
+        trace!(from = %from, to = %to, message_type = %message_type, "WASM send_message (tell)");
 
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             payload: message.as_bytes().to_vec(),
             sender_id: from.to_string(),
             receiver_id: to.to_string(),
+            message_type: message_type.to_string(),
             ..Default::default()
         };
 

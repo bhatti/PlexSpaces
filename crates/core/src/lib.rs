@@ -58,6 +58,9 @@ pub mod object_registry_helpers;
 pub mod actor_trait;
 pub mod exit_reason;
 pub mod virtual_actor_manager;
+pub mod virtual_actor_lifecycle_facet;
+pub mod virtual_actor_registration;
+pub use virtual_actor_lifecycle_facet::{VirtualActorLifecycleFacet, VirtualActorLifecycleState};
 pub mod actor_state_checker;
 pub use actor_state_checker::ActorStateFetcher;
 // FacetManager moved to plexspaces-facet crate to break circular dependency
@@ -90,6 +93,22 @@ pub mod actor_factory;
 pub use actor_factory::ActorFactory;
 pub mod constants;
 pub use constants::TEMP_SENDER_PREFIX;
+pub mod actor_id;
+pub use actor_id::{build_actor_id, parse_actor_id, ParsedActorId, ActorIdError, extract_actor_type, extract_namespace, extract_base_id};
+pub mod facet_helpers;
+pub use facet_helpers::{create_facet_from_proto, create_facets_from_proto};
+pub mod facet_factories;
+pub use facet_factories::{
+    LockFacetFactory,
+    RegistryFacetFactory,
+    ProcessGroupFacetFactory,
+    KeyValueFacetFactory,
+    HttpClientFacetFactory,
+    EventEmitterFacetFactory,
+    LoggingFacetFactory,
+    CachingFacetFactory,
+    MetricsFacetFactory,
+};
 
 // Re-export enhanced ActorContext
 pub use actor_context::{
@@ -103,6 +122,8 @@ pub use actor_context::ObjectRegistration;
 pub use actor_registry::{ActorRegistry, ActorRegistryError, ActorRoutingInfo, MonitorLink, TemporarySenderEntry};
 // Re-export VirtualActorManager and VirtualActorMetadata (source of truth for virtual actors)
 pub use virtual_actor_manager::{VirtualActorManager, VirtualActorError, VirtualActorMetadata};
+// Re-export virtual actor registration helper
+pub use virtual_actor_registration::register_virtual_actor_type_consistent;
 // FacetManager re-exported from plexspaces-facet crate for convenience
 pub use plexspaces_facet::FacetManager;
 // Re-export MessageSender trait (for sending messages to actors)

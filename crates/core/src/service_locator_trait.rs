@@ -28,6 +28,7 @@
 //! - ActorContext uses the trait
 
 use std::sync::Arc;
+use crate::ApplicationNode;
 use async_trait::async_trait;
 
 use crate::{ActorRegistry, VirtualActorManager, ReplyWaiterRegistry, Service};
@@ -579,6 +580,16 @@ pub trait ApplicationManager: Send + Sync {
     /// ## Returns
     /// Arc<dyn Any + Send + Sync> that can be downcast to Arc<ApplicationManagerImpl>
     fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync>;
+    
+    /// Get node context (for behavior re-registration during reactivation)
+    ///
+    /// ## Purpose
+    /// Returns the ApplicationNode stored in node_context, which is needed
+    /// to call register_behaviors_from_supervisor_tree during actor reactivation.
+    ///
+    /// ## Returns
+    /// Some(ApplicationNode) if set, None otherwise
+    async fn get_node_context(&self) -> Option<std::sync::Arc<dyn ApplicationNode>>;
 }
 
 /// Trait for BlobService (defined in blob crate)

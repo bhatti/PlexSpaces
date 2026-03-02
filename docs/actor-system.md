@@ -253,7 +253,7 @@ Actors are defined in `ApplicationSpec` and spawned automatically. Applications 
   
   node.service_locator().register_behavior_registry(Arc::new(behavior_registry)).await;
   ```
-- `ActorFactory` uses `BehaviorRegistry` to create behaviors when spawning actors
+- `BehaviorRegistry` is used by the framework (and Node) when spawning by actor type name
 - If behavior is not registered, `spawn_actor` will fail with a clear error message
 - Use SDK helper `spawn_with_behavior_type()` for convenient spawning with BehaviorRegistry-based actors
 
@@ -663,19 +663,11 @@ behavior_registry.register_simple("worker", || {
     WorkerActor::new()
 }).await;
 
-// Register with ServiceLocator (required for ActorFactory)
+// Register with ServiceLocator (required for Node/spawn when using type-name)
 node.service_locator().register_behavior_registry(Arc::new(behavior_registry)).await;
 
-// Now ActorFactory can spawn actors with actor_type="worker"
-let actor_ref = actor_factory.spawn_actor(
-    &ctx,
-    &actor_id,
-    "worker",  // Uses registered behavior
-    vec![],
-    None,
-    HashMap::new(),
-    vec![],
-).await?;
+// In examples and app code, use Node and SDK spawn helpers (spawn, spawn_with_facets).
+// Framework code may use ActorFactory for type-name spawn when servicing gRPC spawn requests.
 ```
 
 #### WASM Applications (Automatic Registration)
@@ -791,17 +783,30 @@ Orleans-style automatic activation/deactivation:
 **Configuration**:
 ```json
 {
-  "idle_timeout_seconds": 300,
-  "activation_strategy": "lazy"  // or "eager", "prewarm"
+  "idle_timeout": "5m",  // or "300s", defaults to RuntimeConfig.default_virtual_actor_config.idle_timeout
+  "activation_strategy": "lazy"  // or "eager", "prewarm", defaults to RuntimeConfig.default_virtual_actor_config.activation_strategy
 }
 ```
 
+**Default Configuration**:
+Defaults are provided via `RuntimeConfig.default_virtual_actor_config`:
+- `idle_timeout`: 5 minutes (300 seconds) if not specified
+- `max_pool_per_actor_type`: 100 instances per actor type (LRU eviction when exceeded)
+- `activation_strategy`: `lazy` if not specified
+
+These defaults are applied automatically when creating virtual actors if not explicitly provided.
+
 **Example**:
 ```rust
+use plexspaces_sdk::{spawn_with_facets, VirtualActorFacet, RequestContext};
+
+let ctx = RequestContext::new_without_auth("tenant".into(), "namespace".into());
+
+// Create virtual actor facet (uses defaults from RuntimeConfig if not specified)
 let virtual_facet = Box::new(VirtualActorFacet::new(
     serde_json::json!({
-        "idle_timeout_seconds": 300,
-        "activation_strategy": "lazy"
+        "idle_timeout": "5m",  // Optional: defaults to RuntimeConfig.default_virtual_actor_config.idle_timeout
+        "activation_strategy": "lazy"  // Optional: defaults to RuntimeConfig.default_virtual_actor_config.activation_strategy
     }),
     100, // priority
 ));

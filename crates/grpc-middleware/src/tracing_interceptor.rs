@@ -159,4 +159,9 @@ impl Interceptor for TracingInterceptor {
     fn priority(&self) -> i32 {
         20 // After metrics, before auth
     }
+
+    async fn on_error(&self, _error: &tonic::Status) {
+        // Tracing spans are automatically managed - no cleanup needed
+        // The span guard from before_request will be dropped automatically when the error occurs
+    }
 }

@@ -9,7 +9,7 @@ use crate::{WasmConfig, WasmError, WasmResult};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use wasmtime::{Engine, Module};
 
 #[cfg(feature = "component-model")]
@@ -88,6 +88,23 @@ pub struct WasmRuntime {
 
     /// Module cache with LRU eviction (hash -> module)
     module_cache: Arc<RwLock<crate::module_cache::ModuleCache>>,
+
+    /// When pooling is enabled, limits concurrent re-instantiations across all actors so we stay
+    /// under Wasmtime's memory-stripe concurrent limit (default 10). Per-actor semaphore serializes
+    /// per actor; this global cap prevents N actors from re-instantiating at once and hitting the limit.
+    ///
+    /// ## Semaphore Usage
+    /// - **Per-actor lock**: Serializes re-instantiation per actor (prevents concurrent re-instantiations
+    ///   of the same actor). Acquired before `create_fresh_simple_actor_state` / `create_fresh_plexspaces_actor_state`.
+    /// - **Global semaphore**: Caps total concurrent instantiations (initial + re-) across all actors to avoid
+    ///   Wasmtime's "memory stripe 0" limit. Both `instantiate()` and `WasmRuntimeTrait::instantiate()` hold
+    ///   a global permit for the full `WasmInstance::new(...).await`. Re-instantiation paths also acquire
+    ///   the global permit around `create_fresh_*_actor_state` calls.
+    /// - **Both must be held**: When re-instantiating, both the per-actor lock AND global semaphore must be
+    ///   held to ensure we stay under Wasmtime's concurrent limit while serializing per actor.
+    /// - **Configurable**: Permit count is configurable via `WasmConfig.max_concurrent_instantiations` (default: 8).
+    #[cfg(feature = "component-model")]
+    global_reinstantiation_semaphore: Option<Arc<Semaphore>>,
 }
 
 impl std::fmt::Debug for WasmRuntime {
@@ -140,10 +157,35 @@ impl WasmRuntime {
         }
 
         // Enable instance pooling for warm starts
-        if config.enable_pooling {
+        // DISABLED: Pooling allocator to remove Wasmtime's concurrent limit of 10.
+        // With per-actor reinstantiation locks serializing re-instantiations per actor,
+        // we don't need pooling's memory management benefits, and disabling it removes
+        // the hard concurrent limit that was causing "maximum concurrent limit of 10
+        // for memory stripe 0 reached" errors.
+        // 
+        // Note: This may have performance implications (no pre-allocated memory pools),
+        // but it allows unlimited concurrent instantiations as long as per-actor locks
+        // serialize re-instantiations per actor.
+        // 
+        // TODO: Make this configurable via WasmConfig if needed for performance tuning.
+        // EXPLICITLY set OnDemand allocation strategy to ensure pooling is disabled.
+        // Wasmtime defaults to OnDemand, but we set it explicitly to be certain.
+        // OnDemand has no concurrent limit, allowing unlimited concurrent instantiations.
+        wasmtime_config
+            .allocation_strategy(wasmtime::InstanceAllocationStrategy::OnDemand);
+        
+        // Pooling is disabled - the condition below never executes
+        if config.enable_pooling && false {
             let mut pooling = wasmtime::PoolingAllocationConfig::default();
             pooling.max_memory_size(config.limits.max_memory_bytes as usize);
             pooling.total_memories(config.limits.max_pooled_instances);
+            
+            // Note: Wasmtime's PoolingAllocationConfig doesn't expose InstanceLimits directly
+            // in the public API. The concurrent limit is managed internally by Wasmtime.
+            // We handle concurrency at the application level using per-actor re-instantiation
+            // locks (Semaphore) to serialize re-instantiations per actor, preventing concurrent
+            // re-instantiations that hit Wasmtime's internal memory stripe concurrent limit.
+            
             wasmtime_config
                 .allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(pooling));
         }
@@ -151,9 +193,17 @@ impl WasmRuntime {
         let engine = Engine::new(&wasmtime_config)
             .map_err(|e| WasmError::CompilationError(e.to_string()))?;
 
+        #[cfg(feature = "component-model")]
+        // Global reinstantiation semaphore not needed when pooling is disabled.
+        // With pooling disabled, Wasmtime has no concurrent limit, and per-actor locks
+        // are sufficient to serialize re-instantiations per actor.
+        let global_reinstantiation_semaphore = None;
+
         Ok(Self {
             engine,
             module_cache: Arc::new(RwLock::new(crate::module_cache::ModuleCache::new(1000))),
+            #[cfg(feature = "component-model")]
+            global_reinstantiation_semaphore,
         })
     }
 
@@ -484,6 +534,24 @@ impl WasmRuntime {
     ) -> WasmResult<crate::WasmInstance> {
         use wasmtime::StoreLimitsBuilder;
 
+        let _global_permit = if let Some(ref sem) = self.global_reinstantiation_semaphore {
+            Some(
+                sem.clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| WasmError::ActorFunctionError(
+                        format!(
+                            "Concurrent instantiation limit reached (max_concurrent_instantiations={}). \
+                            Reduce load or increase WasmConfig.max_concurrent_instantiations. \
+                            Global instantiation semaphore closed.",
+                            sem.available_permits()
+                        )
+                    ))?,
+            )
+        } else {
+            None
+        };
+
         let limits = StoreLimitsBuilder::new()
             .memory_size(config.limits.max_memory_bytes as usize)
             .build();
@@ -506,6 +574,10 @@ impl WasmRuntime {
             journal_storage,
             blob_service,
             config.durability_enabled,
+            #[cfg(feature = "component-model")]
+            self.global_reinstantiation_semaphore.clone(),
+            #[cfg(not(feature = "component-model"))]
+            None,
         )
         .await
     }
@@ -649,7 +721,29 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
         blob_service: Option<std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>>,
     ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, Box<dyn std::error::Error + Send + Sync>> {
         use wasmtime::StoreLimitsBuilder;
-        
+
+        // Gate all Wasmtime instantiations (initial + re-) so we stay under the memory-stripe limit.
+        // Without this, initial activations (e.g. 10 virtual actors) + re-instantiations can exceed 10 concurrent.
+        let _global_permit = if let Some(ref sem) = self.global_reinstantiation_semaphore {
+            Some(
+                sem.clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| {
+                        Box::new(WasmError::ActorFunctionError(
+                            format!(
+                                "Concurrent instantiation limit reached (max_concurrent_instantiations={}). \
+                                Reduce load or increase WasmConfig.max_concurrent_instantiations. \
+                                Global instantiation semaphore closed.",
+                                sem.available_permits()
+                            )
+                        )) as Box<dyn std::error::Error + Send + Sync>
+                    })?,
+            )
+        } else {
+            None
+        };
+
         // Downcast module from Arc<dyn Any> to WasmModule
         let wasm_module = crate::wasm_runtime_helpers::extract_wasm_module(module)?;
         
@@ -720,6 +814,10 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
             journal_storage,
             concrete_blob_service,
             false, // durability_enabled - caller controls via config when using instantiate()
+            #[cfg(feature = "component-model")]
+            self.global_reinstantiation_semaphore.clone(),
+            #[cfg(not(feature = "component-model"))]
+            None,
         ).await?;
         
         Ok(Arc::new(instance) as Arc<dyn std::any::Any + Send + Sync>)

@@ -500,6 +500,7 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             framework_info: None,
             base_dir: String::new(), // Set by config_manager::initialize
             wasm_apps_directory: String::new(), // Set by config_manager::initialize
+            default_virtual_actor_config: None,
         }),
         system_applications: toml.system_applications.included,
         applications: toml
@@ -1055,6 +1056,7 @@ mod tests {
                 framework_info: None,
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
+                default_virtual_actor_config: None,
             }),
             system_applications: vec![],
             applications: vec![
@@ -1192,6 +1194,7 @@ mod tests {
                 framework_info: None,
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
+                default_virtual_actor_config: None,
             }),
             system_applications: vec![],
             applications: vec![
@@ -1294,6 +1297,7 @@ mod tests {
                 framework_info: None,
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
+                default_virtual_actor_config: None,
             }),
             system_applications: vec![],
             applications: vec![
@@ -1414,6 +1418,7 @@ mod tests {
                 framework_info: None,
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
+                default_virtual_actor_config: None,
             }),
             system_applications: vec![],
             applications: vec![
@@ -1500,6 +1505,7 @@ mod tests {
                 framework_info: None,
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
+                default_virtual_actor_config: None,
             }),
             system_applications: vec![],
             applications: vec![ApplicationSpec {
@@ -1573,6 +1579,7 @@ mod tests {
                 framework_info: None,
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
+                default_virtual_actor_config: None,
             }),
             system_applications: vec![],
             applications: vec![

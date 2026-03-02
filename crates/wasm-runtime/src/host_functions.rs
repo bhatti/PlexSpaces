@@ -32,11 +32,12 @@ pub trait MessageSender: Send + Sync {
     /// ## Arguments
     /// * `from` - Sender actor ID
     /// * `to` - Recipient actor ID (can be "actor@node" format for remote)
-    /// * `message` - Message payload
+    /// * `message_type` - Message type (handler name, e.g. "ping", "cleanup_expired")
+    /// * `message` - Message payload (JSON string)
     ///
     /// ## Returns
     /// Success or error
-    async fn send_message(&self, from: &str, to: &str, message: &str) -> Result<(), String>;
+    async fn send_message(&self, from: &str, to: &str, message_type: &str, message: &str) -> Result<(), String>;
 
     /// Send a message and wait for reply (request-reply pattern)
     ///
@@ -303,14 +304,15 @@ impl HostFunctions {
     }
 
     /// Send message via message sender if available
-    pub async fn send_message(&self, from: &str, to: &str, message: &str) -> Result<(), String> {
+    pub async fn send_message(&self, from: &str, to: &str, message_type: &str, message: &str) -> Result<(), String> {
         if let Some(sender) = &self.message_sender {
-            sender.send_message(from, to, message).await
+            sender.send_message(from, to, message_type, message).await
         } else {
             // Fallback: log message (for development/testing)
             tracing::warn!(
                 from = from,
                 to = to,
+                message_type = message_type,
                 message = message,
                 "Message sender not configured, message not delivered"
             );

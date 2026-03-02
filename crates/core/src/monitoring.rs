@@ -201,8 +201,8 @@ pub async fn record_message_routing_metrics(
     #[cfg(feature = "tracing")]
     {
         if success {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+            if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 actor_id = %actor_id,
                 node_id = %node_id,
                 location = %location,

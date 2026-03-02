@@ -99,7 +99,7 @@ impl Actor for TestBehavior {
 async fn start_test_server(node: Arc<Node>) -> String {
     use plexspaces_services::actor_service::ActorServiceImpl as ActorServiceImpl;
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let service = ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
+    let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let bound_addr = listener.local_addr().unwrap();
@@ -300,7 +300,7 @@ async fn test_client_with_invalid_message() {
 #[tokio::test]
 async fn test_send_message_missing_message() {
     let node = Arc::new(NodeBuilder::new("test-node-missing-msg").build().await);
-    let service = ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
+    let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let request = Request::new(SendMessageRequest {
         message: None,
@@ -319,7 +319,7 @@ async fn test_send_message_missing_message() {
 #[tokio::test]
 async fn test_send_message_missing_receiver() {
     let node = Arc::new(NodeBuilder::new("test-node-missing-recv").build().await);
-    let service = ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
+    let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let proto_msg = create_proto_message("msg-1", "sender-1", "", vec![]);
 
@@ -340,7 +340,7 @@ async fn test_send_message_missing_receiver() {
 #[tokio::test]
 async fn test_send_message_to_existing_actor() {
     let (node, _actor_ref) = create_test_node_with_actor("test-node-existing").await;
-    let service = ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
+    let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let proto_msg = create_proto_message(
         "msg-3",
@@ -373,7 +373,7 @@ async fn test_send_message_to_existing_actor() {
 #[tokio::test]
 async fn test_unimplemented_methods_return_unimplemented_status() {
     let node = Arc::new(NodeBuilder::new("test-node-unimpl").build().await);
-    let service = ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
+    let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let result = ActorServiceTrait::create_actor(&service, Request::new(
             plexspaces_proto::actor::v1::CreateActorRequest {
@@ -424,7 +424,7 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
 #[tokio::test]
 async fn test_message_with_headers_via_service() {
     let (node, _actor_ref) = create_test_node_with_actor("test-node-svc-headers").await;
-    let service = ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
+    let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let mut proto_msg = create_proto_message(
         "msg-headers",
@@ -455,7 +455,7 @@ async fn test_message_with_headers_via_service() {
 #[tokio::test]
 async fn test_concurrent_message_sends_via_service() {
     let (node, _actor_ref) = create_test_node_with_actor("test-node-svc-conc").await;
-    let service = Arc::new(ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string()));
+    let service = Arc::new(ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string()));
 
     let mut handles = vec![];
     for i in 0..5 {

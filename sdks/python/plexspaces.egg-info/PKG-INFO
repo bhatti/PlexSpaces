@@ -216,40 +216,115 @@ class DurableAccount:
 
 **Note**: WASM durability uses checkpoint-based persistence (get_state/set_state), not the Rust `DurabilityFacet`. Enable via `durability_enabled: true` in release.yaml or WasmConfig.
 
-### Host Functions
+### Host Functions (Capabilities)
 
-| Function | Description |
-|----------|-------------|
-| `host.send(to, msg_type, payload)` | Send message to another actor |
-| `host.log(level, message)` | Log a message |
-| `host.info(message)` | Log info message |
-| `host.debug(message)` | Log debug message |
-| `host.warn(message)` | Log warning message |
-| `host.error(message)` | Log error message |
-| `host.now_ms()` | Get current timestamp (ms) |
-| **Key-Value** | |
-| `host.kv_get(key)` | Get value for key |
-| `host.kv_put(key, value)` | Store value for key |
-| `host.kv_delete(key)` | Delete key |
-| `host.kv_list(prefix)` | List keys with prefix (returns JSON array) |
-| **TupleSpace** | |
-| `host.ts_write(tuple_json)` | Write tuple (JSON array) |
-| `host.ts_read(pattern_json)` | Read tuple (non-destructive, wildcards: null or "*") |
-| `host.ts_take(pattern_json)` | Take tuple (destructive read) |
-| `host.ts_read_all(pattern_json)` | Read all matching tuples |
-| **Distributed Locks** | |
-| `host.lock_acquire(lock_id, timeout_ms)` | Acquire lock (returns version) |
-| `host.lock_release(lock_id, lock_version)` | Release lock |
-| **Blob Storage** | |
-| `host.blob_upload(blob_id, data, content_type)` | Upload blob (base64 data) |
-| `host.blob_download(blob_id)` | Download blob (returns base64) |
-| `host.blob_delete(blob_id)` | Delete blob |
-| `host.blob_list(prefix)` | List blobs with prefix |
-| **Process Groups** | |
-| `host.process_groups.join(group, actor_id)` | Join a process group |
-| `host.process_groups.leave(group, actor_id)` | Leave a process group |
-| `host.process_groups.publish(group, message)` | Broadcast to group |
-| `host.process_groups.get_members(group)` | Get group members |
+PlexSpaces provides comprehensive host functions for WASM actors, following wasmCloud-style capability-based design.
+
+#### Messaging
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.send(to, msg_type, payload)` | Send message to another actor (fire-and-forget) | `host.send("actor-2", "ping", {"data": "hello"})` |
+| `host.ask(to, msg_type, payload, timeout_ms)` | Send request and wait for response (request-reply) | `response = host.ask("actor-2", "get_data", {}, 5000)` |
+| `host.self_id()` | Get own actor ID | `my_id = host.self_id()` |
+
+#### Actor Lifecycle
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.spawn(module_ref, actor_id, init_config_json)` | Spawn a new actor | `id = host.spawn("calculator", "calc-1", "{}")` |
+| `host.stop(actor_id)` | Stop an actor gracefully | `host.stop("calc-1")` |
+
+#### Actor Linking & Monitoring (Erlang/OTP patterns)
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.link(actor_id)` | Bidirectional link (crash propagation) | `host.link("worker-1")` |
+| `host.unlink(actor_id)` | Remove bidirectional link | `host.unlink("worker-1")` |
+| `host.monitor(actor_id)` | Unidirectional monitor (exit notification) | `ref = host.monitor("worker-1")` |
+| `host.demonitor(monitor_ref)` | Cancel monitor | `host.demonitor(ref)` |
+
+#### Timers (Delayed Messaging)
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.send_after(delay_ms, msg_type, payload)` | Send message to self after delay | `timer_id = host.send_after(5000, "cleanup", {})` |
+
+#### Logging & Time
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.log(level, message)` | Log a message | `host.log("info", "Processing")` |
+| `host.info(message)` | Log info message | `host.info("Processing")` |
+| `host.debug(message)` | Log debug message | `host.debug("Debug info")` |
+| `host.warn(message)` | Log warning message | `host.warn("Warning")` |
+| `host.error(message)` | Log error message | `host.error("Error occurred")` |
+| `host.now_ms()` | Get current timestamp (ms) | `ts = host.now_ms()` |
+
+#### Key-Value Storage
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.kv_get(key)` | Get value for key | `value = host.kv_get("session:123")` |
+| `host.kv_put(key, value)` | Store value for key | `host.kv_put("session:123", json.dumps(data))` |
+| `host.kv_delete(key)` | Delete key | `host.kv_delete("session:123")` |
+| `host.kv_list(prefix)` | List keys with prefix (returns JSON array) | `keys = json.loads(host.kv_list("session:"))` |
+
+**Backends:** Redis, SQLite, DynamoDB, PostgreSQL, Memory
+
+#### Blob Storage
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.blob_upload(blob_id, data, content_type)` | Upload blob (data must be base64-encoded) | `host.blob_upload("file-1", base64_data, "image/png")` |
+| `host.blob_download(blob_id)` | Download blob (returns base64) | `data = host.blob_download("file-1")` |
+| `host.blob_delete(blob_id)` | Delete blob | `host.blob_delete("file-1")` |
+| `host.blob_list(prefix)` | List blobs with prefix (returns JSON array) | `blobs = json.loads(host.blob_list("files/"))` |
+
+**Backends:** S3, Azure Blob, GCP Storage, MinIO, Filesystem
+
+#### TupleSpace (Linda-style Coordination)
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.ts_write(tuple_json)` | Write tuple (JSON array) | `host.ts_write(json.dumps(["task", "worker-1", 123]))` |
+| `host.ts_read(pattern_json)` | Read tuple (non-destructive, wildcards: null or "*") | `tuple = json.loads(host.ts_read(json.dumps(["task", "*", None])))` |
+| `host.ts_take(pattern_json)` | Take tuple (destructive read) | `tuple = json.loads(host.ts_take(json.dumps(["task", "*", None])))` |
+| `host.ts_read_all(pattern_json)` | Read all matching tuples | `tuples = json.loads(host.ts_read_all(json.dumps(["task", "*", None])))` |
+
+#### Distributed Locks
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.lock_acquire(tenant_id, namespace, holder_id, lock_name, lease_duration_secs, timeout_ms)` | Acquire lock (returns JSON with version) | `lock = json.loads(host.lock_acquire("tenant", "ns", "actor-1", "resource", 30, 5000))` |
+| `host.lock_renew(lock_id, tenant_id, namespace, holder_id, lock_version, lease_duration_secs)` | Renew lease on held lock | `new_version = host.lock_renew("resource", "tenant", "ns", "actor-1", version, 30)` |
+| `host.lock_release(lock_id, tenant_id, namespace, holder_id, lock_version)` | Release lock | `host.lock_release("resource", "tenant", "ns", "actor-1", version)` |
+
+#### Process Groups (Pub/Sub)
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.process_groups.join(group)` | Join a process group | `host.process_groups.join("chat-room")` |
+| `host.process_groups.leave(group)` | Leave a process group | `host.process_groups.leave("chat-room")` |
+| `host.process_groups.members(group)` | Get group members (returns list) | `members = host.process_groups.members("chat-room")` |
+| `host.process_groups.broadcast(group, msg_type, payload)` | Broadcast to all group members | `host.process_groups.broadcast("chat-room", "message", {"text": "hello"})` |
+
+### Capability Comparison: PlexSpaces vs wasmCloud
+
+| Capability | wasmCloud | PlexSpaces | Status |
+|------------|-----------|------------|--------|
+| **HTTP Client** | ✅ `wasi:http` | ⚠️ Simulated via `host.ask()` | Partial |
+| **HTTP Server** | ✅ `wasi:http` | ❌ Not available | Missing |
+| **KeyValue Storage** | ✅ `wasi:keyvalue` | ✅ `host.kv_*` | ✅ Complete |
+| **Blob Storage** | ✅ `wasi:blobstore` | ✅ `host.blob_*` | ✅ Complete |
+| **Messaging** | ✅ `wasmcloud:messaging` | ✅ `host.send/ask` | ✅ Complete |
+| **Logging** | ✅ `wasi:logging` | ✅ `host.log` | ✅ Complete |
+| **Process Groups** | ❌ Not available | ✅ `host.pg_*` | ✅ Extra |
+| **TupleSpace** | ❌ Not available | ✅ `host.ts_*` | ✅ Extra |
+| **Distributed Locks** | ❌ Not available | ✅ `host.lock_*` | ✅ Extra |
+| **Timers** | ❌ Not available | ✅ `host.send_after()` | ✅ Extra |
+
+**Note:** HTTP Client can be simulated by calling HTTP gateway actors via `host.ask()`. See [Session Store example](../../examples/python/apps/migrating_wasmcloud/README.md) for details.
 
 ## Migration from Legacy Examples
 

@@ -9,7 +9,10 @@ use crate::{HostFunctions, WasmCapabilities, WasmError, WasmModule, WasmResult};
 use plexspaces_core::ChannelService;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
+#[cfg(feature = "component-model")]
+use tokio::sync::Semaphore;
 use wasmtime::{Caller, Engine, Instance, Linker, Store, StoreLimits, StoreLimitsBuilder};
+use hex;
 
 #[cfg(feature = "component-model")]
 use wasmtime::component::Linker as ComponentLinker;
@@ -114,6 +117,30 @@ pub struct WasmInstance {
     /// Stored so we can replay it during re-instantiation to preserve state.
     #[cfg(feature = "component-model")]
     original_init_config: Option<String>,
+
+    /// Re-instantiation lock (semaphore with permit count 1) to serialize re-instantiations
+    /// 
+    /// ## Purpose
+    /// Prevents concurrent re-instantiations for the same actor instance.
+    /// Only one re-instantiation can proceed at a time per actor.
+    /// 
+    /// ## Design
+    /// - Uses Semaphore(1) to ensure exclusive access during re-instantiation
+    /// - Combined with global_reinstantiation_semaphore (when set) keeps total concurrent
+    ///   instantiations under Wasmtime's memory-stripe limit. Both locks must be held when
+    ///   re-instantiating: per-actor lock serializes per actor, global semaphore caps total.
+    ///   re-instantiations under Wasmtime's memory-stripe limit (default 10).
+    /// 
+    /// ## Why Semaphore Instead of Mutex
+    /// - Semaphore allows us to track permit acquisition/release for observability
+    /// - Better for async operations where we need to drop the permit before async work
+    #[cfg(feature = "component-model")]
+    reinstantiation_lock: Option<Arc<Semaphore>>,
+
+    /// Global cap on concurrent re-instantiations across all actors (when pooling is enabled).
+    /// Acquired before create_fresh_simple_actor_state so we stay under Wasmtime's per-stripe limit.
+    #[cfg(feature = "component-model")]
+    global_reinstantiation_semaphore: Option<Arc<Semaphore>>,
 
     /// Module metadata
     module: WasmModule,
@@ -220,6 +247,7 @@ impl WasmInstance {
         journal_storage: Option<Arc<dyn plexspaces_core::JournalStorage>>,
         blob_service: Option<Arc<plexspaces_blob::BlobService>>,
         durability_enabled: bool,
+        global_reinstantiation_semaphore: Option<Arc<Semaphore>>,
     ) -> WasmResult<Self> {
         let start_time = std::time::Instant::now();
         metrics::counter!("plexspaces_wasm_instance_creation_attempts_total").increment(1);
@@ -576,6 +604,10 @@ impl WasmInstance {
                             durability_enabled,
                             #[cfg(feature = "component-model")]
                             original_init_config: None, // Will be set after init() succeeds
+                            #[cfg(feature = "component-model")]
+                            reinstantiation_lock: Some(Arc::new(Semaphore::new(1))),
+                            #[cfg(feature = "component-model")]
+                            global_reinstantiation_semaphore,
                             module,
                         };
                         
@@ -786,6 +818,10 @@ impl WasmInstance {
             durability_enabled,
             #[cfg(feature = "component-model")]
             original_init_config: None, // Traditional modules don't use init config
+            #[cfg(feature = "component-model")]
+            reinstantiation_lock: None, // Traditional modules don't need re-instantiation
+            #[cfg(feature = "component-model")]
+            global_reinstantiation_semaphore: None,
             module,
         })
     }
@@ -877,9 +913,20 @@ impl WasmInstance {
                                     let to_actor = to_actor.to_string();
                                     let message = message.to_string();
                                     
+                                    // Extract message_type from payload JSON if available, otherwise use "cast"
+                                    let message_type = if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&message) {
+                                        json_value.get("op")
+                                            .or_else(|| json_value.get("msg_type"))
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string())
+                                            .unwrap_or_else(|| "cast".to_string())
+                                    } else {
+                                        "cast".to_string()
+                                    };
+                                    
                                     // Spawn async task to send message (host function is sync)
                                     tokio::spawn(async move {
-                                        if let Err(e) = host_functions.send_message(&from_actor, &to_actor, &message).await {
+                                        if let Err(e) = host_functions.send_message(&from_actor, &to_actor, &message_type, &message).await {
                                             tracing::error!(
                                                 from = %from_actor,
                                                 to = %to_actor,
@@ -1204,7 +1251,7 @@ impl WasmInstance {
     /// - "call" → `handle_request()` (GenServer, expects response)
     /// - "cast" or "info" → `handle_event()` (GenEvent, no response)
     /// - Any → `handle_transition()` (GenFSM, returns new state)
-    /// - Fallback → `handle_message()` (generic, backward compatibility)
+    /// - Fallback → `handle_message()` (generic)
     pub async fn handle_message(
         &self,
         from: &str,
@@ -1581,8 +1628,8 @@ impl WasmInstance {
         )))?;
         // Use original init config if available, otherwise use empty string
         let init_config = self.original_init_config.as_deref().unwrap_or("");
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 actor_id = %self.actor_id,
                 config_len = init_config.len(),
                 has_original_config = self.original_init_config.is_some(),
@@ -1765,16 +1812,66 @@ impl WasmInstance {
                     metrics::counter!("plexspaces_wasm_component_message_success_total").increment(1);
                     let instance_ctx = store.data().instance_ctx.clone();
                     drop(state);
+                    
+                    // Acquire re-instantiation lock to serialize re-instantiations per actor
+                    let reinstantiation_lock = self.reinstantiation_lock.as_ref()
+                        .ok_or_else(|| WasmError::ActorFunctionError(
+                            "Re-instantiation lock not available".to_string()
+                        ))?;
+                    let _permit = reinstantiation_lock.acquire().await
+                        .map_err(|_e| {
+                            tracing::error!(
+                                actor_id = %self.actor_id,
+                                message_id = %message_id,
+                                "Failed to acquire re-instantiation lock (semaphore closed)"
+                            );
+                            WasmError::ActorFunctionError(
+                                "Failed to acquire re-instantiation lock: semaphore closed".to_string()
+                            )
+                        })?;
+                    let reinstantiation_start = std::time::Instant::now();
+                    metrics::counter!("plexspaces_wasm_reinstantiation_total",
+                        "actor_id" => self.actor_id.clone()
+                    ).increment(1);
+                    
+                    // Acquire global reinstantiation cap (if set) so we stay under Wasmtime's memory-stripe limit.
                     let component_state = self.component_state.as_ref().expect("component_state set");
-                    match Self::create_fresh_plexspaces_actor_state(self, &instance_ctx).await {
-                        Ok(new_state) => {
-                            let mut guard = component_state.lock().await;
-                            *guard = new_state;
-                        }
-                        Err(e) => {
-                            tracing::warn!(actor_id = %self.actor_id, error = %e, "PlexspacesActor re-instantiation after handle_event failed");
-                        }
+                    let new_state = {
+                        let _global_permit = if let Some(ref g) = self.global_reinstantiation_semaphore {
+                            Some(
+                                g.acquire()
+                                    .await
+                                    .map_err(|_| WasmError::ActorFunctionError("Global reinstantiation semaphore closed".to_string()))?,
+                            )
+                        } else {
+                            None
+                        };
+                        Self::create_fresh_plexspaces_actor_state(self, &instance_ctx).await
                     }
+                        .map_err(|e| {
+                            let error_msg = e.to_string();
+                            metrics::counter!("plexspaces_wasm_reinstantiation_errors_total",
+                                "actor_id" => self.actor_id.clone(),
+                                "error_type" => "instantiation_failed"
+                            ).increment(1);
+                            tracing::error!(
+                                actor_id = %self.actor_id,
+                                message_id = %message_id,
+                                error = %error_msg,
+                                "PlexspacesActor re-instantiation after handle_event failed"
+                            );
+                            WasmError::ActorFunctionError(format!(
+                                "Failed to re-instantiate WASM actor after handle_event(): {}",
+                                error_msg
+                            ))
+                        })?;
+                    let mut guard = component_state.lock().await;
+                    *guard = new_state;
+                    
+                    let reinstantiation_duration = reinstantiation_start.elapsed();
+                    metrics::histogram!("plexspaces_wasm_reinstantiation_duration_seconds",
+                        "actor_id" => self.actor_id.clone()
+                    ).record(reinstantiation_duration.as_secs_f64());
                     if tracing::enabled!(tracing::Level::TRACE) {
                         tracing::trace!(
                             actor_id = %self.actor_id,
@@ -1811,20 +1908,71 @@ impl WasmInstance {
                         metrics::counter!("plexspaces_wasm_component_message_success_total").increment(1);
                         let instance_ctx = store.data().instance_ctx.clone();
                         drop(state);
+                        
+                        // Acquire re-instantiation lock to serialize re-instantiations per actor
+                        let reinstantiation_lock = self.reinstantiation_lock.as_ref()
+                            .ok_or_else(|| WasmError::ActorFunctionError(
+                                "Re-instantiation lock not available".to_string()
+                            ))?;
+                        let _permit = reinstantiation_lock.acquire().await
+                            .map_err(|_e| {
+                                tracing::error!(
+                                    actor_id = %self.actor_id,
+                                    message_id = %message_id,
+                                    "Failed to acquire re-instantiation lock (semaphore closed)"
+                                );
+                                WasmError::ActorFunctionError(
+                                    "Failed to acquire re-instantiation lock: semaphore closed".to_string()
+                                )
+                            })?;
+                        let reinstantiation_start = std::time::Instant::now();
+                        metrics::counter!("plexspaces_wasm_reinstantiation_total",
+                            "actor_id" => self.actor_id.clone()
+                        ).increment(1);
+                        
+                        // Acquire global reinstantiation cap (if set) so we stay under Wasmtime's memory-stripe limit.
                         let component_state = self.component_state.as_ref().expect("component_state set");
-                        match Self::create_fresh_plexspaces_actor_state(self, &instance_ctx).await {
-                            Ok(new_state) => {
-                                let mut guard = component_state.lock().await;
-                                *guard = new_state;
-                            }
-                            Err(e) => {
-                                tracing::warn!(actor_id = %self.actor_id, error = %e, "PlexspacesActor re-instantiation after handle_message failed");
-                            }
+                        let new_state = {
+                            let _global_permit = if let Some(ref g) = self.global_reinstantiation_semaphore {
+                                Some(
+                                    g.acquire()
+                                        .await
+                                        .map_err(|_| WasmError::ActorFunctionError("Global reinstantiation semaphore closed".to_string()))?,
+                                )
+                            } else {
+                                None
+                            };
+                            Self::create_fresh_plexspaces_actor_state(self, &instance_ctx).await
                         }
+                            .map_err(|e| {
+                                let error_msg = e.to_string();
+                                metrics::counter!("plexspaces_wasm_reinstantiation_errors_total",
+                                    "actor_id" => self.actor_id.clone(),
+                                    "error_type" => "instantiation_failed"
+                                ).increment(1);
+                                tracing::error!(
+                                    actor_id = %self.actor_id,
+                                    message_id = %message_id,
+                                    error = %error_msg,
+                                    "PlexspacesActor re-instantiation after handle_message failed"
+                                );
+                                WasmError::ActorFunctionError(format!(
+                                    "Failed to re-instantiate WASM actor after handle_message(): {}",
+                                    error_msg
+                                ))
+                            })?;
+                        let mut guard = component_state.lock().await;
+                        *guard = new_state;
+                        
+                        let reinstantiation_duration = reinstantiation_start.elapsed();
+                        metrics::histogram!("plexspaces_wasm_reinstantiation_duration_seconds",
+                            "actor_id" => self.actor_id.clone()
+                        ).record(reinstantiation_duration.as_secs_f64());
                         if tracing::enabled!(tracing::Level::TRACE) {
                             tracing::trace!(
                                 actor_id = %self.actor_id,
                                 message_id = %message_id,
+                                duration_ms = reinstantiation_duration.as_millis(),
                                 "handle_message_component END PlexspacesActor Ok"
                             );
                         }
@@ -1855,10 +2003,39 @@ impl WasmInstance {
                 // Convert payload to JSON string (it should already be JSON)
                 let payload_json = String::from_utf8_lossy(&payload).to_string();
                 
+                // Log payload JSON for debugging JSON parsing errors (always log on error, debug otherwise)
+                tracing::debug!(
+                    actor_id = %self.actor_id,
+                    message_id = %message_id,
+                    from_actor = %from_string,
+                    msg_type = %message_type_string,
+                    payload_json = %payload_json,
+                    payload_len = payload.len(),
+                    payload_hex = %hex::encode(&payload[..payload.len().min(200)]),
+                    "SimpleActor handle() call - payload JSON"
+                );
+                
+                // Validate JSON before calling WASM handler
+                if let Err(e) = serde_json::from_str::<serde_json::Value>(&payload_json) {
+                    tracing::error!(
+                        actor_id = %self.actor_id,
+                        message_id = %message_id,
+                        from_actor = %from_string,
+                        msg_type = %message_type_string,
+                        payload_json = %payload_json,
+                        payload_len = payload.len(),
+                        payload_hex = %hex::encode(&payload[..payload.len().min(200)]),
+                        error = %e,
+                        "Invalid JSON payload before calling WASM handle()"
+                    );
+                    return Err(WasmError::ActorFunctionError(format!(
+                        "Invalid JSON payload: {}",
+                        e
+                    )));
+                }
                 let result = simple_bindings.plexspaces_simple_actor_actor()
                     .call_handle(&mut *store, &from_string, &message_type_string, &payload_json)
                     .await;
-                
                 // Process the result first (before re-instantiation)
                 // handle() returns a plain string (JSON-serialized result)
                 // Errors are encoded in the JSON payload (e.g., {"error": "message"})
@@ -1884,6 +2061,8 @@ impl WasmInstance {
                             msg_type = %message_type_string,
                             invocation = %invocation_label,
                             error_first_line = %error_first_line,
+                            payload_json = %payload_json,
+                            payload_len = payload.len(),
                             "Simple actor handle() call failed"
                         );
                         if tracing::enabled!(tracing::Level::TRACE) {
@@ -1903,106 +2082,191 @@ impl WasmInstance {
                     }
                 };
                 
+                // Check if we have an error before proceeding to re-instantiation
+                // If error, convert String error to Vec<u8> error response and return early
+                if let Err(ref e) = processed_result {
+                    tracing::error!(
+                        actor_id = %self.actor_id,
+                        message_id = %message_id,
+                        error = %e,
+                        "❌ SimpleActor handle() failed - NOT proceeding to re-instantiation"
+                    );
+                    // Convert error to JSON error response format
+                    let error_json = serde_json::json!({
+                        "status": "error",
+                        "error": e.to_string()
+                    });
+                    return Ok(serde_json::to_string(&error_json)
+                        .unwrap_or_else(|_| format!(r#"{{"status":"error","error":"{}"}}"#, e))
+                        .into_bytes());
+                }
+                
+                // CRITICAL: Capture instance_ctx and saved_state (get_state) WHILE we hold the lock,
+                // then drop the lock BEFORE acquiring reinstantiation_lock. This avoids deadlock:
+                // we never re-acquire component_state lock in this path until after create_fresh.
+                let instance_ctx = store.data().instance_ctx.clone();
+                let saved_state = {
+                    if let ComponentBindings::SimpleActor(ref old_simple) = bindings {
+                        match old_simple.plexspaces_simple_actor_actor()
+                            .call_get_state(&mut *store)
+                            .await
+                        {
+                            Ok(state_json) => {
+                                if tracing::enabled!(tracing::Level::TRACE) {
+                                    tracing::trace!(
+                                        actor_id = %self.actor_id,
+                                        message_id = %message_id,
+                                        state_len = state_json.len(),
+                                        "Captured actor state before re-instantiation (while holding lock)"
+                                    );
+                                }
+                                Some(state_json)
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    actor_id = %self.actor_id,
+                                    message_id = %message_id,
+                                    from_actor = %from_string,
+                                    msg_type = %message_type_string,
+                                    error = %e,
+                                    "Failed to capture state before re-instantiation; state will be lost"
+                                );
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                };
+                drop(state);
                 // Re-instantiate after handle() to avoid re-entrancy trap (wasmtime component model).
                 // Preserve state across re-instantiation via get_state/set_state cycle:
-                //   1. Call get_state() on the OLD instance to capture current state
+                //   1. get_state() already captured above while holding lock
                 //   2. Create fresh instance (new Store + component + init())
-                //   3. Call set_state() on the NEW instance to restore state
-
-                // Step 1: Capture state from the old instance before dropping it
-                let saved_state = match simple_bindings.plexspaces_simple_actor_actor()
-                    .call_get_state(&mut *store)
-                    .await
-                {
-                    Ok(state_json) => {
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!(
-                                actor_id = %self.actor_id,
-                                message_id = %message_id,
-                                state_len = state_json.len(),
-                                "Captured actor state before re-instantiation"
-                            );
-                        }
-                        Some(state_json)
-                    }
-                    Err(e) => {
+                //   3. Call set_state() on the NEW instance to restore state (after re-acquiring lock once)
+                //
+                // CRITICAL: Use per-actor re-instantiation lock to serialize re-instantiations.
+                let reinstantiation_lock = self.reinstantiation_lock.as_ref()
+                    .ok_or_else(|| {
+                        tracing::error!(
+                            actor_id = %self.actor_id,
+                            message_id = %message_id,
+                            "Re-instantiation lock not available (None)"
+                        );
+                        WasmError::ActorFunctionError(
+                            "Re-instantiation lock not available".to_string()
+                        )
+                    })?;
+                let _permit = reinstantiation_lock.acquire().await
+                    .map_err(|_e| {
+                        tracing::error!(
+                            actor_id = %self.actor_id,
+                            message_id = %message_id,
+                            "Failed to acquire re-instantiation lock (semaphore closed)"
+                        );
+                        WasmError::ActorFunctionError(
+                            "Failed to acquire re-instantiation lock: semaphore closed".to_string()
+                        )
+                    })?;
+                let reinstantiation_start = std::time::Instant::now();
+                metrics::counter!("plexspaces_wasm_reinstantiation_total",
+                    "actor_id" => self.actor_id.clone()
+                ).increment(1);
+                
+                // Step 2: Create fresh instance (saved_state and instance_ctx were captured above while holding lock).
+                // No component_state lock held here - avoids deadlock.
+                tracing::info!(
+                    actor_id = %self.actor_id,
+                    message_id = %message_id,
+                    saved_state_len = saved_state.as_ref().map(|s| s.len()).unwrap_or(0),
+                    "SimpleActor reinstantiation: creating fresh instance (state already captured)"
+                );
+                // Acquire global reinstantiation cap (if set) so we stay under Wasmtime's memory-stripe limit.
+                // CRITICAL: Both per-actor lock (already held above) AND global semaphore must be held.
+                // Per-actor lock serializes re-instantiations per actor; global semaphore caps total concurrent.
+                let new_state = {
+                    let _global_permit = if let Some(ref g) = self.global_reinstantiation_semaphore {
+                        Some(
+                            g.acquire()
+                                .await
+                                .map_err(|_| WasmError::ActorFunctionError(
+                                    format!(
+                                        "Concurrent instantiation limit reached during re-instantiation. \
+                                        Reduce load or increase WasmConfig.max_concurrent_instantiations. \
+                                        Global reinstantiation semaphore closed (available_permits={}).",
+                                        g.available_permits()
+                                    )
+                                ))?,
+                        )
+                    } else {
+                        None
+                    };
+                    Self::create_fresh_simple_actor_state(self, &instance_ctx).await
+                }
+                    .map_err(|e| {
+                        let error_msg = e.to_string();
+                        metrics::counter!("plexspaces_wasm_reinstantiation_errors_total",
+                            "actor_id" => self.actor_id.clone(),
+                            "error_type" => "instantiation_failed"
+                        ).increment(1);
                         tracing::error!(
                             actor_id = %self.actor_id,
                             message_id = %message_id,
                             from_actor = %from_string,
                             msg_type = %message_type_string,
-                            error = %e,
-                            "Failed to capture state before re-instantiation; state will be lost"
+                            error = %error_msg,
+                            "SimpleActor re-instantiation after handle() failed"
                         );
-                        None
-                    }
-                };
-
-                // Step 2: Create fresh instance
-                let instance_ctx = store.data().instance_ctx.clone();
-                drop(state);
+                        WasmError::ActorFunctionError(format!(
+                            "Failed to re-instantiate WASM actor after handle(): {}",
+                            error_msg
+                        ))
+                    })?;
+                // Step 3: Restore state on the new instance (acquire lock once to replace and set_state)
                 let component_state = self.component_state.as_ref().expect("component_state set");
-                match Self::create_fresh_simple_actor_state(self, &instance_ctx).await {
-                    Ok(new_state) => {
-                        // Step 3: Restore state on the new instance
-                        let mut guard = component_state.lock().await;
-                        *guard = new_state;
-
-                        if let Some(ref state_json) = saved_state {
-                            let ComponentState { store: new_store, bindings: new_bindings } = &mut *guard;
-                            if let ComponentBindings::SimpleActor(ref new_simple) = new_bindings {
-                                match new_simple.plexspaces_simple_actor_actor()
-                                    .call_set_state(new_store, state_json)
-                                    .await
-                                {
-                                    Ok(result) if result.is_empty() => {
-                                        if tracing::enabled!(tracing::Level::DEBUG) {
-                                            tracing::debug!(
-                                                actor_id = %self.actor_id,
-                                                message_id = %message_id,
-                                                "State restored on new instance after re-instantiation"
-                                            );
-                                        }
-                                    }
-                                    Ok(result) => {
-                                        tracing::warn!(
-                                            actor_id = %self.actor_id,
-                                            message_id = %message_id,
-                                            error = %result,
-                                            "set_state() returned error on new instance"
-                                        );
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            actor_id = %self.actor_id,
-                                            message_id = %message_id,
-                                            error = %e,
-                                            "set_state() call failed on new instance; state may be lost"
-                                        );
-                                    }
+                let mut guard = component_state.lock().await;
+                *guard = new_state;
+                if let Some(ref state_json) = saved_state {
+                    let ComponentState { store: new_store, bindings: new_bindings } = &mut *guard;
+                    if let ComponentBindings::SimpleActor(ref new_simple) = new_bindings {
+                        match new_simple.plexspaces_simple_actor_actor()
+                            .call_set_state(new_store, state_json)
+                            .await
+                        {
+                            Ok(result) if result.is_empty() => {
+                                if tracing::enabled!(tracing::Level::TRACE) {
+                                    tracing::trace!(
+                                        actor_id = %self.actor_id,
+                                        message_id = %message_id,
+                                        "State restored on new instance after re-instantiation"
+                                    );
                                 }
                             }
+                            Ok(result) => {
+                                tracing::warn!(
+                                    actor_id = %self.actor_id,
+                                    message_id = %message_id,
+                                    error = %result,
+                                    "set_state() returned error on new instance"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    actor_id = %self.actor_id,
+                                    message_id = %message_id,
+                                    error = %e,
+                                    "set_state() call failed on new instance; state may be lost"
+                                );
+                            }
                         }
-
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!(
-                                actor_id = %self.actor_id,
-                                message_id = %message_id,
-                                state_preserved = saved_state.is_some(),
-                                "SimpleActor re-instantiation succeeded"
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            actor_id = %self.actor_id,
-                            error = %e,
-                            "SimpleActor re-instantiation after handle() failed; next call may trap"
-                        );
                     }
                 }
-                
-                // Now process the result (after re-instantiation)
+
+                // Record re-instantiation success metrics
+                let reinstantiation_duration = reinstantiation_start.elapsed();
+                metrics::histogram!("plexspaces_wasm_reinstantiation_duration_seconds",
+                    "actor_id" => self.actor_id.clone()
+                ).record(reinstantiation_duration.as_secs_f64());
                 // Result is already serialized JSON string from structured types
                 let final_result = processed_result?;
                 

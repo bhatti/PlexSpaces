@@ -6,6 +6,13 @@ PlexSpaces provides language-specific SDKs for building actors with minimal boil
 
 The SDK is a **thin decorator layer** over the core framework crates. Core functionality -- actor registry, message routing, supervision, and state management -- lives in the main crates (`crates/behavior`, `crates/services`, `crates/core`). The SDK simplifies the developer experience by removing boilerplate: decorators like `@actor` and `@handler` generate the WIT interface glue, state serialization, and message dispatch that you would otherwise write by hand. This means the SDK adds no new runtime capabilities; it is purely a developer ergonomics layer that compiles down to the same WIT exports the framework already expects.
 
+**Design Principles**:
+- **Core Functionality**: All business logic and framework capabilities are in main crates
+- **SDK as Decorator**: SDK provides annotations and helpers to reduce boilerplate
+- **WASM Support**: SDK provides WASM wrappers for integration without RPC
+- **gRPC APIs**: Can be built separately for remote access
+- **No Duplication**: SDK doesn't reimplement core functionality, only simplifies usage
+
 ## Available SDKs
 
 | Language | Status | Location | Build Target |
@@ -75,20 +82,36 @@ curl -X POST http://localhost:8094/api/v1/deploy \
 
 ### Actor ID Format
 
-All WASM actors use the `name:namespace@node_id` format for actor identification. The namespace component is **required** for WASM deployment -- it determines where the actor is registered and how it is addressed by other actors.
+All actors use the standardized format: `{id}//{actor_type}::{namespace}@{node_id}`
 
-| Component | Required | Description | Example |
-|-----------|----------|-------------|---------|
-| `name` | Yes | Actor instance name | `account-alice` |
-| `namespace` | Yes (WASM) | Deployment namespace | `default`, `banking` |
-| `node_id` | Optional | Target node (for remote addressing) | `node-abc123` |
+**Components**:
+- `id`: Base actor identifier (can be ULID, client-provided, or empty)
+- `actor_type`: Actor type from proto (required, e.g., "read-state-tracker", "GenServer")
+- `namespace`: Optional namespace for multi-tenancy (required for WASM deployment)
+- `node_id`: Node identifier (required)
 
-**Examples:**
-- `account-alice:default` -- actor "account-alice" in the "default" namespace
-- `worker-1:ml-training@node-abc123` -- actor "worker-1" in the "ml-training" namespace on a specific node
-- When calling `host.self_id()`, the returned ID includes the namespace
+**Delimiters**:
+- `//`: Separates base ID from actor_type
+- `::`: Separates actor_type from namespace
+- `@`: Separates namespace from node_id
 
-When deploying via the HTTP API, the namespace is specified in the deploy request (`-F "namespace=default"`). When sending messages between actors, use the full `name:namespace` format in the `to` field.
+**Examples**:
+- `user-123//read-state-tracker::orbit-read-state-ts@node-1` (full format)
+- `//read-state-tracker::orbit-read-state-ts@node-1` (no base ID, ULID generated)
+- `account-alice::default@node-abc123` (legacy format, backward compatible)
+
+**Factory Methods** (Rust SDK):
+```rust
+use plexspaces_core::actor_id::{build_actor_id, parse_actor_id};
+
+// Build actor ID
+let actor_id = build_actor_id("user-123", "read-state-tracker", Some("orbit-read-state-ts"), "node-1");
+
+// Parse actor ID
+let parsed = parse_actor_id(&actor_id)?;
+```
+
+When deploying via the HTTP API, the namespace is specified in the deploy request (`-F "namespace=default"`). When sending messages between actors, use the full actor ID format.
 
 ### API Reference
 
@@ -675,6 +698,8 @@ The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use
 | `spawn(ctx, sl, id, ns, actor)` | Spawn actor using declared facets from annotation |
 | `spawn_with_facets(ctx, sl, id, ns, actor, facets)` | Spawn actor with explicit facets |
 | `spawn_with_storage(ctx, sl, id, ns, actor, storage)` | Spawn durable actor with storage backend |
+
+**Note**: For examples and production code, prefer using `Node` for spawning actors instead of `ActorFactory` directly. The SDK helpers (`spawn`, `spawn_with_facets`) internally use `Node` which provides better integration and observability.
 | `create_facets(&["timer", "durability"], &config)` | Create facet instances from names (convenience helper) |
 
 ### Message Creation Helpers

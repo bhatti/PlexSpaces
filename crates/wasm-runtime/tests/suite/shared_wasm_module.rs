@@ -16,26 +16,21 @@ use tokio::time::timeout;
 /// Get the calculator WASM file path
 /// Tries multiple locations:
 /// 1. tests/webapps/calculator/app.wasm (preferred, auto-deploy convention)
-/// 2. tests/fixtures/calculator_actor.wasm (legacy, for backwards compatibility)
-/// 3. ../../examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm (fallback)
+/// 2. tests/fixtures/calculator_actor.wasm
+/// 3. examples path (fallback)
 pub fn get_calculator_wasm_path() -> PathBuf {
-    // First try: webapps directory (auto-deploy convention)
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests/webapps/calculator/app.wasm");
     if path.exists() {
         return path;
     }
-    
-    // Second try: test fixtures (legacy)
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests/fixtures/calculator_actor.wasm");
     if path.exists() {
         return path;
     }
-    
-    // Third try: examples directory (fallback)
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.pop(); // crates/wasm-runtime
+    path.pop();
     path.pop(); // crates
     path.push("examples");
     path.push("simple");

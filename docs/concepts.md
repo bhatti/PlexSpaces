@@ -210,7 +210,7 @@ let actor_ref = spawn_with_facets(
 ).await?;
 ```
 
-**Note**: For examples and user code, use SDK patterns (`spawn`, `spawn_with_facets`, `spawn_with_storage`). `ActorFactory` is for framework code only (e.g., `ActorServiceImpl` internal implementation).
+**Note**: For examples and user code, use Node and SDK patterns (`spawn`, `spawn_with_facets`, `spawn_with_storage`, `call_message`, `cast_message`). The framework uses ActorFactory internally for gRPC spawn.
 
 ## TupleSpace
 

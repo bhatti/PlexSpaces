@@ -161,7 +161,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl MessageSender for MockMessageSender {
-            async fn send_message(&self, _from: &str, _to: &str, _message: &str) -> Result<(), String> {
+            async fn send_message(&self, _from: &str, _to: &str, _message_type: &str, _message: &str) -> Result<(), String> {
                 Ok(())
             }
 
@@ -278,7 +278,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl MessageSender for TimeoutMessageSender {
-            async fn send_message(&self, _from: &str, _to: &str, _message: &str) -> Result<(), String> {
+            async fn send_message(&self, _from: &str, _to: &str, _message_type: &str, _message: &str) -> Result<(), String> {
                 Ok(())
             }
 
@@ -513,7 +513,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl MessageSender for MockSpawnSender {
-            async fn send_message(&self, _from: &str, _to: &str, _message: &str) -> Result<(), String> {
+            async fn send_message(&self, _from: &str, _to: &str, _message_type: &str, _message: &str) -> Result<(), String> {
                 Ok(())
             }
 
@@ -639,7 +639,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl MessageSender for MockStopSender {
-            async fn send_message(&self, _from: &str, _to: &str, _message: &str) -> Result<(), String> {
+            async fn send_message(&self, _from: &str, _to: &str, _message_type: &str, _message: &str) -> Result<(), String> {
                 Ok(())
             }
 

@@ -333,7 +333,7 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
     let service_locator = node.service_locator();
     
     let actor_service = Arc::new(ActorServiceImpl::new(
-        node.service_locator_impl(),
+        node.service_locator(),
         node.id().as_str().to_string(),
     ));
     
@@ -369,7 +369,7 @@ async fn test_grpc_service_accepts_requests_when_serving() {
     let _service_locator = node.service_locator();
     
     let actor_service = Arc::new(ActorServiceImpl::new(
-        node.service_locator_impl(),
+        node.service_locator(),
         node.id().as_str().to_string(),
     ));
     

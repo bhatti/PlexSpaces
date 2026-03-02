@@ -204,6 +204,17 @@ option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
 // prost_types doesn't include it.
 message Empty {}
 
+// Activation strategy for virtual actors (single definition used by actor_runtime and node.release).
+//
+// Used by VirtualActorConfig (actor_runtime), DefaultVirtualActorConfig (release), and Rust
+// VirtualActorFacet. Define here so it is not duplicated across protos or crates.
+enum ActivationStrategy {
+  ACTIVATION_STRATEGY_UNSPECIFIED = 0;  // Treated as LAZY
+  ACTIVATION_STRATEGY_LAZY = 1;         // Activate on first message (default)
+  ACTIVATION_STRATEGY_EAGER = 2;        // Activate immediately on creation
+  ACTIVATION_STRATEGY_PREWARM = 3;      // Pre-activate based on schedule
+}
+
 // Standard metadata for resources
 message Metadata {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {

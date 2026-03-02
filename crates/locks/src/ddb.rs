@@ -958,7 +958,8 @@ impl LockManager for DynamoDBLockManager {
                     holder_id = %options.holder_id,
                     new_version = %new_version,
                     duration_ms = duration.as_millis(),
-                    "Lock renewed successfully"
+                    implementation = "DynamoDBLockManager",
+                    "🔓 DynamoDBLockManager::renew_lock - lock renewed"
                 );
 
                 Ok(renewed_lock)

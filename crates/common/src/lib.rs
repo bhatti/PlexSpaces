@@ -24,6 +24,7 @@
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
+pub mod activation_strategy;
 pub mod request_context;
 pub mod aws_config;
 pub mod security_validator;
@@ -31,10 +32,12 @@ pub mod release_config;
 pub mod release_parser;
 pub mod config_manager;
 pub mod keyvalue_store;
+pub mod virtual_actor_config;
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
 
+pub use activation_strategy::{ActivationStrategy, from_config_str, to_config_str};
 pub use request_context::{RequestContext, RequestContextError, AUTH_REQUIRED_HINT};
 pub use aws_config::{AWSConfig, DynamoDBConfig, SQSConfig, S3Config, DLQConfig};
 pub use security_validator::{validate_security_config, SecurityValidationError};
@@ -44,4 +47,9 @@ pub use config_manager::{
     EnvConfig, initialize, get_env, get_env_or, get_env_bool, get_env_u32, get_env_u64,
 };
 pub use keyvalue_store::{KeyValueStore, KeyValueStoreError, KeyValueStoreResult};
+pub use virtual_actor_config::{
+    get_idle_timeout, get_max_pool_per_actor_type, get_activation_strategy,
+    DEFAULT_IDLE_TIMEOUT_SECONDS, DEFAULT_MAX_POOL_PER_ACTOR_TYPE, DEFAULT_ACTIVATION_STRATEGY,
+    duration_to_proto, format_duration,
+};
 

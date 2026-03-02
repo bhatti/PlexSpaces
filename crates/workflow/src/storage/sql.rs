@@ -23,11 +23,9 @@
 //! The actual workflow state is in the journal (via DurabilityFacet).
 //!
 //! ## Design
-//! - Minimal implementation to pass tests (TDD - GREEN)
-//! - Supports both SQLite (testing/embedded) and PostgreSQL (production)
-//! - sqlx for type-safe queries
-//! - Migrations via sqlx::migrate!
-//! - Database-agnostic SQL queries where possible
+//! - SQLite for testing/embedded use; PostgreSQL for production.
+//! - Schema: file/Postgres use unified `db/migrations` at init; `:memory:` uses inline schema in this module.
+//! - Database-agnostic SQL where possible; sqlx for type-safe queries.
 
 use serde_json::Value;
 use sqlx::{postgres::PgPool, sqlite::{SqlitePool, SqlitePoolOptions}, Row};
@@ -66,6 +64,82 @@ enum SqlPool {
 pub struct WorkflowStorage {
     pool: SqlPool,
     db_type: DatabaseType,
+}
+
+/// Create workflow tables for :memory: SQLite. File-based uses unified db/migrations at init.
+async fn run_workflow_memory_schema_sqlite(pool: &SqlitePool) -> Result<(), WorkflowError> {
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS workflow_definitions (
+            id TEXT NOT NULL, version TEXT NOT NULL, name TEXT NOT NULL, definition_proto BLOB NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')), updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            PRIMARY KEY (id, version))"#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_workflow_definitions_name ON workflow_definitions(name)")
+        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_workflow_definitions_created ON workflow_definitions(created_at DESC)")
+        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS workflow_executions (
+            execution_id TEXT PRIMARY KEY, definition_id TEXT NOT NULL, definition_version TEXT NOT NULL, status TEXT NOT NULL,
+            current_step_id TEXT, input_json TEXT, output_json TEXT, error TEXT, node_id TEXT, version INTEGER NOT NULL DEFAULT 1,
+            last_heartbeat INTEGER, metadata_json TEXT, created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            started_at INTEGER, completed_at INTEGER, updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            FOREIGN KEY (definition_id, definition_version) REFERENCES workflow_definitions(id, version))"#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    for sql in [
+        "CREATE INDEX IF NOT EXISTS idx_workflow_executions_status ON workflow_executions(status)",
+        "CREATE INDEX IF NOT EXISTS idx_workflow_executions_definition ON workflow_executions(definition_id)",
+        "CREATE INDEX IF NOT EXISTS idx_workflow_executions_node ON workflow_executions(node_id)",
+        "CREATE INDEX IF NOT EXISTS idx_workflow_executions_created ON workflow_executions(created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_workflow_executions_heartbeat ON workflow_executions(status, last_heartbeat) WHERE status IN ('RUNNING', 'PENDING')",
+        "CREATE INDEX IF NOT EXISTS idx_workflow_executions_version ON workflow_executions(execution_id, version)",
+    ] {
+        sqlx::query(sql).execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    }
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS workflow_execution_labels (
+            execution_id TEXT NOT NULL, label_key TEXT NOT NULL, label_value TEXT NOT NULL,
+            PRIMARY KEY (execution_id, label_key), FOREIGN KEY (execution_id) REFERENCES workflow_executions(execution_id))"#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_workflow_execution_labels_key_value ON workflow_execution_labels(label_key, label_value)")
+        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS step_executions (
+            step_execution_id TEXT PRIMARY KEY, execution_id TEXT NOT NULL, step_id TEXT NOT NULL, status TEXT NOT NULL,
+            input_json TEXT, output_json TEXT, error TEXT, attempt INTEGER NOT NULL DEFAULT 1, metadata_json TEXT,
+            started_at INTEGER, completed_at INTEGER, FOREIGN KEY (execution_id) REFERENCES workflow_executions(execution_id))"#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_step_executions_execution ON step_executions(execution_id)")
+        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_step_executions_status ON step_executions(status)")
+        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_step_executions_started ON step_executions(started_at DESC)")
+        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS signals (
+            signal_id TEXT PRIMARY KEY NOT NULL, execution_id TEXT NOT NULL, signal_name TEXT NOT NULL, payload TEXT NOT NULL,
+            received_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')), FOREIGN KEY (execution_id) REFERENCES workflow_executions(execution_id))"#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_signals_execution_name ON signals(execution_id, signal_name, received_at)")
+        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_signals_execution ON signals(execution_id)")
+        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    Ok(())
 }
 
 impl WorkflowStorage {
@@ -151,13 +225,15 @@ impl WorkflowStorage {
             .await
             .map_err(|e| WorkflowError::Storage(format!("Failed to connect to SQLite (conn_str: {}): {}", conn_str, e)))?;
 
+        // For :memory: create schema inline; file-based uses unified db/migrations at init.
+        if conn_str.starts_with("sqlite::memory:") {
+            run_workflow_memory_schema_sqlite(&pool).await?;
+        }
+
         let storage = Self {
             pool: SqlPool::Sqlite(pool),
             db_type: DatabaseType::SQLite,
         };
-
-        // Run migrations
-        storage.run_migrations().await?;
 
         Ok(storage)
     }
@@ -179,41 +255,9 @@ impl WorkflowStorage {
             db_type: DatabaseType::PostgreSQL,
         };
 
-        // Run migrations
-        storage.run_migrations().await?;
+        // Schema is created by unified db/migrations at init. Assume it exists.
 
         Ok(storage)
-    }
-
-    /// Run database migrations
-    async fn run_migrations(&self) -> Result<(), WorkflowError> {
-        match &self.pool {
-            SqlPool::Sqlite(pool) => {
-                sqlx::migrate!("./migrations/sqlite")
-                    .run(pool)
-                    .await
-                    .map_err(|e| WorkflowError::Storage(format!("SQLite migration failed: {}", e)))?;
-                
-                tracing::info!(
-                    tables = "workflows, workflow_steps, workflow_events",
-                    backend = "SQLite",
-                    "Workflow storage initialized"
-                );
-            }
-            SqlPool::Postgres(pool) => {
-                sqlx::migrate!("./migrations/postgres")
-                    .run(pool)
-                    .await
-                    .map_err(|e| WorkflowError::Storage(format!("PostgreSQL migration failed: {}", e)))?;
-                
-                tracing::info!(
-                    tables = "workflows, workflow_steps, workflow_events",
-                    backend = "PostgreSQL",
-                    "Workflow storage initialized"
-                );
-            }
-        }
-        Ok(())
     }
 
     /// Get database type

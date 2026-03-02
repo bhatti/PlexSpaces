@@ -150,6 +150,9 @@ pub struct SqlStorage {
     /// Database type (PostgreSQL or SQLite)
     db_type: SqlDatabaseType,
 
+    /// When true, schema was created inline (:memory:); when false, schema from unified db/migrations.
+    is_memory: bool,
+
     /// Operation statistics (for metrics)
     stats: Arc<std::sync::Mutex<SqlOperationStats>>,
 }
@@ -192,17 +195,19 @@ impl SqlStorage {
             pool: SqlPool::Postgres(pg_pool),
             table_name,
             db_type: SqlDatabaseType::PostgreSQL,
+            is_memory: false,
             stats: Arc::new(std::sync::Mutex::new(SqlOperationStats::default())),
         };
 
-        storage.initialize_schema().await?;
+        // Schema is created by unified db/migrations at init. Assume it exists.
         Ok(storage)
     }
 
     /// Create new SQLite storage
     pub async fn new_sqlite(config: SqliteConfig) -> Result<Self, TupleSpaceError> {
         // SQLite connection string format: sqlite://path/to/db.sqlite or sqlite::memory:
-        let connection_string = if config.database_path == ":memory:" {
+        let is_memory = config.database_path == ":memory:";
+        let connection_string = if is_memory {
             "sqlite::memory:".to_string()
         } else {
             format!("sqlite:{}", config.database_path)
@@ -216,50 +221,62 @@ impl SqlStorage {
                 TupleSpaceError::ConnectionError(format!("SQLite connection failed: {}", e))
             })?;
 
+        // For :memory: create schema inline; file-based uses unified db/migrations at init.
+        if is_memory {
+            Self::run_tuplespace_memory_schema_sqlite(&sqlite_pool).await?;
+        }
+
         let storage = SqlStorage {
             pool: SqlPool::Sqlite(sqlite_pool),
             table_name: "tuples".to_string(),
             db_type: SqlDatabaseType::SQLite,
+            is_memory,
             stats: Arc::new(std::sync::Mutex::new(SqlOperationStats::default())),
         };
 
-        storage.initialize_schema().await?;
         Ok(storage)
     }
 
-    /// Initialize database schema using migrations
-    async fn initialize_schema(&self) -> Result<(), TupleSpaceError> {
-        match &self.pool {
-            SqlPool::Postgres(pool) => {
-                sqlx::migrate!("./migrations/postgres")
-                    .run(pool)
-                    .await
-                    .map_err(|e| {
-                        TupleSpaceError::BackendError(format!("PostgreSQL migration failed: {}", e))
-                    })?;
-                
-                tracing::info!(
-                    table = %self.table_name,
-                    backend = "PostgreSQL",
-                    "TupleSpace storage initialized"
-                );
-            }
-            SqlPool::Sqlite(pool) => {
-                sqlx::migrate!("./migrations/sqlite")
-                    .run(pool)
-                    .await
-                    .map_err(|e| {
-                        TupleSpaceError::BackendError(format!("SQLite migration failed: {}", e))
-                    })?;
-                
-                tracing::info!(
-                    table = %self.table_name,
-                    backend = "SQLite",
-                    "TupleSpace storage initialized"
-                );
-            }
-        }
-
+    /// Create schema for :memory: SQLite (tuples + barriers + watchers).
+    async fn run_tuplespace_memory_schema_sqlite(pool: &SqlitePool) -> Result<(), TupleSpaceError> {
+        sqlx::query(
+            r#"CREATE TABLE IF NOT EXISTS tuples (
+                id TEXT PRIMARY KEY, tuple_data TEXT NOT NULL, created_at TEXT NOT NULL,
+                expires_at TEXT, renewable INTEGER NOT NULL DEFAULT 0)"#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_expires_at ON tuples(expires_at) WHERE expires_at IS NOT NULL")
+            .execute(pool).await.map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
+        sqlx::query(
+            r#"CREATE TABLE IF NOT EXISTS barriers (
+                barrier_id TEXT PRIMARY KEY, space_id TEXT NOT NULL, expected_count INTEGER NOT NULL,
+                current_count INTEGER NOT NULL DEFAULT 0, participants_json TEXT, metadata_json TEXT,
+                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')), completed_at INTEGER, expires_at INTEGER)"#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_barriers_space ON barriers(space_id)")
+            .execute(pool).await.map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_barriers_status ON barriers(completed_at) WHERE completed_at IS NULL")
+            .execute(pool).await.map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
+        sqlx::query(
+            r#"CREATE TABLE IF NOT EXISTS watchers (
+                watcher_id TEXT PRIMARY KEY, space_id TEXT NOT NULL, actor_id TEXT NOT NULL, pattern_hash TEXT,
+                event_types TEXT NOT NULL, metadata_json TEXT, created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+                last_notified_at INTEGER, notification_count INTEGER NOT NULL DEFAULT 0, active INTEGER NOT NULL DEFAULT 1)"#,
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_watchers_space ON watchers(space_id, active) WHERE active = 1")
+            .execute(pool).await.map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_watchers_pattern ON watchers(space_id, pattern_hash, active) WHERE active = 1")
+            .execute(pool).await.map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_watchers_actor ON watchers(actor_id, active) WHERE active = 1")
+            .execute(pool).await.map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
         Ok(())
     }
 

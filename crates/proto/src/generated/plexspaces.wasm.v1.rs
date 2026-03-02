@@ -270,6 +270,16 @@ pub struct WasmConfig {
     /// is active for HTTP/deploy.
     #[prost(bool, tag="7")]
     pub use_instance_pool: bool,
+    /// Maximum concurrent instantiations (initial + re-instantiation) when pooling is enabled.
+    ///
+    /// Limits total concurrent Wasmtime instantiations to avoid hitting Wasmtime's memory-stripe
+    /// limit (default 10). Per-actor re-instantiation lock serializes per actor; this global cap
+    /// prevents N actors from re-instantiating at once. Default: 8 (stays under Wasmtime's limit
+    /// with headroom). Only used when enable_pooling is true.
+    ///
+    /// When 0 or not set, uses code default of 8.
+    #[prost(uint32, tag="8")]
+    pub max_concurrent_instantiations: u32,
 }
 /// Deploy WASM module request
 ///

@@ -77,6 +77,7 @@ pub async fn start(node_id: &str, listen_addr: &str, release_config: Option<&str
     info!("╔════════════════════════════════════════════════════════════════╗");
     info!("║     Starting PlexSpaces Node                                  ║");
     info!("╚════════════════════════════════════════════════════════════════╝");
+    info!("WASM: SimpleActor reinstantiation deadlock fix active (get_state before drop, no mid-path lock)");
     info!(node_id = %node_id, listen_addr = %listen_addr, "Node starting");
 
     // Create shutdown channel for fatal errors FIRST (before any initialization)

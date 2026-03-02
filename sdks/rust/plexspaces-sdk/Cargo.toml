@@ -19,6 +19,7 @@ plexspaces-facet = { path = "../../../crates/facet" }
 plexspaces-behavior = { path = "../../../crates/behavior" }
 plexspaces-journaling = { path = "../../../crates/journaling" }
 plexspaces-workflow = { path = "../../../crates/workflow" }
+plexspaces-common = { path = "../../../crates/common" }
 async-trait = "0.1"
 serde_json = "1.0"
 ulid = "1.1"

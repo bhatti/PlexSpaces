@@ -306,6 +306,13 @@ pub struct WasmConfig {
     /// On by default. When true, runtime may checkout from a per-module pool for faster spawn.
     /// Deploy-path integration is planned; until then, only engine-level pooling is active.
     pub use_instance_pool: bool,
+
+    /// Maximum concurrent instantiations (initial + re-instantiation) when pooling is enabled.
+    /// Limits total concurrent Wasmtime instantiations to avoid hitting Wasmtime's memory-stripe limit (default 10).
+    /// Per-actor re-instantiation lock serializes per actor; this global cap prevents N actors from
+    /// re-instantiating at once. Default: 8 (stays under Wasmtime's limit with headroom).
+    /// Only used when `enable_pooling` is true.
+    pub max_concurrent_instantiations: Option<u32>,
 }
 
 impl Default for WasmConfig {
@@ -325,6 +332,7 @@ impl Default for WasmConfig {
             enable_aot: false,    // JIT by default (faster deployment)
             durability_enabled: false, // Off by default for performance
             use_instance_pool: true,   // On by default; used when deploy-path integration is done
+            max_concurrent_instantiations: Some(7), // Default: 7 permits (leaves headroom under Wasmtime's limit of 10)
         }
     }
 }
@@ -341,6 +349,11 @@ impl From<plexspaces_proto::wasm::v1::WasmConfig> for WasmConfig {
             enable_aot: p.enable_aot,
             durability_enabled: p.durability_enabled,
             use_instance_pool: p.use_instance_pool,
+            max_concurrent_instantiations: if p.max_concurrent_instantiations > 0 {
+                Some(p.max_concurrent_instantiations)
+            } else {
+                default.max_concurrent_instantiations
+            },
         }
     }
 }

@@ -432,10 +432,41 @@ pub async fn spawn_with_facets<B>(
 where
     B: plexspaces_core::Actor + Send + 'static,
 {
+    let namespace_str = namespace.as_ref().to_string();
+    
+    // Phase 2.1: Register virtual actor type if virtual_actor facet is present
+    // This enables automatic activation of any actor ID matching the type pattern
+    // Uses centralized helper for consistent behavior across SDK, WASM, and app-config.toml
+    let has_virtual_actor_facet = facets.iter().any(|f| f.facet_type() == "virtual_actor");
+    if has_virtual_actor_facet {
+        // Get actor_type from behavior.behavior_type()
+        let behavior_type = behavior.behavior_type();
+        let actor_type = match behavior_type {
+            plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
+            plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
+            plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+            plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
+            plexspaces_core::BehaviorType::Custom(s) => s,
+        };
+        
+        // Use centralized helper for consistent registration
+        // Errors are logged but non-fatal (actor will still work, just no auto-activation)
+        let _ = plexspaces_core::register_virtual_actor_type_consistent(
+            &service_locator,
+            actor_type,
+            namespace_str.clone(),
+            Some(&facets),
+            None, // No proto facets for SDK
+            None, // config - can be provided later if needed
+            Some(ctx.tenant_id().to_string()), // tenant_id from context
+            None, // init_config_template - not used for SDK actors (only WASM actors)
+        ).await;
+    }
+    
     // Use ActorBuilder from main crate - core functionality stays in crates/actor
     let mut builder = ActorBuilder::new(Box::new(behavior))
         .with_id(actor_id.into())
-        .with_namespace(namespace.as_ref().to_string());
+        .with_namespace(namespace_str);
     for facet in facets {
         builder = builder.with_facet(facet);
     }
@@ -659,16 +690,20 @@ pub fn create_facets(
                 facets.push(Box::new(timer));
             }
             "virtual_actor" => {
-                // VirtualActorFacet with default config (lazy activation, 5m idle timeout)
+                // VirtualActorFacet with default config (uses constants from plexspaces-common)
+                // TODO: Use runtime config from ServiceLocator when available (Phase 1.4)
+                use plexspaces_common::virtual_actor_config::{DEFAULT_IDLE_TIMEOUT_SECONDS, DEFAULT_ACTIVATION_STRATEGY};
+                use plexspaces_common::to_config_str;
                 let facet_config = if config.get("virtual_actor").is_some() {
                     config["virtual_actor"].clone()
                 } else {
                     serde_json::json!({
-                        "idle_timeout": "5m",
-                        "activation_strategy": "lazy"
+                        "idle_timeout": format!("{}s", DEFAULT_IDLE_TIMEOUT_SECONDS),
+                        "activation_strategy": to_config_str(&DEFAULT_ACTIVATION_STRATEGY)
                     })
                 };
-                let virtual_facet = plexspaces_journaling::VirtualActorFacet::new(facet_config, 100);
+                use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
+                let virtual_facet = plexspaces_journaling::VirtualActorFacet::new(facet_config, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY);
                 facets.push(Box::new(virtual_facet));
             }
             "logging" => {
@@ -730,15 +765,20 @@ pub fn create_facets_with_storage(
                 facets.push(Box::new(timer));
             }
             "virtual_actor" => {
+                // VirtualActorFacet with default config (uses constants from plexspaces-common)
+                // TODO: Use runtime config from ServiceLocator when available (Phase 1.4)
+                use plexspaces_common::virtual_actor_config::{DEFAULT_IDLE_TIMEOUT_SECONDS, DEFAULT_ACTIVATION_STRATEGY};
+                use plexspaces_common::to_config_str;
                 let facet_config = if config.get("virtual_actor").is_some() {
                     config["virtual_actor"].clone()
                 } else {
                     serde_json::json!({
-                        "idle_timeout": "5m",
-                        "activation_strategy": "lazy"
+                        "idle_timeout": format!("{}s", DEFAULT_IDLE_TIMEOUT_SECONDS),
+                        "activation_strategy": to_config_str(&DEFAULT_ACTIVATION_STRATEGY)
                     })
                 };
-                let virtual_facet = plexspaces_journaling::VirtualActorFacet::new(facet_config, 100);
+                use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
+                let virtual_facet = plexspaces_journaling::VirtualActorFacet::new(facet_config, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY);
                 facets.push(Box::new(virtual_facet));
             }
             "durability" => {

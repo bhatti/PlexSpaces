@@ -1301,11 +1301,17 @@ Component-model WASM actors are **re-instantiated after each `handle()` call**. 
 4. `set_state()` restores the captured state on the new instance
 5. The new instance is ready for the next message
 
+**Concurrency Control:**
+- **Per-actor re-instantiation lock**: Each `WasmInstance` has a semaphore (permit count 1) that serializes re-instantiations per actor. Both must be held where applicable: drop any component_state lock before acquiring the per-actor lock to avoid deadlock (see `crates/wasm-runtime/tests/simple_actor_deadlock.rs`).
+- **Global instantiation cap**: When pooling is enabled, `WasmRuntime` holds a global semaphore used for **both** initial instantiation (virtual actor activation) and re-instantiation (after `handle()`). The permit count is set by **`WasmConfig.max_concurrent_instantiations`** (default: 7) to stay under Wasmtime’s per-memory-stripe limit (e.g. 10). This avoids the "maximum concurrent limit of 10 for memory stripe 0 reached" error. If that error appears, reduce load or increase `max_concurrent_instantiations` in config.
+- **Sequential processing per actor**: Only one re-instantiation at a time per actor; messages queue in the mailbox.
+- **Observability**: Metrics track re-instantiation duration, errors, and queue depth (see `plexspaces_wasm_reinstantiation_*` metrics).
+
 **State preservation:** The `get_state()`/`set_state()` cycle preserves all `state()` fields. Fields **not** declared with `state()` are lost across re-instantiation. For large derived data (e.g., data shards), regenerate from deterministic seeds rather than persisting.
 
 **When will this change?** The wasmtime project is working on `component-model-async` support which will allow re-entrant component calls. Once PlexSpaces upgrades to a wasmtime version with this feature, re-instantiation will no longer be needed and per-message performance will improve significantly.
 
-**Impact on performance:** Re-instantiation adds per-message overhead (typically 1-5ms for Python actors). For high-throughput single-actor scenarios, consider using traditional (non-component) WASM modules.
+**Impact on performance:** Re-instantiation adds per-message overhead (typically 1-5ms for Python actors). The per-actor lock ensures reliable operation without hitting Wasmtime's concurrent limits, even under high message rates. For high-throughput single-actor scenarios, consider using traditional (non-component) WASM modules.
 
 ### Metrics
 

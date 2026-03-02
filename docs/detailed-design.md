@@ -70,6 +70,44 @@ pub struct ActorRef {
 }
 ```
 
+### Actor ID Format
+
+Actor IDs follow a standardized format for consistency and proto-first design:
+
+**Format**: `{id}//{actor_type}::{namespace}@{node_id}`
+
+**Components**:
+- `id`: Base actor identifier (can be ULID, client-provided, or empty)
+- `actor_type`: Actor type from proto (required, e.g., "read-state-tracker", "GenServer")
+- `namespace`: Optional namespace for multi-tenancy
+- `node_id`: Node identifier (required)
+
+**Delimiters**:
+- `//`: Separates base ID from actor_type (allows client-provided IDs with slashes)
+- `::`: Separates actor_type from namespace (allows actor_type with colons)
+- `@`: Separates namespace from node_id (standard format)
+
+**Examples**:
+- `user-123//read-state-tracker::orbit-read-state-ts@node-1` (full format)
+- `//read-state-tracker::orbit-read-state-ts@node-1` (no base ID, ULID generated)
+- `//GenServer::default@node-1` (no namespace)
+- `counter@node-1` (legacy format, backward compatible)
+
+**Factory Methods**:
+```rust
+use plexspaces_core::actor_id::{build_actor_id, parse_actor_id};
+
+// Build actor ID
+let actor_id = build_actor_id("user-123", "read-state-tracker", Some("orbit-read-state-ts"), "node-1");
+
+// Parse actor ID
+let parsed = parse_actor_id(&actor_id)?;
+assert_eq!(parsed.id, "user-123");
+assert_eq!(parsed.actor_type, "read-state-tracker");
+assert_eq!(parsed.namespace, Some("orbit-read-state-ts".to_string()));
+assert_eq!(parsed.node_id, "node-1");
+```
+
 **Features**:
 - Cloneable and Send + Sync
 - Automatic routing (local vs remote)
@@ -118,7 +156,11 @@ All message routing logic is centralized in `crates/actor/src/routing.rs` to ens
 
 **Key Functions**:
 
-- **`extract_node_id(actor_id)`**: Parses actor ID to extract node_id (format: "actor_name@node_id")
+- **`build_actor_id(id, actor_type, namespace, node_id)`**: Factory method to build standardized actor IDs
+- **`parse_actor_id(actor_id)`**: Parses actor ID into components (id, actor_type, namespace, node_id)
+- **`extract_actor_type(actor_id)`**: Extracts actor_type from actor ID
+- **`extract_namespace(actor_id)`**: Extracts namespace from actor ID
+- **`extract_base_id(actor_id)`**: Extracts base ID from actor ID
 - **`is_actor_local(actor_id, service_locator)`**: Dynamically determines if actor is local by comparing node_id with local_node_id from NodeConfig
 - **`ask_helper(ctx, service_locator, ...)`**: Generic ask helper that returns `Pin<Box<dyn Future>>` for parallel operations
 - **`route_local(ctx, service_locator, ...)`**: Routes message to local actor (returns Future)
@@ -537,28 +579,87 @@ Facets execute in priority order (higher = runs first):
 
 #### VirtualActorFacet
 
-Orleans-style activation/deactivation:
+Orleans-style activation/deactivation with automatic instance creation:
 
-```rust
-pub struct VirtualActorFacet {
-    idle_timeout: Duration,
-    activation_count: u64,
-    last_accessed: Instant,
-}
-```
+**Activation Flow**:
+
+1. **Type Registration**: During application deployment (`wasm_application.rs`):
+   ```rust
+   // Extract all facet configs from ChildSpec
+   let mut all_facet_configs = serde_json::Map::new();
+   for facet_proto in &child_spec.facets {
+       if let Some(config) = extract_facet_config(&child_spec.facets, &facet_proto.r#type) {
+           all_facet_configs.insert(facet_proto.r#type.clone(), config);
+       }
+   }
+   
+   // Register virtual actor type with all facet configs
+   virtual_actor_manager.register_virtual_actor_type(
+       actor_type,
+       config,
+       namespace,
+       serde_json::Value::Object(all_facet_configs), // All facets
+       None, // tenant_id for type-level registration
+   ).await?;
+   ```
+
+2. **Auto-Activation**: When message arrives for non-existent virtual actor:
+   - `invoke_actor()` discovers no actors match `actor_type`
+   - Checks `VirtualActorManager.is_virtual_actor_type(actor_type)`
+   - Calls `get_or_activate_actor_impl()` which:
+     - Builds actor_id: `build_actor_id(base_id, actor_type, namespace, node_id)`
+     - Retrieves type metadata from `VirtualActorManager`
+     - Creates all facets from `facet_config`: `create_facets_from_config(facet_config, facet_registry)`
+     - Spawns actor with facets attached
+   - Retries lookup to discover newly created actor
+
+3. **Facet Support**: Supports all facet types:
+   - `virtual_actor`: Lifecycle management (always included)
+   - `durability`: State persistence (if configured)
+   - `timer`: Time-based operations (if configured)
+   - `reminder`: Durable reminders (if configured)
+   - Any other facets declared in application config
+
+**Actor ID Format**: Uses standardized format `{id}//{actor_type}::{namespace}@{node_id}`:
+- Type: `read-state-tracker` (registered during deployment)
+- Instance: `user-123//read-state-tracker::orbit-read-state-ts@node-1`
+- Auto-activation: Any message to matching pattern triggers activation
 
 **Configuration**:
-- `activation_strategy`: `lazy` (default) or `eager`
-- `deactivation_timeout`: Duration before deactivation (default: 5 minutes)
+- `activation_strategy`: `lazy` (default), `eager`, or `prewarm`
+- `idle_timeout`: Duration before deactivation (default: 5 minutes from `RuntimeConfig.default_virtual_actor_config`)
+
+**Default Configuration**:
+Defaults are provided via `RuntimeConfig.default_virtual_actor_config`:
+- `idle_timeout`: 5 minutes (300 seconds) if not specified
+- `max_pool_per_actor_type`: 100 instances per actor type (LRU eviction when exceeded)
+- `activation_strategy`: `lazy` if not specified
+
+These defaults are applied when creating `VirtualActorFacet` instances if not explicitly provided in facet configuration.
+
+**Architecture**:
+- Uses `VirtualActorLifecycleFacet` trait (defined in `plexspaces-core`) for type-safe lifecycle management
+- `VirtualActorFacet` (in `plexspaces-journaling`) implements this trait
+- Eliminates `Any` types and unsafe downcasting - all lifecycle operations use trait methods
+- `VirtualActorManager` stores facets as `Box<dyn VirtualActorLifecycleFacet>` for type safety
 
 **Features**:
 - Automatic activation on first message
-- Deactivation after idle timeout
+- Deactivation after idle timeout (configurable via runtime config defaults)
 - State preservation during deactivation
 - Transparent to application code
 - Always addressable (actor ID never changes)
+- Supports all facets (not just virtual_actor)
+- LRU eviction when max pool size per actor type is exceeded
 
 **Use Cases**: Stateful services with millions of instances, user sessions, game sessions
+
+**VirtualActorManager Architecture**:
+- Manages virtual actor metadata and lifecycle state
+- Stores facets as `Box<dyn VirtualActorLifecycleFacet>` (type-safe, no `Any` types)
+- Provides trait-based API for lifecycle operations (`get_activation_strategy()`, `should_activate()`, `should_deactivate()`, etc.)
+- Supports both instance-level and type-level registration
+- Applies defaults from `RuntimeConfig.default_virtual_actor_config` when creating facets
 
 **Example (SDK)**:
 ```rust
@@ -2890,7 +2991,7 @@ Host Bindings
   ↓
 HostFunctions (Service Gateway)
   ↓ delegates to framework services
-Framework (ActorFactory, ActorRef, ActorRegistry, TimerFacet, etc.)
+Framework (Node, ActorRef, ActorRegistry, TimerFacet, etc.)
 ```
 
 ### WIT Host Interface (simple-actor)
@@ -2961,19 +3062,13 @@ All database-backed services support multiple storage backends:
 
 For in-memory testing, use SQLite with `:memory:` path, which provides fast, isolated storage without persistence.
 
-### Migration Files
+### Unified Migrations
 
-Each service has SQL migrations in its crate directory:
+All schema migrations live in a single place and run once at database connection time:
 
-```
-crates/<service>/migrations/
-├── postgres/
-│   └── 001_<table>.up.sql / .down.sql
-└── sqlite/
-    └── 001_<table>.up.sql / .down.sql
-```
-
-Migrations run automatically when initializing SQL-backed repositories.
+- **Location**: `db/migrations/sqlite/` and `db/migrations/postgres/` (see [plexspaces-db](../db/README.md)).
+- **When**: The service locator calls `plexspaces_db::run_migrations(connection_string)` at startup before creating any store. File-based and PostgreSQL databases use this path only.
+- **In-memory**: For SQLite `:memory:`, unified migrations are skipped (each connection is a fresh DB). Each store that supports `:memory:` creates its own schema inline when connected to `:memory:` so tests and single-process in-memory usage work without running the full migration set.
 
 ### Service Database Tables Overview
 
@@ -3258,19 +3353,21 @@ Each service supports multiple database backends:
 
 ### Related Resources
 
-For detailed documentation on each service's database schema:
+Schema definitions are in `db/migrations/`; service-specific behavior and table usage are documented in each crate:
 
-| Service | README | Migration Path |
-|---------|--------|----------------|
-| Object Registry | [README](../crates/object-registry/README.md) | `crates/object-registry/migrations/` |
-| Locks | [README](../crates/locks/README.md) | `crates/locks/migrations/` |
-| KeyValue | [README](../crates/keyvalue/README.md) | `crates/keyvalue/migrations/` |
-| Workflow | [README](../crates/workflow/README.md) | `crates/workflow/migrations/` |
-| Journaling | [README](../crates/journaling/README.md) | `crates/journaling/migrations/` |
-| Channel | [README](../crates/channel/README.md) | `crates/channel/migrations/` |
-| Blob | [README](../crates/blob/README.md) | `crates/blob/migrations/` |
-| TupleSpace | [README](../crates/tuplespace/README.md) | `crates/tuplespace/migrations/` |
-| Scheduler | [README](../crates/scheduler/README.md) | `crates/scheduler/migrations/` |
+| Service | README | Tables (in `db/migrations/`) |
+|---------|--------|------------------------------|
+| Object Registry | [README](../crates/object-registry/README.md) | `002_object_registrations` |
+| Locks | [README](../crates/locks/README.md) | `003_locks` |
+| KeyValue | [README](../crates/keyvalue/README.md) | `001_keyvalue_store` |
+| Journaling | [README](../crates/journaling/README.md) | `004`–`006` (journal, actor_events, reminders) |
+| Scheduler | [README](../crates/scheduler/README.md) | `007_scheduling_requests` |
+| Channel | [README](../crates/channel/README.md) | `008_channel_messages` |
+| Blob | [README](../crates/blob/README.md) | `009_blob_metadata` |
+| Workflow | [README](../crates/workflow/README.md) | `010`–`014` (definitions, executions, labels, steps, signals) |
+| TupleSpace | [README](../crates/tuplespace/README.md) | `015_tuples`, `016_barriers_and_watchers` |
+
+See [db/README.md](../db/README.md) for how migrations are run at startup.
 
 ## See Also
 

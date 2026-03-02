@@ -22,3 +22,4 @@ pub mod reply_waiter_tests;
 pub mod request_context_propagation_tests;
 pub mod service_wrappers_tests;
 pub mod stub_services_tests;
+pub mod virtual_actor_lru_eviction_tests;

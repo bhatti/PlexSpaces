@@ -94,7 +94,7 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 | **heat_diffusion** | Thermal simulation with TupleSpace coordination (stencil computation, ghost cell exchange, barrier sync) | `#[gen_server_actor]`, `#[plexspaces_handlers]`, `#[handler]`, `spawn()`, `GenServerRef.call()`, `ActorContext::get_tuplespace()` | [embedded](../examples/rust/embedded/heat_diffusion/README.md) |
 | **matrix_multiply** | Parallel matrix multiplication with scatter-gather pattern (master-worker, scientific computing) | `#[gen_server_actor]`, `#[plexspaces_handlers]`, `#[handler]`, `spawn()`, `GenServerRef.call()` | [embedded](../examples/rust/embedded/matrix_multiply/README.md) |
 | **chat_room** | Process groups for broadcast messaging (pub/sub, Slack/Discord-style) | `ProcessGroupRegistry`, `RequestContext`, `CoordinationComputeTracker` | [embedded](../examples/rust/embedded/chat_room/README.md) |
-| **timeseries_forecasting** | Pipeline via ActorFactory (type-name spawn); see README for Factory vs SDK | ActorFactory pattern | [embedded](../examples/rust/embedded/timeseries_forecasting/README.md) |
+| **timeseries_forecasting** | Pipeline via Node/type-name spawn; see README | SDK/Node spawn | [embedded](../examples/rust/embedded/timeseries_forecasting/README.md) |
 | **firecracker_multi_tenant** | Data-parallel actors (DPA-inspired) with worker pools, **health-aware node connectivity** (liveness/readiness checks, exponential backoff retry), resource-based routing, coordination/compute metrics | `ParallelClient`, `UnifiedShardGroupClient`, `NodeClient` (with health checks) | [embedded](../examples/rust/embedded/firecracker_multi_tenant/README.md) |
 
 **Annotations Quick Reference**:
@@ -110,7 +110,7 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 **Conventions**: 
 - ✅ **Use SDK patterns** (`spawn`, `spawn_with_facets`, `spawn_with_storage`, `call_message`, `cast_message`) for examples and user code
 - ✅ **Use SDK annotations** (`#[gen_server_actor]`, `#[handler]`, `#[plexspaces_handlers]`) for actor definitions
-- ⚠️ **ActorFactory** is for framework code only (e.g., `ActorServiceImpl` internal implementation) or pipeline-style multi-actor setups (see `timeseries_forecasting` example)
+- Use **Node** and SDK spawn helpers in examples; framework uses ActorFactory internally for gRPC spawn
 - ✅ GenServer uses **call by default** (like Python)
 
 **Note**: For examples, prefer SDK patterns over low-level APIs. SDK removes boilerplate and provides better developer experience.

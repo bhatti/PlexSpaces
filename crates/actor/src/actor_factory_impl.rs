@@ -31,7 +31,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use std::time::Instant;
 use tokio::task::JoinHandle;
-use plexspaces_core::{ActorId, Service, ServiceLocator as ServiceLocatorTrait, ActorRegistry, MessageSender, VirtualActorManager, ActorContext, RequestContext, ExitReason, ActorFactory};
+use plexspaces_core::{ActorId, Service, ServiceLocator as ServiceLocatorTrait, ActorRegistry, MessageSender, VirtualActorManager, ActorContext, RequestContext, ExitReason, ActorFactory, ApplicationManager};
 use plexspaces_proto::ActorLifecycleEvent;
 use prost_types::Timestamp;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
@@ -166,25 +166,6 @@ impl ActorFactoryImpl {
         Ok(temp_sender_ref)
     }
     
-    /// Setup facets (TimerFacet, ReminderFacet, etc.) after actor spawn
-    ///
-    /// ## Note
-    /// This requires journaling crate for TimerFacet, which actor crate doesn't depend on.
-    /// So we'll skip facet setup here - it should be done by Node or a separate facet setup service.
-    /// TODO: Create a FacetSetupService that can be called from Node or ActorFactory
-    async fn setup_facets(
-        &self,
-        _actor_id: &ActorId,
-        _actor_ref: &ActorRef,
-        _node_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Facet setup requires journaling crate (TimerFacet, ReminderFacet)
-        // ActorFactoryImpl doesn't depend on journaling crate to avoid circular dependencies
-        // Facet setup should be done by Node or a separate FacetSetupService
-        // For now, skip facet setup here
-        Ok(())
-    }
-    
     /// Watch actor termination and handle cleanup
     /// Watch actor termination and handle cleanup
     /// 
@@ -203,6 +184,10 @@ impl ActorFactoryImpl {
         let actor_id_clone = actor_id.clone();
         
         tokio::spawn(async move {
+            // CRITICAL: Clear tracing context at the start of watch task to prevent span cloning panics
+            // This task is spawned from spawn_actor which may have an active span from gRPC handler
+            let noop_dispatcher = tracing::dispatcher::Dispatch::none();
+            let _watch_guard = tracing::dispatcher::set_default(&noop_dispatcher);
             // Wait for actor task to complete
             let result = join_handle.await;
             
@@ -212,18 +197,18 @@ impl ActorFactoryImpl {
                 let cloned = stored.clone();
                 if cloned.is_some() {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        actor_id = %actor_id_clone,
-                        stored_reason = ?cloned,
-                        "Found stored exit reason in actor (terminated due to EXIT)"
-                    );
+                        tracing::debug!(
+                            actor_id = %actor_id_clone,
+                            stored_reason = ?cloned,
+                            "Found stored exit reason in actor (terminated due to EXIT)"
+                        );
                     }
                 } else {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        actor_id = %actor_id_clone,
-                        "No stored exit reason (normal termination)"
-                    );
+                        tracing::debug!(
+                            actor_id = %actor_id_clone,
+                            "No stored exit reason (normal termination)"
+                        );
                     }
                 }
                 cloned
@@ -236,11 +221,11 @@ impl ActorFactoryImpl {
                     if let Some(ref exit_reason) = stored_exit_reason {
                         // Actor terminated due to EXIT - use the stored reason
                         if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            actor_id = %actor_id_clone,
-                            exit_reason = ?exit_reason,
-                            "Actor terminated due to EXIT, using stored exit reason"
-                        );
+                            tracing::debug!(
+                                actor_id = %actor_id_clone,
+                                exit_reason = ?exit_reason,
+                                "Actor terminated due to EXIT, using stored exit reason"
+                            );
                         }
                         let reason_str = match exit_reason {
                             ExitReason::Normal => "normal".to_string(),
@@ -376,11 +361,11 @@ impl ActorFactoryImpl {
             // Convert reason string to ExitReason, or use stored exit reason if available
             let exit_reason = if let Some(stored) = &stored_exit_reason {
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    actor_id = %actor_id_clone,
-                    exit_reason = ?stored,
-                    "Using stored exit reason for handle_actor_termination (will propagate to links)"
-                );
+                    tracing::debug!(
+                        actor_id = %actor_id_clone,
+                        exit_reason = ?stored,
+                        "Using stored exit reason for handle_actor_termination (will propagate to links)"
+                    );
                 }
                 stored.clone()
             } else {
@@ -397,28 +382,28 @@ impl ActorFactoryImpl {
                     }
                 };
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    actor_id = %actor_id_clone,
-                    exit_reason = ?converted,
-                    reason_str = %reason,
-                    "Using converted exit reason for handle_actor_termination"
-                );
+                    tracing::debug!(
+                        actor_id = %actor_id_clone,
+                        exit_reason = ?converted,
+                        reason_str = %reason,
+                        "Using converted exit reason for handle_actor_termination"
+                    );
                 }
                 converted
             };
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                actor_id = %actor_id_clone,
-                exit_reason = ?exit_reason,
-                "Calling handle_actor_termination (will propagate to links if error)"
-            );
+                tracing::debug!(
+                    actor_id = %actor_id_clone,
+                    exit_reason = ?exit_reason,
+                    "Calling handle_actor_termination (will propagate to links if error)"
+                );
             }
             registry.handle_actor_termination(&actor_id_clone, exit_reason).await;
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                actor_id = %actor_id_clone,
-                "handle_actor_termination completed"
-            );
+                tracing::debug!(
+                    actor_id = %actor_id_clone,
+                    "handle_actor_termination completed"
+                );
             }
             
             // CRITICAL: Unregister actor to prevent memory leaks
@@ -461,7 +446,77 @@ impl ActorFactory for ActorFactoryImpl {
         
         // Check if already active
         if manager.is_active(&actor_id).await {
+            // Update last_access for LRU tracking
+            manager.update_last_access(&actor_id).await;
             return Ok(()); // Already active
+        }
+        
+        // Get actor_type for LRU eviction check
+        let actor_type = {
+            use plexspaces_core::actor_id::parse_actor_id;
+            if let Ok(parsed) = parse_actor_id(&actor_id) {
+                parsed.actor_type
+            } else {
+                // Fallback: try to get from metadata
+                if let Some(metadata) = manager.get_metadata(&actor_id).await {
+                    metadata.actor_type
+                } else {
+                    return Err("Cannot determine actor_type for LRU eviction".into());
+                }
+            }
+        };
+        
+        // Evict LRU actors if max_pool_per_actor_type is exceeded
+        let evicted = manager.evict_lru_if_needed(
+            &actor_type,
+            Some(self.service_locator.clone()),
+        ).await;
+        
+        // Re-register VirtualActorWrapper for evicted actors to keep them addressable
+        if !evicted.is_empty() {
+            tracing::info!(
+                actor_type = %actor_type,
+                evicted_count = evicted.len(),
+                "LRU-evicted {} virtual actor(s) of type {} to stay under max_pool_per_actor_type limit",
+                evicted.len(),
+                actor_type
+            );
+            
+            // Re-register VirtualActorWrapper for each evicted actor to keep them addressable
+            use crate::virtual_actor_wrapper::VirtualActorWrapper;
+            use plexspaces_core::RequestContext;
+            let actor_registry = self.service_locator.actor_registry().await
+                .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
+            
+            for evicted_actor_id in &evicted {
+                // Get tenant/namespace from metadata
+                let (tenant_id, namespace) = if let Some(metadata) = manager.get_metadata(evicted_actor_id).await {
+                    (metadata.tenant_id, metadata.namespace)
+                } else {
+                    (String::new(), String::new())
+                };
+                
+                let ctx = RequestContext::new_without_auth(tenant_id, namespace);
+                let virtual_wrapper: Arc<dyn plexspaces_core::MessageSender> = Arc::new(
+                    VirtualActorWrapper::new(
+                        evicted_actor_id.clone(),
+                        self.service_locator.clone(),
+                        self.service_locator.get_actor_factory().await
+                            .ok_or_else(|| "ActorFactory not found".to_string())?,
+                    )
+                );
+                
+                // Re-register VirtualActorWrapper (actor remains addressable but not active)
+                actor_registry.register_actor(
+                    &ctx,
+                    evicted_actor_id.clone(),
+                    virtual_wrapper,
+                    None, // actor_type preserved in metadata
+                    None, // config preserved in metadata
+                    None, // no instance - actor is deactivated
+                    None, // behavior_kind preserved
+                ).await;
+            }
         }
         // Get actor instance (for lazy virtual actors) - use ActorRegistry directly
         // VirtualActorManager doesn't store actor instances - ActorRegistry does
@@ -577,11 +632,8 @@ impl ActorFactory for ActorFactoryImpl {
                 .map_err(|e| format!("Failed to get virtual actor facet: {}", e))?;
             {
                 let facet_guard = facet_arc.read().await;
-                
-                use plexspaces_journaling::VirtualActorFacet;
-                if let Some(virtual_facet) = facet_guard.as_ref().downcast_ref::<VirtualActorFacet>() {
-                    virtual_facet.mark_activated().await;
-                }
+                // Use trait method directly - facet is Box<dyn VirtualActorLifecycleFacet>
+                facet_guard.mark_activated().await;
             }
             
             // Process pending messages - send them to the now-activated actor
@@ -591,12 +643,14 @@ impl ActorFactory for ActorFactoryImpl {
             let pending_messages = manager.take_pending_messages(&actor_id).await;
             if !pending_messages.is_empty() {
                 if tracing::enabled!(tracing::Level::DEBUG) {
+                if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         actor_id = %actor_id,
                         pending_count = pending_messages.len(),
                         "Sending {} pending messages to activated virtual actor",
                         pending_messages.len()
                     );
+                }
                 }
                 for message in pending_messages {
                     if tracing::enabled!(tracing::Level::DEBUG) {
@@ -626,51 +680,136 @@ impl ActorFactory for ActorFactoryImpl {
             // Need to rebuild from scratch using spawn_actor
             // Get actor metadata from VirtualActorManager (source of truth for virtual actors)
             
-            // Get metadata from VirtualActorManager (clean design: VirtualActorManager is source of truth)
-            let metadata = manager.get_metadata(&actor_id).await
-                .ok_or_else(|| format!("Virtual actor {} not found - cannot activate. Actor was suspended but metadata is missing from VirtualActorManager", actor_id))?;
+            // Try to get instance-level metadata first, then fall back to type-level metadata
+            // This handles both individually-registered actors and type-registered actors
+            let metadata = if let Some(instance_metadata) = manager.get_metadata(&actor_id).await {
+                instance_metadata
+            } else {
+                // Fall back to type-level metadata (for WASM/Rust applications that register types)
+                // Extract actor_type from actor_id to lookup type-level registration
+                use plexspaces_core::actor_id::parse_actor_id;
+                let parsed = parse_actor_id(&actor_id)
+                    .map_err(|e| format!("Failed to parse actor_id {}: {}", actor_id, e))?;
+                let actor_type = parsed.actor_type;
+                
+                manager.get_virtual_actor_type(&actor_type).await
+                    .ok_or_else(|| format!(
+                        "Virtual actor {} not found - cannot activate. Actor was suspended but metadata is missing from VirtualActorManager. Tried instance-level (actor_id) and type-level (actor_type: {}) lookups.",
+                        actor_id, actor_type
+                    ))?
+            };
             
             // Extract metadata needed for rebuilding
-            let actor_type = metadata.actor_type
-                .ok_or_else(|| format!("Virtual actor {} was suspended but actor_type is missing. Cannot rebuild without actor_type.", actor_id))?;
+            // actor_type is now required (not optional) per proto-first design
+            let actor_type = metadata.actor_type;
             let config = metadata.config;
             let tenant_id = metadata.tenant_id;
-            let namespace = metadata.namespace;
+            let namespace = metadata.namespace.clone();
+            let tenant_id_clone = tenant_id.clone();
             
             // Create context for spawn_actor
-            let ctx = RequestContext::new_without_auth(tenant_id, namespace);
+            let ctx = RequestContext::new_without_auth(tenant_id_clone, namespace.clone());
             
             // CRITICAL: For virtual actors, we need to recreate the VirtualActorFacet
             // spawn_built_actor only detects virtual actors if they already have the facet attached
             // Since we're rebuilding a suspended actor, we need to recreate the facet
             // Get the facet from VirtualActorManager metadata to recreate it
-            let facet_arc = metadata.facet.clone();
-            let facet_guard = facet_arc.read().await;
-            
-            use plexspaces_journaling::VirtualActorFacet;
-            // facet_guard is RwLockReadGuard<Box<dyn Any + Send + Sync>>
-            // We need to access the inner Box and downcast it
-            let virtual_facet = facet_guard.as_ref().downcast_ref::<VirtualActorFacet>();
-            let activation_strategy = if let Some(vf) = virtual_facet {
-                Some(vf.get_activation_strategy().await)
-            } else {
-                None
-            };
-            drop(facet_guard);
-            
-            // Recreate VirtualActorFacet with same config
+            // For type-level registration, use facet_config; for instance-level, use stored facet
             let mut facets_to_attach = vec![];
-            if let Some(activation_strategy) = activation_strategy {
+            let mut activation_strategy: Option<plexspaces_journaling::ActivationStrategy> = None;
+            
+            if let Some(facet_arc) = metadata.facet.clone() {
+                // Instance-level registration: use stored facet
+                // facet_arc is Arc<RwLock<Box<dyn VirtualActorLifecycleFacet>>>
+                // Use trait methods directly - no downcasting needed
+                let facet_guard = facet_arc.read().await;
+                activation_strategy = Some(facet_guard.get_activation_strategy().await);
+                drop(facet_guard);
+                
+                if let Some(strategy) = activation_strategy.clone() {
+                    use plexspaces_journaling::VirtualActorFacet;
+                    use plexspaces_common::virtual_actor_config::{DEFAULT_IDLE_TIMEOUT_SECONDS, format_duration};
+                    use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
+                    use std::time::Duration;
+                    // Build keyed format for consistency (even though we create facet directly)
+                    // This ensures facet_config shape is consistent if we ever need to store it
+                    let idle_timeout_str = format_duration(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS));
+                    let facet_config = serde_json::json!({
+                        "virtual_actor": {
+                            "idle_timeout": idle_timeout_str,
+                            "activation_strategy": plexspaces_journaling::to_config_str(&strategy)
+                        }
+                    });
+                    // Extract virtual_actor config for VirtualActorFacet::new (which expects flat format)
+                    let virtual_actor_config = facet_config.get("virtual_actor").cloned().unwrap_or_else(|| serde_json::json!({}));
+                    let virtual_facet_new = Box::new(VirtualActorFacet::new(virtual_actor_config, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY));
+                    facets_to_attach.push(virtual_facet_new as Box<dyn plexspaces_facet::Facet>);
+                }
+            } else if let Some(facet_config) = metadata.facet_config.clone() {
+                // Type-level registration: recreate facet from stored config
+                // Use FacetRegistry to create facet from config (supports all facet types)
+                if let Some(facet_registry_wrapper) = self.service_locator.get_facet_registry().await {
+                    let facet_registry: Arc<plexspaces_facet::FacetRegistry> = facet_registry_wrapper.inner_clone();
+                    use plexspaces_facet::create_facets_from_config;
+                    use plexspaces_journaling::VirtualActorFacet;
+                    let recreated_facets = create_facets_from_config(&facet_config, &facet_registry).await;
+                    
+                    // Try to extract activation_strategy from recreated facets before moving them
+                    for facet in &recreated_facets {
+                        if facet.facet_type() == "virtual_actor" {
+                            if let Some(vf) = facet.as_any().downcast_ref::<VirtualActorFacet>() {
+                                activation_strategy = Some(vf.get_activation_strategy().await);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    facets_to_attach.extend(recreated_facets);
+                } else {
+                    return Err(format!("FacetRegistry not available - cannot recreate facets for virtual actor {}", actor_id).into());
+                }
+            } else {
+                // No facet config available - create default VirtualActorFacet
+                // Use FacetRegistry for consistency with type-level registration path
+                use plexspaces_facet::create_facets_from_config;
+                use plexspaces_journaling::to_config_str;
+                use plexspaces_common::virtual_actor_config::{DEFAULT_IDLE_TIMEOUT_SECONDS, DEFAULT_ACTIVATION_STRATEGY, format_duration};
+                use std::time::Duration;
+                
+                // Build keyed format facet_config for consistency with create_facets_from_config
+                let idle_timeout_str = format_duration(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS));
                 let facet_config = serde_json::json!({
-                    "idle_timeout": "5m",
-                    "activation_strategy": match activation_strategy {
-                        plexspaces_journaling::ActivationStrategy::Eager => "eager",
-                        plexspaces_journaling::ActivationStrategy::Prewarm => "prewarm",
-                        _ => "lazy"
+                    "virtual_actor": {
+                        "idle_timeout": idle_timeout_str,
+                        "activation_strategy": to_config_str(&DEFAULT_ACTIVATION_STRATEGY)
                     }
                 });
-                let virtual_facet_new = Box::new(VirtualActorFacet::new(facet_config, 100));
-                facets_to_attach.push(virtual_facet_new as Box<dyn plexspaces_facet::Facet>);
+                
+                // Use FacetRegistry to create facet (same path as type-level registration)
+                if let Some(facet_registry_wrapper) = self.service_locator.get_facet_registry().await {
+                    let facet_registry: Arc<plexspaces_facet::FacetRegistry> = facet_registry_wrapper.inner_clone();
+                    let recreated_facets = create_facets_from_config(&facet_config, &facet_registry).await;
+                    
+                    // Extract activation_strategy from recreated facets
+                    use plexspaces_journaling::VirtualActorFacet;
+                    for facet in &recreated_facets {
+                        if facet.facet_type() == "virtual_actor" {
+                            if let Some(vf) = facet.as_any().downcast_ref::<VirtualActorFacet>() {
+                                activation_strategy = Some(vf.get_activation_strategy().await);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    facets_to_attach.extend(recreated_facets);
+                } else {
+                    // Fallback: create facet directly if FacetRegistry not available
+                    use plexspaces_journaling::{VirtualActorFacet, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY};
+                    let virtual_actor_config = facet_config.get("virtual_actor").cloned().unwrap_or_else(|| serde_json::json!({}));
+                    let virtual_facet_new = Box::new(VirtualActorFacet::new(virtual_actor_config, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY));
+                    facets_to_attach.push(virtual_facet_new as Box<dyn plexspaces_facet::Facet>);
+                    activation_strategy = Some(DEFAULT_ACTIVATION_STRATEGY);
+                }
             }
             
             // Retrieve and reattach all other facets from FacetManager
@@ -734,23 +873,67 @@ impl ActorFactory for ActorFactoryImpl {
             }
             
             // Rebuild actor using spawn_actor with stored actor_type and recreated VirtualActorFacet
-            // This will use BehaviorFactory to create the behavior, or FAIL if not registered
-            // CRITICAL: actor_type must match the registered behavior name in BehaviorRegistry
-            // For tests, behaviors must be registered before suspending actors (spawn_actor will fail otherwise)
-            let actor_ref = self.spawn_actor(
+            // If BehaviorRegistry fails, try to ensure behavior is registered by re-registering from application
+            let actor_ref = match self.spawn_actor(
                 &ctx,
                 &actor_id,
-                &actor_type, // This must match the registered behavior name in BehaviorRegistry
+                &actor_type,
                 vec![], // No initial state (state should be loaded from durability facet if present)
-                config,
+                config.clone(),
                 HashMap::new(), // No labels
                 facets_to_attach, // Recreated VirtualActorFacet (and other facets from FacetManager if needed)
-            ).await
-            .map_err(|e| format!("Failed to rebuild suspended actor {}: {}", actor_id, e))?;
+            ).await {
+                Ok(ref_) => ref_,
+                Err(e) => {
+                    // BehaviorRegistry failed - ensure behavior is registered by re-registering from application
+                    let error_msg = e.to_string();
+                    if error_msg.contains("BehaviorRegistry") || error_msg.contains("Register the behavior") {
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            tracing::debug!(
+                                actor_id = %actor_id,
+                                actor_type = %actor_type,
+                                namespace = %namespace,
+                                "BehaviorRegistry failed, attempting to re-register behavior from application"
+                            );
+                        }
+                        
+                        // Try to get application by namespace (namespace typically matches application name)
+                        if let Some(app_manager) = self.service_locator.application_manager().await {
+                            let app_name = namespace.clone();
+                            
+                            // Check if application exists
+                            let app_exists = app_manager.list_applications().await.contains(&app_name);
+                            
+                            if app_exists {
+                                // Application exists - behaviors should be registered during start()
+                                // If they're not registered, it means the application wasn't started properly
+                                // Return a clear error message indicating the application needs to be started
+                                return Err(format!(
+                                    "Failed to rebuild suspended actor {}: {}. Behavior '{}' is not registered in BehaviorRegistry. Ensure the application '{}' has been started (behaviors are registered during application start()).",
+                                    actor_id, error_msg, actor_type, app_name
+                                ).into());
+                            } else {
+                                return Err(format!(
+                                    "Failed to rebuild suspended actor {}: {}. Application '{}' not found.",
+                                    actor_id, error_msg, app_name
+                                ).into());
+                            }
+                        } else {
+                            return Err(format!(
+                                "Failed to rebuild suspended actor {}: {}. ApplicationManager not available.",
+                                actor_id, error_msg
+                            ).into());
+                        }
+                    } else {
+                        // Different error - return as-is
+                        return Err(format!("Failed to rebuild suspended actor {}: {}", actor_id, error_msg).into());
+                    }
+                }
+            };
             // After rebuilding, check activation status
             // For eager actors: spawn_actor already started them, just mark as activated
             // For lazy actors: instance exists but not started, activate it now since activate_virtual_actor was explicitly called
-            let is_lazy = activation_strategy.map(|s| matches!(s, plexspaces_journaling::ActivationStrategy::Lazy)).unwrap_or(false);
+            let is_lazy = activation_strategy.map(|s| matches!(s, plexspaces_journaling::ActivationStrategy::ActivationStrategyLazy | plexspaces_journaling::ActivationStrategy::ActivationStrategyUnspecified)).unwrap_or(false);
             
             if is_lazy {
                 // Lazy actor: check if instance exists and activate it
@@ -1056,11 +1239,13 @@ impl ActorFactoryImpl {
         
         // Add observability logging
         let actor_id_before_unwrap = actor.id().clone();
-        tracing::info!(
-            actor_id = %actor_id_before_unwrap,
-            actor_type = ?actor_type,
-            "Spawning built actor"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                actor_id = %actor_id_before_unwrap,
+                actor_type = ?actor_type,
+                "Spawning built actor"
+            );
+        }
         
         // Unwrap the Arc to get the Actor
         let mut actor = Arc::try_unwrap(actor)
@@ -1122,18 +1307,11 @@ impl ActorFactoryImpl {
             "node_id" => local_node_id.to_string(),
             "namespace" => actor_namespace.clone()
         ).increment(1);
-        
-        // OBSERVABILITY: Log actor spawn with full context
-        tracing::info!(
-            actor_id = %actor_id,
-            node_id = %local_node_id,
-            namespace = %actor_namespace,
-            tenant_id = %actor_tenant_id,
-            actor_type = ?actor_type,
-            "Actor spawned"
-        );
 
         // Create RequestContext for registry operations (moves values)
+        // Clone values for logging before moving
+        let actor_tenant_id_for_log = actor_tenant_id.clone();
+        let actor_namespace_for_log = actor_namespace.clone();
         let ctx = RequestContext::new_without_auth(actor_tenant_id, actor_namespace);
         
         // Emit Created event
@@ -1165,6 +1343,8 @@ impl ActorFactoryImpl {
         // Check if actor has VirtualActorFacet
         let facets = actor.list_facets().await;
         let is_virtual = facets.contains(&"virtual_actor".to_string());
+        let mut activation_strategy_opt: Option<plexspaces_journaling::ActivationStrategy> = None;
+        let mut should_activate_eagerly = false;
         if is_virtual {
             // Virtual actor handling
             let actor_facets = actor.facets();
@@ -1181,41 +1361,54 @@ impl ActorFactoryImpl {
             
             // Check activation strategy
             let activation_strategy = virtual_facet.get_activation_strategy().await;
-            let should_activate_eagerly = matches!(activation_strategy, plexspaces_journaling::ActivationStrategy::Eager);
+            should_activate_eagerly = matches!(activation_strategy, plexspaces_journaling::ActivationStrategy::ActivationStrategyEager);
+            let activation_strategy_clone = activation_strategy.clone();
+            activation_strategy_opt = Some(activation_strategy);
             
             // Create new facet for registration
             drop(virtual_facet_guard);
             drop(facets_guard);
             
+            use plexspaces_common::virtual_actor_config::{DEFAULT_IDLE_TIMEOUT_SECONDS, format_duration};
+            use std::time::Duration;
+            let idle_timeout_str = format_duration(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS));
             let facet_config = serde_json::json!({
-                "idle_timeout": "5m",
-                "activation_strategy": match activation_strategy {
-                    plexspaces_journaling::ActivationStrategy::Eager => "eager",
-                    plexspaces_journaling::ActivationStrategy::Prewarm => "prewarm",
-                    _ => "lazy"
-                }
+                "idle_timeout": idle_timeout_str,
+                "activation_strategy": plexspaces_journaling::to_config_str(&activation_strategy_clone)
             });
-            let virtual_facet_for_reg = VirtualActorFacet::new(facet_config, 100); // VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY
+            use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
+            let virtual_facet_for_reg = VirtualActorFacet::new(facet_config, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY);
             
-            // Register as virtual actor (only if not already registered)
+            // Register as virtual actor (only if instance not already registered)
             // Store metadata in VirtualActorManager (source of truth for virtual actors)
-            if !manager.is_virtual(&actor_id).await {
-                let facet_box = Arc::new(tokio::sync::RwLock::new(
-                    Box::new(virtual_facet_for_reg) as Box<dyn std::any::Any + Send + Sync>
-                ));
+            // CRITICAL: Check if instance is registered (not just type), because is_virtual() 
+            // returns true for type-level registration even if instance is not registered
+            let instance_metadata = manager.get_metadata(&actor_id).await;
+            if instance_metadata.is_none() {
+                // Instance not registered - register it fresh
+                // This happens when rebuilding a suspended actor that was only type-registered
+                // Convert VirtualActorFacet to VirtualActorLifecycleFacet trait object
+                use plexspaces_journaling::virtual_actor_facet_to_lifecycle_facet;
+                let lifecycle_facet = virtual_actor_facet_to_lifecycle_facet(virtual_facet_for_reg);
+                let facet_box = Arc::new(tokio::sync::RwLock::new(lifecycle_facet));
+                
                 // Register with full metadata (actor_type, config, tenant_id, namespace)
                 // This metadata persists across suspension and is used to rebuild actors
+                let actor_type_str = actor_type.clone()
+                    .ok_or_else(|| format!("Actor type is required for virtual actor registration"))?;
+                
+                // Register new virtual actor instance
                 manager.register(
                     actor_id.clone(),
                     facet_box,
-                    actor_type.clone(),
+                    actor_type_str,
                     actor_config.clone(),
                     ctx.tenant_id().to_string(),
                     ctx.namespace().to_string(),
                 ).await
                     .map_err(|e| format!("Failed to register virtual actor: {}", e))?;
             } else {
-                // Actor already registered - update metadata if we have new info
+                // Instance already registered - update metadata if we have new info
                 manager.update_metadata(
                     &actor_id,
                     actor_type.clone(),
@@ -1252,7 +1445,7 @@ impl ActorFactoryImpl {
             // Handle eager vs lazy activation
             if should_activate_eagerly {
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(actor_id = %actor_id, "Virtual actor with eager activation - starting immediately");
+                    tracing::debug!(actor_id = %actor_id, "Virtual actor with eager activation - starting immediately");
                 }
                 
                 // Create ActorRef for return value
@@ -1343,18 +1536,11 @@ impl ActorFactoryImpl {
                             );
                         }
                     }
+                }
                 
                 return Ok(actor_ref);
-                }
-                
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(actor_id = %actor_id, "Virtual actor started with eager activation");
-                }
             } else {
                 // Lazy activation - store actor Arc but don't start
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(actor_id = %actor_id, "Virtual actor with lazy activation - will activate on first message");
-                }
                 
                 let actor_arc = Arc::new(actor);
                 
@@ -1380,6 +1566,24 @@ impl ActorFactoryImpl {
                 ).await;
             }
             
+            // OBSERVABILITY: Log actor spawn with full context (after determining activation strategy)
+            let activation_info = match activation_strategy_opt {
+                Some(plexspaces_journaling::ActivationStrategy::ActivationStrategyLazy)
+                | Some(plexspaces_journaling::ActivationStrategy::ActivationStrategyUnspecified) => " (virtual actor with lazy activation - will activate on first message)",
+                Some(plexspaces_journaling::ActivationStrategy::ActivationStrategyEager) => " (virtual actor with eager activation)",
+                Some(plexspaces_journaling::ActivationStrategy::ActivationStrategyPrewarm) => " (virtual actor with prewarm activation)",
+                None => "",
+            };
+            tracing::info!(
+                actor_id = %actor_id,
+                node_id = %local_node_id,
+                namespace = %actor_namespace_for_log,
+                tenant_id = %actor_tenant_id_for_log,
+                actor_type = ?actor_type,
+                "Actor spawned{}",
+                activation_info
+            );
+            
             // Create ActorRef for return value (for lazy virtual actors, VirtualActorWrapper is already registered)
             // CRITICAL: Pass tenant_id from RequestContext to ActorRef
             let actor_ref = ActorRef::local(
@@ -1392,6 +1596,16 @@ impl ActorFactoryImpl {
             
             return Ok(actor_ref);
         }
+        
+        // OBSERVABILITY: Log actor spawn with full context (for non-virtual actors)
+        tracing::info!(
+            actor_id = %actor_id,
+            node_id = %local_node_id,
+            namespace = %actor_namespace_for_log,
+            tenant_id = %actor_tenant_id_for_log,
+            actor_type = ?actor_type,
+            "Actor spawned"
+        );
         
         // Normal actor - start immediately
         // Store facets

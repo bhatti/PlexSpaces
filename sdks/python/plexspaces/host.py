@@ -27,7 +27,7 @@ Usage:
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from .decorators import _desanitize_from_wasm
 
 # Global reference to actual host module (set by runtime)
@@ -297,9 +297,9 @@ class Host:
     def __init__(self):
         self.process_groups = ProcessGroups()
     
-    def send(self, to: str, msg_type: str, payload: Any = None) -> str:
+    def send(self, to: str, msg_type: str, payload: Optional[Union[str, Dict[str, Any], List[Any]]] = None) -> str:
         """
-        Send a message to another actor.
+        Send a message to another actor (fire-and-forget).
         
         Args:
             to: Target actor ID
@@ -358,7 +358,12 @@ class Host:
     def kv_get(self, key: str) -> str:
         """
         Key-value get (string-only, WASM-safe).
-        Returns value or empty string if not found.
+        
+        Args:
+            key: Key to retrieve
+        
+        Returns:
+            Value string or empty string if not found
         """
         h = _get_host()
         if hasattr(h, "kv_get"):
@@ -367,7 +372,14 @@ class Host:
 
     def kv_put(self, key: str, value: str) -> str:
         """
-        Key-value put (string-only). Returns empty on success, ERROR:... on failure.
+        Key-value put (string-only).
+        
+        Args:
+            key: Key to store
+            value: Value string
+        
+        Returns:
+            Empty string on success, "ERROR:message" on failure
         """
         h = _get_host()
         if hasattr(h, "kv_put"):
@@ -416,7 +428,13 @@ class Host:
 
     def kv_delete(self, key: str) -> str:
         """
-        Key-value delete. Returns empty on success, ERROR:... on failure.
+        Key-value delete.
+        
+        Args:
+            key: Key to delete
+        
+        Returns:
+            Empty string on success, "ERROR:message" on failure
         """
         h = _get_host()
         if hasattr(h, "kv_delete"):
@@ -425,7 +443,13 @@ class Host:
 
     def kv_list(self, prefix: str) -> str:
         """
-        Key-value list keys with prefix. Returns JSON array of keys, e.g. ["key1","key2"].
+        Key-value list keys with prefix.
+        
+        Args:
+            prefix: Key prefix to match
+        
+        Returns:
+            JSON array of keys (e.g., ["key1","key2"]) or "ERROR:message" on failure
         """
         h = _get_host()
         if hasattr(h, "kv_list"):
@@ -501,7 +525,15 @@ class Host:
 
     def blob_upload(self, blob_id: str, data: str, content_type: str = "application/octet-stream") -> str:
         """
-        Upload blob data (base64-encoded). Returns empty on success, ERROR:... on failure.
+        Upload blob data (base64-encoded).
+        
+        Args:
+            blob_id: Unique blob identifier
+            data: Base64-encoded content
+            content_type: MIME type (e.g., "image/png", "application/json")
+        
+        Returns:
+            Empty string on success, "ERROR:message" on failure
         """
         h = _get_host()
         if hasattr(h, "blob_upload"):
@@ -510,7 +542,13 @@ class Host:
 
     def blob_download(self, blob_id: str) -> str:
         """
-        Download blob data. Returns base64-encoded content, empty if not found.
+        Download blob data.
+        
+        Args:
+            blob_id: Unique blob identifier
+        
+        Returns:
+            Base64-encoded content on success, empty string if not found, "ERROR:message" on failure
         """
         h = _get_host()
         if hasattr(h, "blob_download"):
@@ -519,7 +557,13 @@ class Host:
 
     def blob_delete(self, blob_id: str) -> str:
         """
-        Delete blob. Returns empty on success, ERROR:... on failure.
+        Delete blob.
+        
+        Args:
+            blob_id: Unique blob identifier
+        
+        Returns:
+            Empty string on success, "ERROR:message" on failure
         """
         h = _get_host()
         if hasattr(h, "blob_delete"):
@@ -528,7 +572,13 @@ class Host:
 
     def blob_list(self, prefix: str) -> str:
         """
-        List blobs with prefix. Returns JSON array of blob IDs.
+        List blobs with prefix.
+        
+        Args:
+            prefix: Blob ID prefix to match
+        
+        Returns:
+            JSON array of blob IDs (e.g., ["blob1","blob2"]) or "ERROR:message" on failure
         """
         h = _get_host()
         if hasattr(h, "blob_list"):

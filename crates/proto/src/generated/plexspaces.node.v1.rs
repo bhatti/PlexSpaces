@@ -278,6 +278,31 @@ pub struct DbBackoffConfig {
     #[prost(uint32, tag="3")]
     pub max_attempts: u32,
 }
+/// Default virtual actor configuration (runtime defaults)
+///
+/// ## Purpose
+/// Default values for virtual actor lifecycle when not specified per-actor or in gRPC request.
+/// Used by VirtualActorFacet, actor factory, SDK, and WASM app registration when building
+/// facet_config. Idle timeout and pool size are read from here when available.
+///
+/// ## Defaults (when not set)
+/// - idle_timeout: 5m (300 seconds)
+/// - max_pool_per_actor_type: 100
+/// - activation_strategy: LAZY
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DefaultVirtualActorConfig {
+    /// Idle timeout before deactivation (default: 5m)
+    /// When not set, code uses 300 seconds. Valid range: 1s to 24h.
+    #[prost(message, optional, tag="1")]
+    pub idle_timeout: ::core::option::Option<::prost_types::Duration>,
+    /// Max instances per actor type (LRU eviction when exceeded). Default: 100
+    #[prost(uint32, tag="2")]
+    pub max_pool_per_actor_type: u32,
+    /// Activation strategy (from common.proto; default: LAZY when UNSPECIFIED)
+    #[prost(enumeration="super::super::common::v1::ActivationStrategy", tag="3")]
+    pub activation_strategy: i32,
+}
 /// Runtime configuration
 ///
 /// ## Purpose
@@ -365,6 +390,13 @@ pub struct RuntimeConfig {
     /// Environment variable: PLEXSPACES_SAVE_WASM_APPS
     #[prost(bool, tag="12")]
     pub save_wasm_apps: bool,
+    /// Default virtual actor config (idle_timeout, pool size, activation_strategy)
+    ///
+    /// When not set, code defaults apply: idle_timeout 5m, max_pool_per_actor_type 100,
+    /// activation_strategy LAZY. Used when creating VirtualActorFacet or registering
+    /// virtual actor types (WASM, SDK, gRPC fallback).
+    #[prost(message, optional, tag="13")]
+    pub default_virtual_actor_config: ::core::option::Option<DefaultVirtualActorConfig>,
 }
 /// gRPC server configuration
 #[allow(clippy::derive_partial_eq_without_eq)]

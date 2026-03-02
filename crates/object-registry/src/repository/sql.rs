@@ -72,22 +72,30 @@ impl SqliteObjectRegistryRepository {
             .await
             .map_err(|e| RepositoryError::Connection(e.to_string()))?;
 
-        // Run migrations
-        Self::run_migrations(&pool).await?;
+        // For :memory: only: create schema. File-based uses unified db/migrations.
+        if path == ":memory:" {
+            Self::run_migrations(&pool).await?;
+        }
 
         Ok(Self { pool })
     }
 
-    /// Run SQLite migrations
+    /// Create object_registrations schema for :memory: SQLite. File-based uses unified db/migrations at init.
     async fn run_migrations(pool: &Pool<Sqlite>) -> RepositoryResult<()> {
-        let migration_sql = include_str!("../../migrations/sqlite/001_object_registrations.up.sql");
-        
-        sqlx::raw_sql(migration_sql)
-            .execute(pool)
-            .await
-            .map_err(|e| RepositoryError::Storage(format!("Migration failed: {}", e)))?;
-
-        debug!("Object registry SQLite migrations completed");
+        const SCHEMA: &str = r#"CREATE TABLE IF NOT EXISTS object_registrations (
+            tenant_id TEXT NOT NULL, namespace TEXT NOT NULL, object_id TEXT NOT NULL,
+            object_type INTEGER NOT NULL, object_name TEXT, version TEXT, node_id TEXT,
+            grpc_address TEXT NOT NULL, object_category TEXT, health_status INTEGER NOT NULL DEFAULT 0,
+            last_heartbeat BIGINT, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL,
+            registration_blob BLOB NOT NULL, PRIMARY KEY (tenant_id, namespace, object_id))"#;
+        sqlx::query(SCHEMA).execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_type ON object_registrations(tenant_id, namespace, object_type)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_node ON object_registrations(tenant_id, namespace, node_id)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_heartbeat ON object_registrations(tenant_id, namespace, last_heartbeat)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_health ON object_registrations(tenant_id, namespace, health_status)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_category ON object_registrations(tenant_id, namespace, object_category)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_type_health ON object_registrations(tenant_id, namespace, object_type, health_status)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        debug!("Object registry SQLite schema created");
         Ok(())
     }
 
@@ -498,24 +506,9 @@ impl PostgresObjectRegistryRepository {
             .await
             .map_err(|e| RepositoryError::Connection(e.to_string()))?;
 
-        // Run migrations
-        Self::run_migrations(&pool).await?;
+        // Schema is created by unified db/migrations at init. Assume it exists.
 
         Ok(Self { pool })
-    }
-
-    /// Run PostgreSQL migrations
-    async fn run_migrations(pool: &Pool<Postgres>) -> RepositoryResult<()> {
-        let migration_sql =
-            include_str!("../../migrations/postgres/001_object_registrations.up.sql");
-
-        sqlx::raw_sql(migration_sql)
-            .execute(pool)
-            .await
-            .map_err(|e| RepositoryError::Storage(format!("Migration failed: {}", e)))?;
-
-        debug!("Object registry PostgreSQL migrations completed");
-        Ok(())
     }
 
     /// Get current timestamp for PostgreSQL

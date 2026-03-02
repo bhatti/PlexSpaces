@@ -1,0 +1,28 @@
+# Orbit - Discord-style Read State Tracker Application Configuration
+#
+# Deploys a virtual actor per user for tracking message read states:
+# - ReadStateTracker: per-user read state tracking (virtual actor with durability)
+#
+# Equivalent to Orbit's virtual actor pattern:
+#   UserActor user = Actor.getReference(UserActor.class, "user-123");
+#   await user.markRead(channelId, messageId);
+#
+# Facets configured:
+# - virtual_actor: Automatic activation/deactivation (lazy activation)
+# - durability: State persistence (read states survive crashes)
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# ReadStateTracker actor (Virtual Actor: one per user, auto-activated)
+[[supervisor.children]]
+id = "read-state-tracker"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 100 } }
+]

@@ -17,6 +17,8 @@ pub mod lifecycle_edge_cases_tests;
 pub mod pipeline_actors_test;
 pub mod registration_reliability_tests;
 pub mod routing_tests;
+pub mod span_cloning_panic_tests;
+pub mod span_cloning_panic_integration_test;
 pub mod ttl_support_tests;
 
 // Supervisor tests (moved from crates/supervisor)

@@ -585,14 +585,15 @@ impl FacetContainer {
         for facet in &self.facets {
             let facet = facet.read().await;
             let facet_type = facet.facet_type();
-            debug!(method = %method, facet_type = %facet_type, "FacetContainer: Checking facet");
             match facet.before_method(method, &current_args).await? {
                 InterceptResult::Continue => {
                     debug!(method = %method, facet_type = %facet_type, "FacetContainer: Facet continued (no interception)");
                 }
                 InterceptResult::ReplaceArgs(new_args) => {
                     current_args = new_args;
-                    tracing::trace!(facet_type = %facet_type, "Facet replaced args");
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!(facet_type = %facet_type, "Facet replaced args");
+                    }
                 }
                 InterceptResult::ShortCircuit(result) => {
                     let duration = start.elapsed();
@@ -637,7 +638,9 @@ impl FacetContainer {
                 InterceptResult::Continue => {}
                 InterceptResult::ReplaceResult(new_result) => {
                     current_result = new_result;
-                    tracing::trace!(facet_type = %facet.facet_type(), "Facet replaced result");
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!(facet_type = %facet.facet_type(), "Facet replaced result");
+                    }
                 }
                 _ => {}
             }
@@ -888,7 +891,6 @@ impl FacetRegistry {
     }
 }
 
-// Note: Service trait implementation moved to core crate to break circular dependency
 // FacetRegistry doesn't implement Service here - core provides a wrapper if needed
 
 // Example facets demonstrating the pattern
@@ -935,7 +937,9 @@ impl Facet for LoggingFacet {
 
     async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
         // Use stored config, ignore parameter (config is set in constructor)
-        tracing::debug!(actor_id = %actor_id, "Logging facet attached to actor");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(actor_id = %actor_id, "Logging facet attached to actor");
+        }
         Ok(())
     }
 
@@ -949,12 +953,14 @@ impl Facet for LoggingFacet {
         method: &str,
         args: &[u8],
     ) -> Result<InterceptResult, FacetError> {
-        tracing::debug!(
-            level = %self.level,
-            method = %method,
-            args_bytes = args.len(),
-            "Calling method"
-        );
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                level = %self.level,
+                method = %method,
+                args_bytes = args.len(),
+                "Calling method"
+            );
+        }
         Ok(InterceptResult::Continue)
     }
 
@@ -1044,7 +1050,9 @@ impl Facet for CachingFacet {
 
         // Check cache
         if let Some(cached) = self.cache.get(&key) {
-            tracing::trace!(method = %method, "Cache hit");
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(method = %method, "Cache hit");
+            }
             return Ok(InterceptResult::ShortCircuit(cached.clone()));
         }
 
@@ -1128,13 +1136,15 @@ impl Facet for MetricsFacet {
             } else {
                 0
             };
-            tracing::debug!(
-                method = %method,
-                calls = metrics.count,
-                avg_ms = avg_time,
-                errors = metrics.errors,
-                "Method metrics on detach"
-            );
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                tracing::debug!(
+                    method = %method,
+                    calls = metrics.count,
+                    avg_ms = avg_time,
+                    errors = metrics.errors,
+                    "Method metrics on detach"
+                );
+            }
         }
         Ok(())
     }

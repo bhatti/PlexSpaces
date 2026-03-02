@@ -270,7 +270,8 @@ All Go examples, TypeScript migrating_cloudflare_workers, and the full workspace
 |-----|--------|
 | bank_account | Has build.sh + test.sh, needs build |
 | migrating_cloudflare_workers | **DONE - Tested E2E** - guild_chat_actor.wasm |
-| migrating_orleans | INCOMPLETE - missing build.sh/test.sh |
+| migrating_orbit | **DONE - Tested E2E** - read_state_actor.wasm (virtual actor + durability) |
+| migrating_orleans | **DONE - Tested E2E** - batch_predictor_model.wasm (virtual actor + lazy activation) |
 
 ### Python Apps (4/17 built)
 | App | Status |
@@ -297,6 +298,25 @@ All Go examples, TypeScript migrating_cloudflare_workers, and the full workspace
 
 5. **Consider**: Fix `deployment_service.rs` to also pass `keyvalue_store` from a ServiceLocator
    reference (currently only wasm_application.rs path has it)
+
+## SDK Improvements (TODOs)
+
+### High Priority
+
+- [ ] **Add HTTP Client Helper** - Add `host.http_request()` wrapper function for convenient HTTP API calls (simulates wasmCloud HTTP capability)
+- [ ] **Add Capability Helper Classes to SDK** - Add helper classes (`host.keyvalue()`, `host.blob()`, `host.locks()`, `host.tuplespace()`) similar to `ProcessGroups` for better ergonomics
+  - ✅ Example `KeyValue` helper class implemented in `migrating_wasmcloud` example
+- [ ] **Add Detailed Examples** - Create example files showing usage of each capability (KV, Blob, Locks, TupleSpace)
+
+### Medium Priority
+
+- [ ] **Improve Type Hints** - Add comprehensive type hints throughout `host.py` with `TypedDict` for structured return types
+- [ ] **Add HTTP Server Capability** - Actors can register HTTP routes, framework routes HTTP requests to actor handlers
+
+### Low Priority
+
+- [ ] **Better Error Handling** - Add exception classes for structured error handling (currently returns "ERROR:message" strings)
+- [ ] **Performance Optimizations** - Connection pooling, batch operations, caching layer
 
 ---
 
@@ -335,3 +355,44 @@ Go WASM IoT sensor aggregation:
 Both TypeScript and Go versions build and test successfully:
 - TypeScript: guild_chat_actor.wasm - all tests pass (312,500 rate checks/sec)
 - Go: guild_chat.wasm - all tests pass (2,500,000 rate checks/sec)
+
+### #5 migrating_wasmcloud (Python) - ✅ COMPLETE
+
+Python WASM session store service:
+1. [x] Create SessionStore actor with wasmCloud-style capability-based design
+2. [x] Implement session CRUD operations using KV store capability
+3. [x] Add timer-based cleanup for expired sessions (manual trigger via HTTP API)
+4. [x] Use host.ask() to validate sessions (simulating HTTP capability)
+5. [x] Add KeyValue helper class for convenient KV operations (example implementation)
+6. [x] Create build.sh and test.sh scripts
+7. [x] Create README.md with metrics and capability comparison
+8. [x] Create app-config.toml for ApplicationSpec
+9. [x] Fix self-messaging validation (tell() logs DEBUG, ask() errors)
+10. [x] Add message_type parameter to MessageSender::send_message() (removes JSON parsing hacks)
+11. [x] Update all call sites and test mocks
+12. [x] Restore benchmark data sizes (200 sessions, 1000 operations, 50 refreshes)
+9. [x] Improve type hints in host.py
+10. [x] Test end-to-end: server.sh -> build.sh -> test.sh
+
+### #7 migrating_orbit (TypeScript) - ✅ DONE (E2E Tested)
+
+TypeScript WASM read state tracker (Discord-style read receipts):
+1. [x] Create ReadStateTracker actor with virtual actor pattern
+2. [x] Add durability for read state persistence
+3. [x] Implement mark_read, get_read_state, get_all_read_states operations
+4. [x] Add batch_mark_read for performance testing
+5. [x] Create build.sh and test.sh scripts
+6. [x] Create README.md with metrics and Orbit comparison
+7. [x] Build WASM successfully (read_state_actor.wasm)
+8. [x] Test end-to-end: server.sh -> build.sh -> test.sh
+
+### #8 migrating_orleans (TypeScript) - ✅ DONE (E2E Tested)
+
+TypeScript WASM batch predictor model service (Orleans-style virtual actors):
+1. [x] Create BatchPredictorModel actor with virtual actor pattern and lazy activation
+2. [x] Implement model loading, batch prediction, and state management
+3. [x] Add batch prediction with configurable batch size
+4. [x] Create build.sh and test.sh scripts
+5. [x] Create README.md with metrics and Orleans comparison
+6. [x] Build WASM successfully (batch_predictor_model.wasm)
+7. [x] Test end-to-end: server.sh -> build.sh -> test.sh

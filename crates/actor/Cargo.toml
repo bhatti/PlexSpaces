@@ -21,6 +21,7 @@ plexspaces-keyvalue = { workspace = true }
 plexspaces-tuplespace = { workspace = true }
 plexspaces-locks = { path = "../locks" }
 plexspaces-journaling = { path = "../journaling" }
+plexspaces-common = { path = "../common" }
 indexmap = { version = "2.0", features = ["serde"] }
 
 # Core dependencies

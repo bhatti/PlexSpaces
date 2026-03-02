@@ -147,11 +147,22 @@ impl SqliteKVStore {
             .connect(&url)
             .await?;
 
-        // Run migrations
-        sqlx::migrate!("./migrations/sqlite")
-            .run(&pool)
+        // For :memory: only: create schema inline. File-based DB uses unified db/migrations at init.
+        if path == ":memory:" {
+            sqlx::query(
+                r#"CREATE TABLE IF NOT EXISTS kv_store (
+                    tenant_id TEXT NOT NULL, namespace TEXT NOT NULL, key TEXT NOT NULL,
+                    value BLOB NOT NULL, expires_at BIGINT, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL,
+                    PRIMARY KEY (tenant_id, namespace, key))"#,
+            )
+            .execute(&pool)
             .await
-            .map_err(|e| KVError::BackendError(format!("Migration failed: {}", e)))?;
+            .map_err(|e| KVError::BackendError(format!("Schema creation failed: {}", e)))?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS idx_kv_store_ttl_cleanup ON kv_store(tenant_id, namespace, expires_at, key) WHERE expires_at IS NOT NULL")
+                .execute(&pool).await.map_err(|e| KVError::BackendError(e.to_string()))?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS idx_kv_store_tenant_namespace ON kv_store(tenant_id, namespace, key)")
+                .execute(&pool).await.map_err(|e| KVError::BackendError(e.to_string()))?;
+        }
 
         // Enable SQLite performance optimizations
         // WAL mode: Better concurrency for read-heavy workloads
@@ -808,11 +819,7 @@ impl PostgreSQLKVStore {
             .connect(connection_string)
             .await?;
 
-        // Run migrations
-        sqlx::migrate!("./migrations/postgres")
-            .run(&pool)
-            .await
-            .map_err(|e| KVError::BackendError(format!("Migration failed: {}", e)))?;
+        // Schema is created by unified db/migrations at init. Assume it exists.
 
         // Mask credentials in connection string for logging
         let display_url = connection_string

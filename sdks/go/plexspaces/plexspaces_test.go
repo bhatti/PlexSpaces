@@ -814,3 +814,4 @@ func TestActorRouterEchoActorInit(t *testing.T) {
 		t.Errorf("expected state to contain 'initialized', got %q", state)
 	}
 }
+

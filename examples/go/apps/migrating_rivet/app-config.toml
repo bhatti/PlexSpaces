@@ -1,0 +1,35 @@
+# Rivet Game Matchmaking Application Configuration
+# Virtual Actor per Game Room with Auto-Activation/Deactivation
+#
+# Deploys a virtual actor per game room for matchmaking:
+# - GameRoom: per-room matchmaking with virtual actor pattern
+#
+# Equivalent to Rivet's virtual actor pattern:
+#   GameRoom room = Actor.getReference(GameRoom.class, "room-123");
+#   await room.join(player);
+#
+# Facets configured:
+# - virtual_actor: Automatic activation/deactivation (lazy activation)
+# Note: Durability facet removed for simplicity - virtual actors handle state via GetState/SetState
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+# Game Room Actor (Virtual Actor: one per room, auto-activated)
+[[supervisor.children]]
+id = "game-room"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "5m", activation_strategy = "lazy" } }
+]
+
+# Actor Arguments
+[supervisor.children.args]
+max_players = 10
+min_players = 2
+game_mode = "5v5"
+idle_timeout_ms = 300000

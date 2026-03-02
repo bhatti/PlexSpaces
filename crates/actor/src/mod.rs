@@ -201,7 +201,7 @@
 // Submodules are declared in lib.rs, not here
 
 use std::sync::Arc;
-use std::io::Write;
+use std::io::prelude::*;
 use tokio::sync::{mpsc, RwLock};
 // For catch_unwind()
 use crate::resource::{ActorHealth, ResourceContract, ResourceProfile, ResourceUsage};
@@ -806,8 +806,19 @@ impl Actor {
         // This allows start() to wait for the actor to be fully ready before returning
         let (active_tx, active_rx) = tokio::sync::oneshot::channel::<()>();
 
-           // Simple message loop - Node/Supervisor will detect termination via JoinHandle
-           let handle = tokio::spawn(async move {
+        // Simple message loop - Node/Supervisor will detect termination via JoinHandle
+        let handle = tokio::spawn(async move {
+            // CRITICAL: Clear tracing context at the start of the actor task to prevent
+            // "tried to clone a span that already closed" panics. The issue occurs when:
+            // 1. Actor is spawned from within a gRPC handler (which has a span)
+            // 2. The actor task inherits the tracing context from the handler
+            // 3. When the handler returns, the span guard is dropped, but the actor task is still running
+            // 4. When the actor task completes and tries to log, tracing tries to clone the already-closed span
+            // Solution: Clear the tracing context at the start of the actor task so it doesn't inherit spans.
+            // CRITICAL: The guard must remain active for the ENTIRE task lifecycle to prevent panics.
+            let noop_dispatcher = tracing::dispatcher::Dispatch::none();
+            let _tracing_guard = tracing::dispatcher::set_default(&noop_dispatcher);
+               
                // Mark as active
                *state.write().await = ActorState::Active;
             
@@ -1132,19 +1143,54 @@ impl Actor {
                             }
                             // WASM instance poisoned (trap / "cannot enter component instance"): terminate actor
                             // so supervisor can restart with a fresh instance; avoid processing further messages.
-                            let error_str = e.to_string();
+                            // CRITICAL: Extract error string safely to avoid span cloning panics.
+                            // The panic "tried to clone a span that already closed" occurs when tracing tries to
+                            // clone a span during error handling. Use catch_unwind to safely extract error strings
+                            // even if formatting panics due to span cloning issues.
+                            let error_str = {
+                                // Use catch_unwind to safely extract error string without triggering span cloning panics
+                                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    format!("{}", e)
+                                })) {
+                                    Ok(err_msg) => {
+                                        // Filter out panic messages about span cloning to prevent recursive panics
+                                        if err_msg.contains("tried to clone a span") {
+                                            "WASM actor error (span cloning issue prevented detailed error extraction)".to_string()
+                                        } else {
+                                            err_msg
+                                        }
+                                    }
+                                    Err(_) => {
+                                        // Panic occurred during error formatting - use safe fallback
+                                        "WASM actor error (panic during error formatting - likely span cloning issue)".to_string()
+                                    }
+                                }
+                            };
                             let is_wasm_poisoned = error_str.to_lowercase().contains("cannot enter")
                                 || error_str.to_lowercase().contains("trap")
                                 || error_str.to_lowercase().contains("cannotentercomponent");
                             if is_wasm_poisoned {
+                                // Create exit reason - ensure we're not in an active span context
                                 let exit_reason = plexspaces_core::ExitReason::Error(error_str.clone());
                                 {
                                     let mut stored = exit_reason_arc.write().await;
                                     *stored = Some(exit_reason.clone());
                                 }
                                 let mut behavior_guard = behavior.write().await;
-                                let _ = behavior_guard.terminate(&context, &exit_reason).await;
-                                tracing::error!(
+                                // Terminate actor - errors during termination are logged but don't panic
+                                if let Err(term_err) = behavior_guard.terminate(&context, &exit_reason).await {
+                                    // Log termination error - use tracing but ensure we're not in an active span context
+                                    // by using tracing::event! instead of tracing::error! to avoid span cloning issues
+                                    tracing::event!(
+                                        tracing::Level::ERROR,
+                                        actor_id = %actor_id_for_logging,
+                                        error = %term_err,
+                                        "Failed to terminate actor"
+                                    );
+                                }
+                                // Log WASM instance poisoned - use tracing::event! to avoid span cloning issues
+                                tracing::event!(
+                                    tracing::Level::ERROR,
                                     actor_id = %actor_id_for_logging,
                                     "WASM instance poisoned, terminating actor for restart"
                                 );
@@ -1190,7 +1236,13 @@ impl Actor {
             // So we don't need to call it again here. The message loop just exits cleanly.
             
             // Mark as stopped
+            // CRITICAL: The tracing context guard set at the start of this task is still active
+            // and will remain active until this function returns, preventing any automatic logging
+            // from trying to clone closed spans when the task completes.
             *state.write().await = ActorState::Terminated;
+            
+            // The guard will be automatically dropped when this function returns,
+            // ensuring the tracing context remains cleared throughout the entire task lifecycle
         });
 
         self.processor_handle = Some(handle.abort_handle());
@@ -2067,16 +2119,14 @@ impl Actor {
         }
         
         // OBSERVABILITY: Tracing span for message processing (TRACE to reduce log noise; use RUST_LOG=plexspaces_actor=trace to enable)
-        let span = tracing::span!(
-            tracing::Level::TRACE,
-            "actor.process_message",
-            actor_id = %actor_id_owned,
-            message_id = %message_id,
-            message_type = %message_type,
-            behavior = %behavior_owned,
-            depth = depth
-        );
-        let _guard = span.enter();
+        // CRITICAL: Disable span creation to prevent "tried to clone a span that already closed" panics.
+        // The issue occurs when:
+        // 1. A span is created with .entered() in process_message
+        // 2. The span guard is dropped when process_message returns
+        // 3. The span is still in the tracing context when actor terminates
+        // 4. When we log during termination, tracing tries to clone the already-closed span
+        // Solution: Don't create spans in process_message. Use regular tracing macros instead.
+        // If distributed tracing is needed, it should be implemented at a higher level.
         
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(

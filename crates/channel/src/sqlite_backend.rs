@@ -203,13 +203,21 @@ impl SqliteChannel {
                 })?;
         }
 
-        // Run migrations (SQLite-specific)
-        sqlx::migrate!("./migrations/sqlite")
-            .run(&pool)
+        // Schema: for :memory: create inline; file-based uses unified db/migrations at init.
+        if sqlite_config.database_path == ":memory:" || sqlite_config.database_path.is_empty() {
+            sqlx::query(
+                r#"CREATE TABLE IF NOT EXISTS channel_messages (
+                    id TEXT PRIMARY KEY, channel_name TEXT NOT NULL, payload BLOB NOT NULL,
+                    timestamp INTEGER NOT NULL, acked INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)"#,
+            )
+            .execute(&pool)
             .await
-            .map_err(|e| {
-                ChannelError::BackendError(format!("Failed to run channel migrations: {}", e))
-            })?;
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS idx_channel_unacked ON channel_messages(channel_name, acked) WHERE acked = 0")
+                .execute(&pool).await.map_err(|e| ChannelError::BackendError(e.to_string()))?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS idx_channel_name ON channel_messages(channel_name)")
+                .execute(&pool).await.map_err(|e| ChannelError::BackendError(e.to_string()))?;
+        }
 
         // Get table name
         let table_name = if sqlite_config.table_name.is_empty() {

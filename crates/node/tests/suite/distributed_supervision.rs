@@ -33,7 +33,7 @@ use super::test_helpers::register_actor_with_message_sender;
 /// Helper to start a gRPC server for testing
 async fn start_test_server(node: Arc<Node>) -> String {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let service = ActorServiceImpl::new(node.service_locator_impl(), node.id().as_str().to_string());
+    let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let bound_addr = listener.local_addr().unwrap();

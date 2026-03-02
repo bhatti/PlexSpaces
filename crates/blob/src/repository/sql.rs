@@ -128,17 +128,11 @@ impl SqlBlobRepository {
             );
             Ok(())
         } else {
-            sqlx::migrate!("./migrations/postgres")
-                .run(pool)
-                .await
-                .map_err(|e| {
-                    error!("Blob PostgreSQL migration failed: {}", e);
-                    e
-                })?;
+            // Schema is created by unified db/migrations at init. Assume it exists.
             info!(
-                db = %db_version, 
+                db = %db_version,
                 table = "blob_metadata",
-                "Blob storage migration completed"
+                "Blob storage (PostgreSQL) initialized"
             );
             Ok(())
         }

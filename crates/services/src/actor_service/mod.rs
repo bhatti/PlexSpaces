@@ -1386,21 +1386,155 @@ impl ActorServiceTrait for ActorServiceImpl {
             );
         }
 
+        // CRITICAL: Handle virtual actor auto-activation when no actors found
+        // Delegate to get_or_activate_actor_impl which handles virtual actor type detection and facet creation
+        let mut actor_ids = actor_ids;
         if actor_ids.is_empty() {
-            metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                "error_type" => "actor_not_found",
-                "tenant_id" => tenant_id.clone(),
-                "namespace" => namespace.clone(),
-                "actor_type" => actor_type.clone()
-            ).increment(1);
-            tracing::warn!(
-                "🟦 [INVOKE_ACTOR] No actors found: type='{}', tenant='{}', namespace='{}'",
-                actor_type, &tenant_id, &namespace
-            );
-            return Err(Status::not_found(format!(
-                "No actors found for type '{}' in tenant '{}', namespace '{}'",
-                actor_type, &tenant_id, &namespace
-            )));
+            // Extract instance_id from actor_type if it's in HTTP format (actor_type:instance_id)
+            // Format: "read-state-tracker:user-1" -> instance_id="user-1", simple_actor_type="read-state-tracker"
+            // Format: "read-state-tracker" -> instance_id=ULID, simple_actor_type="read-state-tracker"
+            let (instance_id, simple_actor_type) = if let Some((actor_type_part, instance_id_part)) = actor_type.split_once(':') {
+                (instance_id_part.to_string(), actor_type_part.to_string())
+            } else {
+                (ulid::Ulid::new().to_string(), actor_type.clone())
+            };
+            // Check if actor type is virtual - use simple_actor_type directly (no base type extraction)
+            let virtual_actor_manager = self.service_locator.virtual_actor_manager().await;
+            if let Some(manager) = virtual_actor_manager {
+                let is_virtual = manager.is_virtual_actor_type(&simple_actor_type).await;
+                if is_virtual {
+                    // Virtual actor type - build actor_id and delegate to get_or_activate_actor_impl
+                    tracing::info!(
+                        actor_type = %actor_type,
+                        simple_actor_type = %simple_actor_type,
+                        instance_id = %instance_id,
+                        "🟦 [INVOKE_ACTOR] Virtual actor type detected - activating via get_or_activate_actor_impl"
+                    );
+                    
+                    // Get virtual actor type metadata to extract namespace for actor_id construction
+                    if let Some(type_metadata) = manager.get_virtual_actor_type(&simple_actor_type).await {
+                        // Build actor_id using factory: {instance_id}//{actor_type}::{namespace}@{node_id}
+                        use plexspaces_core::actor_id::build_actor_id;
+                        let target_actor_id = build_actor_id(
+                            &instance_id,
+                            &simple_actor_type,
+                            Some(&type_metadata.namespace),
+                            &self.local_node_id,
+                        );
+                        
+                        // Delegate to get_or_activate_actor_impl - it handles virtual actor type detection,
+                        // facet creation from VirtualActorMetadata, and actor spawning
+                        // NOTE: For WASM actors, init config should be built in get_or_activate_actor_impl
+                        // using ApplicationController to get ChildSpec and merge instance_id as user_id
+                        use plexspaces_proto::actor::v1::GetOrActivateActorRequest;
+                        let get_or_activate_req = GetOrActivateActorRequest {
+                            actor_id: target_actor_id.clone(),
+                            actor_type: simple_actor_type.clone(),
+                            initial_state: vec![], // Will be built in get_or_activate_actor_impl for WASM actors
+                            config: type_metadata.config.clone(),
+                            force_activation: false,
+                        };
+                        
+                        // Use namespace from type_metadata (from deployment) for proper actor creation
+                        let get_or_activate_ctx = plexspaces_core::RequestContext::new_without_auth(
+                            tenant_id.clone(),
+                            type_metadata.namespace.clone(),
+                        );
+                        match crate::actor_service::get_or_activate_impl::get_or_activate_actor_impl(
+                            &self.service_locator,
+                            &self.local_node_id,
+                            &get_or_activate_ctx,
+                            &get_or_activate_req,
+                        ).await {
+                            Ok((_was_activated, final_actor_id)) => {
+                                // Actor activated/created - use the final_actor_id directly instead of retrying type lookup
+                                // Log payload info here (combine with activation log) - payload_str will be set below for POST/PUT
+                                tracing::info!(
+                                    actor_type = %actor_type,
+                                    final_actor_id = %final_actor_id,
+                                    namespace = %namespace,
+                                    tenant_id = %tenant_id,
+                                    "🟦 [INVOKE_ACTOR] Virtual actor auto-activated successfully - using final_actor_id"
+                                );
+                                
+                                // Verify actor is actually registered and active before routing message
+                                // This ensures the actor is ready to receive messages
+                                if actor_registry.lookup_actor(&final_actor_id).await.is_none() {
+                                    tracing::warn!(
+                                        actor_id = %final_actor_id,
+                                        "Actor not found in registry immediately after activation - retrying lookup"
+                                    );
+                                    // Retry lookup after a brief delay to allow registration to complete
+                                    tokio::time::sleep(Duration::from_millis(50)).await;
+                                    if actor_registry.lookup_actor(&final_actor_id).await.is_none() {
+                                        return Err(Status::internal(format!(
+                                            "Actor {} not found in registry after activation",
+                                            final_actor_id
+                                        )));
+                                    }
+                                }
+                                
+                                // Use the actor ID returned from activation (not type lookup)
+                                actor_ids = vec![final_actor_id];
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    actor_type = %simple_actor_type,
+                                    error = %e,
+                                    "Failed to activate virtual actor"
+                                );
+                                return Err(Status::internal(format!(
+                                    "Failed to activate virtual actor type '{}': {}",
+                                    simple_actor_type, e
+                                )));
+                            }
+                        }
+                    } else {
+                        tracing::error!(
+                            actor_type = %simple_actor_type,
+                            "Virtual actor type metadata not found"
+                        );
+                        return Err(Status::internal(format!(
+                            "Virtual actor type '{}' metadata not found",
+                            simple_actor_type
+                        )));
+                    }
+                } else {
+                    // Not a virtual actor type - return error
+                    metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                        "error_type" => "actor_not_found",
+                        "tenant_id" => tenant_id.clone(),
+                        "namespace" => namespace.clone(),
+                        "actor_type" => actor_type.clone()
+                    ).increment(1);
+                    tracing::warn!(
+                        actor_type = %actor_type,
+                        "🟦 [INVOKE_ACTOR] No actors found: type='{}', tenant='{}', namespace='{}'",
+                        actor_type, &tenant_id, &namespace
+                    );
+                    return Err(Status::not_found(format!(
+                        "No actors found for type '{}' in tenant '{}', namespace '{}'",
+                        actor_type, &tenant_id, &namespace
+                    )));
+                }
+            } else {
+                // VirtualActorManager not available - return error
+                metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
+                    "error_type" => "actor_not_found",
+                    "tenant_id" => tenant_id.clone(),
+                    "namespace" => namespace.clone(),
+                    "actor_type" => actor_type.clone()
+                ).increment(1);
+                tracing::warn!(
+                    actor_type = %actor_type,
+                    "🟦 [INVOKE_ACTOR] No actors found: type='{}', tenant='{}', namespace='{}'",
+                    actor_type, &tenant_id, &namespace
+                );
+                return Err(Status::not_found(format!(
+                    "No actors found for type '{}' in tenant '{}', namespace '{}'",
+                    actor_type, &tenant_id, &namespace
+                )));
+            }
         }
 
         // Randomly select an actor if multiple found (load balancing)
@@ -1447,6 +1581,34 @@ impl ActorServiceTrait for ActorServiceImpl {
             (query_json.into_bytes(), HashMap::new())
         } else {
             // POST/PUT: Use body as payload, convert headers to metadata
+            let payload_str = String::from_utf8_lossy(&req.payload);
+            // Log payload for debugging JSON parsing errors (combined with virtual actor activation log above for virtual actors)
+            tracing::debug!(
+                actor_type = %req.actor_type,
+                namespace = %namespace,
+                tenant_id = %tenant_id,
+                payload_json = %payload_str,
+                payload_len = req.payload.len(),
+                "🟦 [INVOKE_ACTOR] POST/PUT payload before routing"
+            );
+            
+            // Validate JSON payload early to catch malformed JSON before routing
+            if let Err(e) = serde_json::from_str::<serde_json::Value>(&payload_str) {
+                tracing::error!(
+                    actor_type = %req.actor_type,
+                    namespace = %namespace,
+                    tenant_id = %tenant_id,
+                    payload_json = %payload_str,
+                    payload_len = req.payload.len(),
+                    error = %e,
+                    "🟦 [INVOKE_ACTOR] Invalid JSON payload in request"
+                );
+                return Err(Status::invalid_argument(format!(
+                    "Invalid JSON payload: {}",
+                    e
+                )));
+            }
+            
             (req.payload, req.headers)
         };
 

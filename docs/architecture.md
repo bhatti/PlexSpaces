@@ -518,6 +518,9 @@ Composable capabilities that extend actor behavior at runtime:
 
 **Infrastructure Facets**:
 - **VirtualActorFacet**: Orleans-style activation/deactivation
+  - Implements `VirtualActorLifecycleFacet` trait (type-safe lifecycle management)
+  - Uses `RuntimeConfig.default_virtual_actor_config` for defaults (idle_timeout: 5m, max_pool: 100, strategy: lazy)
+  - Supports LRU eviction when max pool size per actor type is exceeded
 - **DurabilityFacet**: Automatic persistence and recovery (Restate-inspired)
 - **MobilityFacet**: Actor migration between nodes
 

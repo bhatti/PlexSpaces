@@ -376,6 +376,22 @@ pub struct RequestContext {
     /// Examples: "source_ip", "user_agent", "api_version"
     #[prost(map="string, string", tag="7")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// HTTP-style headers for auth credential propagation (OpenAPI securitySchemes pattern)
+    ///
+    /// Carries authorization headers and security credentials through the call chain.
+    /// Header names are stored lowercase (HTTP/2 convention). Common entries:
+    ///
+    /// | Header              | OpenAPI Equivalent                    |
+    /// |---------------------|---------------------------------------|
+    /// | authorization       | bearerAuth (type: http, scheme: bearer) |
+    /// | x-api-key           | apiKey (in: header)                   |
+    /// | apikey-query:<name> | apiKey (in: query)                    |
+    /// | any custom header   | custom securityScheme                 |
+    ///
+    /// Security: When auth is enabled, the 'authorization' header is set from
+    /// validated JWT only — never from client-supplied headers.
+    #[prost(map="string, string", tag="11")]
+    pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     /// Admin flag (from JWT, optional)
     ///
     /// When true, indicates the user has admin privileges.
@@ -400,15 +416,6 @@ pub struct RequestContext {
     /// If auth is disabled, tenant_id can be empty.
     #[prost(bool, tag="10")]
     pub auth_enabled: bool,
-    /// HTTP-style headers for auth credential propagation (OpenAPI securitySchemes pattern)
-    ///
-    /// Carries authorization headers and security credentials through the call chain.
-    /// Header names are stored lowercase (HTTP/2 convention). Common entries:
-    /// - authorization: Bearer token (OpenAPI bearerAuth)
-    /// - x-api-key: API key in header (OpenAPI apiKey in: header)
-    /// - apikey-query:<name>: API key as query param (OpenAPI apiKey in: query)
-    #[prost(map="string, string", tag="11")]
-    pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 // ============================================================================
 // UNIFIED MESSAGE TYPE
@@ -544,6 +551,46 @@ pub struct Message {
     /// Example: "GET", "POST", "PUT", "DELETE"
     #[prost(string, tag="17")]
     pub uri_method: ::prost::alloc::string::String,
+}
+/// Activation strategy for virtual actors (single definition used by actor_runtime and node.release).
+///
+/// Used by VirtualActorConfig (actor_runtime), DefaultVirtualActorConfig (release), and Rust
+/// VirtualActorFacet. Define here so it is not duplicated across protos or crates.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ActivationStrategy {
+    /// Treated as LAZY
+    ActivationStrategyUnspecified = 0,
+    /// Activate on first message (default)
+    ActivationStrategyLazy = 1,
+    /// Activate immediately on creation
+    ActivationStrategyEager = 2,
+    /// Pre-activate based on schedule
+    ActivationStrategyPrewarm = 3,
+}
+impl ActivationStrategy {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            ActivationStrategy::ActivationStrategyUnspecified => "ACTIVATION_STRATEGY_UNSPECIFIED",
+            ActivationStrategy::ActivationStrategyLazy => "ACTIVATION_STRATEGY_LAZY",
+            ActivationStrategy::ActivationStrategyEager => "ACTIVATION_STRATEGY_EAGER",
+            ActivationStrategy::ActivationStrategyPrewarm => "ACTIVATION_STRATEGY_PREWARM",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "ACTIVATION_STRATEGY_UNSPECIFIED" => Some(Self::ActivationStrategyUnspecified),
+            "ACTIVATION_STRATEGY_LAZY" => Some(Self::ActivationStrategyLazy),
+            "ACTIVATION_STRATEGY_EAGER" => Some(Self::ActivationStrategyEager),
+            "ACTIVATION_STRATEGY_PREWARM" => Some(Self::ActivationStrategyPrewarm),
+            _ => None,
+        }
+    }
 }
 /// Quality of Service levels
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

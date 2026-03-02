@@ -40,7 +40,7 @@ mod tests {
 
     #[async_trait]
     impl MessageSender for MockMessageSender {
-        async fn send_message(&self, _from: &str, _to: &str, _message: &str) -> Result<(), String> {
+        async fn send_message(&self, _from: &str, _to: &str, _message_type: &str, _message: &str) -> Result<(), String> {
             Ok(())
         }
 

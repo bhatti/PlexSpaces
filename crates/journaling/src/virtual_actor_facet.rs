@@ -63,6 +63,9 @@
 //! ```
 
 use async_trait::async_trait;
+use plexspaces_common::{from_config_str, ActivationStrategy};
+use plexspaces_core::VirtualActorLifecycleFacet as VirtualActorLifecycleFacetTrait;
+use plexspaces_core::VirtualActorLifecycleState;
 use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
 use serde_json::Value;
 use std::sync::Arc;
@@ -79,6 +82,7 @@ use tracing;
 ///
 /// ## Thread Safety
 /// Uses Arc<RwLock<>> for concurrent access to lifecycle state.
+#[derive(Debug)]
 pub struct VirtualActorFacet {
     /// Facet configuration (immutable)
     config: Value,
@@ -111,17 +115,6 @@ pub struct VirtualActorFacet {
 /// Default priority for VirtualActorFacet
 pub const VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY: i32 = 100;
 
-/// Activation strategy for virtual actors
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActivationStrategy {
-    /// Activate on first message (default)
-    Lazy,
-    /// Activate immediately on creation
-    Eager,
-    /// Pre-activate based on schedule
-    Prewarm,
-}
-
 impl VirtualActorFacet {
     /// Create a new virtual actor facet
     ///
@@ -133,21 +126,19 @@ impl VirtualActorFacet {
     /// New VirtualActorFacet ready to attach to an actor
     pub fn new(config: Value, priority: i32) -> Self {
         // Validate and parse config
+        // Use constants from plexspaces-common for defaults (matches RuntimeConfig.default_virtual_actor_config)
+        use plexspaces_common::virtual_actor_config::{DEFAULT_IDLE_TIMEOUT_SECONDS, DEFAULT_ACTIVATION_STRATEGY};
         let idle_timeout = config
             .get("idle_timeout")
             .and_then(|v| v.as_str())
             .and_then(|s| parse_duration(s))
-            .unwrap_or(Duration::from_secs(300)); // Default: 5 minutes
+            .unwrap_or(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS));
 
         let activation_strategy = config
             .get("activation_strategy")
             .and_then(|v| v.as_str())
-            .map(|s| match s {
-                "eager" => ActivationStrategy::Eager,
-                "prewarm" => ActivationStrategy::Prewarm,
-                _ => ActivationStrategy::Lazy,
-            })
-            .unwrap_or(ActivationStrategy::Lazy);
+            .map(from_config_str)
+            .unwrap_or(DEFAULT_ACTIVATION_STRATEGY);
 
         VirtualActorFacet {
             config,
@@ -236,19 +227,131 @@ impl VirtualActorFacet {
     
     /// Get activation strategy
     pub async fn get_activation_strategy(&self) -> ActivationStrategy {
-        *self.activation_strategy.read().await
+        self.activation_strategy.read().await.clone()
     }
 }
 
-/// Lifecycle state for virtual actors
-#[derive(Debug, Clone)]
-pub struct VirtualActorLifecycleState {
-    pub last_activated: Option<SystemTime>,
-    pub last_accessed: Option<SystemTime>,
-    pub activation_count: u32,
-    pub is_activating: bool,
-    pub idle_timeout: Duration,
+#[async_trait]
+impl VirtualActorLifecycleFacetTrait for VirtualActorFacet {
+    async fn get_activation_strategy(&self) -> ActivationStrategy {
+        self.activation_strategy.read().await.clone()
+    }
+    
+    async fn get_lifecycle_state(&self) -> VirtualActorLifecycleState {
+        let last_activated = *self.last_activated.read().await;
+        let last_accessed = *self.last_accessed.read().await;
+        let activation_count = *self.activation_count.read().await;
+        let is_activating = *self.is_activating.read().await;
+        let idle_timeout = *self.idle_timeout.read().await;
+
+        VirtualActorLifecycleState {
+            last_activated,
+            last_accessed,
+            activation_count,
+            is_activating,
+            idle_timeout,
+        }
+    }
+    
+    async fn should_activate(&self) -> bool {
+        let is_activating = *self.is_activating.read().await;
+        if is_activating {
+            return false;
+        }
+        let last_activated = *self.last_activated.read().await;
+        last_activated.is_none()
+    }
+    
+    async fn should_deactivate(&self) -> bool {
+        let last_accessed = *self.last_accessed.read().await;
+        let idle_timeout = *self.idle_timeout.read().await;
+
+        if let Some(last_access) = last_accessed {
+            if let Ok(elapsed) = SystemTime::now().duration_since(last_access) {
+                return elapsed >= idle_timeout;
+            }
+        }
+        false
+    }
+    
+    async fn start_activation(&self) -> bool {
+        let mut is_activating = self.is_activating.write().await;
+        if *is_activating {
+            return false;
+        }
+        *is_activating = true;
+        true
+    }
+    
+    async fn mark_activated(&self) {
+        let now = SystemTime::now();
+        *self.last_activated.write().await = Some(now);
+        *self.last_accessed.write().await = Some(now);
+        *self.is_activating.write().await = false;
+        *self.activation_count.write().await += 1;
+    }
+    
+    async fn mark_deactivated(&self) {
+        *self.is_activating.write().await = false;
+    }
+    
+    async fn update_access_time(&self) {
+        *self.last_accessed.write().await = Some(SystemTime::now());
+    }
 }
+
+/// Convert a Facet to VirtualActorLifecycleFacet trait object
+///
+/// ## Purpose
+/// Helper function to convert `Box<dyn Facet>` to `Box<dyn VirtualActorLifecycleFacet>`
+/// by downcasting to `VirtualActorFacet` (which implements both traits).
+///
+/// ## Returns
+/// `Some(Box<dyn VirtualActorLifecycleFacet>)` if facet is a VirtualActorFacet,
+/// `None` otherwise.
+///
+/// ## Usage
+/// This helper is used when registering virtual actors to convert from the generic
+/// `Facet` trait to the specific `VirtualActorLifecycleFacet` trait required by
+/// `VirtualActorManager`.
+pub fn facet_to_lifecycle_facet(
+    facet: Box<dyn plexspaces_facet::Facet>
+) -> Option<Box<dyn plexspaces_core::VirtualActorLifecycleFacet>> {
+    // Check if facet is VirtualActorFacet by checking facet_type
+    if facet.facet_type() != "virtual_actor" {
+        return None;
+    }
+    
+    // Downcast to VirtualActorFacet using as_any()
+    if let Some(virtual_facet_ref) = facet.as_any().downcast_ref::<VirtualActorFacet>() {
+        // We can't directly convert &VirtualActorFacet to Box<dyn VirtualActorLifecycleFacet>
+        // because we don't own the facet. We need to clone or recreate it.
+        // However, since VirtualActorFacet contains Arc<RwLock<>> internally, we can't easily clone.
+        // The best approach is to require callers to pass VirtualActorFacet directly.
+        // For now, return None and update call sites to pass VirtualActorFacet directly.
+        None
+    } else {
+        None
+    }
+}
+
+/// Convert VirtualActorFacet to VirtualActorLifecycleFacet trait object
+///
+/// ## Purpose
+/// Converts a `VirtualActorFacet` instance to `Box<dyn VirtualActorLifecycleFacet>`.
+/// This is the preferred way to convert since VirtualActorFacet implements the trait.
+///
+/// ## Usage
+/// Use this when you have a `VirtualActorFacet` instance and need to pass it to
+/// `VirtualActorManager::register()`.
+pub fn virtual_actor_facet_to_lifecycle_facet(
+    facet: VirtualActorFacet
+) -> Box<dyn plexspaces_core::VirtualActorLifecycleFacet> {
+    Box::new(facet)
+}
+
+// VirtualActorLifecycleState is now defined in plexspaces-core
+// No need to re-export here - it's re-exported from lib.rs
 
 #[async_trait]
 impl Facet for VirtualActorFacet {

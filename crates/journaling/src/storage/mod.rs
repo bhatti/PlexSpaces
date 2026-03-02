@@ -96,11 +96,25 @@ pub use ddb::DynamoDBJournalStorage;
 pub async fn create_journal_storage(
     db_url: &str,
 ) -> JournalResult<Arc<dyn JournalStorage>> {
-    // Determine backend type from connection string
-    if db_url.contains(":memory:") || db_url.starts_with("sqlite:") || db_url.starts_with("sqlite://") {
+    // Determine backend type from connection string or plain path
+    // Support both connection strings (sqlite:///path) and plain paths (/path/to/db or ~/path/to/db)
+    if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {
+        #[cfg(feature = "postgres-backend")]
+        {
+            let storage = PostgresJournalStorage::new(db_url).await?;
+            Ok(Arc::new(storage))
+        }
+        #[cfg(not(feature = "postgres-backend"))]
+        {
+            Err(JournalError::InvalidConfiguration(
+                "PostgreSQL backend requires 'postgres-backend' feature".to_string(),
+            ))
+        }
+    } else if !db_url.is_empty() {
+        // SQLite (connection string or plain path)
         #[cfg(feature = "sqlite-backend")]
         {
-            // Extract path from SQLite connection string
+            // Extract path from SQLite connection string or use plain path
             let path = if db_url == ":memory:" || db_url.contains(":memory:") {
                 ":memory:".to_string()
             } else if db_url.starts_with("sqlite:///") {
@@ -120,11 +134,18 @@ pub async fn create_journal_storage(
                     .unwrap_or(db_url)
                     .to_string()
             } else {
-                return Err(JournalError::InvalidConfiguration(
-                    "Invalid SQLite connection string format".to_string(),
-                ));
+                // Plain file path (e.g., /path/to/db or ~/path/to/db)
+                // Expand ~ to home directory if needed
+                if db_url.starts_with("~/") {
+                    let home = std::env::var("HOME")
+                        .unwrap_or_else(|_| "~".to_string());
+                    db_url.replacen("~/", &format!("{}/", home), 1)
+                } else {
+                    db_url.to_string()
+                }
             };
             
+
             // Ensure directory exists for file-based SQLite databases
             if path != ":memory:" && !path.is_empty() {
                 if let Some(parent) = std::path::Path::new(&path).parent() {
@@ -146,20 +167,8 @@ pub async fn create_journal_storage(
                 "SQLite backend requires 'sqlite-backend' feature".to_string(),
             ))
         }
-    } else if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {
-        #[cfg(feature = "postgres-backend")]
-        {
-            let storage = PostgresJournalStorage::new(db_url).await?;
-            Ok(Arc::new(storage))
-        }
-        #[cfg(not(feature = "postgres-backend"))]
-        {
-            Err(JournalError::InvalidConfiguration(
-                "PostgreSQL backend requires 'postgres-backend' feature".to_string(),
-            ))
-        }
     } else {
-        // Fallback to in-memory SQLite for unsupported databases
+        // Fallback to in-memory SQLite for empty/unsupported databases
         tracing::warn!(
             db_url = %db_url,
             "Unsupported database type for journaling, using in-memory SQLite fallback"

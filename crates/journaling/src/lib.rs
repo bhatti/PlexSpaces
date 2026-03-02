@@ -319,7 +319,10 @@ pub use state_loader::StateLoader;
 
 // Phase 8.5: Virtual Actor facet for Orleans-style lifecycle
 mod virtual_actor_facet;
-pub use virtual_actor_facet::{ActivationStrategy, VirtualActorFacet, VirtualActorLifecycleState};
+pub use plexspaces_common::{ActivationStrategy, to_config_str};
+pub use virtual_actor_facet::{VirtualActorFacet, virtual_actor_facet_to_lifecycle_facet, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY};
+// VirtualActorLifecycleState is re-exported from core (defined there to avoid circular dependencies)
+pub use plexspaces_core::VirtualActorLifecycleState;
 
 // Phase 8.5: Event Sourcing facet for Temporal-inspired event sourcing
 mod event_sourcing_facet;
@@ -335,3 +338,13 @@ mod reminder_facet;
 pub use reminder_facet::{ReminderError, ReminderFacet};
 // ActivationProvider moved to plexspaces-core to avoid circular dependencies
 pub use plexspaces_core::ActivationProvider;
+
+// Facet factories for journaling-related facets
+pub mod facet_factories;
+pub use facet_factories::{
+    VirtualActorFacetFactory,
+    DurabilityFacetFactory,
+    TimerFacetFactory,
+    ReminderFacetFactory,
+    EventSourcingFacetFactory,
+};

@@ -512,6 +512,12 @@ mod tests {
     impl LockManager for TestLockManager {
         async fn acquire_lock(&self, _ctx: &RequestContext, options: AcquireLockOptions) -> Result<Lock, String> {
             let mut locks = self.locks.write().await;
+            // Check if lock already exists and is locked
+            if let Some(existing_lock) = locks.get(&options.lock_key) {
+                if existing_lock.locked {
+                    return Err(format!("Lock already held by: {}", existing_lock.holder_id));
+                }
+            }
             let lock = Lock {
                 lock_key: options.lock_key.clone(),
                 holder_id: options.holder_id.clone(),
@@ -582,36 +588,19 @@ mod tests {
             .await
             .unwrap();
 
-        // ASSERT: Should short-circuit with lock data
-        match result {
+        // ASSERT: Should short-circuit with lock data and extract version
+        let version = match &result {
             InterceptResult::ShortCircuit(data) => {
-                let lock_json: serde_json::Value = serde_json::from_slice(&data).unwrap();
+                let lock_json: serde_json::Value = serde_json::from_slice(data).unwrap();
                 assert_eq!(lock_json["lock_key"], "resource-1");
                 assert_eq!(lock_json["holder_id"], "actor-1");
                 assert!(!lock_json["version"].as_str().unwrap().is_empty());
+                lock_json["version"].as_str().unwrap().to_string()
             }
             _ => panic!("Expected short circuit"),
-        }
+        };
 
         // ACT: Release lock
-        let release_args = serde_json::json!({
-            "lock_key": "resource-1",
-            "holder_id": "actor-1",
-            "version": "test-version",
-            "delete_lock": false
-        });
-
-        // First acquire to get real version
-        let acquire_result = facet
-            .before_method("acquire_lock", serde_json::to_vec(&acquire_args).unwrap().as_slice())
-            .await
-            .unwrap();
-
-        let lock_json: serde_json::Value = match acquire_result {
-            InterceptResult::ShortCircuit(data) => serde_json::from_slice(&data).unwrap(),
-            _ => panic!("Expected short circuit"),
-        };
-        let version = lock_json["version"].as_str().unwrap().to_string();
 
         let release_args_with_version = serde_json::json!({
             "lock_key": "resource-1",
@@ -620,13 +609,13 @@ mod tests {
             "delete_lock": false
         });
 
-        let result = facet
+        let release_result = facet
             .before_method("release_lock", serde_json::to_vec(&release_args_with_version).unwrap().as_slice())
             .await
             .unwrap();
 
         // ASSERT: Should short-circuit with success
-        match result {
+        match release_result {
             InterceptResult::ShortCircuit(data) => {
                 let response: Value = serde_json::from_slice(&data).unwrap();
                 assert_eq!(response["status"], "ok");

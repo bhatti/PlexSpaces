@@ -407,21 +407,17 @@ impl Node {
         &self.config
     }
 
-    /// Get ServiceLocator (trait object for compatibility)
-    pub fn service_locator(&self) -> Arc<dyn plexspaces_core::ServiceLocator> {
-        self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
-    }
-    
-    /// Get ServiceLocatorImpl directly (for accessing concrete type methods)
+    /// Get ServiceLocator (returns concrete ServiceLocatorImpl type)
     /// 
     /// ## Purpose
-    /// Returns the concrete ServiceLocatorImpl type for accessing methods that require
-    /// the concrete type. For ActorFactory access, use ServiceLocator methods directly:
-    /// `service_locator.get_actor_factory().await`
+    /// Returns the concrete ServiceLocatorImpl type. ServiceLocatorImpl implements
+    /// the ServiceLocator trait, so it can be used wherever a trait object is needed.
     /// 
     /// ## Design
-    /// ServiceLocatorImpl is the only production implementation, so this is safe and production-grade.
-    pub fn service_locator_impl(&self) -> Arc<plexspaces_services::ServiceLocatorImpl> {
+    /// ServiceLocatorImpl is the only production implementation, so returning the concrete
+    /// type is safe and production-grade. Cast to trait object when needed:
+    /// `service_locator.clone() as Arc<dyn ServiceLocator>`
+    pub fn service_locator(&self) -> Arc<plexspaces_services::ServiceLocatorImpl> {
         self.service_locator.clone()
     }
     
@@ -458,7 +454,7 @@ impl Node {
         labels: std::collections::HashMap<String, String>,
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<Arc<dyn plexspaces_core::MessageSender>, NodeError> {
-        let actor_factory = self.service_locator_impl().get_actor_factory().await
+        let actor_factory = self.service_locator().get_actor_factory().await
             .ok_or_else(|| NodeError::ConfigError("ActorFactory not found in ServiceLocator".to_string()))?;
         
         // spawn_actor returns Arc<dyn MessageSender> directly
@@ -546,15 +542,6 @@ impl Node {
     }
     
     // === Helper methods for VirtualActorFacet downcasting ===
-    // Since VirtualActorMetadata stores facet as Box<dyn Any>, we need to downcast
-    
-    /// Helper to downcast facet from Box<dyn Any> to VirtualActorFacet
-    /// This is needed because VirtualActorMetadata stores facet as trait object to avoid circular dependency
-    fn downcast_virtual_actor_facet(
-        facet_box: &Box<dyn std::any::Any + Send + Sync>,
-    ) -> Option<&VirtualActorFacet> {
-        facet_box.downcast_ref::<VirtualActorFacet>()
-    }
     
     
     /// Get health reporter (for tests and advanced usage)
@@ -660,8 +647,9 @@ impl Node {
 
     /// Look up a remote node's address from NodeRegistry
     async fn lookup_node_address(&self, node_id: &NodeId) -> Result<String, NodeError> {
-        if let Some(node_registry) = self.service_locator.get_node_registry().await {
-            let ctx = self.service_locator.request_context_for_system_operations().await;
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        if let Some(node_registry) = service_locator_trait.get_node_registry().await {
+            let ctx = service_locator_trait.request_context_for_system_operations().await;
             match node_registry.lookup_node(&ctx, node_id.as_str()).await {
                 Ok(Some(registration)) => Ok(registration.node_address),
                 Ok(None) => Err(NodeError::NodeNotConnected(node_id.clone())),
@@ -705,9 +693,10 @@ impl Node {
         };
         
         // Get connected nodes count from NodeRegistry
-        let connected_nodes = if let Some(node_registry) = self.service_locator.get_node_registry().await {
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        let connected_nodes = if let Some(node_registry) = service_locator_trait.get_node_registry().await {
             
-            let ctx = self.service_locator.request_context_for_system_operations().await;
+            let ctx = service_locator_trait.request_context_for_system_operations().await;
             let local_node_id = self.id().as_str().to_string();
             // List nodes from registry (excluding self)
             match node_registry.list_nodes(&ctx, None, 1000, "").await {
@@ -931,10 +920,12 @@ impl Node {
         // Use same context as registration (internal context, cluster_name as namespace if defined)
         let ctx = if let Some(cluster) = &cluster_name {
             // Use cluster_name as namespace for cluster isolation (same as registration)
-            self.service_locator.request_context_for_system_operations_with_namespace(cluster.clone()).await
+            let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+            service_locator_trait.request_context_for_system_operations_with_namespace(cluster.clone()).await
         } else {
             // Use default internal context (same as registration)
-            self.service_locator.request_context_for_system_operations().await
+            let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+            service_locator_trait.request_context_for_system_operations().await
         };
         
         // Heartbeat updates this node's own registration timestamp (not sending to other nodes)
@@ -1222,12 +1213,13 @@ impl Node {
             
             // Use internal context for system operations (node registration is system-level)
             // If cluster_name is defined, use it as namespace for cluster isolation
+            let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = node_for_registration.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
             let ctx = if let Some(cluster) = &cluster_name {
                 // Use cluster_name as namespace for cluster isolation
-                node_for_registration.service_locator.request_context_for_system_operations_with_namespace(cluster.clone()).await
+                service_locator_trait.request_context_for_system_operations_with_namespace(cluster.clone()).await
             } else {
                 // Use default internal context
-                node_for_registration.service_locator.request_context_for_system_operations().await
+                service_locator_trait.request_context_for_system_operations().await
             };
             
             if let Some(object_registry) = node_for_registration.service_locator.get_object_registry().await {
@@ -1274,7 +1266,8 @@ impl Node {
             // If registration failed, skip heartbeats (they would fail anyway)
             let node_id_for_check = node_for_heartbeat.id.as_str().to_string();
             // Use internal context for system operations (heartbeat check is system-level)
-            let ctx_for_check = node_for_heartbeat.service_locator.request_context_for_system_operations().await;
+            let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = node_for_heartbeat.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+            let ctx_for_check = service_locator_trait.request_context_for_system_operations().await;
             
             // Check if node is registered
             if let Some(object_registry) = node_for_heartbeat.service_locator.get_object_registry().await {
@@ -1541,7 +1534,7 @@ impl Node {
         }
         
         // Register TaskRouter in ServiceLocator for ShardGroup integration
-        self.service_locator_impl().register_task_router(task_router.clone()).await;
+        self.service_locator().register_task_router(task_router.clone()).await;
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!("✅ TaskRouter registered in ServiceLocator");
         }
@@ -3432,8 +3425,9 @@ impl Node {
         
         // Close network connections via NodeRegistry
         tracing::warn!("🛑 Phase 4: Network Connections");
-        if let Some(node_registry) = self.service_locator.get_node_registry().await {
-            let ctx = self.service_locator.request_context_for_system_operations().await;
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        if let Some(node_registry) = service_locator_trait.get_node_registry().await {
+            let ctx = service_locator_trait.request_context_for_system_operations().await;
             match node_registry.list_nodes(&ctx, None, 1000, "").await {
                 Ok((nodes, _)) => {
                     let node_count = nodes.len();
@@ -3504,8 +3498,9 @@ impl Node {
         let active_requests = node_metrics.messages_routed as usize;
         
         // Get connected nodes from NodeRegistry
-        let connected_nodes = if let Some(node_registry) = self.service_locator.get_node_registry().await {
-            let ctx = self.service_locator.request_context_for_system_operations().await;
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator().clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        let connected_nodes = if let Some(node_registry) = service_locator_trait.get_node_registry().await {
+            let ctx = service_locator_trait.request_context_for_system_operations().await;
             match node_registry.list_nodes(&ctx, None, 1000, "").await {
                 Ok((nodes, _)) => nodes.len(),
                 Err(_) => 0,
@@ -3617,13 +3612,9 @@ impl Node {
         let facet_arc = manager.get_facet(&actor_id).await
             .map_err(|_e| NodeError::ActorNotFound(actor_id.clone()))?;
         
-        // Downcast facet to VirtualActorFacet and mark as deactivated
+        // Use trait method directly - facet is Box<dyn VirtualActorLifecycleFacet>
         let mut facet_guard = facet_arc.write().await;
-        let facet = facet_guard
-            .downcast_mut::<VirtualActorFacet>()
-            .ok_or_else(|| NodeError::ActorRegistrationFailed(actor_id.clone().into(), "Failed to downcast VirtualActorFacet".to_string()))?;
-        
-        facet.mark_deactivated().await;
+        facet_guard.mark_deactivated().await;
         drop(facet_guard);
 
         // TODO: Persist actor state if persist_on_deactivation enabled
@@ -3682,6 +3673,9 @@ impl Node {
         tracing::warn!("🔵 [DEACTIVATE] Step 2: Suspending virtual actor: actor_id={}", actor_id);
         actor_registry.suspend_virtual_actor(&actor_id).await;
         tracing::warn!("🟢 [DEACTIVATE] Virtual actor suspended: actor_id={}", actor_id);
+        
+        // Step 2.5: Remove from active instances tracking (for LRU eviction)
+        manager.remove_from_active_tracking(&actor_id).await;
 
         // CRITICAL: Re-register VirtualActorWrapper so actor remains addressable (Orleans design)
         // After deactivation, virtual actors should still be registered (with VirtualActorWrapper)
@@ -3690,7 +3684,7 @@ impl Node {
         use plexspaces_actor::VirtualActorWrapper;
         // Use internal context for system operations (virtual actor re-registration is system-level)
         let ctx = self.service_locator().request_context_for_system_operations().await;
-        let actor_factory = self.service_locator_impl().get_actor_factory().await
+        let actor_factory = self.service_locator().get_actor_factory().await
             .ok_or_else(|| NodeError::ConfigError("ActorFactory not registered in ServiceLocator".to_string()))?;
         let virtual_wrapper: Arc<dyn plexspaces_core::MessageSender> = Arc::new(VirtualActorWrapper::new(
             actor_id.clone(),
@@ -3773,16 +3767,19 @@ impl Node {
         actor_type: Option<String>,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
     ) -> Result<(), NodeError> {
-        // Wrap facet in Box<dyn Any> for storage
-        let facet_box = Arc::new(tokio::sync::RwLock::new(Box::new(facet) as Box<dyn std::any::Any + Send + Sync>));
+        // Convert VirtualActorFacet to VirtualActorLifecycleFacet trait object
+        use plexspaces_journaling::virtual_actor_facet_to_lifecycle_facet;
+        let lifecycle_facet = virtual_actor_facet_to_lifecycle_facet(facet);
+        let facet_box = Arc::new(tokio::sync::RwLock::new(lifecycle_facet));
         
         // Use VirtualActorManager for registration (source of truth for virtual actors)
         let manager = self.get_virtual_actor_manager().await?;
         let actor_id_clone = actor_id.clone();
+        let actor_type_str = actor_type.ok_or_else(|| NodeError::ConfigError("actor_type is required for virtual actor registration".to_string()))?;
         manager.register(
             actor_id,
             facet_box,
-            actor_type,
+            actor_type_str,
             config,
             ctx.tenant_id().to_string(),
             ctx.namespace().to_string(),
@@ -3828,15 +3825,14 @@ impl Node {
                         Some(manager) => {
                             let virtual_actors = manager.registry().virtual_actors().read().await;
                             if let Some(virtual_meta) = virtual_actors.get(&actor_id) {
-                                // Downcast facet from Box<dyn Any> to VirtualActorFacet
-                                let facet_guard = virtual_meta.facet.read().await;
-                                if let Some(facet) = facet_guard.downcast_ref::<VirtualActorFacet>() {
-                                    let result = facet.should_deactivate().await;
+                                // Use trait method directly - facet is Box<dyn VirtualActorLifecycleFacet>
+                                if let Some(facet_arc) = &virtual_meta.facet {
+                                    let facet_guard = facet_arc.read().await;
+                                    let result = facet_guard.should_deactivate().await;
                                     drop(facet_guard);
                                     drop(virtual_actors);
                                     result
                                 } else {
-                                    drop(facet_guard);
                                     drop(virtual_actors);
                                     false
                                 }
@@ -3854,21 +3850,26 @@ impl Node {
                         if let Ok(manager) = node.get_virtual_actor_manager().await {
                             if let Ok(facet_arc) = manager.get_facet(&actor_id).await {
                                 let mut facet_guard = facet_arc.write().await;
-                                if let Some(facet) = facet_guard.downcast_mut::<VirtualActorFacet>() {
-                                    facet.mark_deactivated().await;
-                                }
+                                // Use trait method directly - facet is Box<dyn VirtualActorLifecycleFacet>
+                                facet_guard.mark_deactivated().await;
                             }
                             // Use service_locator to get ActorRegistry
                             
                             if let Some(actor_registry) = node.service_locator().actor_registry().await {
                                 if let Err(e) = actor_registry.unregister_with_cleanup(&actor_id).await {
                                     tracing::warn!("Failed to deactivate idle virtual actor {}: {}", actor_id, e);
+                                } else {
+                                    // Remove from active instances tracking (for LRU eviction)
+                                    manager.remove_from_active_tracking(&actor_id).await;
                                 }
                             } else {
                                 // Fallback to direct access if not registered yet
                                 if let Ok(actor_registry) = node.actor_registry().await {
                                     if let Err(e) = actor_registry.unregister_with_cleanup(&actor_id).await {
                                         tracing::warn!("Failed to deactivate idle virtual actor {}: {}", actor_id, e);
+                                    } else {
+                                        // Remove from active instances tracking (for LRU eviction)
+                                        manager.remove_from_active_tracking(&actor_id).await;
                                     }
                                 }
                             }
@@ -3896,12 +3897,12 @@ impl ApplicationNode for Node {
 
     /// Get ServiceLocator
     fn service_locator(&self) -> Option<Arc<dyn ServiceLocatorTrait>> {
-        Some(self.service_locator.clone() as Arc<dyn ServiceLocatorTrait>)
+        Some(self.service_locator().clone() as Arc<dyn ServiceLocatorTrait>)
     }
     
     /// Get ActorFactory
     async fn actor_factory(&self) -> Option<Arc<dyn plexspaces_actor::ActorFactory>> {
-        self.service_locator_impl().get_actor_factory().await
+        self.service_locator().get_actor_factory().await
     }
     
     /// Get BlobService for WASM actors

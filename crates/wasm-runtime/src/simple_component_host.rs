@@ -230,8 +230,9 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         if to == self_id {
             let host_functions = std::sync::Arc::clone(&self.host_functions);
             let from = self_id.clone();
+            let msg_type_clone = msg_type.clone();
             tokio::task::spawn(async move {
-                let _ = host_functions.send_message(&from, &from, &payload_json).await;
+                let _ = host_functions.send_message(&from, &from, &msg_type_clone, &payload_json).await;
             });
             metrics::counter!("plexspaces_wasm_simple_send_success_total").increment(1);
             return String::new();
@@ -240,7 +241,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         // Send message using existing host_functions API
         let result = self
             .host_functions
-            .send_message(&self_id, &to, &payload_json)
+            .send_message(&self_id, &to, &msg_type, &payload_json)
             .await;
 
         let duration = start_time.elapsed();
@@ -985,8 +986,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         // Spawn tracked background task
         let handle = tokio::task::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-            let msg = format!(r#"{{"msg_type":"{}","payload":{}}}"#, msg_type, payload_json);
-            if let Err(e) = host_functions.send_message(&from, &from, &msg).await {
+            if let Err(e) = host_functions.send_message(&from, &from, &msg_type, &payload_json).await {
                 tracing::warn!(
                     actor_id = %from, timer_id = %timer_id_for_task,
                     error = %e, "send_after: delivery failed"
@@ -1083,9 +1083,19 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Ok(m) => m,
             Err(e) => return format!("ERROR: {}", e),
         };
+        // Extract message_type from payload JSON if available, otherwise use "cast" (fire-and-forget)
+        let message_type = if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&payload_json) {
+            json_value.get("op")
+                .or_else(|| json_value.get("msg_type"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "cast".to_string())
+        } else {
+            "cast".to_string()
+        };
         for member in &members {
             let member_str = member.to_string();
-            if let Err(e) = self.host_functions.send_message(&self_id, &member_str, &payload_json).await {
+            if let Err(e) = self.host_functions.send_message(&self_id, &member_str, &message_type, &payload_json).await {
                 tracing::warn!(
                     actor_id = %self_id, group = %group_name,
                     target = %member_str, error = %e,

@@ -15,9 +15,8 @@ examples/
 │   └── apps/               # 2 TypeScript WASM actors
 ├── go/
 │   └── apps/               # 1 Go WASM actor
-├── native_references/      # Reference code from other frameworks
 └── README.md
-```
+Native reference code (framework comparison) lives under each example’s `native/` folder when present (e.g. `examples/typescript/apps/migrating_temporal/native/`).
 
 ## Summary
 

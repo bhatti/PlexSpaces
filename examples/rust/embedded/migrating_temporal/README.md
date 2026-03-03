@@ -16,6 +16,7 @@ A workflow that:
 
 This example demonstrates:
 - ✅ **WorkflowBehavior** - Durable workflow execution
+- ✅ **Facets at spawn** - Durability facet attached when spawning (doc comment on `OrderWorkflow` lists facets)
 - ✅ **DurabilityFacet** - Journaling and deterministic replay
 - ✅ **Activity Patterns** - External task execution
 - ✅ **Retry Policies** - Automatic retry with exponential backoff
@@ -267,8 +268,10 @@ cargo build --release
 
 ### Run PlexSpaces Example
 
+Builds use the **workspace shared target** (`.cargo/config.toml` → `target-dir = "../../../../target"`), not a per-example `target/`.
+
 ```bash
-# Run the example
+# Run the example (from this dir or repo root: cargo run -p temporal-comparison --release)
 cargo run --release
 
 # Run tests

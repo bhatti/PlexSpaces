@@ -210,6 +210,8 @@ def _actor_with_behavior(cls: Type[T], behavior_type: str, facets: Optional[List
         cls = new_cls
     setattr(cls, "__behavior_type__", behavior_type)
     setattr(cls, "__facets__", facets or [])
+    # Workflow behavior: dispatch_message routes workflow_run / workflow_signal:x / workflow_query:x to run/signal/query
+    setattr(cls, "_plexspaces_workflow", behavior_type == BEHAVIOR_WORKFLOW)
     
     # GenServer always uses request-reply (call) - force invocation="call" on all handlers
     if behavior_type == BEHAVIOR_GEN_SERVER:
@@ -485,11 +487,8 @@ def dispatch_message(instance: Any, from_actor: str, msg_type: str, payload: Dic
     - POST/PUT/DELETE use tell (fire-and-forget): msg_type is "cast", payload is request body.
       Use POST for write handlers (e.g. ingest, clear); reply is not sent to the client.
 
-    Payload conventions:
-    - GET: payload = query params JSON, e.g. {"msg_type": "readings", "limit": "10"}.
-      effective_type = payload["msg_type"]; handler receives kwargs from payload.
-    - POST: body {"msg_type": "ingest", "payload": {...}} -> route to handler "ingest" with inner payload.
-    - Alternative: {"op": "deposit", "amount": 100} -> route to handler "deposit" with full payload.
+    Payload key for operation (consistent across SDKs): canonical key is message_type; aliases op and msg_type.
+    Resolved in order: message_type -> op -> msg_type. E.g. {"message_type": "workflow_run"} or {"op": "deposit", "amount": 100}.
 
     Returns the handler's return value (sent back to client for ask/GET), or an error dict if no handler found.
     """
@@ -497,18 +496,17 @@ def dispatch_message(instance: Any, from_actor: str, msg_type: str, payload: Dic
     effective_type = msg_type
     handler_payload = payload
 
-    # HTTP POST sends message_type "cast"; real operation is in body
+    # Resolve operation from payload when envelope is cast/call or unknown: message_type (canonical) -> op -> msg_type
     if isinstance(payload, dict):
-        if msg_type in ("cast", "call") and payload.get("msg_type"):
-            effective_type = payload.get("msg_type", msg_type)
-            handler_payload = payload.get("payload", payload)
-        elif payload.get("op") and (msg_type in ("cast", "call") or msg_type not in handlers):
-            # bank_account style: {"op": "deposit", "amount": 1000}
-            effective_type = payload.get("op")
-            handler_payload = payload
-        # NEW: Handle case where msg_type is already the handler name (extracted by Rust)
-        # and payload has nested "payload" key
-        elif payload.get("payload") and isinstance(payload.get("payload"), dict):
+        if msg_type in ("cast", "call") or msg_type not in handlers:
+            for key in ("message_type", "op", "msg_type"):
+                val = payload.get(key)
+                if not val or (key == "op" and val in ("call", "cast")):
+                    continue
+                effective_type = val
+                handler_payload = payload.get("payload", payload) if isinstance(payload.get("payload"), dict) else payload
+                break
+        if payload.get("payload") and isinstance(payload.get("payload"), dict) and effective_type == msg_type and msg_type in ("cast", "call"):
             handler_payload = payload.get("payload")
 
     def _filter_kwargs(method: Callable, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -535,6 +533,29 @@ def dispatch_message(instance: Any, from_actor: str, msg_type: str, payload: Dic
             except Exception:
                 pass
         return kwargs
+
+    # Workflow behavior: route workflow_run / workflow_signal:name / workflow_query:name to run/signal/query (aligned with Rust Workflow trait)
+    if getattr(instance, "_plexspaces_workflow", False):
+        if effective_type == "workflow_run":
+            run_fn = getattr(instance, "run", None)
+            if callable(run_fn):
+                result = run_fn(handler_payload if isinstance(handler_payload, dict) else payload)
+                return result if result is not None else {}
+            return {"error": "Workflow actor must implement run(payload)"}
+        if effective_type.startswith("workflow_signal:"):
+            signal_name = effective_type[len("workflow_signal:"):].strip()
+            signal_fn = getattr(instance, "signal", None)
+            if callable(signal_fn):
+                signal_fn(signal_name, handler_payload if isinstance(handler_payload, dict) else payload)
+                return {}
+            return {"error": "Workflow actor must implement signal(name, data)"}
+        if effective_type.startswith("workflow_query:"):
+            query_name = effective_type[len("workflow_query:"):].strip()
+            query_fn = getattr(instance, "query", None)
+            if callable(query_fn):
+                result = query_fn(query_name, handler_payload if isinstance(handler_payload, dict) else payload)
+                return result if result is not None else {}
+            return {"error": "Workflow actor must implement query(name, params)"}
 
     # Check for exact match
     if effective_type in handlers:

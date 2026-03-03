@@ -1,0 +1,23 @@
+{
+  "name": "migrating-temporal-order-fulfillment",
+  "version": "0.1.0",
+  "description": "Temporal → PlexSpaces: E-commerce order fulfillment workflow (TypeScript WASM)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:ts && npm run build:bundle",
+    "build:ts": "tsc -p .",
+    "build:bundle": "node build-bundle.mjs",
+    "test": "npm run build",
+    "verify": "npm run build && echo 'Run ./test.sh 8092 with server (./scripts/server.sh) for e2e'"
+  },
+  "dependencies": {
+    "@plexspaces/sdk": "file:../../../../sdks/typescript"
+  },
+  "devDependencies": {
+    "@bytecodealliance/componentize-js": "^0.14.0",
+    "@bytecodealliance/jco": "^1.16.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.0.0"
+  }
+}

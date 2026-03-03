@@ -49,26 +49,21 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
-/// Tries to get application-level msg_type (handler name) from JSON payload.
-/// Checks for "op" field first (Python SDK convention), then "msg_type" field.
-/// Returns None if payload is not valid JSON or has no handler field, or field value is transport-only ("call"/"cast").
-fn try_msg_type_from_payload(payload: &[u8]) -> Option<String> {
+/// Tries to get application-level message type (handler name) from JSON payload.
+///
+/// **Canonical payload key**: `message_type`. Accepted aliases: `op` (SDK shorthand), `msg_type`.
+/// Check order: `message_type` → `op` → `msg_type` so all SDKs and clients can use one consistent name.
+/// Used for GenServer handler names and Workflow routing (workflow_run, workflow_signal:name, workflow_query:name).
+/// Returns None if payload is not valid JSON or has no handler field, or value is transport-only ("call"/"cast").
+pub(crate) fn try_msg_type_from_payload(payload: &[u8]) -> Option<String> {
     let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
-    // Check "op" field first (Python SDK convention: {"op": "handler_name", ...})
-    if let Some(op_value) = value.get("op") {
-        if let Some(s) = op_value.as_str() {
-            let s = s.trim();
+    let take_str = |key: &str| -> Option<String> {
+        value.get(key).and_then(|v| v.as_str()).map(|s| s.trim().to_string())
+    };
+    for key in ["message_type", "op", "msg_type"] {
+        if let Some(s) = take_str(key) {
             if !s.is_empty() && !s.eq_ignore_ascii_case("call") && !s.eq_ignore_ascii_case("cast") {
-                return Some(s.to_string());
-            }
-        }
-    }
-    // Fall back to "msg_type" field (legacy/alternative convention)
-    if let Some(msg_type_value) = value.get("msg_type") {
-        if let Some(s) = msg_type_value.as_str() {
-            let s = s.trim();
-            if !s.is_empty() && !s.eq_ignore_ascii_case("call") && !s.eq_ignore_ascii_case("cast") {
-                return Some(s.to_string());
+                return Some(s);
             }
         }
     }
@@ -1892,6 +1887,46 @@ mod tests {
     use crate::ApplicationNode;
     use std::sync::Arc;
     use plexspaces_wasm_runtime::WasmRuntime;
+
+    #[test]
+    fn test_try_msg_type_from_payload_message_type_canonical() {
+        assert_eq!(
+            try_msg_type_from_payload(br#"{"message_type":"workflow_run","order_id":"o1"}"#),
+            Some("workflow_run".to_string())
+        );
+        assert_eq!(
+            try_msg_type_from_payload(br#"{"message_type":"workflow_signal:cancel"}"#),
+            Some("workflow_signal:cancel".to_string())
+        );
+        assert_eq!(
+            try_msg_type_from_payload(br#"{"message_type":"workflow_query:status"}"#),
+            Some("workflow_query:status".to_string())
+        );
+    }
+
+    #[test]
+    fn test_try_msg_type_from_payload_op_alias() {
+        assert_eq!(
+            try_msg_type_from_payload(br#"{"op":"workflow_run","order_id":"o1"}"#),
+            Some("workflow_run".to_string())
+        );
+        assert_eq!(try_msg_type_from_payload(br#"{"op":"call"}"#), None);
+        assert_eq!(try_msg_type_from_payload(br#"{"op":"cast"}"#), None);
+    }
+
+    #[test]
+    fn test_try_msg_type_from_payload_msg_type_alias() {
+        assert_eq!(
+            try_msg_type_from_payload(br#"{"msg_type":"get_status"}"#),
+            Some("get_status".to_string())
+        );
+    }
+
+    #[test]
+    fn test_try_msg_type_from_payload_message_type_takes_precedence() {
+        let payload = br#"{"op":"other","message_type":"workflow_run"}"#;
+        assert_eq!(try_msg_type_from_payload(payload), Some("workflow_run".to_string()));
+    }
 
     // Mock ApplicationNode for testing
     struct MockApplicationNode;

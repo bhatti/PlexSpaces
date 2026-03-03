@@ -96,6 +96,16 @@ func (b *BaseActor) SetSelf(self Actor) {
 	b.self = self
 }
 
+// WorkflowActor extends Actor with run/signal/query for workflow behavior (aligned with Rust/Python/TS).
+// When the framework sends message_type workflow_run, workflow_signal:name, or workflow_query:name,
+// exports will route to Run, Signal, or Query instead of Handle.
+type WorkflowActor interface {
+	Actor
+	Run(payloadJSON string) string
+	Signal(name, payloadJSON string)
+	Query(name, payloadJSON string) string
+}
+
 // ========================================================================
 // Actor Registration (for WASM export)
 // ========================================================================

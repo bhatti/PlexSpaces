@@ -92,13 +92,46 @@ export class PlexSpacesActor {
     }
     /**
      * WIT handle(from-actor, msg-type, payload-json) -> result<string, string>.
-     * Dispatches by payload.op (or payload) to on<Op>(payload). Returns JSON string.
+     * Dispatches by msgType for Workflow behavior (workflow_run, workflow_signal:name, workflow_query:name),
+     * then by payload.op (or payload) to on<Op>(payload). Returns JSON string.
      * Uses iterative serializer to avoid WASM recursion.
+     *
+     * Workflow behavior (aligned with Rust Workflow trait and Python @workflow_actor):
+     * - msgType "workflow_run" -> run(payload)
+     * - msgType "workflow_signal:name" -> signal(name, payload)
+     * - msgType "workflow_query:name" -> query(name, payload)
      */
-    handle(_fromActor, _msgType, payloadJson) {
+    handle(_fromActor, msgType, payloadJson) {
         try {
             const payload = payloadJson && payloadJson.trim() ? JSON.parse(payloadJson) : {};
-            const op = (payload.op ?? payload);
+            // Workflow behavior: route by msgType when actor implements run/signal/query (aligned with crates/behavior Workflow trait)
+            if (msgType === "workflow_run") {
+                const runFn = this.run;
+                if (typeof runFn === "function") {
+                    const result = runFn.call(this, payload);
+                    this.cachedStateJson = null;
+                    return iterativeStringify(result ?? {});
+                }
+            }
+            if (msgType.startsWith("workflow_signal:")) {
+                const name = msgType.slice("workflow_signal:".length).trim();
+                const signalFn = this.signal;
+                if (typeof signalFn === "function") {
+                    signalFn.call(this, name, payload);
+                    this.cachedStateJson = null;
+                    return "{}";
+                }
+            }
+            if (msgType.startsWith("workflow_query:")) {
+                const name = msgType.slice("workflow_query:".length).trim();
+                const queryFn = this.query;
+                if (typeof queryFn === "function") {
+                    const result = queryFn.call(this, name, payload);
+                    return iterativeStringify(result ?? {});
+                }
+            }
+            // Payload key order (aligned with framework): message_type (canonical) -> op -> msg_type
+            const op = (payload.message_type ?? payload.op ?? payload.msg_type ?? payload);
             const opKey = typeof op === "string" ? this.capitalize(op) : "";
             const methodName = opKey ? `on${opKey}` : "";
             const method = methodName && typeof this[methodName] === "function"
@@ -187,6 +220,23 @@ export class PlexSpacesActor {
     error(message) {
         return "ERROR:" + message;
     }
+}
+/**
+ * Base class for Workflow behavior actors (aligned with Rust Workflow trait and Python @workflow_actor).
+ *
+ * Implement run(), signal(), and query() for durable workflows (Temporal/Restate-style).
+ * Message routing: framework sends msgType "workflow_run" | "workflow_signal:name" | "workflow_query:name";
+ * PlexSpacesActor.handle() dispatches to these methods when present.
+ *
+ * Example:
+ *   class OrderFulfillmentActor extends WorkflowActor<OrderState> {
+ *     getDefaultState() { return { orderId: '', status: 'pending', steps: [] }; }
+ *     run(payload: Record<string, unknown>) { ...; return { status: 'completed' }; }
+ *     signal(name: string, data: Record<string, unknown>) { if (name === 'cancel') this.state.status = 'cancelled'; }
+ *     query(name: string, params: Record<string, unknown>) { if (name === 'status') return this.state; return {}; }
+ *   }
+ */
+export class WorkflowActor extends PlexSpacesActor {
 }
 // ─── Fully Iterative JSON Serializer (ZERO recursion, ZERO method calls in loop) ───
 // Character codes for escaping (pre-computed, avoids method calls)

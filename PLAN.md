@@ -120,7 +120,7 @@ based on the native framework's language. Work one at a time with full verificat
 
 | # | Example | Target Lang | Real-World Use Case | Key Abstractions |
 |---|---------|------------|---------------------|-----------------|
-| 9 | migrating_temporal | TypeScript | **E-commerce order fulfillment** - multi-step with compensation/saga | **Workflow**, signals, queries, durability |
+| 9 | migrating_temporal | TypeScript ✅ / Go / Python / Rust | **E-commerce order fulfillment** - multi-step with compensation/saga | **Workflow**, signals, queries, durability |
 | 10 | migrating_cadence | Go | **Payment processing with retries** - idempotent payments, retry policies | **Workflow**, durability, retry |
 | 11 | migrating_aws_step_functions | Python | **AI/ML pipeline** - data prep -> training -> evaluation -> deploy (Ray Train-style) | **Workflow**, fan-out/fan-in |
 | 12 | migrating_azure_durable_functions | TypeScript | **Document processing** - OCR -> classify -> extract -> store (fan-out/fan-in) | **Workflow**, parallel activities |
@@ -258,12 +258,13 @@ All Go examples, TypeScript migrating_cloudflare_workers, and the full workspace
 
 ## Example Completion Status
 
-### Go Apps (3/3 have build.sh + test.sh + .wasm)
+### Go Apps (4/4 have build.sh + test.sh + .wasm)
 | App | Status |
 |-----|--------|
 | migrating_cloudflare_workers | **DONE - Tested E2E** - guild_chat.wasm |
 | migrating_erlang_otp | **DONE - Tested E2E** - rate_limiter.wasm |
 | migrating_gosiris | **DONE - Tested E2E** - sensor_aggregation.wasm (process groups need server config) |
+| migrating_rivet | **DONE - Tested E2E** - matchmaking.wasm (virtual actor + durability, game matchmaking) |
 
 ### TypeScript Apps
 | App | Status |
@@ -288,13 +289,13 @@ All Go examples, TypeScript migrating_cloudflare_workers, and the full workspace
 
 ## Next Steps (For Next Session)
 
-1. **Build remaining Python examples** - Run build.sh for the 13 unbuilt Python apps
+1. **Next example: migrating_temporal (TypeScript)** – E-commerce order fulfillment (saga-style with durability). See "Next Example to Work On" below.
 
-2. **Complete TypeScript migrating_orleans** - Needs build.sh and test.sh
+2. **Build remaining Python examples** - Run build.sh for the 13 unbuilt Python apps
 
 3. **Fix ProcessGroupRegistry** - Wire process group service for gosiris polling feature
 
-4. **Continue migration examples** per Phase 2 plan (Group B, C, D, E)
+4. **Continue migration examples** per Phase 2 plan (Group C, D, E) – one at a time with full verification
 
 5. **Consider**: Fix `deployment_service.rs` to also pass `keyvalue_store` from a ServiceLocator
    reference (currently only wasm_application.rs path has it)
@@ -396,3 +397,93 @@ TypeScript WASM batch predictor model service (Orleans-style virtual actors):
 5. [x] Create README.md with metrics and Orleans comparison
 6. [x] Build WASM successfully (batch_predictor_model.wasm)
 7. [x] Test end-to-end: server.sh -> build.sh -> test.sh
+
+### #8 migrating_rivet (Go) - ✅ COMPLETE (E2E Tested)
+
+Go WASM game matchmaking (Rivet-style virtual actors per game room):
+1. [x] Create matchmaking.go with GameRoom actor (virtual actor + durability)
+2. [x] Implement join, leave, matchmake, get_status, get_stats operations
+3. [x] Add skill/region matching and idle timeout (5m) for auto-deactivation
+4. [x] Create build.sh and test.sh (in example dir), app-config.toml, README.md
+5. [x] Benchmarks: coord vs compute, granularity, non-trivial batch (100 rooms × 10 players)
+6. [x] Test: server.sh (base dir) -> build.sh -> test.sh 8092
+
+### #9 migrating_temporal (TypeScript) - ✅ COMPLETE (E2E Tested)
+
+E-commerce order fulfillment workflow (Workflow run/signal/query + virtual_actor + durability):
+1. [x] TypeScript WASM: `examples/typescript/apps/migrating_temporal` (OrderFulfillmentActor, build.sh, test.sh)
+2. [x] Workflow behavior: run (saga steps), signal(cancel), query(status); metrics (coord vs compute, non-negative)
+3. [x] app-config: behavior_kind = "Workflow", virtual_actor + durability facets
+4. [x] Polyglot variants (same use case, under examples/{lang}/apps/migrating_temporal):
+   - **Go**: WorkflowActor (Run/Signal/Query), build.sh, test.sh
+   - **Python**: @workflow_actor, run/signal/query, build.sh, test.sh
+   - **Rust**: See `examples/rust/embedded/migrating_temporal` (embedded WorkflowBehavior); WASM app in `examples/rust/apps/migrating_temporal` links to embedded as reference
+
+---
+
+## Next Example to Work On: #10 migrating_cadence (Go)
+
+**Phase 2 Group C** – Workflow + Durability (Temporal/Step Functions patterns).
+
+### Plan Summary
+
+| Field | Value |
+|-------|--------|
+| **Example** | migrating_cadence |
+| **Target Lang** | Go |
+| **Real-World Use Case** | **Payment processing with retries** – idempotent payments, retry policies |
+| **Key Abstractions** | Workflow, durability, retry |
+| **App vs Embedded** | WASM app (deploy via HTTP, test with server.sh + build.sh + test.sh 8092) |
+
+### Real-World Use Case (E-commerce Order Fulfillment)
+
+- **Flow**: Place order → Validate order → Reserve inventory → Charge payment → Ship (or compensate on any failure).
+- **Signals**: e.g. `cancel` to abort and run compensation.
+- **Queries**: e.g. `get_status` (read-only order state).
+- **Durability**: Each step and compensation checkpointed; replay-safe.
+- **Non-trivial run**: e.g. 50–100 orders, 2+ seconds total, so metrics are meaningful.
+
+### Workflow Behavior (MANDATORY for This Example)
+
+The example **must use the framework Workflow behavior** (run/signal/query), aligned with:
+
+- **Rust**: `crates/behavior` `Workflow` trait; `#[workflow_actor]` + `#[plexspaces_handlers(workflow)]` with `run_handler`, `#[signal_handler("name")]`, `#[query_handler("name")]`; routing by `message_type` (workflow_run, workflow_signal:name, workflow_query:name).
+- **Framework**: `MessageTypeExt` in behavior maps `message_type` string to `WorkflowRun` / `WorkflowSignal(name)` / `WorkflowQuery(name)`; WASM path uses `try_msg_type_from_payload` with **canonical payload key `message_type`** (aliases: `op`, `msg_type`; order: message_type → op → msg_type) then passes to instance `handle(from, msg_type, payload)`.
+- **TypeScript SDK**: `PlexSpacesActor.handle()` routes `msgType === "workflow_run"` → `run(payload)`, `msgType.startsWith("workflow_signal:")` → `signal(name, payload)`, `msgType.startsWith("workflow_query:")` → `query(name, payload)`. Optional base class `WorkflowActor<TState>` with abstract `run`, `signal`, `query` (exported from `@plexspaces/sdk`).
+- **Python SDK**: `@workflow_actor` sets `_plexspaces_workflow`; `dispatch_message()` routes `effective_type == "workflow_run"` → `run(payload)`, `workflow_signal:name` → `signal(name, payload)`, `workflow_query:name` → `query(name, params)`.
+- **app-config.toml**: Use `behavior_kind = "Workflow"` (and facets e.g. durability) so the node/registry treat the actor as a workflow.
+
+**Client contract**: Request body sets application message type; **canonical key is `message_type`** (aliases: `op`, `msg_type`). Values: `workflow_run` (start/run), `workflow_signal:cancel`, `workflow_query:status`. Use ask (request-reply) for run and query so the client gets the result.
+
+### SDK and Framework Extensions Completed (for Workflow)
+
+1. **crates/application**: `try_msg_type_from_payload()` uses **canonical key `message_type`** then aliases `op`, `msg_type` (same order in all SDKs).
+2. **sdks/python**: `dispatch_message()` resolves effective_type from payload: message_type → op → msg_type; `@workflow_actor` routes workflow_run / workflow_signal:name / workflow_query:name to `run` / `signal` / `query`.
+3. **sdks/typescript**: `handle()` uses payload.message_type → op → msg_type for op-based dispatch; workflow routing by `msgType` to `run` / `signal` / `query`; `WorkflowActor<TState>` base class.
+4. **sdks/go**: `exports.go` resolves msgType from payload message_type → op → msg_type; `WorkflowActor` interface with `Run`/`Signal`/`Query`; workflow routing when actor implements `WorkflowActor`.
+
+### Implementation Notes for migrating_temporal
+
+1. **Use WorkflowActor** (or PlexSpacesActor with `run`, `signal`, `query`). One workflow actor instance per order (virtual actor or explicit ID); durability via getState/setState (DurabilityFacet in app-config).
+2. **run(payload)**: Execute saga steps (validate → reserve → charge → ship); on failure run compensation; return final result. Use `host.ask()` for “activity” calls if we add child actors later, or inline steps for simplicity.
+3. **signal(name, data)**: e.g. `cancel` sets a flag and triggers compensation (release inventory, refund).
+4. **query(name, params)**: e.g. `status` returns current order state (read-only).
+5. **Metrics**: Coordination vs computation %, granularity, total time, throughput (orders/sec); run 2+ s with non-trivial data (e.g. 50–100 orders).
+6. **Scripts**: One README.md; `build.sh` and `test.sh` in example dir; test via `./scripts/server.sh` then `./build.sh` and `./test.sh 8092`.
+
+### Design References (Review for Consistency)
+
+- **Workflow trait and routing**: `crates/behavior/src/mod.rs` (Workflow trait, route_workflow_message, MessageTypeExt), `crates/behavior/src/workflow.rs` (ExecutionContext for durable run/sleep/now).
+- **Message type from payload**: `crates/application/src/wasm_application.rs` (try_msg_type_from_payload, handle_message message_type).
+- **Workflow actor registration**: `crates/node/src/object_registry_helpers.rs` (register_workflow), app-config `behavior_kind = "Workflow"`.
+- **Rust workflow actor macro**: `sdks/rust/plexspaces-sdk-macros` (`#[workflow_actor]`, `#[plexspaces_handlers(workflow)]`, run_handler / signal_handler / query_handler).
+- **Core types**: `crates/core/src/lib.rs` (BehaviorType, ActorContext, Message).
+
+### Verification Checklist (Before Moving to Next Example)
+
+- [ ] Review existing design/impl; use correct APIs (SDK or host); no dead/legacy code.
+- [ ] One README.md only; build.sh and test.sh in example dir; server via scripts/server.sh.
+- [ ] Shared target: debug build; no separate target dir for examples.
+- [ ] Metrics: coord vs compute, benchmark section, run 2+ s, non-trivial data size.
+- [ ] Full test: `./scripts/server.sh` (base) → `./build.sh` → `./test.sh 8092` (all pass).
+- [ ] Principal-engineer review: prod-grade, minimal boilerplate, clear use case.

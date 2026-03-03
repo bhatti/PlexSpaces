@@ -1,9 +1,12 @@
+# Temporal comparison - embedded example (Node + WorkflowBehavior + DurabilityFacet)
+# Part of workspace so workspace = true deps resolve.
+
 [package]
 name = "temporal-comparison"
 version.workspace = true
 edition.workspace = true
-
-# Standalone example - not part of workspace
+publish = false
+description = "Temporal-style durable workflow comparison (embedded)"
 
 [dependencies]
 plexspaces-core.workspace = true
@@ -11,7 +14,6 @@ plexspaces-actor.workspace = true
 plexspaces-behavior.workspace = true
 plexspaces-journaling = { workspace = true, features = ["sqlite-backend"] }
 plexspaces-node.workspace = true
-plexspaces-mailbox.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

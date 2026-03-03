@@ -38,4 +38,31 @@ mod validate_toml_parsing {
             println!("     Facet {}: type={}, priority={}", i, facet.r#type, facet.priority);
         }
     }
+
+    #[test]
+    fn validate_behavior_kind_parsing() {
+        let toml_config = r#"
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "order-fulfillment"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "Workflow"
+facets = [
+  { type = "durability", priority = 90, config = {} }
+]
+"#;
+        let result = parse_app_config_toml(toml_config, "temporal-order");
+        assert!(result.is_ok(), "Should parse TOML with behavior_kind: {:?}", result.err());
+        let spec = result.unwrap();
+        assert!(spec.supervisor.is_some());
+        let child = &spec.supervisor.as_ref().unwrap().children[0];
+        assert_eq!(child.id, "order-fulfillment");
+        assert_eq!(child.behavior_kind.as_deref(), Some("Workflow"));
+    }
 }

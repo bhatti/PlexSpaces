@@ -206,9 +206,9 @@ The SDK macro (`#[plexspaces_handlers]`) extracts the operation name from the me
 
 ### Operation Extraction
 
-When `message_type` is `"call"` or `"cast"` (invocation types), the operation name is extracted from:
+When `message_type` is `"call"` or `"cast"` (invocation types), the operation name is extracted from the payload. **Canonical key across all SDKs is `message_type`**; aliases `op` and `msg_type` (order: message_type → op → msg_type). Rust SDK also accepts:
 
-1. `payload.action` (preferred)
+1. `payload.action` (preferred in Rust)
 2. `payload.op` (fallback)
 3. `payload.msg_type` (fallback)
 

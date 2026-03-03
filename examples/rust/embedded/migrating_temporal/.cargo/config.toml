@@ -1,0 +1,3 @@
+# Use workspace shared target directory (no per-example target/)
+[build]
+target-dir = "../../../../target"

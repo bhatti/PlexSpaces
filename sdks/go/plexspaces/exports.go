@@ -28,6 +28,7 @@ package plexspaces
 
 import (
 	"encoding/json"
+	"strings"
 	"unsafe"
 )
 
@@ -112,16 +113,39 @@ func wasmHandle(fromPtr, fromLen, msgTypePtr, msgTypeLen, payloadPtr, payloadLen
 	if actor == nil {
 		return stringToRetArea(`{"error":"no actor registered"}`)
 	}
-	// HTTP gateway sends msgType as "call" or "cast"; extract the actual
-	// operation from the "op" field in the JSON payload for routing.
+	// Resolve operation from payload when envelope is "call" or "cast". Payload key order
+	// (aligned with Rust/Python/TS): message_type (canonical) -> op -> msg_type.
 	if msgType == "call" || msgType == "cast" {
 		var envelope struct {
-			Op string `json:"op"`
+			MessageType string `json:"message_type"`
+			Op          string `json:"op"`
+			MsgType     string `json:"msg_type"`
 		}
-		if json.Unmarshal([]byte(payloadJSON), &envelope) == nil && envelope.Op != "" {
-			msgType = envelope.Op
+		if json.Unmarshal([]byte(payloadJSON), &envelope) == nil {
+			for _, v := range []string{envelope.MessageType, envelope.Op, envelope.MsgType} {
+				if v != "" && v != "call" && v != "cast" {
+					msgType = v
+					break
+				}
+			}
 		}
 	}
+
+	// Workflow behavior (aligned with Rust/Python/TS): route workflow_run / workflow_signal:name / workflow_query:name
+	if wa, ok := actor.(WorkflowActor); ok {
+		switch {
+		case msgType == "workflow_run":
+			return stringToRetArea(wa.Run(payloadJSON))
+		case strings.HasPrefix(msgType, "workflow_signal:"):
+			name := strings.TrimSpace(strings.TrimPrefix(msgType, "workflow_signal:"))
+			wa.Signal(name, payloadJSON)
+			return stringToRetArea("{}")
+		case strings.HasPrefix(msgType, "workflow_query:"):
+			name := strings.TrimSpace(strings.TrimPrefix(msgType, "workflow_query:"))
+			return stringToRetArea(wa.Query(name, payloadJSON))
+		}
+	}
+
 	return stringToRetArea(actor.Handle(fromActor, msgType, payloadJSON))
 }
 

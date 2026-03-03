@@ -429,22 +429,100 @@ class TestFacets:
             pass
         
         assert TestActor.__facets__ == ["durability"]
-    
+
     def test_facets_preserved_with_state_and_handlers(self):
         """Facets should work with full actor definition."""
         @actor(facets=["durability"])
         class BankAccount:
             balance: int = state(default=0)
-            
+
             @handler("deposit")
             def deposit(self, amount: int) -> dict:
                 self.balance += amount
                 return {"balance": self.balance}
-        
+
         assert BankAccount.__facets__ == ["durability"]
         assert BankAccount.__behavior_type__ == BEHAVIOR_GEN_SERVER
         assert "deposit" in BankAccount._plexspaces_handlers
         assert "balance" in BankAccount._plexspaces_state_fields
+
+
+class TestWorkflowDispatch:
+    """Integration tests for workflow run/signal/query dispatch (dispatch_message)."""
+
+    def test_workflow_dispatch_run(self):
+        """workflow_run effective_type should call run(payload)."""
+        @workflow_actor
+        class OrderWorkflow:
+            def run(self, payload):
+                return {"status": "ok", "order_id": payload.get("order_id", "")}
+
+            def signal(self, name, data):
+                pass
+
+            def query(self, name, params):
+                return {}
+
+        instance = OrderWorkflow()
+        init_actor(instance, {})
+        result = dispatch_message(instance, "client", "workflow_run", {"order_id": "o1"})
+        assert result == {"status": "ok", "order_id": "o1"}
+
+    def test_workflow_dispatch_signal(self):
+        """workflow_signal:name effective_type should call signal(name, payload)."""
+        received = []
+
+        @workflow_actor
+        class OrderWorkflow:
+            def run(self, payload):
+                return {}
+
+            def signal(self, name, data):
+                received.append((name, data))
+
+            def query(self, name, params):
+                return {}
+
+        instance = OrderWorkflow()
+        init_actor(instance, {})
+        dispatch_message(instance, "client", "workflow_signal:cancel", {"reason": "user"})
+        assert received == [("cancel", {"reason": "user"})]
+
+    def test_workflow_dispatch_query(self):
+        """workflow_query:name effective_type should call query(name, params)."""
+        @workflow_actor
+        class OrderWorkflow:
+            def run(self, payload):
+                return {}
+
+            def signal(self, name, data):
+                pass
+
+            def query(self, name, params):
+                return {"query": name, "order_id": params.get("order_id", "")}
+
+        instance = OrderWorkflow()
+        init_actor(instance, {})
+        result = dispatch_message(instance, "client", "workflow_query:status", {"order_id": "o1"})
+        assert result == {"query": "status", "order_id": "o1"}
+
+    def test_workflow_dispatch_run_from_payload_op(self):
+        """When payload has op=workflow_run, effective_type becomes workflow_run."""
+        @workflow_actor
+        class OrderWorkflow:
+            def run(self, payload):
+                return {"ran": True}
+
+            def signal(self, name, data):
+                pass
+
+            def query(self, name, params):
+                return {}
+
+        instance = OrderWorkflow()
+        init_actor(instance, {})
+        result = dispatch_message(instance, "client", "cast", {"op": "workflow_run", "order_id": "o1"})
+        assert result == {"ran": True}
 
 
 class TestDesanitizeFromWasm:

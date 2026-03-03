@@ -102,21 +102,32 @@ else
     echo -e "${YELLOW}⚠️  Completion message not found${NC}"
 fi
 
-# Extract and display metrics
+# Step 6: Metrics / stats (same format as Go/Python/TS examples)
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "📊 Metrics Summary"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if grep -q "Execution Time:" /tmp/temporal_output.log; then
-    grep "Execution Time:" /tmp/temporal_output.log | tail -1
+echo "Step 6: Metrics from workflow execution"
+echo "================================================================"
+if [ -f /tmp/temporal_output.log ]; then
+    echo ""
+    echo "  Order (sample)"
+    echo "  ────────────────────────────────────────────"
+    grep "Order ID:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /'
+    grep "Status:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /'
+    echo ""
+    echo "  Benchmarks"
+    echo "  ────────────────────────────────────────────"
+    grep "Execution Time:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /'
+    if grep -q "Validation:" /tmp/temporal_output.log; then
+        grep "Validation:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /'
+    fi
+    if grep -q "Payment:" /tmp/temporal_output.log; then
+        grep "Payment:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /'
+    fi
+    if grep -q "Shipping:" /tmp/temporal_output.log; then
+        grep "Shipping:" /tmp/temporal_output.log | tail -1 | sed 's/^/  /'
+    fi
+    echo ""
 fi
-if grep -q "Order ID:" /tmp/temporal_output.log; then
-    grep "Order ID:" /tmp/temporal_output.log | tail -1
-fi
-if grep -q "Status:" /tmp/temporal_output.log; then
-    grep "Status:" /tmp/temporal_output.log | tail -1
-fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "================================================================"
 echo ""
 
 if [ "$VALIDATION_PASSED" = true ]; then
@@ -126,6 +137,10 @@ else
 fi
 echo ""
 
+echo "================================================================"
+echo -e "  ${GREEN}Order Fulfillment Workflow (Rust embedded) Test Complete${NC}"
+echo "================================================================"
+echo ""
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║  ✅ All tests passed!                                          ║"
 echo "╚════════════════════════════════════════════════════════════════╝"

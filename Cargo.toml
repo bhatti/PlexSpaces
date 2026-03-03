@@ -33,6 +33,7 @@ members = [
     "crates/services",
     "sdks/rust/plexspaces-sdk-macros",
     "sdks/rust/plexspaces-sdk",
+    "examples/rust/embedded/migrating_temporal",
 ]
 # Default members: Exclude rarely-changed or optional crates from default builds
 # This speeds up default `cargo build` and `cargo test` by only building frequently-changed crates

@@ -434,6 +434,12 @@ fn parse_child_spec(value: &toml::Value) -> Result<plexspaces_proto::application
         std::collections::HashMap::new()
     };
 
+    // Optional OTP-style behavior kind (GenServer, GenEvent, Workflow, etc.) for routing and logging
+    let behavior_kind = value
+        .get("behavior_kind")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     Ok(ChildSpec {
         id,
         r#type: child_type as i32,
@@ -444,6 +450,7 @@ fn parse_child_spec(value: &toml::Value) -> Result<plexspaces_proto::application
         }),
         facets,
         args,
+        behavior_kind,
         ..Default::default()
     })
 }

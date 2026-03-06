@@ -135,6 +135,7 @@ async fn test_wasm_component_instantiation() {
         enable_aot: false,
         durability_enabled: false,
         use_instance_pool: false,
+        max_concurrent_instantiations: None,
     };
     
     let actor_id = "test-calculator-actor".to_string();
@@ -156,8 +157,8 @@ async fn test_wasm_component_instantiation() {
             None, // No lock manager
             None, // No object registry
             None, // No journal storage
-            
             None, // No blob service
+            None, // No elastic pool service
         )
     ).await;
     let instance = match inst_result {
@@ -233,6 +234,7 @@ async fn test_component_init_function() {
         enable_aot: false,
         durability_enabled: false,
         use_instance_pool: false,
+        max_concurrent_instantiations: None,
     };
     
     let actor_id = "test-calculator-init".to_string();
@@ -257,6 +259,7 @@ async fn test_component_init_function() {
             None,
             
             None,
+            None, // elastic_pool_service
         )
     ).await;
     let instance = match inst_result {
@@ -299,6 +302,7 @@ async fn test_component_handle_message() {
         enable_aot: false,
         durability_enabled: false,
         use_instance_pool: false,
+        max_concurrent_instantiations: None,
     };
     
     let actor_id = "test-calculator-handle".to_string();
@@ -320,6 +324,7 @@ async fn test_component_handle_message() {
             None,
             
             None,
+            None, // elastic_pool_service
         )
     ).await;
     let instance = match inst_result {
@@ -425,6 +430,7 @@ async fn test_component_empty_initial_state() {
         enable_aot: false,
         durability_enabled: false,
         use_instance_pool: false,
+        max_concurrent_instantiations: None,
     };
     
     // ACT: Instantiate with empty initial state (with timeout)
@@ -446,6 +452,7 @@ async fn test_component_empty_initial_state() {
             None,
             
             None,
+            None, // elastic_pool_service
         )
     ).await;
     match inst_result {
@@ -483,6 +490,7 @@ async fn test_component_observability() {
         enable_aot: false,
         durability_enabled: false,
         use_instance_pool: false,
+        max_concurrent_instantiations: None,
     };
     
     // ACT: Instantiate and call handle_message (with timeout)
@@ -504,6 +512,7 @@ async fn test_component_observability() {
             None,
             
             None,
+            None, // elastic_pool_service
         )
     ).await;
     let instance = match inst_result {
@@ -552,6 +561,7 @@ async fn test_component_different_message_types() {
         enable_aot: false,
         durability_enabled: false,
         use_instance_pool: false,
+        max_concurrent_instantiations: None,
     };
     
     let runtime_guard = runtime.lock().await;
@@ -572,6 +582,7 @@ async fn test_component_different_message_types() {
             None,
             
             None,
+            None, // elastic_pool_service
         )
     ).await;
     let instance = match inst_result {

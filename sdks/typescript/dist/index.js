@@ -5,6 +5,6 @@
 //
 // Build actors with minimal boilerplate via inheritance (mirrors Python SDK's decorators).
 export { PlexSpacesActor, WorkflowActor } from "./actor.js";
-export { Host, ProcessGroups, host } from "./host.js";
+export { Host, ProcessGroups, TupleSpace, host } from "./host.js";
 export { ActorRouter } from "./router.js";
 export { defaultRetryConfig, withRetry, } from "./workflow.js";

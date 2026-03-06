@@ -288,12 +288,16 @@ PlexSpaces provides comprehensive host functions for WASM actors, following wasm
 
 #### TupleSpace (Linda-style Coordination)
 
+**Preferred: `host.ts`** — list-in, list-out; use `None` in patterns for wildcards.
+
 | Function | Description | Example |
 |----------|-------------|---------|
-| `host.ts_write(tuple_json)` | Write tuple (JSON array) | `host.ts_write(json.dumps(["task", "worker-1", 123]))` |
-| `host.ts_read(pattern_json)` | Read tuple (non-destructive, wildcards: null or "*") | `tuple = json.loads(host.ts_read(json.dumps(["task", "*", None])))` |
-| `host.ts_take(pattern_json)` | Take tuple (destructive read) | `tuple = json.loads(host.ts_take(json.dumps(["task", "*", None])))` |
-| `host.ts_read_all(pattern_json)` | Read all matching tuples | `tuples = json.loads(host.ts_read_all(json.dumps(["task", "*", None])))` |
+| `host.ts.write(tuple_list)` | Write tuple (list of JSON-serializable elements) | `host.ts.write(["task", "worker-1", 123])` |
+| `host.ts.read(pattern)` | Read one match (non-destructive). Returns list or None. | `t = host.ts.read(["task", None, None])` |
+| `host.ts.take(pattern)` | Take one match (destructive). Returns list or None. | `t = host.ts.take(["task", None, None]); if t: ...` |
+| `host.ts.read_all(pattern)` | Read all matches (non-destructive). Returns list of lists. | `all_ = host.ts.read_all(["task", None, None])` |
+
+Low-level string API (when you need raw JSON): `host.ts_write(tuple_json)`, `host.ts_read(pattern_json)`, `host.ts_take(pattern_json)`, `host.ts_read_all(pattern_json)`.
 
 #### Distributed Locks
 
@@ -310,7 +314,7 @@ PlexSpaces provides comprehensive host functions for WASM actors, following wasm
 | `host.process_groups.join(group)` | Join a process group | `host.process_groups.join("chat-room")` |
 | `host.process_groups.leave(group)` | Leave a process group | `host.process_groups.leave("chat-room")` |
 | `host.process_groups.members(group)` | Get group members (returns list) | `members = host.process_groups.members("chat-room")` |
-| `host.process_groups.broadcast(group, msg_type, payload)` | Broadcast to all group members | `host.process_groups.broadcast("chat-room", "message", {"text": "hello"})` |
+| `host.process_groups.broadcast(group, msg_type, payload)` | Broadcast to all group members; msg_type is used for routing so payload can be data-only. | `host.process_groups.broadcast("chat-room", "message", {"text": "hello"})` |
 
 ### Capability Comparison: PlexSpaces vs wasmCloud
 
@@ -323,7 +327,7 @@ PlexSpaces provides comprehensive host functions for WASM actors, following wasm
 | **Messaging** | ✅ `wasmcloud:messaging` | ✅ `host.send/ask` | ✅ Complete |
 | **Logging** | ✅ `wasi:logging` | ✅ `host.log` | ✅ Complete |
 | **Process Groups** | ❌ Not available | ✅ `host.pg_*` | ✅ Extra |
-| **TupleSpace** | ❌ Not available | ✅ `host.ts_*` | ✅ Extra |
+| **TupleSpace** | ❌ Not available | ✅ `host.ts` / `host.ts_*` | ✅ Extra |
 | **Distributed Locks** | ❌ Not available | ✅ `host.lock_*` | ✅ Extra |
 | **Timers** | ❌ Not available | ✅ `host.send_after()` | ✅ Extra |
 

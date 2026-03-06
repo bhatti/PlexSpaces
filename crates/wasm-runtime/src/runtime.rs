@@ -531,6 +531,7 @@ impl WasmRuntime {
         object_registry: Option<std::sync::Arc<dyn plexspaces_core::actor_context::ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn plexspaces_journaling::JournalStorage>>,
         blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>>,
+        elastic_pool_service: Option<std::sync::Arc<dyn plexspaces_core::ElasticPoolService>>,
     ) -> WasmResult<crate::WasmInstance> {
         use wasmtime::StoreLimitsBuilder;
 
@@ -573,6 +574,7 @@ impl WasmRuntime {
             object_registry,
             journal_storage,
             blob_service,
+            elastic_pool_service,
             config.durability_enabled,
             #[cfg(feature = "component-model")]
             self.global_reinstantiation_semaphore.clone(),
@@ -813,6 +815,7 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
             object_registry,
             journal_storage,
             concrete_blob_service,
+            None, // elastic_pool_service - caller can add via create_instance when using pool
             false, // durability_enabled - caller controls via config when using instantiate()
             #[cfg(feature = "component-model")]
             self.global_reinstantiation_semaphore.clone(),

@@ -80,6 +80,7 @@ mod tests {
             None, // object_registry
             None, // journal_storage
             Some(blob_service), // blob_service
+            None, // elastic_pool_service
         ))
     }
 
@@ -402,7 +403,7 @@ mod tests {
     async fn test_blob_upload_without_service() {
         // Test error handling when blob service is not configured
         let host_functions = Arc::new(HostFunctions::with_all_services(
-            None, None, None, None, None, None, None, None, // No blob_service
+            None, None, None, None, None, None, None, None, None, // No blob_service, no elastic_pool
         ));
         let mut blob_impl = create_test_blob_impl(host_functions);
 

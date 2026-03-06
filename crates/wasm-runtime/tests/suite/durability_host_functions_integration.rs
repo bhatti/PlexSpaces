@@ -40,6 +40,7 @@ mod tests {
             None, // No object registry
             Some(journal_storage),
             None, // No blob service
+            None, // No elastic pool service
         ))
     }
 

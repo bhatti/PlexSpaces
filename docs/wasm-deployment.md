@@ -1083,6 +1083,18 @@ WASM actors using the simple-actor WIT can write tuples via **`host.ts_write(tup
 
 **When to use ts_write**: Prefer `ts_write` for fire-and-forget event or audit streams when WASM integration is stable; it avoids reentrancy and readonly issues that can occur when WASM calls into the keyvalue backend during message handling.
 
+### Elastic pool (WASM host)
+
+WASM actors using the simple-actor WIT can use the **elastic pool** API to checkout workers from a named pool, send them work, and check them in when done. When the pool is not configured (or checkout fails), application code can fall back to process group broadcast.
+
+| WIT function | Description |
+|--------------|-------------|
+| `pool-checkout(pool-name, timeout-ms)` | Returns JSON handle `{actor_id, pool_name, checkout_id}` on success, or `"ERROR:message"` on failure/timeout. |
+| `pool-checkin(pool-name, actor-id, checkout-id, healthy)` | Returns empty on success, `"ERROR:message"` on failure. |
+| `pool-get-metrics(pool-name)` | Returns JSON metrics (e.g. total_actors, available_actors, busy_actors, current_load) or `"ERROR:message"`. |
+
+**SDK usage**: Python `host.pool_checkout` / `host.pool_checkin` / `host.pool_get_metrics`; Go `host.PoolCheckout` / `host.PoolCheckin` / `host.PoolGetMetrics`; TypeScript `host.poolCheckout` / `host.poolCheckin` / `host.poolGetMetrics`. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) (Python, Go, TypeScript, Rust) for a full example combining pool, tuple space (work queue), and process group fallback.
+
 ### Key-Value Storage (WASM)
 
 WASM actors (Python simple-actor) can persist data via the host **keyvalue** API. This avoids in-actor state serialization issues and provides reliable storage across the WASM boundary.

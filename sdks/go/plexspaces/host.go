@@ -29,11 +29,84 @@ const errorPrefix = "ERROR:"
 //	host.Send("other-actor", "ping", map[string]any{"data": "hello"})
 //	response, err := host.Ask("other-actor", "get_balance", nil, 5000)
 //	myID := host.SelfID()
-type Host struct{}
+type Host struct {
+	ts *TupleSpace
+}
 
 // NewHost creates a new Host instance.
 func NewHost() *Host {
-	return &Host{}
+	h := &Host{}
+	h.ts = &TupleSpace{host: h}
+	return h
+}
+
+// TupleSpace provides list-in, list-out tuple space API. Use nil in patterns for wildcards.
+// Consistent with Python host.ts and TypeScript host.ts.
+type TupleSpace struct {
+	host *Host
+}
+
+// TS returns the TupleSpace helper for list-in, list-out operations.
+func (h *Host) TS() *TupleSpace { return h.ts }
+
+// Write writes a tuple. Elements must be JSON-serializable. Returns empty on success, "ERROR:..." on failure.
+func (ts *TupleSpace) Write(tuple []any) string {
+	data, err := json.Marshal(tuple)
+	if err != nil {
+		return "ERROR: " + err.Error()
+	}
+	return ts.host.TSWrite(string(data))
+}
+
+// Take removes and returns one matching tuple. Returns (tuple, true) or (nil, false) if no match/error.
+func (ts *TupleSpace) Take(pattern []any) ([]any, bool) {
+	data, err := json.Marshal(pattern)
+	if err != nil {
+		return nil, false
+	}
+	raw := ts.host.TSTake(string(data))
+	if raw == "" || strings.HasPrefix(raw, errorPrefix) {
+		return nil, false
+	}
+	var tuple []any
+	if err := json.Unmarshal([]byte(raw), &tuple); err != nil {
+		return nil, false
+	}
+	return tuple, true
+}
+
+// Read returns one matching tuple (non-destructive). Returns (tuple, true) or (nil, false) if no match/error.
+func (ts *TupleSpace) Read(pattern []any) ([]any, bool) {
+	data, err := json.Marshal(pattern)
+	if err != nil {
+		return nil, false
+	}
+	raw := ts.host.TSRead(string(data))
+	if raw == "" || strings.HasPrefix(raw, errorPrefix) {
+		return nil, false
+	}
+	var tuple []any
+	if err := json.Unmarshal([]byte(raw), &tuple); err != nil {
+		return nil, false
+	}
+	return tuple, true
+}
+
+// ReadAll returns all matching tuples (non-destructive). Returns slice of tuples (each tuple is []any).
+func (ts *TupleSpace) ReadAll(pattern []any) [][]any {
+	data, err := json.Marshal(pattern)
+	if err != nil {
+		return nil
+	}
+	raw := ts.host.TSReadAll(string(data))
+	if raw == "" || strings.HasPrefix(raw, errorPrefix) {
+		return nil
+	}
+	var out [][]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // ========================================================================
@@ -287,10 +360,49 @@ func (pg *ProcessGroups) Members(group string) ([]string, error) {
 }
 
 // Broadcast sends a message to all members of a process group.
+// msgType is used by the host for routing; payload can be data-only (consistent with Python/TypeScript).
 func (pg *ProcessGroups) Broadcast(group, msgType string, payload any) error {
 	payloadJSON := marshalPayload(payload)
 	result := hostPGBroadcast(group, msgType, payloadJSON)
 	return checkError(result)
+}
+
+// ========================================================================
+// Elastic pool (checkout/checkin)
+// ========================================================================
+
+// PoolCheckout checks out an actor from a named pool.
+// Returns a map with actor_id, pool_name, checkout_id on success, or nil on failure (pool not configured, timeout, empty).
+func (h *Host) PoolCheckout(poolName string, timeoutMs uint64) map[string]any {
+	result := hostPoolCheckout(poolName, timeoutMs)
+	if result == "" || isHostError(result) {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// PoolCheckin checks in an actor to the pool. actorID and checkoutID come from the handle returned by PoolCheckout.
+// healthy should be true if the actor is healthy and can be reused.
+func (h *Host) PoolCheckin(poolName, actorID, checkoutID string, healthy bool) error {
+	result := hostPoolCheckin(poolName, actorID, checkoutID, healthy)
+	return checkError(result)
+}
+
+// PoolGetMetrics returns pool metrics (total_actors, available_actors, busy_actors, current_load, etc.) or nil if not available.
+func (h *Host) PoolGetMetrics(poolName string) map[string]any {
+	result := hostPoolGetMetrics(poolName)
+	if result == "" || isHostError(result) {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // ========================================================================

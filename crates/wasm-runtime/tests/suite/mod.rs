@@ -6,6 +6,7 @@
 pub mod behavior_routing_tests;
 pub mod blob_host_functions_integration;
 pub mod simple_host_lock_integration;
+pub mod simple_host_elastic_pool_integration;
 pub mod channel_host_functions_tests;
 pub mod component_host_functions_tests;
 pub mod comprehensive_coverage_tests;

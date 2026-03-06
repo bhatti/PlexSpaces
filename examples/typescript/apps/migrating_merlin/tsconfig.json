@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "outDir": ".",
+    "rootDir": ".",
+    "declaration": true,
+    "skipLibCheck": true
+  },
+  "include": ["sweep_actor.ts"],
+  "exclude": ["node_modules"]
+}

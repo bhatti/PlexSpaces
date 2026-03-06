@@ -158,6 +158,20 @@ interface host {
     /// Key-value list keys with prefix. Returns JSON array of keys, e.g. ["key1","key2"].
     /// Errors return "ERROR:message".
     kv-list: func(prefix: string) -> string;
+
+    // ============================================================================
+    // Elastic pool (checkout/checkin)
+    // ============================================================================
+    /// Checkout an actor from a named pool. timeout-ms: max wait in milliseconds.
+    /// Returns JSON ActorHandle on success, e.g. {"actor_id":"...","pool_name":"...","checkout_id":"..."}.
+    /// Errors return "ERROR:message".
+    pool-checkout: func(pool-name: string, timeout-ms: u64) -> string;
+    /// Checkin an actor to the pool. Pass actor-id and checkout-id from the handle returned by pool-checkout.
+    /// healthy: true if the actor is healthy and can be reused.
+    /// Returns empty on success, "ERROR:message" on failure.
+    pool-checkin: func(pool-name: string, actor-id: string, checkout-id: string, healthy: bool) -> string;
+    /// Get pool metrics (size, available, busy, load). Returns JSON object or "ERROR:message".
+    pool-get-metrics: func(pool-name: string) -> string;
     
     // ============================================================================
     // TupleSpace (Linda-style coordination)

@@ -118,7 +118,9 @@ The SDK automatically handles logging via `host.log()` for error reporting and o
 - `send(to: string, msgType: string, payloadJson: string)` - Send message to another actor
 - `now_ms()` - Get current timestamp in milliseconds
 - `kv_get(key: string)`, `kv_put(key: string, value: string)`, etc. - Key-value storage
-- `ts_write(tupleJson: string)`, `ts_read(patternJson: string)`, etc. - TupleSpace operations
+- **TupleSpace**: Prefer `host.ts` (list-in, list-out): `host.ts.write(tuple)`, `host.ts.take(pattern)` → tuple or null, `host.ts.readAll(pattern)` → tuple[]. Use `null` in patterns for wildcards. Low-level: `ts_write(tupleJson)`, `ts_take(patternJson)`, etc.
+- **Process groups**: `host.processGroups.broadcast(group, msgType, payload)` — `msgType` is used by the host for routing; payload can be data-only.
+- **Elastic pool**: `host.poolCheckout(poolName, timeoutMs)` → `{ actor_id, pool_name, checkout_id } | null`; `host.poolCheckin(poolName, actorId, checkoutId, healthy)`; `host.poolGetMetrics(poolName)` → metrics object or null. When the pool is not configured, checkout returns null; use process group broadcast as fallback. See [Parameter sweep (migrating_merlin)](../../examples/typescript/apps/migrating_merlin/README.md).
 - See `wit/plexspaces-simple-actor/world.wit` for complete interface
 
 **Note**: The SDK uses `host.log()` internally for error logging. For custom logging in your actors, you can import and use host functions directly using the virtual import pattern (future enhancement: SDK may provide helper methods).

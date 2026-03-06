@@ -55,6 +55,8 @@ pub use application_node_trait::ApplicationNode;
 pub mod grpc_connection_manager;
 pub use grpc_connection_manager::{GrpcConnectionManager, ServiceType};
 pub mod object_registry_helpers;
+pub mod elastic_pool_service;
+pub use elastic_pool_service::{ElasticPoolService, PoolServiceError};
 pub mod actor_trait;
 pub mod exit_reason;
 pub mod virtual_actor_manager;

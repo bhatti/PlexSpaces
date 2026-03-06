@@ -130,8 +130,9 @@ export class PlexSpacesActor {
                     return iterativeStringify(result ?? {});
                 }
             }
-            // Payload key order (aligned with framework): message_type (canonical) -> op -> msg_type
-            const op = (payload.message_type ?? payload.op ?? payload.msg_type ?? payload);
+            // Payload key order: message_type -> op -> msg_type; fallback to msgType so data-only payloads route by message type (e.g. tasks_ready)
+            const opRaw = payload.message_type ?? payload.op ?? payload.msg_type;
+            const op = (typeof opRaw === "string" && opRaw ? opRaw : msgType);
             const opKey = typeof op === "string" ? this.capitalize(op) : "";
             const methodName = opKey ? `on${opKey}` : "";
             const method = methodName && typeof this[methodName] === "function"

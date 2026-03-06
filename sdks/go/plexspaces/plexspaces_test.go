@@ -670,6 +670,29 @@ func TestHostTupleSpace(t *testing.T) {
 	}
 }
 
+func TestHostTupleSpaceHelper(t *testing.T) {
+	h := NewHost()
+	ts := h.TS()
+	if ts == nil {
+		t.Fatal("TS() should return non-nil")
+	}
+	// Write: list-in (stub returns success)
+	errStr := ts.Write([]any{"job", "j1", "task", "t0", 1})
+	if isHostError(errStr) {
+		t.Errorf("TS().Write should succeed, got %q", errStr)
+	}
+	// Take: returns (nil, false) when stub returns empty
+	tuple, ok := ts.Take([]any{"job", "j1", "task", nil, nil})
+	if ok || tuple != nil {
+		t.Errorf("TS().Take stub should return (nil, false), got (%v, %v)", tuple, ok)
+	}
+	// ReadAll: stub returns "[]" -> empty slice
+	all := ts.ReadAll([]any{"job", nil, nil, nil, nil})
+	if all == nil || len(all) != 0 {
+		t.Errorf("TS().ReadAll stub should return empty slice, got %v", all)
+	}
+}
+
 func TestHostLocks(t *testing.T) {
 	h := NewHost()
 	result := h.LockAcquire("tenant", "ns", "holder", "lock-1", 30, 5000)

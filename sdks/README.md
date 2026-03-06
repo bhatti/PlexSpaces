@@ -8,7 +8,7 @@ Language SDKs for building PlexSpaces actors with minimal boilerplate.
 |----------|--------|---------------|
 | **Python** | ✅ Available | [sdks/python/README.md](python/README.md) |
 | **TypeScript** | ✅ Available | [sdks/typescript/README.md](typescript/README.md) |
-| Go | 📋 Planned | - |
+| **Go** | ✅ Available | `sdks/go/plexspaces` (see [docs/sdk.md](../docs/sdk.md)) |
 
 ## Design Philosophy
 
@@ -55,7 +55,7 @@ sdks/
 │   ├── tests/          # Unit tests
 │   └── README.md       # Python SDK docs
 ├── typescript/         # TypeScript SDK (inheritance-based)
-└── go/                 # Go SDK (planned)
+└── go/                 # Go SDK (WASM via TinyGo)
 ```
 
 ## Contributing

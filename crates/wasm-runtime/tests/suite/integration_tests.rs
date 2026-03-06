@@ -127,6 +127,7 @@ async fn test_genserver_handle_request() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        None, // elastic_pool_service
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
     )
@@ -188,6 +189,7 @@ async fn test_genevent_handle_event() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        None, // elastic_pool_service
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
     )
@@ -249,6 +251,7 @@ async fn test_genfsm_handle_transition() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        None, // elastic_pool_service
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
     )
@@ -309,6 +312,7 @@ async fn test_fallback_to_handle_message() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        None, // elastic_pool_service
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
     )
@@ -382,6 +386,7 @@ async fn test_channel_send_to_queue() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        None, // elastic_pool_service
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
     )
@@ -434,6 +439,7 @@ async fn test_channel_publish_to_topic() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        None, // elastic_pool_service
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
     )
@@ -488,6 +494,7 @@ async fn test_channel_service_optional() {
         None, // object_registry
         None, // journal_storage
         None, // blob_service
+        None, // elastic_pool_service
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
     )

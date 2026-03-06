@@ -41,6 +41,9 @@ import {
   pgLeave as hostPgLeave,
   pgMembers as hostPgMembers,
   pgBroadcast as hostPgBroadcast,
+  poolCheckout as hostPoolCheckout,
+  poolCheckin as hostPoolCheckin,
+  poolGetMetrics as hostPoolGetMetrics,
   // @ts-expect-error Virtual import
 } from 'plexspaces:simple-actor/host@0.1.0';
 
@@ -55,7 +58,59 @@ function safeCall<T>(fn: ((...args: any[]) => T) | undefined, ...args: any[]): T
 }
 
 /**
- * Process groups sub-API
+ * Tuple space helper: list-in, list-out API.
+ * Use null in patterns for wildcards. Consistent with Python host.ts and Go host.TS().
+ */
+export class TupleSpace {
+  constructor(private host: Host) {}
+
+  /** Write a tuple. Elements must be JSON-serializable. Returns empty on success, "ERROR:..." on failure. */
+  write(tuple: unknown[]): string {
+    const json = JSON.stringify(tuple);
+    return this.host.tsWrite(json);
+  }
+
+  /** Take one matching tuple (destructive). Returns tuple as array or null if no match/error. */
+  take(pattern: unknown[]): unknown[] | null {
+    const json = JSON.stringify(pattern);
+    const raw = this.host.tsTake(json);
+    if (raw === '' || raw.startsWith('ERROR')) return null;
+    try {
+      return JSON.parse(raw) as unknown[];
+    } catch {
+      return null;
+    }
+  }
+
+  /** Read one matching tuple (non-destructive). Returns tuple as array or null if no match/error. */
+  read(pattern: unknown[]): unknown[] | null {
+    const json = JSON.stringify(pattern);
+    const raw = this.host.tsRead(json);
+    if (raw === '' || raw.startsWith('ERROR')) return null;
+    try {
+      return JSON.parse(raw) as unknown[];
+    } catch {
+      return null;
+    }
+  }
+
+  /** Read all matching tuples (non-destructive). Returns array of tuples (each tuple is an array). */
+  readAll(pattern: unknown[]): unknown[][] {
+    const json = JSON.stringify(pattern);
+    const raw = this.host.tsReadAll(json);
+    if (raw === '' || raw.startsWith('ERROR')) return [];
+    try {
+      const out = JSON.parse(raw) as unknown;
+      return Array.isArray(out) ? (out as unknown[][]) : [];
+    } catch {
+      return [];
+    }
+  }
+}
+
+/**
+ * Process groups sub-API.
+ * broadcast(group, msgType, payload): msgType is used by the host for routing; payload can be data-only.
  */
 export class ProcessGroups {
   /** Join a named process group */
@@ -87,7 +142,7 @@ export class ProcessGroups {
     }
   }
 
-  /** Broadcast message to all group members */
+  /** Broadcast to all group members. msgType is used for routing so payload can be data-only. */
   broadcast(group: string, msgType: string, payload?: unknown): void {
     const payloadJson = payload !== undefined ? JSON.stringify(payload) : '{}';
     const result = safeCall(hostPgBroadcast, group, msgType, payloadJson) as string;
@@ -111,6 +166,8 @@ export class ProcessGroups {
  */
 export class Host {
   readonly processGroups = new ProcessGroups();
+  /** Tuple space: list-in, list-out. Use null in patterns for wildcards. */
+  readonly ts = new TupleSpace(this);
 
   // ========================================================================
   // Messaging
@@ -254,7 +311,7 @@ export class Host {
   kvList(prefix: string): string { return safeCall(hostKvList, prefix) as string; }
 
   // ========================================================================
-  // TupleSpace
+  // TupleSpace (low-level string API; prefer host.ts for list-in/list-out)
   // ========================================================================
 
   tsWrite(tupleJson: string): string { return safeCall(hostTsWrite, tupleJson) as string; }
@@ -286,6 +343,46 @@ export class Host {
   blobDownload(blobId: string): string { return safeCall(hostBlobDownload, blobId) as string; }
   blobDelete(blobId: string): string { return safeCall(hostBlobDelete, blobId) as string; }
   blobList(prefix: string): string { return safeCall(hostBlobList, prefix) as string; }
+
+  // ========================================================================
+  // Elastic pool (checkout/checkin)
+  // ========================================================================
+
+  /**
+   * Checkout an actor from a named pool. Returns handle { actor_id, pool_name, checkout_id } or null on failure.
+   */
+  poolCheckout(poolName: string, timeoutMs: number = 5000): { actor_id: string; pool_name: string; checkout_id: string } | null {
+    const result = safeCall(hostPoolCheckout, poolName, BigInt(timeoutMs)) as string;
+    if (typeof result !== 'string' || result === '' || result.startsWith('ERROR:')) return null;
+    try {
+      return JSON.parse(result) as { actor_id: string; pool_name: string; checkout_id: string };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Checkin an actor to the pool. Pass actor_id and checkout_id from the handle returned by poolCheckout.
+   */
+  poolCheckin(poolName: string, actorId: string, checkoutId: string, healthy: boolean): void {
+    const result = safeCall(hostPoolCheckin, poolName, actorId, checkoutId, healthy) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+  }
+
+  /**
+   * Get pool metrics (total_actors, available_actors, busy_actors, current_load, etc.). Returns null if not available.
+   */
+  poolGetMetrics(poolName: string): Record<string, unknown> | null {
+    const result = safeCall(hostPoolGetMetrics, poolName) as string;
+    if (typeof result !== 'string' || result === '' || result.startsWith('ERROR:')) return null;
+    try {
+      return JSON.parse(result) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
 }
 
 /** Global host instance */

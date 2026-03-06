@@ -399,6 +399,9 @@ pub struct ServiceLocatorImpl {
     /// This allows components to retrieve ProcessGroupService for distributed pub/sub
     /// Uses ProcessGroupService trait from plexspaces-core for Erlang pg/pg2-style process groups
     process_group_service: Arc<RwLock<Option<Arc<dyn plexspaces_core::ProcessGroupService>>>>,
+
+    /// Registered ElasticPoolService for checkout/checkin and pool metrics (SDK uses via ServiceLocator)
+    elastic_pool_service: Arc<RwLock<Option<Arc<dyn plexspaces_core::ElasticPoolService>>>>,
     
     /// Registered BlobService (stored separately for type-safe access)
     /// This allows components to retrieve BlobService for blob storage operations
@@ -460,6 +463,7 @@ impl ServiceLocatorImpl {
             grpc_connection_manager: Arc::new(RwLock::new(None)),
             wasm_runtime: Arc::new(RwLock::new(None)),
             process_group_service: Arc::new(RwLock::new(None)),
+            elastic_pool_service: Arc::new(RwLock::new(None)),
             blob_service: Arc::new(RwLock::new(None)),
             node_registry: Arc::new(RwLock::new(None)),
             keyvalue_store: Arc::new(RwLock::new(None)),
@@ -1650,6 +1654,16 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
     async fn register_process_group_service(&self, service: std::sync::Arc<dyn plexspaces_core::ProcessGroupService>) {
         let mut process_group_service = self.process_group_service.write().await;
         *process_group_service = Some(service);
+    }
+
+    async fn get_elastic_pool_service(&self) -> Option<std::sync::Arc<dyn plexspaces_core::ElasticPoolService>> {
+        let service = self.elastic_pool_service.read().await;
+        service.clone()
+    }
+
+    async fn register_elastic_pool_service(&self, service: std::sync::Arc<dyn plexspaces_core::ElasticPoolService>) {
+        let mut elastic_pool_service = self.elastic_pool_service.write().await;
+        *elastic_pool_service = Some(service);
     }
     
     async fn get_blob_service(&self) -> Option<std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>> {

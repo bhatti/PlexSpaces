@@ -11,12 +11,13 @@ This document provides detailed information about PlexSpaces abstractions, compo
 3. [Facets](#facets)
 4. [Object Store (Blob Store)](#object-store-blob-store)
 5. [TupleSpace](#tuplespace)
-6. [Workflows](#workflows)
-7. [Journaling](#journaling)
-8. [Supervision](#supervision)
-9. [Observability](#observability)
-10. [WASM Runtime & SDKs](#wasm-runtime--sdks)
-11. [Database Models and ER Diagram](#database-models-and-er-diagram)
+6. [Elastic pool](#elastic-pool)
+7. [Workflows](#workflows)
+8. [Journaling](#journaling)
+9. [Supervision](#supervision)
+10. [Observability](#observability)
+11. [WASM Runtime & SDKs](#wasm-runtime--sdks)
+12. [Database Models and ER Diagram](#database-models-and-er-diagram)
 
 ## Actors
 
@@ -1805,6 +1806,17 @@ let pattern = Pattern::new(vec![
 > **Note**: In-memory testing uses `SqlStorage::new_sqlite(":memory:")` which provides fast, isolated storage without persistence.
 - **Blob**: Object storage (MinIO/S3/GCP/Azure) - uses object_store directly, no SQL database needed
 
+## Elastic pool
+
+Single unified implementation for actor pools with checkout/checkin semantics and optional auto-scaling.
+
+- **Trait**: `ElasticPoolService` in `plexspaces-core` defines the interface (create_pool, checkout, checkin, get_metrics, scale_to, scale_by, pause_scaling, resume_scaling, drain, delete_pool). Errors use `PoolServiceError`.
+- **Implementation**: `crates/elastic-pool` — `ElasticPool` holds workers and implements the pool logic; `PoolRegistry` implements `ElasticPoolService` and holds named `ElasticPool` instances for use via ServiceLocator.
+- **ServiceLocator**: `get_elastic_pool_service` / `register_elastic_pool_service` (implemented in `plexspaces-services`).
+- **SDK**: `ElasticPoolClient::from_service_locator(service_locator)` in the Rust SDK delegates to the registered service; no duplicate business logic.
+- **Proto**: `proto/plexspaces/v1/pool/pool.proto` defines PoolConfig, PoolMetrics, ActorHandle, and ElasticPoolError. PoolService gRPC can be added later for remote access.
+- **WASM host**: The simple-actor WIT (`wit/plexspaces-simple-actor/world.wit`) exposes `pool-checkout`, `pool-checkin`, and `pool-get-metrics`. Python, Go, and TypeScript SDKs wrap these (e.g. `host.pool_checkout`, `host.PoolCheckout`, `host.poolCheckout`). When the pool is not configured, checkout returns an error and apps can fall back to process group broadcast. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) and [WASM Deployment: Elastic pool](wasm-deployment.md#elastic-pool-wasm-host).
+
 ## Workflows
 
 ### Workflow Definition
@@ -3011,6 +3023,7 @@ The `plexspaces:simple-actor` WIT world is the primary interface for Python, Typ
 | **Distributed Locks** | `lock-acquire`, `lock-release`, `lock-renew` |
 | **Blob Storage** | `blob-upload`, `blob-download`, `blob-delete`, `blob-list` |
 | **Process Groups** | `pg-join`, `pg-leave`, `pg-members`, `pg-broadcast` |
+| **Elastic pool** | `pool-checkout`, `pool-checkin`, `pool-get-metrics` |
 
 ### State Preservation
 

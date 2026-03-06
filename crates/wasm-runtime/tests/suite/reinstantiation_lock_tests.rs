@@ -63,6 +63,7 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
             enable_aot: false,
             durability_enabled: false,
             use_instance_pool: false,
+            max_concurrent_instantiations: None,
         }
     }
 
@@ -110,6 +111,7 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 &[],
                 config,
                 None, None, None, None, None, None, None, None, None,
+                None, // elastic_pool_service
             )
         ).await
             .expect("Instantiation timed out");
@@ -264,6 +266,7 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                     &[],
                     config.clone(),
                     None, None, None, None, None, None, None, None, None,
+                    None, // elastic_pool_service
                 )
             })
             .collect();
@@ -431,6 +434,7 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 &[],
                 config,
                 None, None, None, None, None, None, None, None, None,
+                None, // elastic_pool_service
             )
         ).await
             .expect("Instantiation timed out");
@@ -587,6 +591,7 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 &[],
                 config,
                 None, None, None, None, None, None, None, None, None,
+                None, // elastic_pool_service
             )
         ).await
             .expect("Instantiation timed out");

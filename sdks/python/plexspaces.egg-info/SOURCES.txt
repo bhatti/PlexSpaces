@@ -14,4 +14,5 @@ plexspaces.egg-info/top_level.txt
 plexspaces_cli/__init__.py
 plexspaces_cli/build.py
 tests/test_decorators.py
+tests/test_host_tuple_space.py
 tests/test_workflow_retry.py

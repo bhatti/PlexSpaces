@@ -151,6 +151,7 @@ mod tests {
             Some(object_registry),
             Some(journal_storage),
             None, // No blob service
+            None, // No elastic pool service
         ))
     }
 
@@ -475,7 +476,8 @@ mod tests {
             Some(Arc::new(
                 plexspaces_journaling::SqliteJournalStorage::new(":memory:").await.unwrap(),
             )),
-            None,
+            None, // blob_service
+            None, // elastic_pool_service
         ));
         let ctx_leader = test_context("", "leader-election");
         let lock_key = "leader".to_string();

@@ -59,6 +59,7 @@ mod tests {
             enable_aot: false,
             durability_enabled: false,
             use_instance_pool: false,
+            max_concurrent_instantiations: None,
         }
     }
 
@@ -93,7 +94,8 @@ mod tests {
             runtime.instantiate(
                 module, "test-sequential-1".to_string(), &[], config,
                 None, None, None, None, None, None, None, None,
-                None,
+                None, // blob_service
+                None, // elastic_pool_service
             )
         ).await;
         let instance = match instance {
@@ -188,7 +190,7 @@ mod tests {
             runtime.instantiate(
                 module, "test-state-1".to_string(), &[], config,
                 None, None, None, None, None, None, None, None,
-                None,
+                None, None, // blob_service, elastic_pool_service
             )
         ).await;
         let instance = match instance {
@@ -291,7 +293,7 @@ mod tests {
             runtime.instantiate(
                 module, "test-getstate-1".to_string(), &[], config,
                 None, None, None, None, None, None, None, None,
-                None,
+                None, None, // blob_service, elastic_pool_service
             )
         ).await;
         let instance = match instance {

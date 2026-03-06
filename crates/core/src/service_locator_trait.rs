@@ -369,6 +369,25 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Arguments
     /// * `service` - ProcessGroupService to register
     async fn register_process_group_service(&self, service: std::sync::Arc<dyn crate::actor_context::ProcessGroupService>);
+
+    /// Get ElasticPoolService
+    ///
+    /// ## Purpose
+    /// Returns ElasticPoolService for checkout/checkin and pool metrics.
+    /// SDK uses this for in-process pool access (no gRPC).
+    ///
+    /// ## Returns
+    /// Some(Arc<dyn ElasticPoolService>) if registered, None otherwise
+    async fn get_elastic_pool_service(&self) -> Option<std::sync::Arc<dyn crate::ElasticPoolService>> {
+        None
+    }
+
+    /// Register ElasticPoolService
+    ///
+    /// ## Purpose
+    /// Registers ElasticPoolService (e.g. from elastic-pool crate).
+    async fn register_elastic_pool_service(&self, _service: std::sync::Arc<dyn crate::ElasticPoolService>) {
+    }
     
     /// Get BlobService
     ///

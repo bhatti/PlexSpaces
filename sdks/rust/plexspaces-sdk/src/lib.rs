@@ -840,12 +840,16 @@ pub use plexspaces_facet::Facet;
 pub mod shard_group;
 pub mod node_client;
 pub mod parallel;
+pub mod elastic_pool_client;
 
 pub use shard_group::{ShardGroupClientTrait, UnifiedShardGroupClient, ShardGroupClientLocal};
 #[cfg(feature = "grpc")]
 pub use shard_group::{ShardGroupClientGrpc, ShardGroupClient};
 pub use node_client::{NodeClient, HealthCheckConfig};
 pub use parallel::ParallelClient;
+pub use elastic_pool_client::ElasticPoolClient;
+/// Re-export pool service error for elastic pool client callers
+pub use plexspaces_core::PoolServiceError;
 
 /// Re-export CoordinationComputeTracker for metrics tracking
 pub use plexspaces_node::CoordinationComputeTracker;

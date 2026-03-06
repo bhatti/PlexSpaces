@@ -1071,8 +1071,9 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         }
     }
 
-    /// Broadcast message to all members of a process group
-    async fn pg_broadcast(&mut self, group_name: String, _msg_type: String, payload_json: String) -> String {
+    /// Broadcast message to all members of a process group.
+    /// Uses msg_type parameter for routing so payload can be data-only.
+    async fn pg_broadcast(&mut self, group_name: String, msg_type: String, payload_json: String) -> String {
         let self_id = self.actor_id.to_string();
         let ctx = self.pg_context();
         let registry = match self.host_functions.process_group_registry() {
@@ -1083,15 +1084,19 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Ok(m) => m,
             Err(e) => return format!("ERROR: {}", e),
         };
-        // Extract message_type from payload JSON if available, otherwise use "cast" (fire-and-forget)
-        let message_type = if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&payload_json) {
-            json_value.get("op")
-                .or_else(|| json_value.get("msg_type"))
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "cast".to_string())
+        let message_type = if msg_type.is_empty() {
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&payload_json) {
+                json_value
+                    .get("op")
+                    .or_else(|| json_value.get("msg_type"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "cast".to_string())
+            } else {
+                "cast".to_string()
+            }
         } else {
-            "cast".to_string()
+            msg_type
         };
         for member in &members {
             let member_str = member.to_string();
@@ -1104,6 +1109,68 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             }
         }
         String::new()
+    }
+
+    // ========================================================================
+    // Elastic pool (checkout/checkin)
+    // ========================================================================
+
+    async fn pool_checkout(&mut self, pool_name: String, timeout_ms: u64) -> String {
+        let svc = match self.host_functions.elastic_pool_service() {
+            Some(s) => s.clone(),
+            None => return "ERROR: Elastic pool service not configured".to_string(),
+        };
+        let timeout = std::time::Duration::from_millis(timeout_ms);
+        match svc.checkout(&pool_name, timeout).await {
+            Ok(handle) => {
+                let json = serde_json::json!({
+                    "actor_id": handle.actor_id,
+                    "pool_name": handle.pool_name,
+                    "checkout_id": handle.checkout_id,
+                });
+                serde_json::to_string(&json).unwrap_or_else(|_| "ERROR: serialize handle".to_string())
+            }
+            Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    async fn pool_checkin(
+        &mut self,
+        pool_name: String,
+        actor_id: String,
+        checkout_id: String,
+        healthy: bool,
+    ) -> String {
+        let svc = match self.host_functions.elastic_pool_service() {
+            Some(s) => s.clone(),
+            None => return "ERROR: Elastic pool service not configured".to_string(),
+        };
+        match svc.checkin(&pool_name, &actor_id, &checkout_id, healthy).await {
+            Ok(()) => String::new(),
+            Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    async fn pool_get_metrics(&mut self, pool_name: String) -> String {
+        let svc = match self.host_functions.elastic_pool_service() {
+            Some(s) => s.clone(),
+            None => return "ERROR: Elastic pool service not configured".to_string(),
+        };
+        match svc.get_metrics(&pool_name).await {
+            Ok(m) => {
+                let json = serde_json::json!({
+                    "total_actors": m.total_actors,
+                    "available_actors": m.available_actors,
+                    "busy_actors": m.busy_actors,
+                    "idle_actors": m.idle_actors,
+                    "failed_actors": m.failed_actors,
+                    "waiting_requests": m.waiting_requests,
+                    "current_load": m.current_load,
+                });
+                serde_json::to_string(&json).unwrap_or_else(|_| "ERROR: serialize metrics".to_string())
+            }
+            Err(e) => format!("ERROR: {}", e),
+        }
     }
 }
 

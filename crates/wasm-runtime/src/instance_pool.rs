@@ -149,6 +149,7 @@ impl InstancePool {
             None, // ObjectRegistry not available at pool level
             None, // JournalStorage not available at pool level
             None, // BlobService not available at pool level
+            None, // ElasticPoolService not available at pool level
             self.config.durability_enabled,
             None, // global_reinstantiation_semaphore - pool not tied to runtime
         )

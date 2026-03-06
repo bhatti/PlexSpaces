@@ -71,6 +71,7 @@ class _MockHost:
 
     def __init__(self):
         self._kv: Dict[str, str] = {}
+        self.ts = _TupleSpaceHelper(self)
 
     def send(self, to: str, msg_type: str, payload_json: str) -> str:
         print(f"[MOCK] send({to}, {msg_type}, {payload_json})")
@@ -233,6 +234,110 @@ class _MockHost:
         """Process group broadcast (mock). Returns empty on success."""
         return ""
 
+    def pool_checkout(self, pool_name: str, timeout_ms: int) -> str:
+        """Elastic pool checkout (mock). Returns JSON handle or ERROR."""
+        return json.dumps({
+            "actor_id": "mock-worker-0",
+            "pool_name": pool_name,
+            "checkout_id": "mock-checkout-1",
+        })
+
+    def pool_checkin(
+        self,
+        pool_name: str,
+        actor_id: str,
+        checkout_id: str,
+        healthy: bool,
+    ) -> str:
+        """Elastic pool checkin (mock). Returns empty on success."""
+        return ""
+
+    def pool_get_metrics(self, pool_name: str) -> str:
+        """Elastic pool metrics (mock). Returns JSON."""
+        return json.dumps({
+            "total_actors": 2,
+            "available_actors": 1,
+            "busy_actors": 0,
+            "current_load": 0.0,
+        })
+
+
+class _TupleSpaceHelper:
+    """
+    Tuple space helper: list-in, list-out API. Use None in patterns for wildcards.
+
+    Example:
+        from plexspaces import host
+
+        host.ts.write(["ensemble", "job-1", "task", "t0", 0])
+        t = host.ts.take(["ensemble", "job-1", "task", None, None])  # None = wildcard
+        if t:
+            ...
+        all_results = host.ts.read_all(["ensemble", "job-1", "result", None, None])
+    """
+
+    def __init__(self, host_ref: Any):
+        self._host = host_ref
+
+    def write(self, tuple_list: List[Any]) -> str:
+        """
+        Write a tuple to the tuple space. Elements must be JSON-serializable.
+
+        Returns:
+            Empty string on success, "ERROR:..." on failure.
+        """
+        json_str = json.dumps(tuple_list)
+        return self._host.ts_write(json_str)
+
+    def take(self, pattern: List[Any]) -> Optional[List[Any]]:
+        """
+        Take one matching tuple (destructive). Use None in pattern for wildcards.
+
+        Returns:
+            Matched tuple as a list, or None if no match or error.
+        """
+        json_str = json.dumps(pattern)
+        raw = self._host.ts_take(json_str)
+        if not raw or raw.startswith("ERROR"):
+            return None
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    def read(self, pattern: List[Any]) -> Optional[List[Any]]:
+        """
+        Read one matching tuple (non-destructive). Use None in pattern for wildcards.
+
+        Returns:
+            Matched tuple as a list, or None if no match or error.
+        """
+        json_str = json.dumps(pattern)
+        raw = self._host.ts_read(json_str)
+        if not raw or raw.startswith("ERROR"):
+            return None
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    def read_all(self, pattern: List[Any]) -> List[List[Any]]:
+        """
+        Read all matching tuples (non-destructive). Use None in pattern for wildcards.
+
+        Returns:
+            List of tuples (each tuple is a list of elements).
+        """
+        json_str = json.dumps(pattern)
+        raw = self._host.ts_read_all(json_str)
+        if not raw or raw.startswith("ERROR"):
+            return []
+        try:
+            out = json.loads(raw)
+            return out if isinstance(out, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
 
 class ProcessGroups:
     """
@@ -296,6 +401,7 @@ class Host:
     
     def __init__(self):
         self.process_groups = ProcessGroups()
+        self.ts = _TupleSpaceHelper(self)
     
     def send(self, to: str, msg_type: str, payload: Optional[Union[str, Dict[str, Any], List[Any]]] = None) -> str:
         """
@@ -703,6 +809,84 @@ class Host:
     # ========================================================================
     # Timers (Delayed Messaging)
     # ========================================================================
+
+    # ========================================================================
+    # Elastic pool (checkout/checkin)
+    # ========================================================================
+
+    def pool_checkout(self, pool_name: str, timeout_ms: int = 5000) -> Optional[Dict[str, Any]]:
+        """
+        Checkout an actor from a named pool.
+
+        Args:
+            pool_name: Pool name (e.g. "merlin-workers").
+            timeout_ms: Max wait in milliseconds.
+
+        Returns:
+            Dict with actor_id, pool_name, checkout_id on success.
+            None on failure (pool not configured, timeout, or pool empty).
+        """
+        h = _get_host()
+        fn = getattr(h, "pool_checkout", None) or getattr(h, "pool-checkout", None)
+        if fn is None:
+            return None
+        result = fn(pool_name, timeout_ms)
+        if not result or result.startswith("ERROR:"):
+            return None
+        try:
+            return json.loads(result)
+        except (json.JSONDecodeError, ValueError):
+            return None
+
+    def pool_checkin(
+        self,
+        pool_name: str,
+        actor_id: str,
+        checkout_id: str,
+        healthy: bool = True,
+    ) -> None:
+        """
+        Checkin an actor to the pool.
+
+        Args:
+            pool_name: Pool name.
+            actor_id: From the handle returned by pool_checkout.
+            checkout_id: From the handle returned by pool_checkout.
+            healthy: True if the actor is healthy and can be reused.
+
+        Raises:
+            RuntimeError: on failure.
+        """
+        h = _get_host()
+        fn = getattr(h, "pool_checkin", None) or getattr(h, "pool-checkin", None)
+        if fn is None:
+            raise RuntimeError("pool checkin not available")
+        result = fn(pool_name, actor_id, checkout_id, healthy)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+
+    def pool_get_metrics(self, pool_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Get pool metrics (size, available, busy, load).
+
+        Args:
+            pool_name: Pool name.
+
+        Returns:
+            Dict with total_actors, available_actors, busy_actors, current_load, etc.
+            None if not available or on error.
+        """
+        h = _get_host()
+        fn = getattr(h, "pool_get_metrics", None) or getattr(h, "pool-get-metrics", None)
+        if fn is None:
+            return None
+        result = fn(pool_name)
+        if not result or result.startswith("ERROR:"):
+            return None
+        try:
+            return json.loads(result)
+        except (json.JSONDecodeError, ValueError):
+            return None
 
     def send_after(self, delay_ms: int, msg_type: str, payload: Any = None) -> str:
         """

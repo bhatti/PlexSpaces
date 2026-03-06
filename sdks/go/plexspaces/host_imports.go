@@ -321,3 +321,31 @@ func hostPGBroadcast(groupName, msgType, payloadJSON string) string {
 	rawHostPGBroadcast(groupName, msgType, payloadJSON, unsafe.Pointer(&retArea))
 	return readRetString(unsafe.Pointer(&retArea))
 }
+
+// ========================================================================
+// Elastic pool (checkout/checkin)
+// ========================================================================
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 pool-checkout
+func rawHostPoolCheckout(poolName string, timeoutMs uint64, retptr unsafe.Pointer)
+
+func hostPoolCheckout(poolName string, timeoutMs uint64) string {
+	rawHostPoolCheckout(poolName, timeoutMs, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 pool-checkin
+func rawHostPoolCheckin(poolName, actorID, checkoutID string, healthy bool, retptr unsafe.Pointer)
+
+func hostPoolCheckin(poolName, actorID, checkoutID string, healthy bool) string {
+	rawHostPoolCheckin(poolName, actorID, checkoutID, healthy, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 pool-get-metrics
+func rawHostPoolGetMetrics(poolName string, retptr unsafe.Pointer)
+
+func hostPoolGetMetrics(poolName string) string {
+	rawHostPoolGetMetrics(poolName, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}

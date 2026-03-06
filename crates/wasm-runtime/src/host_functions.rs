@@ -6,7 +6,7 @@
 //! Host functions provided to WASM actors
 
 use async_trait::async_trait;
-use plexspaces_core::{ChannelService, RequestContext, KeyValueStore, LockManager};
+use plexspaces_core::{ChannelService, ElasticPoolService, RequestContext, KeyValueStore, LockManager};
 use plexspaces_core::actor_context::ObjectRegistry;
 use plexspaces_core::JournalStorage;
 use plexspaces_process_groups::ProcessGroupRegistry;
@@ -178,6 +178,8 @@ pub struct HostFunctions {
     journal_storage: Option<Arc<dyn JournalStorage>>,
     /// Blob service for object storage (optional)
     blob_service: Option<Arc<BlobService>>,
+    /// Elastic pool service for checkout/checkin (optional)
+    elastic_pool_service: Option<Arc<dyn ElasticPoolService>>,
 }
 
 impl HostFunctions {
@@ -192,6 +194,7 @@ impl HostFunctions {
             object_registry: None,
             journal_storage: None,
             blob_service: None,
+            elastic_pool_service: None,
         }
     }
 
@@ -206,6 +209,7 @@ impl HostFunctions {
             object_registry: None,
             journal_storage: None,
             blob_service: None,
+            elastic_pool_service: None,
         }
     }
 
@@ -220,6 +224,7 @@ impl HostFunctions {
             object_registry: None,
             journal_storage: None,
             blob_service: None,
+            elastic_pool_service: None,
         }
     }
 
@@ -237,6 +242,7 @@ impl HostFunctions {
             object_registry: None,
             journal_storage: None,
             blob_service: None,
+            elastic_pool_service: None,
         }
     }
 
@@ -250,6 +256,7 @@ impl HostFunctions {
         object_registry: Option<Arc<dyn ObjectRegistry>>,
         journal_storage: Option<Arc<dyn JournalStorage>>,
         blob_service: Option<Arc<BlobService>>,
+        elastic_pool_service: Option<Arc<dyn ElasticPoolService>>,
     ) -> Self {
         Self {
             message_sender: sender,
@@ -260,6 +267,7 @@ impl HostFunctions {
             object_registry,
             journal_storage,
             blob_service,
+            elastic_pool_service,
         }
     }
     
@@ -286,6 +294,11 @@ impl HostFunctions {
     /// Get process group registry if available
     pub fn process_group_registry(&self) -> Option<&Arc<ProcessGroupRegistry>> {
         self.process_group_registry.as_ref()
+    }
+
+    /// Get elastic pool service if available
+    pub fn elastic_pool_service(&self) -> Option<&Arc<dyn ElasticPoolService>> {
+        self.elastic_pool_service.as_ref()
     }
 
     /// Get lock manager if available

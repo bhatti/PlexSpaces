@@ -82,6 +82,7 @@ mod tests {
                 None, // object_registry
                 None, // journal_storage
                 None, // blob_service
+                None, // elastic_pool_service
             )
             .await
             .expect("Failed to instantiate with custom fuel limit");
@@ -119,6 +120,7 @@ mod tests {
                 &[],
                 config,
                 None, None, None, None, None, None, None, None, None,
+                None, // elastic_pool_service
             )
             .await
             .expect("Failed to instantiate with default fuel limit");
@@ -163,6 +165,7 @@ mod tests {
                 &[],
                 config,
                 None, None, None, None, None, None, None, None, None,
+                None, // elastic_pool_service
             )
             .await
             .expect("Failed to instantiate with zero fuel limit");
@@ -207,6 +210,7 @@ mod tests {
                 &[],
                 config,
                 None, None, None, None, None, None, None, None, None,
+                None, // elastic_pool_service
             )
             .await
             .expect("Failed to instantiate with large fuel limit");

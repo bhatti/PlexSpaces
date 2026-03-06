@@ -4,7 +4,7 @@
 // Unified Parallel Processing API
 // Aligns ShardGroup, ElasticPool, and resource-based routing for cohesive data-parallel operations
 
-use crate::{UnifiedShardGroupClient, ShardGroupClientTrait, NodeClient};
+use crate::{ShardGroupClientTrait, UnifiedShardGroupClient};
 use anyhow::Result;
 use plexspaces_proto::actor::v1::{
     ConsistencyLevel, PartitionStrategy, ShardGroupAggregationStrategy,
@@ -13,40 +13,24 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Unified parallel processing client
-/// Provides high-level map/reduce operations that align ShardGroup, worker pools, and routing
-/// 
-/// ## Unified Abstractions
-/// - Works with both WASM (ServiceLocator) and gRPC (remote nodes)
-/// - Removes boilerplate (auto-creates RequestContext, converts JSON to Messages)
-/// - Aligns ShardGroup, ElasticPool, and resource-based routing
+/// Parallel processing client over ShardGroup (map/reduce, scatter-gather).
+/// Uses ServiceLocator for local access; gRPC for remote can be added separately.
 pub struct ParallelClient {
     shard_client: UnifiedShardGroupClient,
-    node_client: Option<NodeClient>,
-    service_locator: Option<Arc<dyn plexspaces_core::ServiceLocator>>,
 }
 
 impl ParallelClient {
-    /// Connect to a node via gRPC and create parallel client
+    /// Connect to a node via gRPC (requires `grpc` feature).
     #[cfg(feature = "grpc")]
     pub async fn connect(node_addr: &str) -> Result<Self> {
         let shard_client = UnifiedShardGroupClient::from_node_addr(node_addr).await?;
-        let node_client = NodeClient::connect(node_addr).await?;
-        Ok(Self {
-            shard_client,
-            node_client: Some(node_client),
-            service_locator: None,
-        })
+        Ok(Self { shard_client })
     }
 
-    /// Create parallel client from ServiceLocator (WASM/internal apps)
+    /// Create parallel client from ServiceLocator (in-process / embedded).
     pub async fn from_service_locator(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Result<Self> {
-        let shard_client = UnifiedShardGroupClient::from_service_locator(service_locator.clone()).await?;
-        Ok(Self {
-            shard_client,
-            node_client: None,
-            service_locator: Some(service_locator),
-        })
+        let shard_client = UnifiedShardGroupClient::from_service_locator(service_locator).await?;
+        Ok(Self { shard_client })
     }
 
     /// Create a worker pool (ShardGroup) with resource-based placement

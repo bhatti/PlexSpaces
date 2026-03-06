@@ -198,3 +198,19 @@ func hostPGMembers(groupName string) string {
 	return `["actor-1","actor-2"]`
 }
 func hostPGBroadcast(groupName, msgType, payloadJSON string) string { return "" }
+
+func hostPoolCheckout(poolName string, timeoutMs uint64) string {
+	out, _ := json.Marshal(map[string]any{
+		"actor_id":    "mock-worker-0",
+		"pool_name":   poolName,
+		"checkout_id": "mock-checkout-1",
+	})
+	return string(out)
+}
+func hostPoolCheckin(poolName, actorID, checkoutID string, healthy bool) string { return "" }
+func hostPoolGetMetrics(poolName string) string {
+	out, _ := json.Marshal(map[string]any{
+		"total_actors": 2, "available_actors": 1, "busy_actors": 0, "current_load": 0.0,
+	})
+	return string(out)
+}

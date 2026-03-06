@@ -207,7 +207,7 @@ The [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) uses inheritance: extend 
 See [examples/typescript/apps/bank_account](../examples/typescript/apps/bank_account/README.md) for a full example and E2E test.
 
 See [SDK Guide](sdk.md) for complete Python and TypeScript SDK documentation.
-See [WASM Deployment](wasm-deployment.md) and [Examples](examples.md) for Python, TypeScript, and other WASM actor examples.
+See [WASM Deployment](wasm-deployment.md) and [Examples](examples.md) for Python, TypeScript, Go, and Rust WASM actor examples. For parameter sweep with elastic pool (checkout/checkin) and tuple space, see [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) (available in all four languages).
 
 ## Key Concepts
 

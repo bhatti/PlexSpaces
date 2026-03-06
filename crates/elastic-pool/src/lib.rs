@@ -267,8 +267,10 @@
 #![warn(clippy::all)]
 
 mod elastic_pool;
+mod pool_registry;
 
 pub use elastic_pool::*;
+pub use pool_registry::PoolRegistry;
 
 // Re-export proto types for convenience
 pub use plexspaces_proto::pool::v1::{

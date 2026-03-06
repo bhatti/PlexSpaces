@@ -33,6 +33,7 @@ The [PlexSpaces SDKs](sdk.md) provide minimal-boilerplate actor development: **P
 | **N-Body** | Multi-actor physics simulation | [README](../examples/python/apps/nbody/README.md) |
 | **Order Saga (migrating_conductor)** | E-commerce order saga: payment → inventory → discount → shipment → event; compensation on failure. Workflow + virtual_actor + durability. | [README](../examples/python/apps/migrating_conductor/README.md) |
 | **Leader Election** ⚠️ | Distributed lock for single-leader pattern (cron, scheduler). **Status: buggy/incomplete**. | [README](../examples/python/apps/leader_election/README.md) |
+| **Parameter sweep (migrating_merlin)** | Merlin-style parameter sweep: elastic pool (checkout/checkin) + tuple space work queue; fallback to process group. Coordinator scatter → workers take/run/write → gather. Python, Go, TypeScript, Rust. | [README](../examples/python/apps/migrating_merlin/README.md) |
 
 **⚠️ Buggy/incomplete examples**: Storefront API and Leader Election are marked incomplete; see their READMEs and PROJECT_TRACKER.md.
 
@@ -59,6 +60,7 @@ cd examples/python/apps/bank_account
 | Example | Description | README |
 |---------|-------------|--------|
 | **Bank Account** | Same API as Python: durable state, deposit/withdraw/history/replay. Uses `@plexspaces/sdk` and jco componentize. | [README](../examples/typescript/apps/bank_account/README.md) |
+| **Parameter sweep (migrating_merlin)** | Same flow as Python: elastic pool (poolCheckout/poolCheckin) + host.ts; fallback to process group. WorkflowActor + onWork_available. | [README](../examples/typescript/apps/migrating_merlin/README.md) |
 
 **Build and test (TypeScript):**
 ```bash
@@ -73,6 +75,7 @@ cd examples/typescript/apps/bank_account
 | **Migrating Erlang/OTP** | Sliding window rate limiter demonstrating GenServer pattern. Per-client windows, batch benchmarks. Uses Go SDK: `BaseActor`, `Host`, `ActorRouter`. Native: `native/rate_limiter.erl`. | [README](../examples/go/apps/migrating_erlang_otp/README.md) |
 | **Migrating Cadence** | Payment workflow with idempotency and retries. WorkflowActor Run/Signal/Query; virtual_actor + durability. Comparison: Cadence vs PlexSpaces in README. | [README](../examples/go/apps/migrating_cadence/README.md) |
 | **Migrating Dapr** | Background job processor: durable queue, retries, DLQ. WorkflowActor + virtual_actor + durability; queue/DLQ in state. Native: `native/job_processor_dapr.go`. | [README](../examples/go/apps/migrating_dapr/README.md) |
+| **Parameter sweep (migrating_merlin)** | Merlin-style parameter sweep: host.PoolCheckout/PoolCheckin + host.TS(); fallback to host.PG().Broadcast. WorkflowActor Run + Handle(work_available). | [README](../examples/go/apps/migrating_merlin/README.md) |
 
 **Build and test (Go):**
 ```bash
@@ -99,6 +102,7 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 | **chat_room** | Process groups for broadcast messaging (pub/sub, Slack/Discord-style) | `ProcessGroupRegistry`, `RequestContext`, `CoordinationComputeTracker` | [embedded](../examples/rust/embedded/chat_room/README.md) |
 | **timeseries_forecasting** | Pipeline via Node/type-name spawn; see README | SDK/Node spawn | [embedded](../examples/rust/embedded/timeseries_forecasting/README.md) |
 | **firecracker_multi_tenant** | Data-parallel actors (DPA-inspired) with worker pools, **health-aware node connectivity** (liveness/readiness checks, exponential backoff retry), resource-based routing, coordination/compute metrics | `ParallelClient`, `UnifiedShardGroupClient`, `NodeClient` (with health checks) | [embedded](../examples/rust/embedded/firecracker_multi_tenant/README.md) |
+| **Parameter sweep (migrating_merlin)** | Merlin-style parameter sweep (WASM): pool checkout/checkin + tuple space; fallback to process group. Same API as Python/Go/TS. | WIT exports (workflow_run, work_available), host stubs | [apps](../examples/rust/apps/migrating_merlin/README.md) |
 
 **Annotations Quick Reference**:
 | Annotation | Description |

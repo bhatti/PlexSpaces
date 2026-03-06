@@ -48,11 +48,11 @@ Machine learning training and inference:
 
 **Key Features**:
 - Resource-aware scheduling
-- Elastic worker pools
+- Elastic worker pools (checkout/checkin via host pool API; see [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md))
 - Fault tolerance
 - Checkpointing and recovery
 
-**Example**: See [Ray Comparison](../examples/comparison/ray/) example.
+**Examples**: [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) (Python, Go, TypeScript, Rust) — elastic pool + tuple space work queue; [Ray Comparison](../examples/comparison/ray/) for Ray-style patterns.
 
 ## Event Processing
 

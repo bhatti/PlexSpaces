@@ -22,6 +22,30 @@ The SDK is a **thin decorator layer** over the core framework crates. Core funct
 | **Rust** | ✅ Available | `sdks/rust/plexspaces-sdk` | Native (embedded) actors; annotations + spawn_actor + facets |
 | **Go** | ✅ Available | `sdks/go/` | WASM actors (TinyGo) |
 
+### Cross-SDK consistency: TupleSpace and Process Groups
+
+All language SDKs expose the same semantics for TupleSpace and process groups so that examples and docs can be translated 1:1.
+
+**TupleSpace (list-in, list-out)** — Use a high-level helper so callers pass native lists and get native lists back; use `null`/`nil` in patterns for wildcards. Low-level string APIs remain for advanced use.
+
+| Operation | Python | TypeScript | Go |
+|-----------|--------|------------|-----|
+| Write tuple | `host.ts.write([a, b, c])` | `host.ts.write([a, b, c])` | `host.TS().Write([]any{a, b, c})` |
+| Take (destructive) | `host.ts.take(pattern)` → list or None | `host.ts.take(pattern)` → array or null | `host.TS().Take(pattern)` → ([]any, bool) |
+| Read (non-destructive) | `host.ts.read(pattern)` → list or None | `host.ts.read(pattern)` → array or null | `host.TS().Read(pattern)` → ([]any, bool) |
+| Read all | `host.ts.read_all(pattern)` → list of lists | `host.ts.readAll(pattern)` → array[] | `host.TS().ReadAll(pattern)` → [][]any |
+| Wildcards | `None` in pattern | `null` in pattern | `nil` in pattern |
+
+**Process group broadcast** — The host uses the `msg_type` argument for routing. Payload can be data-only (no need to put `op` or `msg_type` inside the payload).
+
+| Language | API |
+|----------|-----|
+| Python | `host.process_groups.broadcast(group, "tasks_ready", {"ensemble_id": "e1", "num_tasks": 10})` |
+| TypeScript | `host.processGroups.broadcast(group, "tasks_ready", { ensembleId: "e1", numTasks: 10 })` |
+| Go | `host.PG().Broadcast(group, "tasks_ready", map[string]any{"ensemble_id": "e1", "num_tasks": 10})` |
+
+**Rust**: Native (embedded) actors use `ActorContext::get_tuplespace()` and process group services from the node; WASM Rust actors would use the same WIT host interface and can implement a small `ts`-style helper for parity.
+
 ## Python SDK
 
 ### Installation
@@ -254,10 +278,10 @@ class ChatRoom:
 | `host.kv_delete(key)` | Delete key. Returns empty on success. |
 | `host.kv_list(prefix)` | List keys with prefix. Returns JSON array of keys. |
 | **TupleSpace** | |
-| `host.ts_write(tuple_json)` | Write tuple (JSON array). Returns empty on success. |
-| `host.ts_read(pattern_json)` | Read tuple (non-destructive). Returns matched tuple or empty. |
-| `host.ts_take(pattern_json)` | Take tuple (destructive). Returns and removes matched tuple. |
-| `host.ts_read_all(pattern_json)` | Read all matching tuples. Returns JSON array of tuples. |
+| `host.ts.write(tuple_list)` | Write tuple (list-in). Use Python list; elements JSON-serializable. Returns empty on success. |
+| `host.ts.read(pattern)` | Read one match (non-destructive). Use `None` for wildcards. Returns list or None. |
+| `host.ts.take(pattern)` | Take one match (destructive). Returns list or None. |
+| `host.ts.read_all(pattern)` | Read all matches. Returns list of lists. Low-level: `host.ts_write` / `host.ts_take` / `host.ts_read_all` take JSON strings. |
 | **Distributed Locks** | |
 | `host.lock_acquire(tenant_id, namespace, holder_id, lock_name, lease_secs, timeout_ms)` | Acquire lock. Returns JSON with lock_key, version, holder_id. |
 | `host.lock_release(lock_id, tenant_id, namespace, holder_id, lock_version)` | Release lock. Returns empty on success. |
@@ -270,8 +294,14 @@ class ChatRoom:
 | **Process Groups** | |
 | `host.process_groups.join(group)` | Join a process group (uses self actor ID) |
 | `host.process_groups.leave(group)` | Leave a process group |
-| `host.process_groups.broadcast(group, msg_type, payload)` | Broadcast to all group members |
+| `host.process_groups.broadcast(group, msg_type, payload)` | Broadcast to all group members; `msg_type` is used for routing so payload can be data-only. |
 | `host.process_groups.members(group)` | Get group member IDs |
+| **Elastic pool** | |
+| `host.pool_checkout(pool_name, timeout_ms)` (Python) / `host.PoolCheckout` (Go) / `host.poolCheckout` (TS) | Checkout an actor from a named pool. Returns handle `{actor_id, pool_name, checkout_id}` or null on failure. |
+| `host.pool_checkin(pool_name, actor_id, checkout_id, healthy)` | Checkin an actor to the pool. Use values from the handle returned by checkout. |
+| `host.pool_get_metrics(pool_name)` | Get pool metrics (total_actors, available_actors, busy_actors, current_load). Returns JSON or null if not available. |
+
+**Example**: [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) uses the pool API with tuple space (work queue) and fallback to process group; available in Python, Go, TypeScript, and Rust.
 
 #### Ask Pattern (Request-Reply Between WASM Actors)
 
@@ -317,30 +347,26 @@ WASM actors can persist data via **`host.kv_get`** and **`host.kv_put`**. Keys a
 
 #### TupleSpace (WASM)
 
-WASM actors can use TupleSpace for coordination via Linda-style primitives:
+WASM actors use **`host.ts`** for list-in, list-out TupleSpace coordination. Use `None` in patterns for wildcards:
 
 ```python
-import json
 from plexspaces import actor, handler, host
 
 @actor
 class JobCoordinator:
     @handler("submit")
     def submit_job(self, job_id: str, tasks: list) -> dict:
-        # Scatter: Write tasks to TupleSpace
+        # Scatter: host.ts.write accepts Python list
         for i, task in enumerate(tasks):
-            tuple_json = json.dumps(["job", job_id, "task", i, task])
-            host.ts_write(tuple_json)
+            host.ts.write(["job", job_id, "task", i, task])
         return {"job_id": job_id, "tasks": len(tasks)}
     
     @handler("claim")
     def claim_task(self, job_id: str) -> dict:
-        # Atomic claim: ts_take removes the tuple
-        pattern = json.dumps(["job", job_id, "task", None, None])
-        result = host.ts_take(pattern)
-        if result:
-            task = json.loads(result)
-            return {"task_id": task[3], "data": task[4]}
+        # Take one match; returns list or None
+        t = host.ts.take(["job", job_id, "task", None, None])
+        if t:
+            return {"task_id": t[3], "data": t[4]}
         return {"task": None}
 ```
 
@@ -865,6 +891,28 @@ let stats = parallel_client.parallel_update(
 - **Labels Flow**: ShardGroup labels → ActorResourceRequirements → NodeSelector → Node placement
 
 See [Firecracker Multi-Tenant Example](../examples/rust/embedded/firecracker_multi_tenant/README.md) for a complete data-parallel actors demonstration.
+
+### Elastic pool (checkout/checkin)
+
+The framework provides a single unified elastic pool: the **ElasticPool** implementation in `crates/elastic-pool`, exposed via the **ElasticPoolService** trait in core. The node (or app) registers a **PoolRegistry** (which holds named ElasticPool instances) with ServiceLocator. The SDK decorator **ElasticPoolClient** obtains the service from ServiceLocator and exposes checkout/checkin, metrics, and scale without adding new business logic.
+
+- **Core**: `ElasticPoolService` trait and `PoolServiceError` in `plexspaces-core`; ServiceLocator has `get_elastic_pool_service` / `register_elastic_pool_service`.
+- **Implementation**: `crates/elastic-pool` — `ElasticPool` (one pool), `PoolRegistry` (implements ElasticPoolService, holds multiple named pools).
+- **SDK**: `ElasticPoolClient::from_service_locator(service_locator)` — thin wrapper that calls the registered service.
+
+```rust
+use plexspaces_sdk::ElasticPoolClient;
+use std::time::Duration;
+
+let client = ElasticPoolClient::from_service_locator(service_locator.clone());
+let handle = client.checkout("my-pool", Duration::from_secs(5)).await?;
+// use actor via handle.actor_id...
+client.checkin("my-pool", &handle.actor_id, &handle.checkout_id, true).await?;
+```
+
+Node setup: register `PoolRegistry` (from `plexspaces_elastic_pool`), then create pools via the registry or `registry.register_pool(name, pool)` before starting.
+
+**WASM host API**: The simple-actor WIT exposes `pool-checkout`, `pool-checkin`, and `pool-get-metrics` so that Python, Go, and TypeScript WASM actors can use the same pool service. The runtime injects `ElasticPoolService` into `HostFunctions`; when the pool is not configured, checkout returns an error and application code can fall back to process group broadcast. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) (Python, Go, TypeScript, Rust) for a full example.
 
 ### Example: GenServer with annotations (webhook_handler-style)
 

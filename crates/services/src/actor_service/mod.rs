@@ -3381,201 +3381,6 @@ impl ActorServiceImpl {
 }
 
 impl ActorServiceImpl {
-    // Old implementation kept for reference (can be removed later)
-    #[allow(dead_code)]
-    async fn scatter_gather_old(
-        &self,
-        request: Request<ScatterGatherRequest>,
-    ) -> Result<Response<ScatterGatherResponse>, Status> {
-        self.check_accepting_requests().await?;
-        let req = request.into_inner();
-
-        // Get group
-        let group = {
-            let groups = self.shard_groups.read().await;
-            groups.get(&req.group_id)
-                .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?
-                .clone()
-        };
-
-        let timeout = req.timeout.map(|d| {
-            std::time::Duration::from_secs(d.seconds as u64)
-                + std::time::Duration::from_nanos(d.nanos as u64)
-        }).unwrap_or(std::time::Duration::from_secs(5));
-
-        let query = req.query.ok_or_else(|| Status::invalid_argument("query is required"))?;
-
-        // Prepare messages for all shards
-        let mut query_messages = Vec::new();
-        for (shard_id, shard_actor_id) in group.shard_actor_ids.iter().enumerate() {
-            let mut query_msg = query.clone();
-            query_msg.receiver_id = shard_actor_id.clone();
-            query_messages.push((shard_id as u32, shard_actor_id.clone(), query_msg));
-        }
-
-        // Send query to all shards in parallel using tokio::spawn
-        use futures::future::join_all;
-        let mut handles = Vec::new();
-
-        for (shard_id, shard_actor_id, query_msg) in query_messages {
-            let actor_id = shard_actor_id.clone();
-            let query_msg_clone = query_msg.clone();
-            
-            // Clone what we need for routing
-            let service_locator = self.service_locator.clone();
-            let local_node_id = self.local_node_id.clone();
-            
-            let handle = tokio::spawn(async move {
-                let start = std::time::Instant::now();
-                // Route message using service_locator to get ActorRegistry
-                // This is a simplified routing - in production, we'd use the full route_message logic
-                let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> = service_locator.actor_registry().await;
-                match actor_registry {
-                    Some(registry) => {
-                        // Lookup actor and send message
-                        match registry.lookup_actor(&actor_id).await {
-                            Some(actor_ref) => {
-                                // Send message using tell (fire-and-forget)
-                                // TODO: Implement proper ask pattern with ReplyWaiter for request-reply
-                                match actor_ref.tell(query_msg_clone).await {
-                                    Ok(_) => {
-                                        let latency = start.elapsed();
-                                        // For now, return success without response (scatter-gather with COLLECT will need proper ask)
-                                        (shard_id, actor_id.clone(), latency, true, String::new(), None::<Message>)
-                                    }
-                                    Err(e) => {
-                                        let latency = start.elapsed();
-                                        (shard_id, actor_id.clone(), latency, false, e.to_string(), None::<Message>)
-                                    }
-                                }
-                            }
-                            None => {
-                                let latency = start.elapsed();
-                                (shard_id, actor_id.clone(), latency, false, format!("Actor {} not found", actor_id), None::<Message>)
-                            }
-                        }
-                    }
-                    None => {
-                        let latency = start.elapsed();
-                        (shard_id, actor_id, latency, false, "Actor registry not available".to_string(), None::<Message>)
-                    }
-                }
-            });
-            handles.push(handle);
-        }
-        
-        // Convert JoinHandles to futures
-        let futures: Vec<_> = handles.into_iter().map(|h| async move {
-            h.await.unwrap_or_else(|e| {
-                (0, String::new(), std::time::Duration::ZERO, false, format!("Task join error: {}", e), None::<Message>)
-            })
-        }).collect();
-
-        // Execute all queries with timeout
-        let results = tokio::time::timeout(timeout, join_all(futures)).await;
-
-        let mut shard_responses = Vec::new();
-        let mut shards_responded = 0;
-        let mut shards_failed = 0;
-        let mut max_latency = std::time::Duration::ZERO;
-
-        match results {
-            Ok(results_vec) => {
-                for (shard_id, shard_actor_id, latency, success, error, response) in results_vec {
-                    if success {
-                        shards_responded += 1;
-                    } else {
-                        shards_failed += 1;
-                    }
-                    if latency > max_latency {
-                        max_latency = latency;
-                    }
-                    shard_responses.push(ShardQueryResponse {
-                        shard_id,
-                        shard_actor_id,
-                        response,
-                        latency: Some(prost_types::Duration {
-                            seconds: latency.as_secs() as i64,
-                            nanos: latency.subsec_nanos() as i32,
-                        }),
-                        success,
-                        error,
-                    });
-                }
-            }
-            Err(_) => {
-                // Timeout - mark all as failed
-                shards_failed = group.shard_count;
-            }
-        }
-
-        // Aggregate results based on strategy
-        let result = match req.aggregation {
-            x if x == ShardGroupAggregationStrategy::ShardGroupAggregationConcat as i32 => {
-                // Concatenate all responses
-                let mut payload = Vec::new();
-                for resp in &shard_responses {
-                    if let Some(msg) = &resp.response {
-                        payload.extend_from_slice(&msg.payload);
-                    }
-                }
-                Some(Message {
-                    id: format!("scatter-gather-{}", ulid::Ulid::new()),
-                    sender_id: "scatter-gather".to_string(),
-                    receiver_id: String::new(),
-                    channel: String::new(),
-                    message_type: String::new(),
-                    payload,
-                    timestamp: Some(prost_types::Timestamp {
-                        seconds: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs() as i64,
-                        nanos: 0,
-                    }),
-                    headers: std::collections::HashMap::new(),
-                    priority: 0,
-                    ttl: None,
-                    delivery_count: 0,
-                    idempotency_key: String::new(),
-                    correlation_id: String::new(),
-                    reply_to: String::new(),
-                    partition_key: String::new(),
-                    uri_path: String::new(),
-                    uri_method: String::new(),
-                })
-            }
-            _ => {
-                // Default: return first response
-                shard_responses.first()
-                    .and_then(|r| r.response.clone())
-            }
-        };
-
-        // Emit metrics
-        metrics::counter!("plexspaces_scatter_gather_total",
-            "group_id" => req.group_id.clone());
-        if max_latency > std::time::Duration::ZERO {
-            metrics::histogram!("plexspaces_scatter_gather_duration_seconds",
-                "group_id" => req.group_id.clone()).record(max_latency.as_secs_f64());
-        }
-        // Note: shard_count histogram removed - use counter with labels instead if needed
-
-        Ok(Response::new(ScatterGatherResponse {
-            result,
-            shard_responses,
-            stats: Some(ScatterGatherStats {
-                shards_queried: group.shard_count,
-                shards_responded,
-                shards_failed,
-                max_latency: Some(prost_types::Duration {
-                    seconds: max_latency.as_secs() as i64,
-                    nanos: max_latency.subsec_nanos() as i32,
-                }),
-            }),
-        }))
-    }
-
     async fn bulk_update_shard_group(
         &self,
         request: Request<BulkUpdateShardGroupRequest>,
@@ -3758,7 +3563,7 @@ impl ActorServiceImpl {
 }
 
 impl ActorServiceImpl {
-    /// Extract tenant_id from JWT claims in request metadata (legacy method, kept for compatibility)
+    /// Extract tenant_id from JWT claims in request metadata (x-tenant-id header set by JWT middleware).
     fn extract_tenant_id_from_jwt(metadata: &tonic::metadata::MetadataMap) -> Option<String> {
         // Try to get from x-tenant-id header (set by JWT middleware)
         metadata.get("x-tenant-id")
@@ -4555,7 +4360,7 @@ mod tests {
     }
 
     // ========================================================================
-    // COVERAGE TESTS - Connection Manager (get_or_create_client removed, now uses GrpcConnectionManager)
+    // Connection Manager
     // ========================================================================
 
     #[tokio::test]
@@ -4705,10 +4510,7 @@ mod tests {
     // INTEGRATION TEST - route_remote() Success Path with Real gRPC Server
     // ========================================================================
 
-    // NOTE: Real gRPC server tests removed - these are covered by integration tests
-    // which are faster and more reliable. Unit tests focus on local routing and
-    // simulated remote scenarios. The following tests were removed:
-    // - test_route_remote_success_with_real_server
+    // Integration tests cover real gRPC server scenarios; unit tests focus on local routing and simulated remote.
     // - test_route_remote_connection_pooling
     // - test_route_remote_with_timeout
     // - test_route_remote_multi_node_scenario

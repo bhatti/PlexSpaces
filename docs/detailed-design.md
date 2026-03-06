@@ -345,7 +345,7 @@ impl PaymentPipeline {
 ```
 
 **ExecutionContext Methods** (for durable execution):
-- `ctx.run(|| ...)` - Execute side-effect durably
+- `ctx.run(name, retry, || ...)` - Execute side-effect durably; `retry` is `None` or `Some(&RetryConfig)` (proto). Single unified run: `None` or `max_attempts == 0` = one attempt; otherwise retries up to `max_attempts` with **exponential backoff and full jitter** (delay = min(initial_interval_ms * backoff_rate^(attempt-1), max_interval_ms) * random(0,1]). Defaults when unset: initial_interval_ms 100, backoff_rate 2, max_interval_ms 30000. Only the first successful result is journaled for deterministic replay.
 - `ctx.sleep(duration)` - Durable sleep
 - `ctx.promise()` - Create awaitable promise
 - `ctx.now()` - Deterministic timestamp

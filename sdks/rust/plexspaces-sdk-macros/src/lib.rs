@@ -439,7 +439,7 @@ pub fn fsm_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// 
 /// ## ExecutionContext
 /// Workflow handlers receive an ExecutionContext with durable operations:
-/// - `ctx.run(|| ...)` - Execute side-effect durably
+/// - `ctx.run(name, retry, || ...)` - Execute side-effect durably (retry = None or RetryConfig)
 /// - `ctx.sleep(duration)` - Durable sleep
 /// - `ctx.promise()` - Create awaitable promise
 /// - `ctx.now()` - Deterministic timestamp

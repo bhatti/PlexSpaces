@@ -1,0 +1,19 @@
+# Zeebe/Camunda → PlexSpaces: Insurance Claim Workflow (Python WASM)
+# BPMN-style: submit → validate → human review → approve/reject; SLA escalation via reminder
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "claim"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "Workflow"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 100 } },
+  { type = "reminder", priority = 50, config = {} }
+]

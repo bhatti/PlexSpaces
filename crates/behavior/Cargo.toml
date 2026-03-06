@@ -24,6 +24,7 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
+rand = "0.8"
 
 # Observability (CRITICAL - production-ready observability)
 metrics = "0.23"

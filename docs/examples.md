@@ -31,6 +31,7 @@ The [PlexSpaces SDKs](sdk.md) provide minimal-boilerplate actor development: **P
 | **Storefront API** ⚠️ | E-commerce backend: store config, shopping cart, checkout rate limit via host KV. **Status: buggy/incomplete** (host KV depends on node `sql-backend`; test may show "config set failed" until fixed). | [README](../examples/python/apps/storefront/README.md) |
 | **Audit Log** | Event-handler (EventHandler): fire-and-forget audit events via `host.log` only (storage deferred until WASM stable) | [README](../examples/python/apps/audit_log/README.md) |
 | **N-Body** | Multi-actor physics simulation | [README](../examples/python/apps/nbody/README.md) |
+| **Order Saga (migrating_conductor)** | E-commerce order saga: payment → inventory → discount → shipment → event; compensation on failure. Workflow + virtual_actor + durability. | [README](../examples/python/apps/migrating_conductor/README.md) |
 | **Leader Election** ⚠️ | Distributed lock for single-leader pattern (cron, scheduler). **Status: buggy/incomplete**. | [README](../examples/python/apps/leader_election/README.md) |
 
 **⚠️ Buggy/incomplete examples**: Storefront API and Leader Election are marked incomplete; see their READMEs and PROJECT_TRACKER.md.
@@ -69,7 +70,9 @@ cd examples/typescript/apps/bank_account
 
 | Example | Description | README |
 |---------|-------------|--------|
-| **Migrating Erlang/OTP** | Sliding window rate limiter demonstrating GenServer pattern. Per-client windows, batch benchmarks, configurable via ApplicationSpec. Uses Go SDK: `BaseActor`, `Host`, `ActorRouter`. | [README](../examples/go/apps/migrating_erlang_otp/README.md) |
+| **Migrating Erlang/OTP** | Sliding window rate limiter demonstrating GenServer pattern. Per-client windows, batch benchmarks. Uses Go SDK: `BaseActor`, `Host`, `ActorRouter`. Native: `native/rate_limiter.erl`. | [README](../examples/go/apps/migrating_erlang_otp/README.md) |
+| **Migrating Cadence** | Payment workflow with idempotency and retries. WorkflowActor Run/Signal/Query; virtual_actor + durability. Comparison: Cadence vs PlexSpaces in README. | [README](../examples/go/apps/migrating_cadence/README.md) |
+| **Migrating Dapr** | Background job processor: durable queue, retries, DLQ. WorkflowActor + virtual_actor + durability; queue/DLQ in state. Native: `native/job_processor_dapr.go`. | [README](../examples/go/apps/migrating_dapr/README.md) |
 
 **Build and test (Go):**
 ```bash

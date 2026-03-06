@@ -702,6 +702,16 @@ The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use
 **Note**: For examples and production code, prefer using `Node` for spawning actors instead of `ActorFactory` directly. The SDK helpers (`spawn`, `spawn_with_facets`) internally use `Node` which provides better integration and observability.
 | `create_facets(&["timer", "durability"], &config)` | Create facet instances from names (convenience helper) |
 
+### Workflow retry (all SDKs)
+
+Retry behavior is defined by proto `RetryConfig` (plexspaces.workflow.v1). Single unified run with reasonable defaults and overrides.
+
+- **Contract**: One run method/helper. `max_attempts` 0 or unset = 1 attempt; otherwise retry up to `max_attempts`. **Exponential backoff with jitter**: between attempts, delay = `min(initial_interval_ms * backoff_rate^(attempt-1), max_interval_ms)` with full jitter (multiply by random in (0, 1]). Defaults when unset: `initial_interval_ms` 100, `backoff_rate` 2, `max_interval_ms` 30000.
+- **Rust (crates/behavior)**: `ctx.run(name, retry, operation)` with `retry: Option<&RetryConfig>`. `None` or `default_retry_config()` = one attempt; `Some(&RetryConfig { max_attempts, initial_interval_ms, backoff_rate, max_interval_ms, .. })` for retries with exponential backoff and jitter. Exports: `ExecutionContext`, `default_retry_config`, `RetryConfig`.
+- **TypeScript**: `withRetry(fn, config?)` with `RetryConfig`. Immediate retries (no delay in WASM); full backoff+jitter in Rust `run()`. Omitted config = 3 attempts; `max_attempts: 1` = one attempt. `defaultRetryConfig()` returns single-attempt config.
+- **Python**: `with_retry(fn, retry_config=None)`. Immediate retries; full backoff+jitter in Rust `run()`. `default_retry_config()` returns single-attempt dict.
+- **Go**: `WithRetry(fn, config)`. Immediate retries; full backoff+jitter in Rust `run()`. `DefaultRetryConfig()` returns single-attempt config.
+
 ### Message Creation Helpers
 
 The SDK provides helper functions for creating messages with correct invocation semantics:
@@ -1158,7 +1168,7 @@ impl PaymentWorkflow {
         self.status = "processing".to_string();
         
         // Workflow execution with durable operations via ExecutionContext
-        // ctx.run(|| ...), ctx.sleep(), ctx.promise(), etc.
+        // ctx.run(name, retry, || ...) with retry = None or Some(&RetryConfig), ctx.sleep(), ctx.promise(), etc.
         
         self.status = "completed".to_string();
         Ok(Message {

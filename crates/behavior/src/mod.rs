@@ -29,8 +29,8 @@ use async_trait::async_trait;
 use plexspaces_core::{Actor, BehaviorError, BehaviorType};
 use plexspaces_proto::common::v1::Message;
 
-// Re-export ExecutionContext from workflow module
-pub use crate::workflow::ExecutionContext;
+// Re-export workflow execution context and retry config (single run-with-config API; proto RetryConfig)
+pub use crate::workflow::{default_retry_config, ExecutionContext, RetryConfig};
 
 /// GenServer-like behavior trait for request/reply patterns
 ///

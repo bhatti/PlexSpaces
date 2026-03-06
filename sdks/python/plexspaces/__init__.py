@@ -49,9 +49,11 @@ from .decorators import (
     init_handler,
 )
 from .host import host
+from .workflow import default_retry_config, with_retry
 
 __all__ = [
     "actor",
+    "default_retry_config",
     "event_actor",
     "gen_server_actor",
     "fsm_actor",
@@ -60,5 +62,6 @@ __all__ = [
     "state",
     "init_handler",
     "host",
+    "with_retry",
     "__version__",
 ]

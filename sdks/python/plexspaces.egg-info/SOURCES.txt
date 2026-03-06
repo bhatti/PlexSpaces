@@ -4,6 +4,7 @@ plexspaces/__init__.py
 plexspaces/decorators.py
 plexspaces/host.py
 plexspaces/runtime.py
+plexspaces/workflow.py
 plexspaces.egg-info/PKG-INFO
 plexspaces.egg-info/SOURCES.txt
 plexspaces.egg-info/dependency_links.txt
@@ -13,3 +14,4 @@ plexspaces.egg-info/top_level.txt
 plexspaces_cli/__init__.py
 plexspaces_cli/build.py
 tests/test_decorators.py
+tests/test_workflow_retry.py

@@ -437,8 +437,6 @@ impl ApplicationService for ApplicationServiceImpl {
             Status::invalid_argument("config is required (WASM deployment not yet implemented)")
         })?;
 
-        // release_config field has been removed from DeployApplicationRequest
-        // Use the application's config directly
         let merged_config = config.clone();
 
         // Create Application instance from config
@@ -748,8 +746,3 @@ impl ApplicationService for ApplicationServiceImpl {
         }
     }
 }
-
-// NOTE: merge_release_config function has been removed.
-// The release_config field was removed from DeployApplicationRequest.
-// Release configuration is now applied at node level, not per-deployment.
-

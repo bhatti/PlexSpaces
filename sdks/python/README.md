@@ -5,6 +5,9 @@ Build PlexSpaces actors with minimal boilerplate, inspired by [Ray's `@ray.remot
 ## Installation
 
 ```bash
+# Activate virtualenv
+source ~/venv/bin/activate
+
 # From source (development)
 cd sdks/python
 pip install -e ".[dev]"
@@ -352,6 +355,12 @@ class BankAccount:
 ## Development
 
 ```bash
+# Activate virtualenv (use project or shared venv)
+source ~/venv/bin/activate
+
+# Install in editable mode with dev deps
+pip install -e ".[dev]"
+
 # Run tests
 pytest
 

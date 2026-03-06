@@ -143,10 +143,6 @@ fn message_priority_from_value(value: i32) -> MessagePriority {
     }
 }
 
-// Message struct removed - use plexspaces_proto::common::v1::Message directly
-// Helper functions available in message_helpers module
-// All Message functionality moved to proto Message + helper functions
-
 // Helper functions for MailboxConfig (cannot add methods to proto-generated types)
 pub fn mailbox_config_default() -> MailboxConfig {
     MailboxConfig {

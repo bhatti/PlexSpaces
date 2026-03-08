@@ -26,6 +26,16 @@ PlexSpaces modernizes these concepts with:
 - Modern observability and deployment patterns
 - Integration with Erlang/OTP supervision, Orleans virtual actors, and Temporal-style durable workflows
 
+### Client code and SDK
+
+- **Core in main crates**: Business logic and framework behavior live in the main Rust crates. The SDK is a **decorator** that removes boilerplate and simplifies usage; it does not reimplement core logic.
+- **Spawning**: Client code and examples should use **Node** via SDK spawn helpers (`spawn`, `spawn_with_facets`, `spawn_with_storage`). Do not use `ActorFactory` directly except in framework code (e.g. gRPC spawn).
+- **Messages**: Use SDK helpers `call_message`, `cast_message`, or `new_message` for message construction instead of `Message::new`. Prefer annotations (`#[gen_server_actor]`, `#[handler("op")]`) for actor definitions.
+- **WASM**: SDKs provide WASM support that wraps the same underlying framework (in-process, no RPC). gRPC and other remote APIs are built separately.
+- **Consistency**: SDK and API behavior are consistent across Rust, Python, TypeScript, and Go where the abstraction maps.
+
+See [SDK guide](sdk.md) and [AGENTS.md](../AGENTS.md) for conventions.
+
 ## Five Foundational Pillars
 
 ### Pillar Architecture Diagram

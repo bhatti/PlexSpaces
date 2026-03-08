@@ -420,10 +420,7 @@ impl FacetContainer {
             }
         }
 
-        // Call on_attach BEFORE storing metadata (so facet can initialize)
-        info!(actor_id = %actor_id, facet_type = %facet_type, "🔧 FacetContainer: Calling facet.on_attach");
         facet.on_attach(actor_id, config.clone()).await?;
-        info!(actor_id = %actor_id, facet_type = %facet_type, "✅ FacetContainer: Facet attached successfully");
 
         // Store metadata FIRST (before creating Arc, so we can use it for sorting)
         let facet_type_clone = facet_type.clone();
@@ -509,7 +506,7 @@ impl FacetContainer {
         metrics::histogram!("plexspaces_facet_attach_duration_seconds", "facet_type" => facet_type.clone()).record(duration.as_secs_f64());
         metrics::counter!("plexspaces_facet_attached_total", "facet_type" => facet_type.clone()).increment(1);
         metrics::gauge!("plexspaces_facet_active_total", "facet_type" => facet_type.clone()).increment(1.0);
-        tracing::info!(facet_type = %facet_type, actor_id = %actor_id, priority = priority, "Facet attached");
+        tracing::debug!(facet_type = %facet_type, actor_id = %actor_id, priority = priority, "Facet attached");
 
         Ok(facet_type)
     }

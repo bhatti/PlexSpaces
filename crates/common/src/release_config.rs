@@ -111,7 +111,6 @@ pub async fn create_default_release_config(
     // Create default node config
     // NOTE: default_tenant_id and default_namespace have been removed.
     // Tenant-id comes from auth (JWT/mTLS); namespace from application/actor.
-    // NOTE: wasm_apps_directory moved to RuntimeConfig
     let node = NodeConfig {
         id: node_id.clone(),
         listen_addr: listen_addr.clone(),

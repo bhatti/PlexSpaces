@@ -46,8 +46,6 @@ use plexspaces_proto::supervision::v1::{SupervisionError as ProtoError, Supervis
 // ============================================================================
 // Link Provider Trait (Phase 8.5: Link Semantics Integration)
 // ============================================================================
-// NOTE: LinkProvider trait moved to plexspaces-core to avoid circular dependencies.
-// Re-export for backward compatibility.
 pub use plexspaces_core::LinkProvider;
 
 // ============================================================================

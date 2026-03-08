@@ -1930,36 +1930,36 @@ journal.replay_from(actor_id, sequence_number).await?;
 
 ```mermaid
 sequenceDiagram
-    participant Actor
+    participant A as Actor
     participant DurabilityFacet
     participant Journal
     participant Snapshot
     
     rect rgb(240, 240, 240)
-        Note over Actor,Snapshot: Normal Execution
-        Actor->>DurabilityFacet: Process Message
+        Note right of A: Normal Execution
+        A->>DurabilityFacet: Process Message
         DurabilityFacet->>Journal: Append Entry
         Journal-->>DurabilityFacet: Entry Stored
-        DurabilityFacet->>Actor: Continue Processing
+        DurabilityFacet->>A: Continue Processing
     end
     
     rect rgb(240, 240, 240)
-        Note over Actor,Snapshot: Periodic Checkpoint
-        DurabilityFacet->>Actor: Request Snapshot
-        Actor-->>DurabilityFacet: State Snapshot
+        Note right of A: Periodic Checkpoint
+        DurabilityFacet->>A: Request Snapshot
+        A-->>DurabilityFacet: State Snapshot
         DurabilityFacet->>Snapshot: Save Checkpoint
         DurabilityFacet->>Journal: Mark Checkpoint
     end
     
     rect rgb(240, 240, 240)
-        Note over Actor,Snapshot: Recovery After Crash
-        Actor->>DurabilityFacet: Initialize
+        Note right of A: Recovery After Crash
+        A->>DurabilityFacet: Initialize
         DurabilityFacet->>Snapshot: Load Latest Checkpoint
         Snapshot-->>DurabilityFacet: State
         DurabilityFacet->>Journal: Replay from Checkpoint
         Journal-->>DurabilityFacet: Entries
-        DurabilityFacet->>Actor: Replay Messages
-        Actor->>Actor: Reconstruct State
+        DurabilityFacet->>A: Replay Messages
+        A->>A: Reconstruct State
     end
 ```
 
@@ -2064,10 +2064,10 @@ sequenceDiagram
     participant Gateway
     participant InvokeActor
     participant Registry
-    participant Actor
+    participant Act as Actor
     participant ActorRef
     
-    Client->>Gateway: GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}?action=get
+    Client->>Gateway: GET "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}?action=get"
     Gateway->>InvokeActor: InvokeActorRequest
     InvokeActor->>InvokeActor: Use default_tenant_id from node config if empty
     InvokeActor->>InvokeActor: Use default_namespace from node config if empty
@@ -2075,8 +2075,8 @@ sequenceDiagram
     Registry-->>InvokeActor: [actor_id1, actor_id2, ...]
     InvokeActor->>InvokeActor: Random selection
     InvokeActor->>ActorRef: ask(message, timeout)
-    ActorRef->>Actor: handle_request(ctx, message)
-    Actor->>ActorRef: send_reply(reply)
+    ActorRef->>Act: handle_request(ctx, message)
+    Act->>ActorRef: send_reply(reply)
     ActorRef-->>InvokeActor: reply
     InvokeActor-->>Gateway: InvokeActorResponse
     Gateway-->>Client: HTTP 200 + JSON
@@ -3132,14 +3132,14 @@ erDiagram
     }
 
     scheduling_requests {
-        text request_id PK
-        text status
+        string request_id PK
+        string status
         jsonb requirements_json
-        text namespace
-        text tenant_id
-        text selected_node_id
-        text actor_id
-        text error_message
+        string namespace
+        string tenant_id
+        string selected_node_id
+        string actor_id
+        string error_message
         timestamp created_at
         timestamp scheduled_at
         timestamp completed_at
@@ -3147,8 +3147,8 @@ erDiagram
     }
 
     channel_messages {
-        text id PK
-        text channel_name
+        string id PK
+        string channel_name
         blob payload
         timestamp timestamp
         bool acked
@@ -3156,72 +3156,72 @@ erDiagram
     }
 
     workflow_definitions {
-        text id PK
-        text version PK
-        text name
+        string id PK
+        string version PK
+        string name
         blob definition_proto
         timestamp created_at
         timestamp updated_at
     }
 
     workflow_executions {
-        text execution_id PK
-        text definition_id FK
-        text definition_version FK
-        text status
-        text current_step_id
-        text input_json
-        text output_json
-        text error
-        text node_id
+        string execution_id PK
+        string definition_id FK
+        string definition_version FK
+        string status
+        string current_step_id
+        string input_json
+        string output_json
+        string error
+        string node_id
         int version
         timestamp last_heartbeat
-        text metadata_json
+        string metadata_json
         timestamp created_at
         timestamp started_at
         timestamp completed_at
     }
 
     workflow_execution_labels {
-        text execution_id PK_FK
-        text label_key PK
-        text label_value
+        string execution_id PK
+        string label_key PK
+        string label_value
     }
 
     step_executions {
-        text step_execution_id PK
-        text execution_id FK
-        text step_id
-        text status
-        text input_json
-        text output_json
-        text error
+        string step_execution_id PK
+        string execution_id FK
+        string step_id
+        string status
+        string input_json
+        string output_json
+        string error
         int attempt
-        text metadata_json
+        string metadata_json
         timestamp started_at
         timestamp completed_at
     }
 
     signals {
-        text signal_id PK
-        text execution_id FK
-        text signal_name
-        text payload
+        string signal_id PK
+        string execution_id FK
+        string signal_name
+        string payload
         timestamp received_at
     }
 
     journal_entries {
-        text id PK
-        text actor_id
+        string id PK
+        string actor_id
         bigint sequence
         timestamp timestamp
-        text correlation_id
-        text entry_type
+        string correlation_id
+        string entry_type
         jsonb entry_data
     }
 
     checkpoints {
-        text actor_id PK
+        string actor_id PK
         bigint sequence PK
         timestamp timestamp
         blob state_data
@@ -3231,19 +3231,19 @@ erDiagram
     }
 
     actor_events {
-        text id PK
-        text actor_id
+        string id PK
+        string actor_id
         bigint sequence
-        text event_type
+        string event_type
         blob event_data
         timestamp timestamp
-        text caused_by
+        string caused_by
         jsonb metadata
     }
 
     reminders {
-        text actor_id PK
-        text reminder_name PK
+        string actor_id PK
+        string reminder_name PK
         bigint interval_seconds
         int interval_nanos
         bigint first_fire_time_seconds
@@ -3260,50 +3260,50 @@ erDiagram
     }
 
     blob_metadata {
-        text blob_id PK
-        text tenant_id
-        text namespace
-        text name
-        text sha256
-        text content_type
+        string blob_id PK
+        string tenant_id
+        string namespace
+        string name
+        string sha256
+        string content_type
         bigint content_length
-        text etag
-        text blob_group
-        text kind
-        text metadata_json
-        text tags_json
+        string etag
+        string blob_group
+        string kind
+        string metadata_json
+        string tags_json
         timestamp expires_at
         timestamp created_at
         timestamp updated_at
     }
 
     tuples {
-        text id PK
-        text tuple_data
-        text created_at
-        text expires_at
+        string id PK
+        string tuple_data
+        string created_at
+        string expires_at
         int renewable
     }
 
     barriers {
-        text barrier_id PK
-        text space_id
+        string barrier_id PK
+        string space_id
         int expected_count
         int current_count
-        text participants_json
-        text metadata_json
+        string participants_json
+        string metadata_json
         timestamp created_at
         timestamp completed_at
         timestamp expires_at
     }
 
     watchers {
-        text watcher_id PK
-        text space_id
-        text actor_id
-        text pattern_hash
-        text event_types
-        text metadata_json
+        string watcher_id PK
+        string space_id
+        string actor_id
+        string pattern_hash
+        string event_types
+        string metadata_json
         timestamp created_at
         timestamp last_notified_at
         int notification_count
@@ -3311,9 +3311,9 @@ erDiagram
     }
 
     kv_store {
-        text tenant_id PK
-        text namespace PK
-        text key PK
+        string tenant_id PK
+        string namespace PK
+        string key PK
         blob value
         bigint expires_at
         bigint created_at

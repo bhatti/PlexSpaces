@@ -3634,45 +3634,27 @@ impl Node {
         
         // Step 1: Stop the actor properly (terminates message loop gracefully)
         // CRITICAL: Must stop actor BEFORE suspending to prevent race conditions
-        // Production-grade: Use stop_from_arc() which sends shutdown signal and aborts task
-        tracing::warn!("🔵 [DEACTIVATE] Step 1: Stopping actor before suspension: actor_id={}", actor_id);
+        tracing::debug!(actor_id = %actor_id, "[DEACTIVATE] Step 1: Stopping actor before suspension");
         if let Some(instance) = actor_registry.get_actor_instance(&actor_id).await {
-            
             if let Ok(actor_arc) = instance.downcast::<plexspaces_actor::Actor>() {
-                tracing::warn!("🔵 [DEACTIVATE] Found actor instance, calling stop_from_arc: actor_id={}", actor_id);
-                // Use stop_from_arc() - production-grade graceful shutdown
-                // This sends shutdown signal, waits, then aborts if needed
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(actor_id = %actor_id, "Stopping actor before suspension");
-                }
                 if let Err(e) = actor_arc.stop_from_arc().await {
-                    tracing::warn!("🔴 [DEACTIVATE] Failed to stop actor: actor_id={}, error={}", actor_id, e);
                     tracing::warn!(
                         actor_id = %actor_id,
                         error = %e,
                         "Failed to stop actor during suspension (continuing)"
                     );
-                } else {
-                    tracing::warn!("🟢 [DEACTIVATE] Actor stop_from_arc() completed: actor_id={}", actor_id);
                 }
-                // Wait a bit more to ensure message loop task is fully terminated
-                // This prevents race conditions where actor is reactivated before old loop stops
-                tracing::warn!("🔵 [DEACTIVATE] Waiting for message loop to fully terminate: actor_id={}", actor_id);
                 tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-                tracing::warn!("🟢 [DEACTIVATE] Wait completed, checking actor state: actor_id={}", actor_id);
             } else {
-                tracing::warn!("🔴 [DEACTIVATE] Failed to downcast actor instance: actor_id={}", actor_id);
+                tracing::debug!(actor_id = %actor_id, "[DEACTIVATE] Failed to downcast actor instance");
             }
         } else {
-            tracing::warn!("🟡 [DEACTIVATE] No actor instance found (already suspended?): actor_id={}", actor_id);
+            tracing::debug!(actor_id = %actor_id, "[DEACTIVATE] No actor instance found (already suspended?)");
         }
-        
+
         // Step 2: Suspend virtual actor (removes instance and ActorRef, preserves metadata)
-        // This is different from unregister_with_cleanup() which removes everything
-        // CRITICAL: Only suspend AFTER actor is fully stopped
-        tracing::warn!("🔵 [DEACTIVATE] Step 2: Suspending virtual actor: actor_id={}", actor_id);
+        tracing::debug!(actor_id = %actor_id, "[DEACTIVATE] Step 2: Suspending virtual actor");
         actor_registry.suspend_virtual_actor(&actor_id).await;
-        tracing::warn!("🟢 [DEACTIVATE] Virtual actor suspended: actor_id={}", actor_id);
         
         // Step 2.5: Remove from active instances tracking (for LRU eviction)
         manager.remove_from_active_tracking(&actor_id).await;

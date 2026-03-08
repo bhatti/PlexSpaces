@@ -1174,11 +1174,22 @@ impl ActorFactory for ActorFactoryImpl {
             .map_err(|e| format!("Failed to build actor: {}", e))?;
         
         // Attach facets before spawning
+        let num_facets = facets.len();
         for facet in facets {
             actor.attach_facet(facet).await
                 .map_err(|e| format!("Failed to attach facet: {}", e))?;
         }
-        
+        if num_facets > 0 && tracing::enabled!(tracing::Level::DEBUG) {
+            let attached = actor.facets().read().await.list_facets();
+            if !attached.is_empty() {
+                tracing::debug!(
+                    actor_id = %normalized_actor_id,
+                    facets = %attached.join(", "),
+                    "Attached facets"
+                );
+            }
+        }
+
         // Spawn the built actor with type information
         // spawn_built_actor_impl returns ActorRef, wrap for trait compatibility
         let actor_ref = self.spawn_built_actor_impl(ctx, Arc::new(actor), Some(actor_type.to_string())).await?;
@@ -2014,11 +2025,22 @@ impl ActorFactoryImpl {
             .map_err(|e| format!("Failed to build actor: {}", e))?;
         
         // Attach facets
+        let num_facets = facets.len();
         for facet in facets {
             actor.attach_facet(facet).await
                 .map_err(|e| format!("Failed to attach facet: {}", e))?;
         }
-        
+        if num_facets > 0 && tracing::enabled!(tracing::Level::DEBUG) {
+            let attached = actor.facets().read().await.list_facets();
+            if !attached.is_empty() {
+                tracing::debug!(
+                    actor_id = %actor_id,
+                    facets = %attached.join(", "),
+                    "Attached facets"
+                );
+            }
+        }
+
         // Use spawn_built_actor_impl - returns ActorRef directly
         self.spawn_built_actor_impl(
             ctx,

@@ -40,6 +40,7 @@
 use crate::HostFunctions;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use plexspaces_core::{ActorId, RequestContext, TupleSpaceProvider, LockManager};
+use plexspaces_core::actor_id::parse_actor_id;
 use plexspaces_tuplespace::{OrderedFloat, Tuple, TupleField, Pattern, PatternField};
 use plexspaces_blob::BlobService;
 use plexspaces_locks::{AcquireLockOptions, RenewLockOptions};
@@ -121,17 +122,14 @@ impl SimpleHostImpl {
     }
 
     /// Build a RequestContext for process group operations.
-    /// Uses the application namespace (from actor_id format `name:namespace@node`)
-    /// so all actors in the same application share the same process group scope.
+    /// Expects `self.actor_id` in canonical format `{id}//{actor_type}::{namespace}@{node_id}`;
+    /// namespace is taken from parsed result, or empty if parsing fails.
     fn pg_context(&self) -> RequestContext {
         let actor_str = self.actor_id.to_string();
-        // Extract namespace from actor_id format: "name:namespace@node"
-        let namespace = actor_str
-            .split(':')
-            .nth(1)
-            .and_then(|rest| rest.split('@').next())
-            .unwrap_or("")
-            .to_string();
+        let namespace = parse_actor_id(&actor_str)
+            .ok()
+            .and_then(|p| p.namespace)
+            .unwrap_or_default();
         RequestContext::new_without_auth(String::new(), namespace)
     }
 
@@ -1071,8 +1069,8 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         }
     }
 
-    /// Broadcast message to all members of a process group.
-    /// Uses msg_type parameter for routing so payload can be data-only.
+    /// Broadcast message to all other members of a process group (sender excluded).
+    /// Uses msg_type for routing; payload can be data-only.
     async fn pg_broadcast(&mut self, group_name: String, msg_type: String, payload_json: String) -> String {
         let self_id = self.actor_id.to_string();
         let ctx = self.pg_context();
@@ -1100,6 +1098,9 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         };
         for member in &members {
             let member_str = member.to_string();
+            if member_str == self_id {
+                continue;
+            }
             if let Err(e) = self.host_functions.send_message(&self_id, &member_str, &message_type, &payload_json).await {
                 tracing::warn!(
                     actor_id = %self_id, group = %group_name,

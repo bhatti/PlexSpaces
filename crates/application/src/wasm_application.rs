@@ -1277,18 +1277,19 @@ impl WasmApplication {
                             error = %e,
                             "Failed to attach facet to WASM actor (continuing with other facets)"
                         );
-                    } else {
-                        let facets_container = actor.facets();
-                        let facets_guard = facets_container.read().await;
-                        let facet_types = facets_guard.list_facets();
-                        let last_facet = facet_types.last().map(|s| s.as_str()).unwrap_or("unknown");
-                        drop(facets_guard);
-                        tracing::info!(
-                            actor_id = %actor_id,
-                            facet_type = %last_facet,
-                            "✅ WASM: Facet attached to actor"
-                        );
                     }
+                }
+                let facets_container = actor.facets();
+                let facets_guard = facets_container.read().await;
+                let attached = facets_guard.list_facets();
+                let attached_list = attached.join(", ");
+                drop(facets_guard);
+                if !attached.is_empty() {
+                    tracing::info!(
+                        actor_id = %actor_id,
+                        facets = %attached_list,
+                        "FacetContainer: attached facets"
+                    );
                 }
                 
                 // Check if VirtualActorFacet was attached (after all facets are attached)

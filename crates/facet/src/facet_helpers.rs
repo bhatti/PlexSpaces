@@ -135,18 +135,10 @@ pub async fn create_facet_from_json(
     config: Value,
     facet_registry: &FacetRegistry,
 ) -> Result<Box<dyn Facet>, FacetError> {
-    // Create facet instance via registry
     let facet = facet_registry
         .create_facet(facet_type, config)
         .await?;
-    
-    if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            facet_type = %facet_type,
-            "Created facet from JSON configuration"
-        );
-    }
-    
+
     Ok(facet)
 }
 
@@ -188,17 +180,12 @@ pub async fn create_facets_from_config(
         let has_facet_type_keys = config_obj.keys().any(|k| known_facet_types.contains(&k.as_str()));
         
         if has_facet_type_keys {
-            // Keyed format: each key is a facet type
+            let mut created_types: Vec<String> = Vec::new();
             for (facet_type, config_value) in config_obj {
                 match create_facet_from_json(facet_type, config_value.clone(), facet_registry).await {
                     Ok(facet) => {
+                        created_types.push(facet_type.clone());
                         facets.push(facet);
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!(
-                                facet_type = %facet_type,
-                                "Created facet from config"
-                            );
-                        }
                     }
                     Err(e) => {
                         // JournalStorage not found is a critical error - log as error, not warning
@@ -218,6 +205,13 @@ pub async fn create_facets_from_config(
                         }
                     }
                 }
+            }
+            if tracing::enabled!(tracing::Level::DEBUG) && !created_types.is_empty() {
+                tracing::debug!(
+                    facets = %created_types.join(", "),
+                    created = facets.len(),
+                    "Created facets from JSON config"
+                );
             }
         } else if !config_obj.is_empty() {
             // Legacy format: flat object with virtual_actor config keys (idle_timeout, activation_strategy, etc.)

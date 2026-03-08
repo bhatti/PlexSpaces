@@ -327,6 +327,7 @@ Low-level string API (when you need raw JSON): `host.ts_write(tuple_json)`, `hos
 | **Messaging** | ✅ `wasmcloud:messaging` | ✅ `host.send/ask` | ✅ Complete |
 | **Logging** | ✅ `wasi:logging` | ✅ `host.log` | ✅ Complete |
 | **Process Groups** | ❌ Not available | ✅ `host.pg_*` | ✅ Extra |
+| **Elastic pool** | ❌ Not available | ✅ `host.pool_checkout` / `host.pool_checkin` / `host.pool_get_metrics` | ✅ Extra |
 | **TupleSpace** | ❌ Not available | ✅ `host.ts` / `host.ts_*` | ✅ Extra |
 | **Distributed Locks** | ❌ Not available | ✅ `host.lock_*` | ✅ Extra |
 | **Timers** | ❌ Not available | ✅ `host.send_after()` | ✅ Extra |

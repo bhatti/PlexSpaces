@@ -1365,6 +1365,10 @@ impl ActorServiceTrait for ActorServiceImpl {
             return Err(Status::invalid_argument("Actor type exceeds maximum length of 128 characters"));
         }
 
+        // Drop span guard before any await to avoid "tried to clone Id, but no span exists" panic.
+        // Holding Entered across .await can cause the span to be dropped from the registry on another thread.
+        drop(_guard);
+
         // Get ActorRegistry to lookup actors
         let actor_registry = self.get_actor_registry().await;
         

@@ -65,7 +65,6 @@ pub mod virtual_actor_registration;
 pub use virtual_actor_lifecycle_facet::{VirtualActorLifecycleFacet, VirtualActorLifecycleState};
 pub mod actor_state_checker;
 pub use actor_state_checker::ActorStateFetcher;
-// FacetManager moved to plexspaces-facet crate to break circular dependency
 pub mod facet_service_wrapper;
 pub use facet_service_wrapper::{FacetRegistryServiceWrapper, FacetManagerServiceWrapper};
 pub mod monitoring;

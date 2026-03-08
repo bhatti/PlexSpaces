@@ -470,13 +470,7 @@ impl WasmInstance {
                         )
                         .await
                         {
-                            Ok(simple_bindings) => {
-                                tracing::debug!(
-                                    actor_id = %actor_id,
-                                    "Instantiating simple-actor component (Python-compatible)"
-                                );
-                                ComponentBindings::SimpleActor(simple_bindings)
-                            }
+                            Ok(simple_bindings) => ComponentBindings::SimpleActor(simple_bindings),
                             Err(e) => {
                                 let err_str = e.to_string();
                                 if err_str.contains("plexspaces:simple-actor") && err_str.contains("matching implementation was not found") {
@@ -536,12 +530,11 @@ impl WasmInstance {
                             }
                         };
                         
-                        // Component instantiation succeeded!
                         tracing::debug!(
                             actor_id = %actor_id,
-                            "WASM component instantiated successfully with WASI bindings"
+                            "Simple-actor component instantiated (Python-compatible, WASI bindings)"
                         );
-                        
+
                         // Call init() function with initial state if provided
                         // For components, we'll call init after storing the instance
                         // (handled in handle_message method for components)
@@ -638,15 +631,6 @@ impl WasmInstance {
                                 Some(config_json.clone())
                             };
                             
-                            if tracing::enabled!(tracing::Level::DEBUG) {
-                                tracing::debug!(
-                                    actor_id = %actor_id,
-                                    config_len = config_json.len(),
-                                    has_config = original_config.is_some(),
-                                    "Storing original init config for re-instantiation"
-                                );
-                            }
-                            
                             match bindings {
                                 ComponentBindings::SimpleActor(simple_bindings) => {
                                     let result = simple_bindings.plexspaces_simple_actor_actor()
@@ -674,13 +658,12 @@ impl WasmInstance {
                                         )));
                                     }
                                     
-                                    // Store original config in instance for re-instantiation
                                     instance.original_init_config = original_config.clone();
                                     if tracing::enabled!(tracing::Level::DEBUG) {
                                         tracing::debug!(
                                             actor_id = %actor_id,
-                                            has_stored_config = instance.original_init_config.is_some(),
-                                            "Stored original init config in WasmInstance"
+                                            config_len = config_json.len(),
+                                            "Init config stored for re-instantiation"
                                         );
                                     }
                                 }
@@ -2004,8 +1987,7 @@ impl WasmInstance {
                 // SimpleActor bindings - handle takes JSON strings
                 // Convert payload to JSON string (it should already be JSON)
                 let payload_json = String::from_utf8_lossy(&payload).to_string();
-                
-                // Log payload JSON for debugging JSON parsing errors (always log on error, debug otherwise)
+
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     message_id = %message_id,
@@ -2016,7 +1998,7 @@ impl WasmInstance {
                     payload_hex = %hex::encode(&payload[..payload.len().min(200)]),
                     "SimpleActor handle() call - payload JSON"
                 );
-                
+
                 // Validate JSON before calling WASM handler
                 if let Err(e) = serde_json::from_str::<serde_json::Value>(&payload_json) {
                     tracing::error!(

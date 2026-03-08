@@ -1,0 +1,18 @@
+# V8 Isolates → PlexSpaces: High-throughput log processor (TypeScript WASM)
+# Batch processing of log lines; parse level, aggregate; status for throughput.
+# virtual_actor: required so first invoke (log-processor:default) activates the actor.
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "log-processor"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } }
+]

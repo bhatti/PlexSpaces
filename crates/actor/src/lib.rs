@@ -68,9 +68,6 @@ pub mod service_locator_helpers;
 pub use actor_factory::ActorFactory;
 pub use actor_factory_impl::ActorFactoryImpl;
 pub use virtual_actor_wrapper::VirtualActorWrapper;
-// Helper functions for ActorFactory are in plexspaces-services crate to avoid circular dependencies
-// pub use service_locator_helpers::get_actor_factory; // Moved to plexspaces-services
-
 // Re-export register_state_fetcher_callback for tests
 pub use r#mod::register_state_fetcher_callback;
 
@@ -93,8 +90,6 @@ pub use supervisor_builder_proto::ProtoSupervisorBuilder;
 pub mod child_spec;
 pub use child_spec::{ChildSpec, StartedChild, StartFn, ShutdownSpec};
 
-// Facet helpers moved to core crate (facet_helpers) and journaling crate (facet_factories)
-// Re-export helpers from core for backward compatibility
 pub use plexspaces_core::facet_helpers::{create_facet_from_proto, create_facets_from_proto};
 
 // Unified routing module

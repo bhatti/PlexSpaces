@@ -72,19 +72,10 @@ pub async fn create_facet_from_proto(
     // Convert proto config (map<string, string>) to serde_json::Value
     let config_value = proto_config_to_value(&proto_facet.config);
     
-    // Create facet instance via registry
     let facet = facet_registry
         .create_facet(facet_type, config_value)
         .await?;
-    
-    if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            facet_type = %facet_type,
-            priority = proto_facet.priority,
-            "Created facet from proto configuration"
-        );
-    }
-    
+
     Ok(facet)
 }
 
@@ -129,10 +120,12 @@ pub async fn create_facets_from_proto(
     facet_registry: &FacetRegistry,
 ) -> Vec<Box<dyn Facet>> {
     let mut facets = Vec::new();
-    
+    let mut created_types: Vec<String> = Vec::new();
+
     for proto_facet in proto_facets {
         match create_facet_from_proto(proto_facet, facet_registry).await {
             Ok(facet) => {
+                created_types.push(format!("{}({})", proto_facet.r#type, proto_facet.priority));
                 facets.push(facet);
             }
             Err(e) => {
@@ -144,15 +137,16 @@ pub async fn create_facets_from_proto(
             }
         }
     }
-    
-    if tracing::enabled!(tracing::Level::DEBUG) {
+
+    if tracing::enabled!(tracing::Level::DEBUG) && !created_types.is_empty() {
         tracing::debug!(
+            facets = %created_types.join(", "),
             total = proto_facets.len(),
             created = facets.len(),
             "Created facets from proto configurations"
         );
     }
-    
+
     facets
 }
 

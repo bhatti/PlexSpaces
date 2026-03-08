@@ -16,10 +16,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! SWIM Protocol Implementation - Production Grade
+//! SWIM Protocol Implementation
 //!
 //! ## Overview
-//! Production-ready implementation of the SWIM (Scalable Weakly-consistent
+//! Implementation of the SWIM (Scalable Weakly-consistent
 //! Infection-style Process Group Membership) protocol for robust node discovery.
 //!
 //! ## Key Features

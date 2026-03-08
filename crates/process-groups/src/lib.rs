@@ -214,6 +214,9 @@ impl ProcessGroupRegistry {
 
         let key = Self::group_key(&tenant_id, &group_name);
 
+        // Drop span guard before await to avoid "tried to clone Id, but no span exists" panic.
+        drop(_guard);
+
         // Check if group already exists
         if self.storage.get(&ctx, &key).await?.is_some() {
             metrics::counter!("plexspaces_process_groups_create_errors_total", "error" => "already_exists").increment(1);

@@ -167,6 +167,34 @@ pub fn ask_helper(
         let sender = match registry.lookup_actor(&target_actor_id).await {
             Some(s) => s,
             None => {
+                // Actor not local: try remote if actor_id has node_id and it is not the local node.
+                // Enables ScatterGather and ask() to reach shards on other nodes (ConnectNodes registers nodes in ObjectRegistry).
+                let (_, node_id_opt) = extract_node_id(&target_actor_id);
+                if let Some(node_id) = node_id_opt {
+                    let local_node_id = registry.local_node_id().to_string();
+                    if node_id != local_node_id {
+                        waiter_registry.remove(&correlation_id).await;
+                        match route_remote(
+                            ctx,
+                            service_locator,
+                            node_id,
+                            target_actor_id.clone(),
+                            message,
+                            true,
+                            Some(timeout),
+                        )
+                        .await
+                        {
+                            Ok((_, Some(reply))) => return Ok(reply),
+                            Ok((_, None)) => {
+                                return Err(ActorRefError::SendFailed(
+                                    "Remote ask returned no reply".to_string(),
+                                ))
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
                 waiter_registry.remove(&correlation_id).await;
                 return Err(ActorRefError::ActorNotFound(target_actor_id.clone()));
             }

@@ -31,7 +31,7 @@
 use plexspaces_channel::Channel;
 use plexspaces_proto::{
     common::v1::Message,
-    actor::v1::ShardGroup,
+    actor::v1::{DataParallelConfig, PartitionStrategy, ShardGroup},
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -125,7 +125,12 @@ impl TaskRouter {
     /// ## Arguments
     /// * `group`: Shard group to register
     pub async fn register_group(&self, group: ShardGroup) -> TaskRouterResult<()> {
-        let group_id = group.group_id.clone();
+        let group_id = group
+            .config
+            .as_ref()
+            .expect("ShardGroup.config required")
+            .group_id
+            .clone();
         let mut groups = self.groups.write().await;
         groups.insert(group_id.clone(), group);
         info!("Registered shard group: {}", group_id);
@@ -388,15 +393,18 @@ mod tests {
 
     fn create_test_group(group_id: &str, actor_ids: Vec<String>) -> ShardGroup {
         ShardGroup {
-            group_id: group_id.to_string(),
+            config: Some(DataParallelConfig {
+                group_id: group_id.to_string(),
+                shard_count: actor_ids.len() as u32,
+                partition_strategy: PartitionStrategy::PartitionStrategyHash as i32,
+                rebalance_policy: plexspaces_proto::actor::v1::RebalancePolicy::RebalancePolicyNone as i32,
+                placement: None,
+            }),
             actor_type: "test-actor".to_string(),
-            shard_count: actor_ids.len() as u32,
-            partition_strategy: plexspaces_proto::actor::v1::PartitionStrategy::PartitionStrategyHash as i32,
             shard_actor_ids: actor_ids,
             state: plexspaces_proto::actor::v1::ShardGroupState::ShardGroupStateActive as i32,
             created_at: Some(plexspaces_proto::prost_types::Timestamp::from(std::time::SystemTime::now())),
             metadata: HashMap::new(),
-            labels: HashMap::new(),
             rebalance_status: None,
         }
     }
@@ -409,7 +417,10 @@ mod tests {
         router.register_group(group.clone()).await.unwrap();
 
         let retrieved = router.get_group("test-group").await.unwrap();
-        assert_eq!(retrieved.group_id, "test-group");
+        assert_eq!(
+            retrieved.config.as_ref().unwrap().group_id,
+            "test-group"
+        );
         assert_eq!(retrieved.shard_actor_ids.len(), 1);
     }
 

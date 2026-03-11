@@ -841,6 +841,7 @@ pub mod shard_group;
 pub mod node_client;
 pub mod parallel;
 pub mod elastic_pool_client;
+pub mod leader_worker;
 
 pub use shard_group::{ShardGroupClientTrait, UnifiedShardGroupClient, ShardGroupClientLocal};
 #[cfg(feature = "grpc")]

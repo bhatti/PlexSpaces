@@ -8,9 +8,9 @@
 //!
 //! ## Cohesion Flow Verified
 //! ```
-//! ShardGroup.labels 
-//!   → ActorResourceRequirements.required_labels
-//!   → NodeSelector filters by required_labels vs NodeCapacity.labels
+//! DataParallelConfig.placement.required_labels (NodePlacement)
+//!   → ActorResourceRequirements.placement (NodePlacement)
+//!   → NodeSelector filters by placement.required_labels vs NodeCapacity.labels
 //!   → NodeCapacity.labels from ObjectRegistration.metadata.labels
 //!   → metadata.labels from NodeRegistration.capabilities
 //!   → capabilities["cluster"] from ConnectNodes
@@ -211,39 +211,46 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_shard_group_labels_mapped_to_actor_resource_requirements() {
-    // Test: Verify that ShardGroup labels are correctly mapped to ActorResourceRequirements.required_labels
-    // This is the first step in the cohesion flow: ShardGroup.labels → ActorResourceRequirements.required_labels
-    
+    // Test: Verify that config.placement.required_labels are stored and flow to ActorResourceRequirements.placement
     let (_service, _registry, _locator) = create_test_actor_service("test-node").await;
 
-    // Create ShardGroup with labels
     let mut labels = HashMap::new();
     labels.insert("cluster".to_string(), "prod".to_string());
     labels.insert("zone".to_string(), "us-west-1".to_string());
     labels.insert("tier".to_string(), "compute".to_string());
 
+    use plexspaces_proto::actor::v1::{DataParallelConfig, NodePlacement, NodePlacementStrategy, PartitionStrategy, RebalancePolicy};
     let req = Request::new(CreateShardGroupRequest {
-        group_id: "labeled-group".to_string(),
+        config: Some(DataParallelConfig {
+            group_id: "labeled-group".to_string(),
+            shard_count: 2,
+            partition_strategy: PartitionStrategy::PartitionStrategyHash as i32,
+            rebalance_policy: RebalancePolicy::RebalancePolicyNone as i32,
+            placement: Some(NodePlacement {
+                strategy: NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                cluster: String::new(),
+                node_ids: vec![],
+                required_labels: labels.clone(),
+                preferred_node_ids: vec![],
+                avoid_node_ids: vec![],
+                resource_requirements: None,
+                affinity_labels: HashMap::new(),
+                preferred_node_id: String::new(),
+            }),
+        }),
         actor_type: "counter".to_string(),
-        shard_count: 2,
-        partition_strategy: plexspaces_proto::actor::v1::PartitionStrategy::PartitionStrategyHash as i32,
         shard_config: None,
         initial_state: Vec::new(),
         metadata: HashMap::new(),
-        labels: labels.clone(),
     });
 
-    // The actual mapping happens in ActorServiceImpl.create_shard_group()
-    // We can't easily test the internal ActorConfig without exposing it, but we can verify:
-    // 1. ShardGroup is created successfully with labels
-    // 2. Labels are stored in the ShardGroup metadata
-    
     let result = _service.create_shard_group(req).await;
     assert!(result.is_ok(), "CreateShardGroup should succeed with labels");
-    
+
     let response = result.unwrap().into_inner();
     let group = response.group.as_ref().expect("group should be present");
-    assert_eq!(group.labels, labels, "ShardGroup should store labels correctly");
+    let stored = group.config.as_ref().and_then(|c| c.placement.as_ref()).map(|p| &p.required_labels);
+    assert_eq!(stored, Some(&labels), "ShardGroup config.placement should store required_labels");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -316,21 +323,28 @@ async fn test_node_selector_filters_by_required_labels() {
         }),
     });
     
-    // Create ActorResourceRequirements with required_labels (as ShardGroup would set)
+    use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
     let requirements = ActorResourceRequirements {
-        resources: Some(ResourceSpec {
-            cpu_cores: 1.0,
-            memory_bytes: 1024 * 1024 * 1024,
-            disk_bytes: 0,
-            gpu_count: 0,
-            gpu_type: String::new(),
+        placement: Some(NodePlacement {
+            strategy: NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+            cluster: String::new(),
+            node_ids: vec![],
+            required_labels: HashMap::from([
+                ("cluster".to_string(), "prod".to_string()),
+                ("zone".to_string(), "us-west-1".to_string()),
+            ]),
+            preferred_node_ids: vec![],
+            avoid_node_ids: vec![],
+            resource_requirements: Some(ResourceSpec {
+                cpu_cores: 1.0,
+                memory_bytes: 1024 * 1024 * 1024,
+                disk_bytes: 0,
+                gpu_count: 0,
+                gpu_type: String::new(),
+            }),
+            affinity_labels: HashMap::new(),
+            preferred_node_id: String::new(),
         }),
-        required_labels: HashMap::from([
-            ("cluster".to_string(), "prod".to_string()),
-            ("zone".to_string(), "us-west-1".to_string()),
-        ]),
-        placement: None,
-        actor_groups: Vec::new(),
     };
     
     // NodeSelector should select node1 (matches labels), not node2 (different cluster)
@@ -418,25 +432,39 @@ async fn test_shard_group_cohesion_end_to_end() {
     labels.insert("cluster".to_string(), "prod".to_string());
     labels.insert("zone".to_string(), "us-west-1".to_string());
     
+    use plexspaces_proto::actor::v1::{DataParallelConfig, NodePlacement, NodePlacementStrategy, PartitionStrategy, RebalancePolicy};
     let req = Request::new(CreateShardGroupRequest {
-        group_id: "cohesion-test-group".to_string(),
+        config: Some(DataParallelConfig {
+            group_id: "cohesion-test-group".to_string(),
+            shard_count: 2,
+            partition_strategy: PartitionStrategy::PartitionStrategyHash as i32,
+            rebalance_policy: RebalancePolicy::RebalancePolicyNone as i32,
+            placement: Some(NodePlacement {
+                strategy: NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                cluster: String::new(),
+                node_ids: vec![],
+                required_labels: labels.clone(),
+                preferred_node_ids: vec![],
+                avoid_node_ids: vec![],
+                resource_requirements: None,
+                affinity_labels: HashMap::new(),
+                preferred_node_id: String::new(),
+            }),
+        }),
         actor_type: "counter".to_string(),
-        shard_count: 2,
-        partition_strategy: plexspaces_proto::actor::v1::PartitionStrategy::PartitionStrategyHash as i32,
         shard_config: None,
         initial_state: Vec::new(),
         metadata: HashMap::new(),
-        labels: labels.clone(),
     });
-    
+
     let result = _service.create_shard_group(req).await;
     assert!(result.is_ok(), "ShardGroup creation should succeed");
-    
+
     let response = result.unwrap().into_inner();
     let group = response.group.as_ref().expect("group should be present");
-    
-    // Verify labels are stored
-    assert_eq!(group.labels, labels, "ShardGroup should store labels");
+
+    let stored = group.config.as_ref().and_then(|c| c.placement.as_ref()).map(|p| &p.required_labels);
+    assert_eq!(stored, Some(&labels), "ShardGroup config.placement should store required_labels");
     
     // Verify shards were created
     assert_eq!(group.shard_actor_ids.len(), 2, "Should have 2 shard actors");

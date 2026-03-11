@@ -201,15 +201,15 @@ impl Actor for WasmActorBehavior {
         // Clone Arc before await to ensure Send
         let instance = self.instance.clone();
         let message_id = message.id.clone();
-        
-        // Trace request: log message-id (should start with req-), sender-id, recipient-id
+        let payload_len = message.payload.len();
+
+        // Single prominent line for observability: actor invoked, op, payload size
         tracing::info!(
+            actor_id = %message.receiver_id,
+            op = %message_type,
+            payload_len = payload_len,
             message_id = %message_id,
-            sender_id = %message.sender_id,
-            receiver_id = %message.receiver_id,
-            correlation_id = %message.correlation_id,
-            msg_type = %message_type,
-            "WasmActor handle_message: received request"
+            "WasmActor invoked"
         );
         match instance.handle_message_with_id(from, message_type.as_str(), payload, &message_id).await {
             Ok(response) => {

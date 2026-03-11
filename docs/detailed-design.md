@@ -804,7 +804,7 @@ Distributed lock coordination for task queues, resource coordination, and leader
 **Use Cases**:
 - Distributed task queues (ensure only one worker processes each job)
 - Resource coordination (prevent concurrent access)
-- Leader election (elect a master node)
+- Leader election (elect a leader node)
 
 **Example**:
 ```toml
@@ -1816,6 +1816,37 @@ Single unified implementation for actor pools with checkout/checkin semantics an
 - **SDK**: `ElasticPoolClient::from_service_locator(service_locator)` in the Rust SDK delegates to the registered service; no duplicate business logic.
 - **Proto**: `proto/plexspaces/v1/pool/pool.proto` defines PoolConfig, PoolMetrics, ActorHandle, and ElasticPoolError. PoolService gRPC can be added later for remote access.
 - **WASM host**: The simple-actor WIT (`wit/plexspaces-simple-actor/world.wit`) exposes `pool-checkout`, `pool-checkin`, and `pool-get-metrics`. Python, Go, and TypeScript SDKs wrap these (e.g. `host.pool_checkout`, `host.PoolCheckout`, `host.poolCheckout`). When the pool is not configured, checkout returns an error and apps can fall back to process group broadcast. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) and [WASM Deployment: Elastic pool](wasm-deployment.md#elastic-pool-wasm-host).
+
+## Leader-Worker and ShardGroup Placement
+
+Leader-worker patterns use **existing building blocks** only; no dedicated session service. Session state (round, progress, aggregation) is the leader’s responsibility (in-memory or TupleSpace/KV). Distribute/collect/rounds are **client logic** using tell/ask, ScatterGather, TupleSpace, or process groups.
+
+**Unified placement**:
+
+- **ShardGroup**: Placement is defined in `DataParallelConfig.placement` (type `NodePlacement`). Labels, affinity, and resource requirements live in `NodePlacement` (e.g. `required_labels`, `resource_requirements`, `preferred_node_ids`, `avoid_node_ids`). The scheduler (`crates/scheduler`) matches nodes using `ActorResourceRequirements.placement` (same single `NodePlacement`).
+- **CreateShardGroupRequest**: Takes `config: DataParallelConfig`; there is no separate `labels` field—labels are in `config.placement.required_labels`.
+- **Scatter-gather / MapShardGroup**: Unchanged; they operate on the ShardGroup’s `shard_actor_ids`. Multi-node placement is achieved by creating the group with `config.placement` (e.g. `from_registry` or explicit `node_ids`), so shards are spread across nodes; ScatterGather and MapShardGroup then fan out to those actors.
+
+**Building blocks** (see [Purdue CS525 leader-worker design](https://www.cs.purdue.edu/homes/ayg/CS525_SPR17/chap3_slides.pdf): centralized dynamic mapping, chunk scheduling):
+
+- **Obtain workers**: (A) CreateShardGroup with `NodePlacement` (from_registry or node_ids), then ScatterGather/MapShardGroup; (B) virtual actors via `list_worker_node_ids` + tell/ask to `actor_id@node_id`; (D) elastic pool + TupleSpace (e.g. migrating_merlin).
+- **Distribute work**: Short payload → messages (ScatterGather or ask); large payload → TupleSpace write/take/read_all.
+- **Collect and iterate**: Leader aggregates in application code; session state in leader or TupleSpace/KV.
+
+**Consistency**: Scatter-gather, elastic-pool, and parallel abstractions all use the same placement model: `NodePlacement` for node selection (labels, resources, preferred/avoid nodes). Elastic pool uses `PoolConfig` for pool sizing/scaling; worker placement on nodes, when needed, follows the same NodeRegistry/placement patterns.
+
+**Cohesive design (single model)**:
+
+| Layer | Concept | Where used |
+|-------|--------|------------|
+| Placement contract | `NodePlacement` | Proto `actor_runtime.proto`; labels, affinity, resource_requirements, preferred/avoid node_ids. |
+| Scheduling | `ActorResourceRequirements { placement }` | `crates/scheduler`: NodeSelector filters/scores nodes; used by ScheduleActor and when CreateShardGroup passes placement to spawn. |
+| ShardGroup / scatter-gather | `DataParallelConfig.placement` | CreateShardGroupRequest and ShardGroup; ScatterGather/MapShardGroup/SendToShard use `shard_actor_ids`. |
+| Elastic pool | `PoolConfig` | Pool sizing/scaling; worker placement can use same NodeRegistry/placement. |
+
+Data flow: CreateShardGroup `config.placement` → `shard_config.resource_requirements.placement` → scheduler (when used) → ScatterGather/MapShardGroup use `shard_actor_ids`.
+
+**Multi-node spawn**: When `placement.node_ids` lists multiple nodes (or `from_registry` returns multiple), `create_shard_group_internal` spawns each shard on the corresponding node: local shards via `ActorFactory.spawn_actor`, remote shards via `get_actor_service_client(node_id)` and gRPC `SpawnActor`. Integration test: `test_create_shard_group_multi_node_scatter_gather` (in-process two nodes, node2 on a local gRPC server, node1’s ObjectRegistry updated so node2 is discoverable) validates that CreateShardGroup with `node_ids: [node1, node2]` yields two shard actor IDs (one per node).
 
 ## Workflows
 

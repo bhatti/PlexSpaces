@@ -3,17 +3,17 @@
 
 //! Helper Functions for Integration Testing
 
-use plexspaces_mailbox::Message;
+use plexspaces_mailbox::new_message;
 use plexspaces_proto::v1::actor::{SendMessageRequest, SendMessageResponse};
 use plexspaces_proto::ActorServiceClient;
 use tonic::transport::Channel;
 use tonic::{Request, Response, Status};
 
-/// Create a message with payload and receiver
+/// Create a message with payload and receiver (uses canonical new_message).
 pub fn create_message(payload: &str, receiver: &str) -> plexspaces_proto::common::v1::Message {
-    let mut message = Message::new(payload.as_bytes().to_vec());
-    message.receiver = receiver.to_string();
-    message.to_proto()
+    let mut message = new_message(payload.as_bytes().to_vec());
+    message.receiver_id = receiver.to_string();
+    message
 }
 
 /// Send a message via gRPC client

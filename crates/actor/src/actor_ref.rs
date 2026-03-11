@@ -1442,6 +1442,10 @@ impl MessageSender for ActorRef {
         ActorRef::ask(self, message, timeout).await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
+
+    fn actor_id(&self) -> Option<String> {
+        Some(self.id().to_string())
+    }
 }
 
 // =============================================================================

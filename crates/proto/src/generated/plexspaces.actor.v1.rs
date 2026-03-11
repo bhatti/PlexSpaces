@@ -196,13 +196,10 @@ pub struct ActorConfig {
     pub supervision_strategy: i32,
     #[prost(map="string, message", tag="7")]
     pub properties: ::std::collections::HashMap<::prost::alloc::string::String, ::prost_types::Any>,
-    /// Orleans-inspired placement configuration
-    #[prost(message, optional, tag="10")]
-    pub placement_hint: ::core::option::Option<PlacementHint>,
     /// Orleans-inspired stateless worker configuration
     #[prost(message, optional, tag="11")]
     pub stateless_worker_config: ::core::option::Option<StatelessWorkerConfig>,
-    /// Data-parallel actor configuration (if part of actor group)
+    /// Data-parallel configuration (if part of a shard group)
     #[prost(message, optional, tag="12")]
     pub data_parallel_config: ::core::option::Option<DataParallelConfig>,
     /// State management mode (traditional vs lattice-based)
@@ -214,7 +211,7 @@ pub struct ActorConfig {
     /// Resource-aware scheduling: Actor resource requirements
     #[prost(message, optional, tag="16")]
     pub resource_requirements: ::core::option::Option<ActorResourceRequirements>,
-    /// Actor groups (for task routing and co-scheduling)
+    /// Shard group IDs (for task routing and co-scheduling)
     #[prost(string, repeated, tag="17")]
     pub actor_groups: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     // NOTE: Actors are ALWAYS isolated (Erlang/OTP principle)
@@ -297,50 +294,14 @@ pub struct ResourceRequirements {
     #[prost(map="string, string", tag="4")]
     pub custom_requirements: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
-/// Placement hint for actor activation
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct PlacementHint {
-    #[prost(enumeration="PlacementStrategy", tag="1")]
-    pub strategy: i32,
-    #[prost(string, tag="2")]
-    pub preferred_node_id: ::prost::alloc::string::String,
-    #[prost(map="string, string", tag="3")]
-    pub affinity_labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    #[prost(message, optional, tag="4")]
-    pub requirements: ::core::option::Option<ResourceRequirements>,
-}
-/// Actor resource requirements for resource-aware scheduling
+/// Actor placement for resource-aware scheduling. Single source for labels, affinity, and resources.
+/// Scheduler (crates/scheduler) uses placement.required_labels and placement.resource_requirements to select nodes.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ActorResourceRequirements {
-    /// Required resources (CPU, memory, disk, GPU)
+    /// Unified placement (strategy, required_labels, resource_requirements, preferred/avoid node IDs)
     #[prost(message, optional, tag="1")]
-    pub resources: ::core::option::Option<super::super::common::v1::ResourceSpec>,
-    /// Required node labels (Kubernetes-inspired label selector)
-    /// All labels must match for node to be eligible
-    #[prost(map="string, string", tag="2")]
-    pub required_labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Placement preferences
-    #[prost(message, optional, tag="3")]
-    pub placement: ::core::option::Option<PlacementPreferences>,
-    /// Actor groups (for task routing and co-scheduling)
-    #[prost(string, repeated, tag="4")]
-    pub actor_groups: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-}
-/// Placement preferences for resource-aware scheduling
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct PlacementPreferences {
-    /// Placement strategy
-    #[prost(enumeration="PlacementStrategy", tag="1")]
-    pub strategy: i32,
-    /// Preferred node IDs (hint, not requirement)
-    #[prost(string, repeated, tag="2")]
-    pub preferred_node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// Avoid node IDs (anti-affinity)
-    #[prost(string, repeated, tag="3")]
-    pub avoid_node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    pub placement: ::core::option::Option<NodePlacement>,
 }
 /// Stateless worker configuration (Orleans-inspired)
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -356,59 +317,52 @@ pub struct StatelessWorkerConfig {
     #[prost(enumeration="LoadBalancingStrategy", tag="3")]
     pub strategy: i32,
 }
-/// Data-parallel actor configuration
+/// Data-parallel (shard group) strategy; same for all shards in the group.
+/// Shard identity is implicit (index in ShardGroup.shard_actor_ids), not stored per-actor.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DataParallelConfig {
-    /// Actor group ID this actor belongs to
+    /// Shard group ID
     #[prost(string, tag="1")]
     pub group_id: ::prost::alloc::string::String,
-    /// Total number of shards in the group
+    /// Number of shards in the group
     #[prost(uint32, tag="2")]
     pub shard_count: u32,
-    /// This actor's shard ID (0 to shard_count-1)
-    #[prost(uint32, tag="3")]
-    pub shard_id: u32,
     /// Partitioning strategy
     #[prost(enumeration="PartitionStrategy", tag="4")]
     pub partition_strategy: i32,
     /// Rebalancing policy
     #[prost(enumeration="RebalancePolicy", tag="5")]
     pub rebalance_policy: i32,
+    /// Node placement for multi-node leader-worker (same_node, from_registry, node_ids)
+    #[prost(message, optional, tag="6")]
+    pub placement: ::core::option::Option<NodePlacement>,
 }
 // ============================================================================
-// ACTOR GROUPS - Shard Group Messages (data-parallel sharding)
+// Shard groups (data-parallel sharding)
 // ============================================================================
-// Labels are used for node placement: ActorResourceRequirements.required_labels
-// matches NodeCapacity.labels (from NodeRegistry capabilities). See
-// docs/CLUSTER_AND_ROUTING_COHESION.md.
+// Node placement uses config.placement (NodePlacement); scheduler matches
+// config.placement.required_labels and resource_requirements to NodeCapacity.
 
-/// Shard group - collection of sharded actors with the same behavior
+/// Shard group: unified config (DataParallelConfig) plus actor refs and state.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ShardGroup {
-    #[prost(string, tag="1")]
-    pub group_id: ::prost::alloc::string::String,
+    /// Strategy for the group (group_id, shard_count, partition_strategy, rebalance_policy, placement)
+    #[prost(message, optional, tag="1")]
+    pub config: ::core::option::Option<DataParallelConfig>,
     #[prost(string, tag="2")]
     pub actor_type: ::prost::alloc::string::String,
-    #[prost(uint32, tag="3")]
-    pub shard_count: u32,
-    #[prost(enumeration="PartitionStrategy", tag="4")]
-    pub partition_strategy: i32,
-    /// Indexed by shard_id 0 to shard_count-1
-    #[prost(string, repeated, tag="5")]
+    /// Indexed by shard index 0 to config.shard_count-1
+    #[prost(string, repeated, tag="3")]
     pub shard_actor_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    #[prost(enumeration="ShardGroupState", tag="6")]
+    #[prost(enumeration="ShardGroupState", tag="4")]
     pub state: i32,
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag="5")]
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(map="string, string", tag="8")]
+    #[prost(map="string, string", tag="6")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Labels for node placement (required_labels in ActorResourceRequirements)
-    #[prost(map="string, string", tag="9")]
-    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Rebalancing status (if currently rebalancing)
-    #[prost(message, optional, tag="10")]
+    #[prost(message, optional, tag="7")]
     pub rebalance_status: ::core::option::Option<RebalanceStatus>,
 }
 /// Rebalancing status for shard groups
@@ -434,26 +388,55 @@ pub struct RebalanceStatus {
     #[prost(message, optional, tag="6")]
     pub estimated_completion: ::core::option::Option<::prost_types::Timestamp>,
 }
+/// Unified node placement: strategy, affinity, and resource requirements.
+/// Replaces PlacementHint, PlacementPreferences, and label/placement fields on ActorResourceRequirements.
+/// Scheduler (crates/scheduler) matches nodes using required_labels and resource_requirements.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct NodePlacement {
+    #[prost(enumeration="NodePlacementStrategy", tag="1")]
+    pub strategy: i32,
+    /// For FROM_REGISTRY: optional cluster name filter (empty = all connected nodes)
+    #[prost(string, tag="2")]
+    pub cluster: ::prost::alloc::string::String,
+    /// For NODE_IDS: explicit node IDs to place shards on (round-robin)
+    #[prost(string, repeated, tag="3")]
+    pub node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Node must match all labels (Kubernetes-inspired). Used by scheduler for node selection.
+    #[prost(map="string, string", tag="4")]
+    pub required_labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Preferred node IDs (hint; scheduler may prefer these when scoring)
+    #[prost(string, repeated, tag="5")]
+    pub preferred_node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Avoid node IDs (anti-affinity; scheduler excludes these)
+    #[prost(string, repeated, tag="6")]
+    pub avoid_node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// CPU, memory, disk, GPU requirements. Scheduler filters by NodeCapacity.available.
+    #[prost(message, optional, tag="7")]
+    pub resource_requirements: ::core::option::Option<super::super::common::v1::ResourceSpec>,
+    /// Affinity labels (co-location hint; scheduler may prefer nodes with matching labels)
+    #[prost(map="string, string", tag="8")]
+    pub affinity_labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Single preferred node (convenience; equivalent to preferred_node_ids with one element)
+    #[prost(string, tag="9")]
+    pub preferred_node_id: ::prost::alloc::string::String,
+}
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateShardGroupRequest {
-    #[prost(string, tag="1")]
-    pub group_id: ::prost::alloc::string::String,
+    /// Group strategy (group_id, shard_count, partition_strategy, rebalance_policy, placement)
+    /// Use config.placement.required_labels for node placement; scheduler matches nodes by placement.
+    #[prost(message, optional, tag="1")]
+    pub config: ::core::option::Option<DataParallelConfig>,
     #[prost(string, tag="2")]
     pub actor_type: ::prost::alloc::string::String,
-    #[prost(uint32, tag="3")]
-    pub shard_count: u32,
-    #[prost(enumeration="PartitionStrategy", tag="4")]
-    pub partition_strategy: i32,
-    #[prost(message, optional, tag="5")]
+    /// Per-shard ActorConfig (optional data_parallel_config here is ignored; use config above)
+    #[prost(message, optional, tag="3")]
     pub shard_config: ::core::option::Option<ActorConfig>,
-    #[prost(bytes="vec", tag="6")]
+    #[prost(bytes="vec", tag="4")]
     pub initial_state: ::prost::alloc::vec::Vec<u8>,
-    #[prost(map="string, string", tag="7")]
+    #[prost(map="string, string", tag="5")]
     pub metadata: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Labels for node placement (shards placed on nodes matching required_labels)
-    #[prost(map="string, string", tag="8")]
-    pub labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -2314,6 +2297,44 @@ impl ShardGroupState {
             "SHARD_GROUP_STATE_DRAINING" => Some(Self::ShardGroupStateDraining),
             "SHARD_GROUP_STATE_STOPPING" => Some(Self::ShardGroupStateStopping),
             "SHARD_GROUP_STATE_STOPPED" => Some(Self::ShardGroupStateStopped),
+            _ => None,
+        }
+    }
+}
+/// Node placement strategy for ShardGroup creation (leader-worker multi-node).
+/// When absent or SAME_NODE, all shards are created on the node that receives the RPC.
+/// FROM_REGISTRY uses NodeRegistry.list_nodes (optional cluster filter); NODE_IDS uses explicit list.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum NodePlacementStrategy {
+    /// Same as SAME_NODE: all shards on local node
+    NodePlacementStrategyUnspecified = 0,
+    NodePlacementStrategySameNode = 1,
+    /// Round-robin shards across nodes from NodeRegistry
+    NodePlacementStrategyFromRegistry = 2,
+    /// Round-robin shards across given node_ids
+    NodePlacementStrategyNodeIds = 3,
+}
+impl NodePlacementStrategy {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            NodePlacementStrategy::NodePlacementStrategyUnspecified => "NODE_PLACEMENT_STRATEGY_UNSPECIFIED",
+            NodePlacementStrategy::NodePlacementStrategySameNode => "NODE_PLACEMENT_STRATEGY_SAME_NODE",
+            NodePlacementStrategy::NodePlacementStrategyFromRegistry => "NODE_PLACEMENT_STRATEGY_FROM_REGISTRY",
+            NodePlacementStrategy::NodePlacementStrategyNodeIds => "NODE_PLACEMENT_STRATEGY_NODE_IDS",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "NODE_PLACEMENT_STRATEGY_UNSPECIFIED" => Some(Self::NodePlacementStrategyUnspecified),
+            "NODE_PLACEMENT_STRATEGY_SAME_NODE" => Some(Self::NodePlacementStrategySameNode),
+            "NODE_PLACEMENT_STRATEGY_FROM_REGISTRY" => Some(Self::NodePlacementStrategyFromRegistry),
+            "NODE_PLACEMENT_STRATEGY_NODE_IDS" => Some(Self::NodePlacementStrategyNodeIds),
             _ => None,
         }
     }

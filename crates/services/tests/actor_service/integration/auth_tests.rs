@@ -150,6 +150,7 @@ async fn test_jwt_grpc_auth() {
         config: None,
         labels: std::collections::HashMap::new(),
         facets: vec![],
+        namespace: "default".to_string(),
     });
     
     // Add JWT token to request metadata

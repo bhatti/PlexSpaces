@@ -14,6 +14,7 @@ High-level API and annotations for building PlexSpaces actors in Rust, inspired 
 - [Message Creation Helpers](#message-creation-helpers)
 - [Communication Patterns](#communication-patterns)
 - [Parallel Operations](#parallel-operations)
+- [Leader-worker (multi-node)](#leader-worker-multi-node)
 - [Best Practices](#best-practices)
 - [Examples](#examples)
 
@@ -455,6 +456,16 @@ let final_result = client.reduce(
 ```
 
 See [examples/rust/apps/data_parallel_worker](../examples/rust/apps/data_parallel_worker) for a complete example.
+
+## Leader-worker (multi-node)
+
+For **one logical run** with work split across nodes, the **first node** is the leader. Use `plexspaces_sdk::leader_worker` (feature `grpc`):
+
+- **`list_worker_node_ids(ctx, service_locator, cluster, page_size)`** — Node IDs from the registry (after ConnectNodes). Leader uses this to distribute work.
+- **Virtual actors are lazy** — No explicit ensure. Deploy the worker type as virtual on all nodes; the leader sends to `worker/chunk@node_id` and the target node creates the actor on first message receive. Same in all SDKs (Rust, Python, TypeScript, Go).
+- **`spawn_actor_on_node(...)`** — Spawn a non-virtual worker on a given node (calls that node’s SpawnActor). Use only when not using virtual actors.
+
+Core logic is in main crates (NodeRegistry, ActorService); the SDK wraps it. See [docs/sdk.md](../../../docs/sdk.md#leader-worker-multi-node-one-run) and [examples/README.md](../../../examples/README.md#what-multi-node-parallelization-means-one-run-work-split) for cross-language semantics and patterns.
 
 ## Best Practices
 

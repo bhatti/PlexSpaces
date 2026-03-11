@@ -1593,29 +1593,48 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         &self,
         node_id: &str,
     ) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>> {
-        // Get node address from ObjectRegistry
-        let object_registry = self.get_object_registry().await
-            .ok_or_else(|| "ObjectRegistry not found in ServiceLocator".to_string())?;
-        
-        // Use request_context_for_system_operations (default tenant from node config or blank)
         let ctx = self.request_context_for_system_operations().await;
-        
-        // Lookup node registration
-        use plexspaces_proto::object_registry::v1::ObjectType;
-        let registration = object_registry
-            .lookup_full(&ctx, ObjectType::ObjectTypeNode, node_id)
-            .await
-            .map_err(|e| format!("Failed to lookup node: {}", e))?
-            .ok_or_else(|| format!("Node not found: {}", node_id))?;
-        
-        let node_address = registration.grpc_address;
-        
-        // Get connection from GrpcConnectionManager (with pooling)
+
+        let node_address = if let Some(object_registry) = self.get_object_registry().await {
+            use plexspaces_proto::object_registry::v1::ObjectType;
+            if let Ok(Some(registration)) = object_registry
+                .lookup_full(&ctx, ObjectType::ObjectTypeNode, node_id)
+                .await
+            {
+                Some(registration.grpc_address)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let node_address = match node_address {
+            Some(addr) => addr,
+            None => {
+                if let Some(node_registry) = self.get_node_registry().await {
+                    let reg = node_registry
+                        .lookup_node(&ctx, node_id)
+                        .await
+                        .map_err(|e| format!("NodeRegistry lookup failed: {}", e))?
+                        .ok_or_else(|| format!("Node not found: {}", node_id))?;
+                    let addr = reg.node_address.trim();
+                    if addr.starts_with("http://") || addr.starts_with("https://") {
+                        addr.to_string()
+                    } else {
+                        format!("http://{}", addr)
+                    }
+                } else {
+                    return Err(format!("Node not found: {} (no ObjectRegistry or NodeRegistry)", node_id).into());
+                }
+            }
+        };
+
         let connection_manager = self.get_grpc_connection_manager().await
             .ok_or_else(|| "GrpcConnectionManager not found in ServiceLocator".to_string())?;
-        
+
         connection_manager
-            .get_actor_service_connection(node_id, &format!("http://{}", node_address))
+            .get_actor_service_connection(node_id, &node_address)
             .await
             .map_err(|e| format!("Connection failed: {}", e).into())
     }

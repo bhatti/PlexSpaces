@@ -1018,6 +1018,8 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /** Map: apply function to all shards in parallel (DPA Map operator)
+*/
         pub async fn map_shard_group(
             &mut self,
             request: impl tonic::IntoRequest<super::MapShardGroupRequest>,
@@ -1445,6 +1447,8 @@ pub mod actor_service_server {
             tonic::Response<super::BulkUpdateShardGroupResponse>,
             tonic::Status,
         >;
+        /** Map: apply function to all shards in parallel (DPA Map operator)
+*/
         async fn map_shard_group(
             &self,
             request: tonic::Request<super::MapShardGroupRequest>,

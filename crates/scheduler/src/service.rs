@@ -348,16 +348,23 @@ mod tests {
 
         let req = ScheduleActorRequest {
             requirements: Some(ActorResourceRequirements {
-                resources: Some(ResourceSpec {
-                    cpu_cores: 1.0,
-                    memory_bytes: 512 * 1024 * 1024,
-                    disk_bytes: 0,
-                    gpu_count: 0,
-                    gpu_type: String::new(),
+                placement: Some(plexspaces_proto::actor::v1::NodePlacement {
+                    strategy: plexspaces_proto::actor::v1::NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                    cluster: String::new(),
+                    node_ids: vec![],
+                    required_labels: HashMap::new(),
+                    preferred_node_ids: vec![],
+                    avoid_node_ids: vec![],
+                    resource_requirements: Some(ResourceSpec {
+                        cpu_cores: 1.0,
+                        memory_bytes: 512 * 1024 * 1024,
+                        disk_bytes: 0,
+                        gpu_count: 0,
+                        gpu_type: String::new(),
+                    }),
+                    affinity_labels: HashMap::new(),
+                    preferred_node_id: String::new(),
                 }),
-                required_labels: HashMap::new(),
-                placement: None,
-                actor_groups: vec![],
             }),
             request_id: String::new(),
         };
@@ -409,16 +416,23 @@ mod tests {
         let scheduling_request = SchedulingRequest {
             request_id: request_id.clone(),
             requirements: Some(ActorResourceRequirements {
-                resources: Some(ResourceSpec {
-                    cpu_cores: 1.0,
-                    memory_bytes: 512 * 1024 * 1024,
-                    disk_bytes: 0,
-                    gpu_count: 0,
-                    gpu_type: String::new(),
+                placement: Some(plexspaces_proto::actor::v1::NodePlacement {
+                    strategy: plexspaces_proto::actor::v1::NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                    cluster: String::new(),
+                    node_ids: vec![],
+                    required_labels: HashMap::new(),
+                    preferred_node_ids: vec![],
+                    avoid_node_ids: vec![],
+                    resource_requirements: Some(ResourceSpec {
+                        cpu_cores: 1.0,
+                        memory_bytes: 512 * 1024 * 1024,
+                        disk_bytes: 0,
+                        gpu_count: 0,
+                        gpu_type: String::new(),
+                    }),
+                    affinity_labels: HashMap::new(),
+                    preferred_node_id: String::new(),
                 }),
-                required_labels: HashMap::new(),
-                placement: None,
-                actor_groups: vec![],
             }),
             namespace: String::new(), // Empty for test
             tenant_id: String::new(), // Empty for test

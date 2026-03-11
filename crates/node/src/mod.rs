@@ -829,7 +829,11 @@ impl Node {
         let actor_configs = actor_configs_arc.read().await;
         for config in actor_configs.values() {
             if let Some(ref resource_reqs) = config.resource_requirements {
-                if let Some(ref resources) = resource_reqs.resources {
+                let resources = resource_reqs
+                    .placement
+                    .as_ref()
+                    .and_then(|p| p.resource_requirements.as_ref());
+                if let Some(ref resources) = resources {
                     allocated_cpu_cores += resources.cpu_cores;
                     allocated_memory_bytes += resources.memory_bytes;
                     allocated_disk_bytes += resources.disk_bytes;
@@ -5292,23 +5296,28 @@ mod tests {
         gpu_count: u32,
     ) -> plexspaces_proto::v1::actor::ActorConfig {
         use plexspaces_proto::{
-            v1::actor::{ActorConfig, ActorResourceRequirements},
+            v1::actor::{ActorConfig, ActorResourceRequirements, NodePlacement, NodePlacementStrategy},
             common::v1::ResourceSpec,
         };
 
-        let resources = ResourceSpec {
-            cpu_cores,
-            memory_bytes,
-            disk_bytes,
-            gpu_count,
-            gpu_type: String::new(),
-        };
-
         let resource_requirements = ActorResourceRequirements {
-            resources: Some(resources),
-            required_labels: std::collections::HashMap::new(),
-            placement: None,
-            actor_groups: vec![],
+            placement: Some(NodePlacement {
+                strategy: NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                cluster: String::new(),
+                node_ids: vec![],
+                required_labels: std::collections::HashMap::new(),
+                preferred_node_ids: vec![],
+                avoid_node_ids: vec![],
+                resource_requirements: Some(ResourceSpec {
+                    cpu_cores,
+                    memory_bytes,
+                    disk_bytes,
+                    gpu_count,
+                    gpu_type: String::new(),
+                }),
+                affinity_labels: std::collections::HashMap::new(),
+                preferred_node_id: String::new(),
+            }),
         };
 
         ActorConfig {
@@ -5319,7 +5328,6 @@ mod tests {
             restart_policy: None,
             supervision_strategy: 0,
             properties: std::collections::HashMap::new(),
-            placement_hint: None,
             stateless_worker_config: None,
             data_parallel_config: None,
             state_management_mode: 0,
@@ -5369,7 +5377,17 @@ mod tests {
         assert!(actor_configs.contains_key(actor_ref.id()));
         let stored_config = actor_configs.get(actor_ref.id()).unwrap();
         assert_eq!(
-            stored_config.resource_requirements.as_ref().unwrap().resources.as_ref().unwrap().cpu_cores,
+            stored_config
+                .resource_requirements
+                .as_ref()
+                .unwrap()
+                .placement
+                .as_ref()
+                .unwrap()
+                .resource_requirements
+                .as_ref()
+                .unwrap()
+                .cpu_cores,
             2.0
         );
     }
@@ -5651,10 +5669,17 @@ mod tests {
         };
 
         let resource_requirements = ActorResourceRequirements {
-            resources: Some(resources),
-            required_labels: std::collections::HashMap::new(),
-            placement: None,
-            actor_groups: vec![],
+            placement: Some(plexspaces_proto::v1::actor::NodePlacement {
+                strategy: plexspaces_proto::v1::actor::NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                cluster: String::new(),
+                node_ids: vec![],
+                required_labels: std::collections::HashMap::new(),
+                preferred_node_ids: vec![],
+                avoid_node_ids: vec![],
+                resource_requirements: Some(resources),
+                affinity_labels: std::collections::HashMap::new(),
+                preferred_node_id: String::new(),
+            }),
         };
 
         let mut config = ActorConfig::default();

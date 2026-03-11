@@ -99,4 +99,10 @@ pub trait MessageSender: Send + Sync {
     async fn ask(&self, _message: Message, _timeout: std::time::Duration) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
         Err("ask() not supported by this MessageSender implementation".into())
     }
+
+    /// Returns the actor ID when this sender is an actor reference (e.g. from spawn).
+    /// Used by callers that need the canonical ID without a registry lookup.
+    fn actor_id(&self) -> Option<String> {
+        None
+    }
 }

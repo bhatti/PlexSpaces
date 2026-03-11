@@ -18,7 +18,7 @@ This file describes how similar HPC ensemble and workflow patterns are implement
 ```
 
 - A workflow engine emits a channel of task parameters; each task runs on a worker; results are collected into a channel for the next step.
-- In MPI or custom HPC codes: master scatters work (e.g. via MPI_Scatter or a task queue), workers compute, master gathers (MPI_Gather or result queue).
+- In MPI or custom HPC codes: leader scatters work (e.g. via MPI_Scatter or a task queue), workers compute, leader gathers (MPI_Gather or result queue).
 
 ## PlexSpaces equivalent
 

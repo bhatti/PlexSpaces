@@ -8,3 +8,4 @@ export { PlexSpacesActor, WorkflowActor } from "./actor.js";
 export { Host, ProcessGroups, TupleSpace, host } from "./host.js";
 export { ActorRouter } from "./router.js";
 export { defaultRetryConfig, withRetry, } from "./workflow.js";
+export { LeaderWorkerClient, listWorkerNodeIds, } from "./leader_worker.js";

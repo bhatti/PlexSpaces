@@ -1,12 +1,12 @@
 # Matrix Multiplication - Parallel Computation with Scatter-Gather Pattern
 
-**Real-world use case**: Scientific computing, ML inference, graphics, signal processing - parallel matrix multiplication using master-worker pattern with scatter-gather coordination.
+**Real-world use case**: Scientific computing, ML inference, graphics, signal processing - parallel matrix multiplication using leader-worker pattern with scatter-gather coordination.
 
 **Pattern**: Scatter-gather pattern (cast for distribution, call for collection) demonstrating parallel computation with actor workers.
 
 ## Overview
 
-This example demonstrates parallel matrix multiplication (C = A × B) using PlexSpaces actors and the scatter-gather pattern. A master actor distributes row partitions to worker actors via `cast()` (scatter) and collects results via `call()` (gather).
+This example demonstrates parallel matrix multiplication (C = A × B) using PlexSpaces actors and the scatter-gather pattern. A leader actor distributes row partitions to worker actors via `cast()` (scatter) and collects results via `call()` (gather).
 
 ## Architecture
 

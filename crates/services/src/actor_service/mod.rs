@@ -131,15 +131,13 @@ use std::io::Write;
 use plexspaces_actor::{ActorFactory, Actor};
 use plexspaces_actor::ActorRef as ActorRefImpl;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
-use plexspaces_core::ActorId;
+use plexspaces_core::{ActorId, actor_id::{build_actor_id, parse_actor_id}};
 use crate::ServiceLocatorImpl;
 use plexspaces_proto::common::v1::Message;
 use ulid::Ulid;
 
 // Import proto types and gRPC service trait
 use plexspaces_proto::actor::v1::{
-    actor_service_client::ActorServiceClient,
-
     // gRPC service trait and server
     actor_service_server::ActorService as ActorServiceTrait,
     ActorDownNotification,
@@ -186,8 +184,8 @@ use plexspaces_proto::actor::v1::{
     ScatterGatherRequest, ScatterGatherResponse,
     BulkUpdateShardGroupRequest, BulkUpdateShardGroupResponse,
     MapShardGroupRequest, MapShardGroupResponse,
-    ShardGroup, ShardGroupState, PartitionStrategy, ShardGroupAggregationStrategy,
-    ShardQueryResponse, ScatterGatherStats, ShardUpdateStats, RebalanceStatus,
+    DataParallelConfig, ShardGroup, ShardGroupState, ShardGroupAggregationStrategy,
+    ShardQueryResponse, ScatterGatherStats, ShardUpdateStats,
 };
 use plexspaces_proto::common::v1::Empty;
 
@@ -315,23 +313,21 @@ impl ActorServiceImpl {
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         labels: std::collections::HashMap<String, String>,
     ) -> Result<ActorRefImpl, Box<dyn std::error::Error + Send + Sync>> {
-        // CRITICAL: Normalize actor_id to include @node suffix BEFORE passing to factory
-        // Parse actor_id to get actor_name and node_id
-        let (actor_name, node_id) = if let Some((name, node)) = actor_id.split_once('@') {
-            (name.to_string(), node.to_string())
-        } else {
-            (actor_id.to_string(), String::new())
-        };
-        
-        // Always use local node_id (ignore any node_id in actor_id)
-        let local_actor_id = if node_id.is_empty() || node_id == self.local_node_id {
-            format!("{}@{}", actor_name, self.local_node_id)
-        } else {
-            // If actor_id specifies a different node, reject it
-            return Err(format!(
-                "Cannot spawn actor on remote node '{}' via local ActorService. ActorService always creates actors locally. To spawn on '{}', call that node's ActorService directly.",
-                node_id, node_id
-            ).into());
+        // Normalize actor_id with build_actor_id; reject if input specifies a different node.
+        let local_actor_id = match parse_actor_id(actor_id) {
+            Ok(parsed) => {
+                if parsed.node_id.is_empty() || parsed.node_id == self.local_node_id {
+                    build_actor_id(&parsed.id, actor_type, parsed.namespace.as_deref(), &self.local_node_id)
+                } else {
+                    return Err(format!(
+                        "Cannot spawn actor on remote node '{}' via local ActorService. ActorService always creates actors locally. To spawn on '{}', call that node's ActorService directly.",
+                        parsed.node_id, parsed.node_id
+                    ).into());
+                }
+            }
+            Err(_) => {
+                build_actor_id(actor_id, actor_type, None, &self.local_node_id)
+            }
         };
 
         // Use ActorFactory from ServiceLocatorImpl (direct access to inherent method)
@@ -395,11 +391,19 @@ impl ActorServiceImpl {
         // correlation_id is now String - check if not empty
         if !message.correlation_id.is_empty() {
             let correlation_id = message.correlation_id.clone();
-            // Parse actor@node ID
-            let (actor_name, node_id) = if let Some((name, node)) = actor_id.split_once('@') {
-                (name.to_string(), node.to_string())
-            } else {
-                (actor_id.to_string(), self.local_node_id.clone())
+            let (actor_id_full, node_id) = match parse_actor_id(actor_id) {
+                Ok(parsed) => (
+                    parsed.to_actor_id(),
+                    if parsed.node_id.is_empty() {
+                        self.local_node_id.clone()
+                    } else {
+                        parsed.node_id
+                    },
+                ),
+                Err(_) => (
+                    build_actor_id(actor_id, "", None, &self.local_node_id),
+                    self.local_node_id.clone(),
+                ),
             };
 
             // If local actor, route reply via MessageSender.tell()
@@ -409,13 +413,11 @@ impl ActorServiceImpl {
                 // Use MessageSender.tell() - ActorRef::tell() handles reply routing automatically
                 // When MessageSender.tell() is called, it eventually calls ActorRef::tell(),
                 // which checks ReplyWaiterRegistry for the correlation_id and routes to ReplyWaiter
-                let actor_id_full = format!("{}@{}", actor_name, node_id);
-                
                 // Try lookup with constructed ID first
                 let mut sender_opt = self.get_actor_registry().await.lookup_actor(&actor_id_full).await;
                 
-                // If not found and original actor_id already has @, try direct lookup (in case parsing was wrong)
-                if sender_opt.is_none() && actor_id.contains('@') && actor_id != actor_id_full {
+                // If not found and original actor_id differs from built full ID, try direct lookup
+                if sender_opt.is_none() && actor_id != actor_id_full {
                     sender_opt = self.get_actor_registry().await.lookup_actor(&actor_id.to_string()).await;
                 }
                 
@@ -521,11 +523,15 @@ impl ActorServiceImpl {
             );
         }
         
-        // Parse actor_id to determine if local or remote
-        let (_actor_name, node_id) = if let Some((name, node)) = actor_id.split_once('@') {
-            (name.to_string(), node.to_string())
-        } else {
-            (actor_id.to_string(), self.local_node_id.clone())
+        let node_id = match parse_actor_id(actor_id) {
+            Ok(parsed) => {
+                if parsed.node_id.is_empty() {
+                    self.local_node_id.clone()
+                } else {
+                    parsed.node_id
+                }
+            }
+            Err(_) => self.local_node_id.clone(),
         };
 
         if node_id == self.local_node_id {
@@ -742,9 +748,7 @@ impl ActorServiceImpl {
         wait_for_response: bool,
         timeout: Option<std::time::Duration>,
     ) -> Result<(String, Option<Message>), Status> {
-        // Construct full actor ID
-        let actor_id = format!("{}@{}", actor_name, node_id);
-        
+        let actor_id = build_actor_id(actor_name, "", None, node_id);
         // Use unified routing module (returns Future, converts ActorRefError to Status)
         use plexspaces_actor::routing::route_local as routing_route_local;
         let result = routing_route_local(
@@ -1012,21 +1016,19 @@ impl ActorServiceTrait for ActorServiceImpl {
             return Err(Status::invalid_argument("Missing actor_type"));
         }
         
-        // Determine actor ID: client-specified or server-generated
+        // Determine actor ID: client-specified or server-generated; use full actor-id format
         let node_id = self.local_node_id.clone();
+        let ns = ctx.namespace();
+        let namespace = if ns.is_empty() { None } else { Some(ns) };
         let actor_id = if !req.actor_id.is_empty() {
-            // Client-specified ID (for virtual actors)
-            // Ensure it includes node suffix for consistency
-            if req.actor_id.contains('@') {
-                req.actor_id.clone()
-            } else {
-                format!("{}@{}", req.actor_id, node_id)
+            match parse_actor_id(&req.actor_id) {
+                Ok(parsed) if !parsed.node_id.is_empty() => req.actor_id.clone(),
+                _ => build_actor_id(&req.actor_id, &req.actor_type, namespace, &node_id),
             }
         } else {
-            // Server-generated ID (use timestamp-based ID)
             use std::time::{SystemTime, UNIX_EPOCH};
             let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            format!("actor-{}@{}", timestamp, node_id)
+            build_actor_id(&format!("actor-{}", timestamp), &req.actor_type, namespace, &node_id)
         };
         
         // Clone values before using them (needed for both spawn_actor and proto_actor)
@@ -1930,13 +1932,14 @@ impl ActorServiceTrait for ActorServiceImpl {
         let actor_factory = self.service_locator.get_actor_factory().await
             .ok_or_else(|| Status::internal("Actor factory not available"))?;
         
-        // Build full actor ID if needed (actor_id@node_id format)
-        let full_actor_id = if actor_id.contains('@') {
-            actor_id.clone()
-        } else {
-            let node_id = self.service_locator.get_node_id().await
-                .ok_or_else(|| Status::internal("Node ID not available"))?;
-            format!("{}@{}", actor_id, node_id)
+        // Build full actor ID if needed (use parse/build from actor_id)
+        let full_actor_id = match parse_actor_id(&actor_id) {
+            Ok(parsed) if !parsed.node_id.is_empty() => actor_id.clone(),
+            _ => {
+                let node_id = self.service_locator.get_node_id().await
+                    .ok_or_else(|| Status::internal("Node ID not available"))?;
+                build_actor_id(&actor_id, "", None, &node_id)
+            }
         };
         
         // Stop the actor using actor factory with tenant isolation validation
@@ -2232,8 +2235,8 @@ impl ActorServiceTrait for ActorServiceImpl {
         use crate::actor_service::partition::calculate_shard_id;
         let shard_id = calculate_shard_id(
             &req.partition_key,
-            group.partition_strategy,
-            group.shard_count,
+            Self::shard_group_config(&group).partition_strategy,
+            Self::shard_group_config(&group).shard_count,
             None, // TODO: Support range boundaries from group metadata
         ).map_err(|e| Status::invalid_argument(format!("Partition calculation failed: {}", e)))?;
 
@@ -2287,122 +2290,151 @@ impl ActorServiceTrait for ActorServiceImpl {
 }
 
 impl ActorServiceImpl {
+    /// Returns the unified DataParallelConfig for a ShardGroup (required).
+    fn shard_group_config(group: &ShardGroup) -> &DataParallelConfig {
+        group.config.as_ref().expect("ShardGroup.config required")
+    }
+
     /// Internal implementation of create_shard_group (used by both gRPC and trait)
     async fn create_shard_group_internal(
         &self,
         ctx: &RequestContext,
         req: CreateShardGroupRequest,
     ) -> Result<CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
-        // Validate request
-        if req.group_id.is_empty() {
-            return Err("group_id is required".into());
-        }
-        if req.actor_type.is_empty() {
-            return Err("actor_type is required".into());
-        }
-        if req.shard_count == 0 {
-            return Err("shard_count must be >= 1".into());
-        }
-        if req.shard_count > 10000 {
-            return Err("shard_count must be <= 10000".into());
-        }
+        let config = req.config.as_ref().ok_or("config is required")?;
+        let group_id = config.group_id.as_str();
+        let shard_count = config.shard_count;
+
+        // config.group_id, config.shard_count, and actor_type are validated by proto (buf.validate);
+        // config is required; group_id min_len:1 max_len:255; shard_count gte:1 lte:1000000000; actor_type min_len:1 max_len:128.
 
         // Check if group already exists
         {
             let groups = self.shard_groups.read().await;
-            if groups.contains_key(&req.group_id) {
-                return Err(format!("ShardGroup {} already exists", req.group_id).into());
+            if groups.contains_key(group_id) {
+                return Err(format!("ShardGroup {} already exists", group_id).into());
             }
         }
 
-        // Spawn shard actors
+        // Resolve target node list for placement (same_node, node_ids, or from_registry)
+        use plexspaces_proto::v1::actor::NodePlacementStrategy;
+        let registry = self
+            .service_locator
+            .actor_registry()
+            .await
+            .ok_or_else(|| "ActorRegistry not available".to_string())?;
+        let local_node_id = registry.local_node_id();
+
+        let target_nodes: Vec<String> = if let Some(placement) = &config.placement {
+            if !placement.node_ids.is_empty() {
+                placement.node_ids.clone()
+            } else if placement.strategy == NodePlacementStrategy::NodePlacementStrategyFromRegistry as i32 {
+                let node_registry = self
+                    .service_locator
+                    .get_node_registry()
+                    .await
+                    .ok_or_else(|| "NodeRegistry not available for from_registry placement".to_string())?;
+                let cluster_opt =
+                    if placement.cluster.is_empty() { None } else { Some(placement.cluster.as_str()) };
+                let (registrations, _) = node_registry
+                    .list_nodes(&ctx, cluster_opt, 1000, "")
+                    .await
+                    .map_err(|e| format!("list_nodes failed: {}", e))?;
+                registrations
+                    .into_iter()
+                    .map(|r| r.node_id)
+                    .collect()
+            } else {
+                vec![local_node_id.to_string()]
+            }
+        } else {
+            vec![local_node_id.to_string()]
+        };
+
+        if target_nodes.is_empty() {
+            return Err("Placement produced no target nodes (node_ids empty or list_nodes returned none)".into());
+        }
+
         let actor_factory = self.service_locator.get_actor_factory().await
             .ok_or_else(|| "Actor factory not available".to_string())?;
 
-        let mut shard_actor_ids = Vec::with_capacity(req.shard_count as usize);
-        let partition_strategy = req.partition_strategy;
+        let mut shard_actor_ids = Vec::with_capacity(shard_count as usize);
 
-        for shard_id in 0..req.shard_count {
-            // Generate unique actor ID using ULID (no shard-id in ID for rebalancing)
-            // Format: "{group_id}-{ulid}" - spawn_actor will normalize to add @node_id
-            let actor_id_base = format!("{}-{}", req.group_id, ulid::Ulid::new());
+        for shard_id in 0..shard_count {
+            let actor_id_base = format!("{}-{}", group_id, ulid::Ulid::new());
             let initial_state = req.initial_state.clone();
 
-            // Build ActorConfig with labels -> ActorResourceRequirements mapping
             let mut shard_config = req.shard_config.clone().unwrap_or_default();
-            
-            // Add group_id to actor_groups (not shard_id - actors shouldn't know their shard for rebalancing)
-            shard_config.actor_groups.push(req.group_id.clone());
-            
-            // If ShardGroup has labels, set them in ActorResourceRequirements for node placement
-            if !req.labels.is_empty() {
+            shard_config.actor_groups.push(config.group_id.clone());
+            if config.placement.is_some() {
                 use plexspaces_proto::v1::actor::ActorResourceRequirements;
                 shard_config.resource_requirements = Some(ActorResourceRequirements {
-                    resources: shard_config.resource_requirements.as_ref()
-                        .and_then(|r| r.resources.clone()),
-                    required_labels: req.labels.clone(),
-                    placement: shard_config.resource_requirements.as_ref()
-                        .and_then(|r| r.placement.clone()),
-                    actor_groups: shard_config.resource_requirements.as_ref()
-                        .map(|r| r.actor_groups.clone())
-                        .unwrap_or_default(),
+                    placement: config.placement.clone(),
                 });
             }
 
-            // Spawn shard actor - spawn_actor normalizes ID to include @node_id
-            match actor_factory.spawn_actor(
-                &ctx,
-                &actor_id_base,
-                &req.actor_type,
-                initial_state,
-                Some(shard_config),
-                req.labels.clone(), // Pass labels as well for compatibility
-                vec![], // facets
-            ).await {
-                Ok(_actor_ref) => {
-                    // CRITICAL: Get the actual node ID from ActorRegistry (not self.local_node_id)
-                    // spawn_actor normalizes the ID internally using the registry's local_node_id
-                    let registry = self.service_locator.actor_registry().await
-                        .ok_or_else(|| "ActorRegistry not available".to_string())?;
-                    
-                    // Get the actual local node ID from registry (this is what spawn_actor uses)
-                    let actual_node_id = registry.local_node_id();
-                    
-                    // Construct the normalized ID using the actual node ID from registry
-                    let normalized_id = if actor_id_base.contains('@') {
-                        actor_id_base.clone()
-                    } else {
-                        format!("{}@{}", actor_id_base, actual_node_id)
-                    };
-                    
-                    // Verify actor is registered by looking it up
-                    if let Some(_found_ref) = registry.lookup_actor(&normalized_id).await {
-                        shard_actor_ids.push(normalized_id);
-                    } else {
-                        // Fallback: use constructed ID (shouldn't happen, but be defensive)
-                        tracing::warn!(
-                            "Shard actor spawned but not found in registry: {}, using constructed ID",
-                            normalized_id
-                        );
-                        shard_actor_ids.push(normalized_id);
+            let target_node = &target_nodes[shard_id as usize % target_nodes.len()];
+
+            if target_node == local_node_id {
+                let ns = ctx.namespace();
+                let namespace = if ns.is_empty() { None } else { Some(ns) };
+                let full_id = build_actor_id(&actor_id_base, &req.actor_type, namespace, target_node);
+                match actor_factory.spawn_actor(
+                    &ctx,
+                    &full_id,
+                    &req.actor_type,
+                    initial_state,
+                    Some(shard_config),
+                    std::collections::HashMap::new(),
+                    vec![],
+                ).await {
+                    Ok(_sender) => {
+                        shard_actor_ids.push(full_id);
+                    }
+                    Err(e) => {
+                        for spawned_id in &shard_actor_ids {
+                            let _ = actor_factory.stop_actor(ctx, spawned_id).await;
+                        }
+                        return Err(format!("Failed to spawn shard {} (local): {}", shard_id, e).into());
                     }
                 }
-                Err(e) => {
-                    // Cleanup: stop already-spawned shards
+            } else {
+                // Remote node: resolve channel and call SpawnActor on the target node via gRPC.
+                // On failure we stop only locally-spawned shards; remote shards are left running
+                // (caller may retry or orchestration can terminate them via TerminateActor).
+                let channel = self.service_locator.get_actor_service_client(target_node).await
+                    .map_err(|e| format!("Failed to get client for node {}: {}", target_node, e))?;
+                let mut client = plexspaces_proto::ActorServiceClient::new(channel);
+                let spawn_req = SpawnActorRequest {
+                    actor_type: req.actor_type.clone(),
+                    actor_id: actor_id_base.clone(),
+                    initial_state,
+                    config: Some(shard_config),
+                    labels: std::collections::HashMap::new(),
+                    facets: vec![],
+                    namespace: ctx.namespace().to_string(),
+                };
+                let spawn_response = client
+                    .spawn_actor(tonic::Request::new(spawn_req))
+                    .await
+                    .map_err(|e| format!("Remote spawn to {} failed: {}", target_node, e))?;
+                let actor_ref = spawn_response
+                    .into_inner()
+                    .actor_ref;
+                if actor_ref.is_empty() {
                     for spawned_id in &shard_actor_ids {
                         let _ = actor_factory.stop_actor(ctx, spawned_id).await;
                     }
-                    return Err(format!("Failed to spawn shard {}: {}", shard_id, e).into());
+                    return Err(format!("Remote spawn to {} returned empty actor_ref", target_node).into());
                 }
+                shard_actor_ids.push(actor_ref);
             }
         }
 
-        // Create ShardGroup metadata
+        // Create ShardGroup metadata (unified config; placement in config carries required_labels)
         let group = ShardGroup {
-            group_id: req.group_id.clone(),
+            config: Some(config.clone()),
             actor_type: req.actor_type.clone(),
-            shard_count: req.shard_count,
-            partition_strategy,
             shard_actor_ids: shard_actor_ids.clone(),
             state: ShardGroupState::ShardGroupStateActive as i32,
             created_at: Some(prost_types::Timestamp {
@@ -2413,14 +2445,13 @@ impl ActorServiceImpl {
                 nanos: 0,
             }),
             metadata: req.metadata.clone(),
-            labels: req.labels.clone(),
             rebalance_status: None,
         };
 
         // Store group
         {
             let mut groups = self.shard_groups.write().await;
-            groups.insert(req.group_id.clone(), group.clone());
+            groups.insert(config.group_id.clone(), group.clone());
         }
 
         // Integrate with TaskRouter for actor-level routing
@@ -2429,13 +2460,13 @@ impl ActorServiceImpl {
         if let Some(task_router) = self.service_locator.get_task_router().await {
             if let Err(e) = task_router.register_group(group.clone()).await {
                 tracing::warn!(
-                    group_id = %req.group_id,
+                    group_id = %config.group_id,
                     error = %e,
                     "Failed to register ShardGroup in TaskRouter (non-fatal)"
                 );
             } else {
                 tracing::debug!(
-                    group_id = %req.group_id,
+                    group_id = %config.group_id,
                     shard_count = shard_actor_ids.len(),
                     "Registered ShardGroup in TaskRouter"
                 );
@@ -2455,13 +2486,13 @@ impl ActorServiceImpl {
 
         // Emit metrics
         metrics::counter!("plexspaces_shard_group_created_total", 
-            "group_id" => req.group_id.clone(),
+            "group_id" => config.group_id.clone(),
             "actor_type" => req.actor_type.clone(),
-            "shard_count" => req.shard_count.to_string());
+            "shard_count" => shard_count.to_string());
 
         tracing::info!(
-            group_id = %req.group_id,
-            shard_count = req.shard_count,
+            group_id = %config.group_id,
+            shard_count = shard_count,
             "Created ShardGroup"
         );
 
@@ -2501,8 +2532,8 @@ impl ActorServiceImpl {
             let partition_key = partition_key_str.as_bytes();
             let shard_id = calculate_shard_id(
                 partition_key,
-                group.partition_strategy,
-                group.shard_count,
+                Self::shard_group_config(&group).partition_strategy,
+                Self::shard_group_config(&group).shard_count,
                 None,
             ).map_err(|e| format!("Partition calculation failed: {}", e))?;
             
@@ -2668,13 +2699,18 @@ impl ActorServiceImpl {
             operation_name
         );
 
-        // CRITICAL: Use ONE temporary sender for all shards with format "{TEMP_SENDER_PREFIX}-{operation_id}@{node_id}"
+        // CRITICAL: Use ONE temporary sender for all shards (legacy format id@node_id via build_actor_id).
         // Each shard gets its own correlation_id (format: "req-shard-{shard_id}-{ulid}" for debugging)
         // All replies go to the same temporary sender ActorRef, but are routed to the correct ReplyWaiter
         // by correlation_id via ReplyWaiterRegistry (which supports multiple correlation_ids)
         use plexspaces_core::TEMP_SENDER_PREFIX;
         let operation_id = Ulid::new().to_string();
-        let temp_sender_id = format!("{}-{}@{}", TEMP_SENDER_PREFIX, operation_id, self.local_node_id);
+        let temp_sender_id = build_actor_id(
+            &format!("{}-{}", TEMP_SENDER_PREFIX, operation_id),
+            "",
+            None,
+            &self.local_node_id,
+        );
         let expires_at = Instant::now() + (timeout * 2);
         // CRITICAL: Use RequestContext from caller (tenant_id flows from API → ActorBuilder → ActorRef)
 
@@ -2933,7 +2969,7 @@ impl ActorServiceImpl {
             tracing::warn!(
                 group_id = %group_id,
                 total_duration_ms = total_duration.as_millis(),
-                shards_queried = group.shard_count,
+                shards_queried = Self::shard_group_config(&group).shard_count,
                 shards_responded,
                 shards_failed,
                 failed_shards = ?failed_shards,
@@ -2941,20 +2977,20 @@ impl ActorServiceImpl {
                 max_latency_ms = max_latency.as_millis(),
                 "⚠️  [MAP_SHARD_GROUP] Parallel map operation completed: {}/{} shards responded, {} failed",
                 shards_responded,
-                group.shard_count,
+                Self::shard_group_config(&group).shard_count,
                 shards_failed
             );
         } else {
             tracing::info!(
                 group_id = %group_id,
                 total_duration_ms = total_duration.as_millis(),
-                shards_queried = group.shard_count,
+                shards_queried = Self::shard_group_config(&group).shard_count,
                 shards_responded,
                 min_latency_ms = if min_latency == Duration::MAX { 0 } else { min_latency.as_millis() },
                 max_latency_ms = max_latency.as_millis(),
                 "✅ [MAP_SHARD_GROUP] Parallel map operation completed: {}/{} shards responded successfully",
                 shards_responded,
-                group.shard_count
+                Self::shard_group_config(&group).shard_count
             );
         }
 
@@ -2962,7 +2998,7 @@ impl ActorServiceImpl {
         Ok(MapShardGroupResponse {
             shard_results: shard_responses,
             stats: Some(ScatterGatherStats {
-                shards_queried: group.shard_count,
+                shards_queried: Self::shard_group_config(&group).shard_count,
                 shards_responded,
                 shards_failed,
                 max_latency: Some(prost_types::Duration {
@@ -3151,7 +3187,7 @@ impl ActorServiceImpl {
         tracing::info!(
             group_id = %group_id,
             total_duration_ms = total_duration.as_millis(),
-            shards_queried = group.shard_count,
+            shards_queried = Self::shard_group_config(&group).shard_count,
             shards_responded,
             shards_failed,
             min_latency_ms = if min_latency == Duration::MAX { 0 } else { min_latency.as_millis() },
@@ -3159,14 +3195,14 @@ impl ActorServiceImpl {
             has_aggregated_result = result.is_some(),
             "✅ [SCATTER_GATHER] Scatter-gather operation completed: {}/{} shards responded successfully",
             shards_responded,
-            group.shard_count
+            Self::shard_group_config(&group).shard_count
         );
 
         Ok(ScatterGatherResponse {
             result,
             shard_responses,
             stats: Some(ScatterGatherStats {
-                shards_queried: group.shard_count,
+                shards_queried: Self::shard_group_config(&group).shard_count,
                 shards_responded: shards_responded as u32,
                 shards_failed: shards_failed as u32,
                 max_latency: Some(prost_types::Duration {
@@ -3341,8 +3377,8 @@ impl ActorServiceImpl {
         use crate::actor_service::partition::calculate_shard_id;
         let shard_id = calculate_shard_id(
             &req.partition_key,
-            group.partition_strategy,
-            group.shard_count,
+            Self::shard_group_config(&group).partition_strategy,
+            Self::shard_group_config(&group).shard_count,
             None, // TODO: Support range boundaries from group metadata
         ).map_err(|e| Status::invalid_argument(format!("Partition calculation failed: {}", e)))?;
 
@@ -3433,8 +3469,8 @@ impl ActorServiceImpl {
             let partition_key = partition_key_str.as_bytes();
             let shard_id = calculate_shard_id(
                 partition_key,
-                group.partition_strategy,
-                group.shard_count,
+                Self::shard_group_config(&group).partition_strategy,
+                Self::shard_group_config(&group).shard_count,
                 None,
             ).map_err(|e| Status::invalid_argument(format!("Partition calculation failed: {}", e)))?;
             
@@ -4171,18 +4207,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_actor_id() {
-        // Test parsing actor_id format
+        use plexspaces_core::actor_id::{parse_actor_id, build_actor_id};
         let actor_id = "counter@node1";
-        let result = actor_id.split_once('@');
-        assert!(result.is_some());
-        let (actor_name, node_id) = result.unwrap();
-        assert_eq!(actor_name, "counter");
-        assert_eq!(node_id, "node1");
+        let parsed = parse_actor_id(actor_id).expect("valid legacy format");
+        assert_eq!(parsed.id, "");
+        assert_eq!(parsed.actor_type, "counter");
+        assert_eq!(parsed.namespace, None);
+        assert_eq!(parsed.node_id, "node1");
+        assert_eq!(parsed.to_actor_id(), "//counter@node1");
 
-        // Test invalid format
-        let invalid = "invalid";
-        let result = invalid.split_once('@');
-        assert!(result.is_none());
+        let full_id = "myid//MyType::ns@node2";
+        let parsed2 = parse_actor_id(full_id).expect("valid full format");
+        assert_eq!(parsed2.id, "myid");
+        assert_eq!(parsed2.actor_type, "MyType");
+        assert_eq!(parsed2.namespace.as_deref(), Some("ns"));
+        assert_eq!(parsed2.node_id, "node2");
+        assert_eq!(parsed2.to_actor_id(), full_id);
+
+        let invalid = "invalid_no_at";
+        assert!(parse_actor_id(invalid).is_err());
+
+        assert_eq!(build_actor_id("x", "", None, "n1"), "x@n1");
     }
 
     // ========================================================================

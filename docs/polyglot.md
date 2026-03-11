@@ -76,6 +76,8 @@ Actor-to-actor communication:
 
 **Use Cases**: Request-reply patterns, actor spawning, message routing
 
+**Multi-node leader-worker**: For one logical run with work split across nodes, the first node is the leader. All SDKs (Rust, Python, TypeScript, Go) provide the same leader-worker API: **list worker node IDs** and **spawn actor on node** (for non-virtual workers). Virtual actors are created lazily on first message—no ensure step. See [SDK - Leader-worker](sdk.md#leader-worker-multi-node-one-run).
+
 #### 2. **TupleSpace** (`tuplespace.wit`)
 Linda-style distributed coordination:
 - `write(ctx: context, tuple: tuple-data)`

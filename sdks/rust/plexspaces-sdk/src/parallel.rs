@@ -37,7 +37,7 @@ impl ParallelClient {
     ///
     /// ## Unified API Design
     /// - Uses ShardGroup for data-parallel sharding
-    /// - Labels flow to ActorResourceRequirements for node placement
+    /// - Labels flow to DataParallelConfig.placement.required_labels (NodePlacement) for scheduler node matching
     /// - Aligns with ElasticPool patterns (worker pool abstraction)
     /// - Removes boilerplate: auto-creates RequestContext, handles errors
     pub async fn create_worker_pool(
@@ -60,7 +60,11 @@ impl ParallelClient {
                 labels,
             )
             .await?;
-        Ok(group.group_id)
+        Ok(group
+            .config
+            .as_ref()
+            .map(|c| c.group_id.clone())
+            .unwrap_or_default())
     }
 
     /// Parallel Map: Apply function to all workers in parallel

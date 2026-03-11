@@ -16,7 +16,6 @@ use plexspaces_core::{
     ActorContext, BehaviorError, BehaviorType, FacetManager, VirtualActorManager, RequestContext,
     MessageSender, Message,
 };
-use plexspaces_mailbox::Mailbox;
 use plexspaces_object_registry::SqliteObjectRegistryRepository;
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_proto::actor::v1::{
@@ -241,15 +240,15 @@ async fn create_test_registry_with_remote_actors(
         // Clone sender before moving it, as we may need it again for the second registration
         let sender_clone = sender.clone();
         actor_registry
-            .register_actor(&ctx, local_actor_id.clone(), sender, None, None, None)
+            .register_actor(&ctx, local_actor_id.clone(), sender, None, None, None, None)
             .await;
-        
+
         // Also register with the original "remote-looking" ID for lookup
         // This allows tests to use "actor@node2" format while the actor is actually local
         // We create a mapping by registering the same sender under both IDs
         if actor_id_with_node != &local_actor_id {
             actor_registry
-                .register_actor(&ctx, actor_id_with_node.to_string(), sender_clone, None, None, None)
+                .register_actor(&ctx, actor_id_with_node.to_string(), sender_clone, None, None, None, None)
                 .await;
         }
     }

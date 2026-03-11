@@ -686,13 +686,10 @@ message ActorConfig {
   SupervisionStrategy supervision_strategy = 6;
   map<string, google.protobuf.Any> properties = 7;
 
-  // Orleans-inspired placement configuration
-  PlacementHint placement_hint = 10;
-
   // Orleans-inspired stateless worker configuration
   StatelessWorkerConfig stateless_worker_config = 11;
 
-  // Data-parallel actor configuration (if part of actor group)
+  // Data-parallel configuration (if part of a shard group)
   DataParallelConfig data_parallel_config = 12;
 
   // State management mode (traditional vs lattice-based)
@@ -704,7 +701,7 @@ message ActorConfig {
   // Resource-aware scheduling: Actor resource requirements
   ActorResourceRequirements resource_requirements = 16;
 
-  // Actor groups (for task routing and co-scheduling)
+  // Shard group IDs (for task routing and co-scheduling)
   repeated string actor_groups = 17 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
 
   // NOTE: Actors are ALWAYS isolated (Erlang/OTP principle)
@@ -791,40 +788,11 @@ message ResourceRequirements {
   map<string, string> custom_requirements = 4;
 }
 
-// Placement hint for actor activation
-message PlacementHint {
-  PlacementStrategy strategy = 1;
-  string preferred_node_id = 2 [(buf.validate.field).string.max_len = 255];
-  map<string, string> affinity_labels = 3;
-  ResourceRequirements requirements = 4;
-}
-
-// Actor resource requirements for resource-aware scheduling
+// Actor placement for resource-aware scheduling. Single source for labels, affinity, and resources.
+// Scheduler (crates/scheduler) uses placement.required_labels and placement.resource_requirements to select nodes.
 message ActorResourceRequirements {
-  // Required resources (CPU, memory, disk, GPU)
-  plexspaces.common.v1.ResourceSpec resources = 1;
-  
-  // Required node labels (Kubernetes-inspired label selector)
-  // All labels must match for node to be eligible
-  map<string, string> required_labels = 2;
-  
-  // Placement preferences
-  PlacementPreferences placement = 3;
-  
-  // Actor groups (for task routing and co-scheduling)
-  repeated string actor_groups = 4 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
-}
-
-// Placement preferences for resource-aware scheduling
-message PlacementPreferences {
-  // Placement strategy
-  PlacementStrategy strategy = 1;
-  
-  // Preferred node IDs (hint, not requirement)
-  repeated string preferred_node_ids = 2 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
-  
-  // Avoid node IDs (anti-affinity)
-  repeated string avoid_node_ids = 3 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
+  // Unified placement (strategy, required_labels, resource_requirements, preferred/avoid node IDs)
+  NodePlacement placement = 1;
 }
 
 // Stateless worker configuration (Orleans-inspired)
@@ -863,45 +831,44 @@ enum RebalancePolicy {
   REBALANCE_POLICY_LOAD_BASED = 3;  // Rebalance based on load metrics
 }
 
-// Data-parallel actor configuration
+// Data-parallel (shard group) strategy; same for all shards in the group.
+// Shard identity is implicit (index in ShardGroup.shard_actor_ids), not stored per-actor.
 message DataParallelConfig {
-  // Actor group ID this actor belongs to
+  // Shard group ID
   string group_id = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
 
-  // Total number of shards in the group
-  uint32 shard_count = 2 [(buf.validate.field).uint32 = {gte: 1, lte: 10000}];
+  // Number of shards in the group (1 to 1 billion)
+  uint32 shard_count = 2 [(buf.validate.field).uint32 = {gte: 1, lte: 1000000000}];
 
-  // This actor's shard ID (0 to shard_count-1)
-  uint32 shard_id = 3 [(buf.validate.field).uint32.lte = 10000];
+  reserved 3;
+  reserved "shard_id";  // Removed: shard identity is index in ShardGroup.shard_actor_ids
 
   // Partitioning strategy
   PartitionStrategy partition_strategy = 4;
 
   // Rebalancing policy
   RebalancePolicy rebalance_policy = 5;
+
+  // Node placement for multi-node leader-worker (same_node, from_registry, node_ids)
+  NodePlacement placement = 6;
 }
 
 // ============================================================================
-// ACTOR GROUPS - Shard Group Messages (data-parallel sharding)
+// Shard groups (data-parallel sharding)
 // ============================================================================
-// Labels are used for node placement: ActorResourceRequirements.required_labels
-// matches NodeCapacity.labels (from NodeRegistry capabilities). See
-// docs/CLUSTER_AND_ROUTING_COHESION.md.
+// Node placement uses config.placement (NodePlacement); scheduler matches
+// config.placement.required_labels and resource_requirements to NodeCapacity.
 
-// Shard group - collection of sharded actors with the same behavior
+// Shard group: unified config (DataParallelConfig) plus actor refs and state.
 message ShardGroup {
-  string group_id = 1;
+  // Strategy for the group (group_id, shard_count, partition_strategy, rebalance_policy, placement)
+  DataParallelConfig config = 1;
   string actor_type = 2;
-  uint32 shard_count = 3;
-  PartitionStrategy partition_strategy = 4;
-  repeated string shard_actor_ids = 5;  // Indexed by shard_id 0 to shard_count-1
-  ShardGroupState state = 6;
-  google.protobuf.Timestamp created_at = 7;
-  map<string, string> metadata = 8;
-  // Labels for node placement (required_labels in ActorResourceRequirements)
-  map<string, string> labels = 9;
-  // Rebalancing status (if currently rebalancing)
-  RebalanceStatus rebalance_status = 10;
+  repeated string shard_actor_ids = 3;  // Indexed by shard index 0 to config.shard_count-1
+  ShardGroupState state = 4;
+  google.protobuf.Timestamp created_at = 5;
+  map<string, string> metadata = 6;
+  RebalanceStatus rebalance_status = 7;
 }
 
 enum ShardGroupState {
@@ -935,16 +902,48 @@ message RebalanceStatus {
   google.protobuf.Timestamp estimated_completion = 6;
 }
 
+// Node placement strategy for ShardGroup creation (leader-worker multi-node).
+// When absent or SAME_NODE, all shards are created on the node that receives the RPC.
+// FROM_REGISTRY uses NodeRegistry.list_nodes (optional cluster filter); NODE_IDS uses explicit list.
+enum NodePlacementStrategy {
+  NODE_PLACEMENT_STRATEGY_UNSPECIFIED = 0;  // Same as SAME_NODE: all shards on local node
+  NODE_PLACEMENT_STRATEGY_SAME_NODE = 1;
+  NODE_PLACEMENT_STRATEGY_FROM_REGISTRY = 2;  // Round-robin shards across nodes from NodeRegistry
+  NODE_PLACEMENT_STRATEGY_NODE_IDS = 3;       // Round-robin shards across given node_ids
+}
+
+// Unified node placement: strategy, affinity, and resource requirements.
+// Replaces PlacementHint, PlacementPreferences, and label/placement fields on ActorResourceRequirements.
+// Scheduler (crates/scheduler) matches nodes using required_labels and resource_requirements.
+message NodePlacement {
+  NodePlacementStrategy strategy = 1;
+  // For FROM_REGISTRY: optional cluster name filter (empty = all connected nodes)
+  string cluster = 2;
+  // For NODE_IDS: explicit node IDs to place shards on (round-robin)
+  repeated string node_ids = 3;
+  // Node must match all labels (Kubernetes-inspired). Used by scheduler for node selection.
+  map<string, string> required_labels = 4;
+  // Preferred node IDs (hint; scheduler may prefer these when scoring)
+  repeated string preferred_node_ids = 5 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
+  // Avoid node IDs (anti-affinity; scheduler excludes these)
+  repeated string avoid_node_ids = 6 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
+  // CPU, memory, disk, GPU requirements. Scheduler filters by NodeCapacity.available.
+  plexspaces.common.v1.ResourceSpec resource_requirements = 7;
+  // Affinity labels (co-location hint; scheduler may prefer nodes with matching labels)
+  map<string, string> affinity_labels = 8;
+  // Single preferred node (convenience; equivalent to preferred_node_ids with one element)
+  string preferred_node_id = 9 [(buf.validate.field).string.max_len = 255];
+}
+
 message CreateShardGroupRequest {
-  string group_id = 1;
-  string actor_type = 2;
-  uint32 shard_count = 3;
-  PartitionStrategy partition_strategy = 4;
-  ActorConfig shard_config = 5;
-  bytes initial_state = 6;
-  map<string, string> metadata = 7;
-  // Labels for node placement (shards placed on nodes matching required_labels)
-  map<string, string> labels = 8;
+  // Group strategy (group_id, shard_count, partition_strategy, rebalance_policy, placement)
+  // Use config.placement.required_labels for node placement; scheduler matches nodes by placement.
+  DataParallelConfig config = 1 [(buf.validate.field).required = true];
+  string actor_type = 2 [(buf.validate.field).string = {min_len: 1, max_len: 128}];
+  // Per-shard ActorConfig (optional data_parallel_config here is ignored; use config above)
+  ActorConfig shard_config = 3;
+  bytes initial_state = 4;
+  map<string, string> metadata = 5;
 }
 
 message CreateShardGroupResponse {

@@ -19,7 +19,7 @@ The SDK is a **thin decorator layer** over the core framework crates. Core funct
 |----------|--------|----------|--------------|
 | **Python** | ✅ Available | `sdks/python/` | WASM actors (componentize-py) |
 | **TypeScript** | ✅ Available | `sdks/typescript/` | WASM actors (jco componentize) |
-| **Rust** | ✅ Available | `sdks/rust/plexspaces-sdk` | Native (embedded) actors; annotations + spawn_actor + facets |
+| **Rust** | ✅ Available | `sdks/rust/plexspaces-sdk` | Native (embedded) actors; annotations + spawn / spawn_with_facets + facets |
 | **Go** | ✅ Available | `sdks/go/` | WASM actors (TinyGo) |
 
 ### Cross-SDK consistency: TupleSpace and Process Groups
@@ -122,7 +122,7 @@ All actors use the standardized format: `{id}//{actor_type}::{namespace}@{node_i
 **Examples**:
 - `user-123//read-state-tracker::orbit-read-state-ts@node-1` (full format)
 - `//read-state-tracker::orbit-read-state-ts@node-1` (no base ID, ULID generated)
-- `account-alice::default@node-abc123` (legacy format, backward compatible)
+- `account-alice::default@node-abc123` (alternate short format)
 
 **Factory Methods** (Rust SDK):
 ```rust
@@ -577,6 +577,24 @@ curl -X POST "http://localhost:8094/api/v1/actors/my-actor:default/invoke?timeou
 
 If the actor does not respond within the specified timeout, the HTTP API returns a `504 Gateway Timeout`. The actor itself continues running -- only the HTTP caller's wait is bounded.
 
+### Leader-worker (multi-node)
+
+Same API surface as Rust/TypeScript/Go. Use when driving multi-node from a Python script (entry node HTTP URL).
+
+```python
+from plexspaces import LeaderWorkerClient, list_worker_node_ids
+
+# One-off list
+node_ids = list_worker_node_ids("http://localhost:8092", page_size=100)
+
+# Or use a client (required for spawn_actor_on_node)
+client = LeaderWorkerClient("http://localhost:8092")
+node_ids = client.list_worker_node_ids(cluster=None, page_size=100)
+# Virtual actors: send to actor_id@node_id (lazy); no ensure.
+# Non-virtual: spawn on a specific node
+actor_ref = client.spawn_actor_on_node(node_ids[0], "worker", "w-1")
+```
+
 ---
 
 ## TypeScript SDK
@@ -655,6 +673,23 @@ The `--disable all` flag ensures the component only imports `plexspaces:simple-a
 **Serialization**: The SDK uses an iterative JSON serializer to avoid WASM recursion issues. Results are serialized to JSON strings in WASM and returned to the host, which parses them. This design avoids stack overflow issues in StarlingMonkey (the JavaScript engine used by jco componentize).
 
 Observability (metrics, tracing) for WASM actors is provided by the PlexSpaces runtime; the TypeScript SDK does not add its own. See [sdks/typescript/README.md](../sdks/typescript/README.md) and [examples/typescript/apps/bank_account](../examples/typescript/apps/bank_account/README.md) for a full example and E2E test.
+
+### Leader-worker (multi-node)
+
+Same API surface as Rust/Python/Go. Use when driving multi-node from Node or browser (entry node HTTP URL).
+
+```ts
+import { LeaderWorkerClient, listWorkerNodeIds } from "@plexspaces/sdk";
+
+// One-off list
+const nodeIds = await listWorkerNodeIds("http://localhost:8092", null, 100);
+
+// Or use a client (required for spawnActorOnNode)
+const client = new LeaderWorkerClient("http://localhost:8092");
+const ids = await client.listWorkerNodeIds(undefined, 100);
+// Virtual actors: send to actor_id@node_id (lazy); no ensure.
+const actorRef = await client.spawnActorOnNode(ids[0], "worker", "w-1");
+```
 
 ---
 
@@ -782,7 +817,7 @@ The Rust SDK provides unified abstractions for ShardGroup (data-parallel actors)
 **Key Features**:
 - **Unified API**: Same interface for WASM and gRPC (via `UnifiedShardGroupClient`)
 - **Boilerplate Removal**: Auto RequestContext, JSON conversion, error handling
-- **Resource-Based Routing**: Labels flow to ActorResourceRequirements for intelligent node placement
+- **Resource-Based Routing**: Labels flow to DataParallelConfig.placement.required_labels (NodePlacement) for scheduler node matching
 - **High-Level API**: `ParallelClient` provides map/reduce operations
 
 **Example: Unified ShardGroup Client**
@@ -888,9 +923,26 @@ let stats = parallel_client.parallel_update(
 - **Core Functionality**: Lives in `crates/services/src/actor_service/mod.rs` (ActorService trait)
 - **SDK Decorators**: `UnifiedShardGroupClient` wraps ActorService and removes boilerplate
 - **Feature Flags**: `grpc` feature (enabled by default) for remote clients; WASM builds can disable it
-- **Labels Flow**: ShardGroup labels → ActorResourceRequirements → NodeSelector → Node placement
+- **Labels Flow**: ShardGroup config.placement.required_labels (NodePlacement) → ActorResourceRequirements.placement → NodeSelector → Node placement
 
 See [Firecracker Multi-Tenant Example](../examples/rust/embedded/firecracker_multi_tenant/README.md) for a complete data-parallel actors demonstration.
+
+### Leader-worker (multi-node, one run)
+
+Multi-node parallelization is **one logical run** with work **split across nodes**. The **first node** that receives the run is the **leader**; it distributes work to workers on the same or other nodes.
+
+**Rust SDK** (host-side, feature `grpc`): `plexspaces_sdk::leader_worker` provides:
+
+| API | Purpose |
+|-----|---------|
+| `list_worker_node_ids(ctx, service_locator, cluster, page_size)` | Returns node IDs from the registry (after ConnectNodes). Leader uses this to distribute work. |
+| `spawn_actor_on_node(ctx, service_locator, node_id, actor_type, actor_id, initial_state, config, labels)` | Calls the target node’s SpawnActor. Use for non-virtual workers only. |
+
+**Virtual actors are lazy**: They are created on first message receive. The leader does not call any “ensure” or pre-create step. Deploy the worker type as virtual on all nodes, then send directly to `worker/chunk-1@node-B`, etc.; the target node creates the actor when it receives the first message. This is consistent across all runtimes (Rust, Python, TypeScript, Go).
+
+Core lives in main crates: NodeRegistry, get_actor_service_client, ActorService SpawnActor. The SDK is a thin wrapper over these.
+
+**Cross-SDK parity**: All four SDKs expose the same leader-worker API. **Rust** (in-process): `list_worker_node_ids(ctx, service_locator, cluster, page_size)`, `spawn_actor_on_node(ctx, service_locator, node_id, ...)`. **Python**: `LeaderWorkerClient(entry_http_url)`, `client.list_worker_node_ids(cluster=..., page_size=...)`, `client.spawn_actor_on_node(node_id, actor_type, ...)`, plus `list_worker_node_ids(entry_http_url, ...)`. **TypeScript**: `LeaderWorkerClient`, `listWorkerNodeIds()`, `spawnActorOnNode()`. **Go**: `NewLeaderWorkerClient(entryHTTPURL)`, `ListWorkerNodeIds()`, `SpawnActorOnNode()` (and `ListWorkerNodeIds` convenience). Virtual actors are lazy in all; no ensure step.
 
 ### Elastic pool (checkout/checkin)
 
@@ -1170,7 +1222,7 @@ let storage: Arc<dyn JournalStorage> = Arc::new(
 let reminder_facet = ReminderFacet::new(storage, json!({}), 50);
 
 // Spawn actor with both facets
-let actor_ref = spawn_actor(
+let actor_ref = spawn_with_facets(
     &ctx, sl, actor_id, "billing", BillingActor::new(),
     vec![Box::new(timer_facet), Box::new(reminder_facet)]
 ).await?;
@@ -1291,7 +1343,7 @@ impl AuditLogger {
 - **session_manager** — `#[actor]`, `#[plexspaces_handlers(custom)]`, TimerFacet; `examples/rust/apps/session_manager/`
 - **timeseries_forecasting** — uses `spawn_with_behavior_type` for BehaviorRegistry-based actors (pipeline by type name); see its README for when to use BehaviorRegistry vs SDK `spawn`
 
-Going forward, new Rust examples should use these SDK annotations and `spawn_actor` with facets where applicable. See [Examples](examples.md) and [Detailed Design - Behaviors](detailed-design.md#behaviors).
+Going forward, new Rust examples should use these SDK annotations and `spawn` / `spawn_with_facets` where applicable. See [Examples](examples.md) and [Detailed Design - Behaviors](detailed-design.md#behaviors).
 
 ---
 
@@ -1300,6 +1352,22 @@ Going forward, new Rust examples should use these SDK annotations and `spawn_act
 The Go SDK uses **TinyGo** to compile actors to WASM components. Actors implement a simple `Actor` interface with JSON-based state management. The SDK provides `BaseActor` for zero-boilerplate state serialization and `ActorRouter` for multi-actor modules.
 
 **Location**: `sdks/go/plexspaces/`
+
+### Leader-worker (multi-node)
+
+Same API surface as Rust/Python/TypeScript. Use when driving multi-node from a Go program (entry node HTTP URL). The `leader_worker` package is excluded from WASM builds (`//go:build !tinygo.wasm`).
+
+```go
+import "github.com/plexspaces/plexspaces/sdks/go/plexspaces"
+
+client := plexspaces.NewLeaderWorkerClient("http://localhost:8092")
+ids, err := client.ListWorkerNodeIds("", 100, "")
+// Virtual actors: send to actor_id@node_id (lazy); no ensure.
+actorRef, err := client.SpawnActorOnNode(ids[0], "worker", "w-1", nil, nil, nil)
+
+// Or one-off list:
+ids, err := plexspaces.ListWorkerNodeIds("http://localhost:8092", "", 100)
+```
 
 ### Installation
 
@@ -1520,7 +1588,7 @@ sdks/
 │   ├── package.json
 │   └── README.md          # TypeScript SDK docs
 ├── rust/                  # Rust SDK (native embedded actors)
-│   ├── plexspaces-sdk/    # Re-exports, spawn_actor, plexspaces_impl_handlers!
+│   ├── plexspaces-sdk/    # Re-exports, spawn/spawn_with_facets, plexspaces_impl_handlers!
 │   └── plexspaces-sdk-macros/  # #[derive(PlexSpacesActor)]
 └── go/                    # Go SDK (TinyGo WASM actors)
     └── plexspaces/

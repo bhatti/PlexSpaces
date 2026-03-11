@@ -3,6 +3,7 @@ pyproject.toml
 plexspaces/__init__.py
 plexspaces/decorators.py
 plexspaces/host.py
+plexspaces/leader_worker.py
 plexspaces/runtime.py
 plexspaces/workflow.py
 plexspaces.egg-info/PKG-INFO

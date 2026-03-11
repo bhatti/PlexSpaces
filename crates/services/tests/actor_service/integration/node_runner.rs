@@ -104,25 +104,25 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
     }
 }
 
-/// Register this node in the registry for discovery by other nodes
+/// Register this node in the registry for discovery by other nodes.
+/// Uses object_id = node_id and ObjectTypeNode so get_actor_service_client(node_id) can resolve.
+/// Uses empty tenant/namespace to match request_context_for_system_operations used by client lookup.
 async fn register_node(
     registry: &plexspaces_object_registry::ObjectRegistry,
     node_id: &str,
     port: u16,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let node_address = format!("127.0.0.1:{}", port);
-    let node_object_id = format!("_node@{}", node_id);
 
     let registration = ProtoObjectRegistration {
-        object_id: node_object_id.clone(),
-        object_type: ObjectType::ObjectTypeService as i32,
+        object_id: node_id.to_string(),
+        object_type: ObjectType::ObjectTypeNode as i32,
         object_category: "node".to_string(),
         grpc_address: node_address.clone(),
-        // tenant_id and namespace come from RequestContext, not registration
         ..Default::default()
     };
 
-    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
     registry.register(&ctx, registration).await?;
 
     println!("Registered node {} at {}", node_id, node_address);

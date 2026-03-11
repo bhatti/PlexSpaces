@@ -13,3 +13,7 @@ export {
   withRetry,
   type RetryConfig,
 } from "./workflow.js";
+export {
+  LeaderWorkerClient,
+  listWorkerNodeIds,
+} from "./leader_worker.js";

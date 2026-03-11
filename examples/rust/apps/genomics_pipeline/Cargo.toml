@@ -1,44 +1,27 @@
-# Genomics Pipeline - DNA Sequencing Workflow with SDK Annotations
+# Genomics Pipeline - DNA Sequencing Workflow (Rust WASM app)
 #
-# Demonstrates PlexSpaces workflow patterns for bioinformatics:
-# - GenomicsWorkflow (Workflow): Durable multi-step pipeline orchestration
-# - QualityControl, Alignment, VariantCalling steps
-# - Signal handlers for pause/resume/cancel
-# - Query handlers for status/progress
-#
-# Real-world use case: DNA sequencing analysis (GATK/Illumina-inspired)
-#
-# Build: cargo build
-# Run: cargo run
-# Test: ./test.sh
+# GenServer-style WASM actor: run (pipeline), query (status/progress/metrics), signal (pause/resume/cancel).
+# Build: ./build.sh (cargo build --target wasm32-wasip1 then wasm-tools component embed + new).
+# Test: Start server with ./scripts/server.sh, then ./test.sh [HTTP_PORT].
 
 [workspace]
 
 [package]
-name = "genomics-pipeline"
+name = "genomics-pipeline-wasm"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "DNA sequencing workflow demonstrating PlexSpaces workflow patterns"
+description = "Genomics pipeline WASM actor (QC → Alignment → Variant Calling)"
 
-[[bin]]
-name = "genomics_pipeline"
-path = "src/main.rs"
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
-plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
-plexspaces-core = { path = "../../../../crates/core" }
-plexspaces-actor = { path = "../../../../crates/actor" }
-plexspaces-behavior = { path = "../../../../crates/behavior" }
-plexspaces-journaling = { path = "../../../../crates/journaling" }
-plexspaces-proto = { path = "../../../../crates/proto" }
-plexspaces-facet = { path = "../../../../crates/facet" }
-
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-chrono = { version = "0.4", features = ["serde"] }
-ulid = "1.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

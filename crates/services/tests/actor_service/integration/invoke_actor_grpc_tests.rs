@@ -179,6 +179,7 @@ async fn test_invoke_actor_post_with_ask_true_real_grpc() {
         subpath: String::new(),
         ask: true, // Explicit ask: request-reply even for POST
         msg_type_override: "call".to_string(),
+        timeout: None,
     });
 
     let response = client.invoke_actor(request).await;

@@ -1,153 +1,74 @@
-# Genomics Pipeline
+# Genomics Pipeline (Rust WASM App)
 
-**Real-World Use Case**: DNA sequencing analysis workflow inspired by GATK/Illumina bioinformatics pipelines.
+**Single-actor only.** This example does **not** implement leader-worker or multi-node distribution. One WASM actor runs the full pipeline (QC → Alignment → Variant Calling) on the node that receives the request.
 
-## Quick Start
+## Scope: What runs where
+
+| Role   | Code / behavior |
+|--------|------------------|
+| Leader | **N/A** – there is no leader. |
+| Worker | **N/A** – there are no workers. |
+| This actor | Single pipeline actor. Handles `run`, `query`, `signal`. Runs QC → Alignment → Variant Calling in one process on the entry node only. |
+
+With multiple nodes, the test script deploys the same WASM app to every node and sends **one** `run` to the **entry node**. That run is executed entirely by this single actor on the entry node. Other nodes are not used for this pipeline run.
+
+## Real-world use case
+
+DNA sequencing analysis workflow (GATK/Illumina-style): one sample, one process. For distributed runs (leader splitting work across workers), a different example or app would implement that.
+
+## Quick start
+
+**1. Start the server** (from repo root):
+
+```bash
+./scripts/server.sh
+```
+
+**2. Build and test** (from this directory):
 
 ```bash
 cd examples/rust/apps/genomics_pipeline
-cargo run
+./build.sh
+./test.sh 8092
 ```
 
-## What It Demonstrates
+- `build.sh`: Builds for `wasm32-wasip1`, produces `genomics_actor.wasm`. Uses shared workspace target.
+- `test.sh [HTTP_PORT | host:port host:port ...]`: Deploys to each node, sends **one** run to the **entry node** (first in list). That run is executed by the **single** pipeline actor on the entry node only.
 
-1. **Workflow Actor** - Durable multi-step pipeline execution
-2. **Run Handler** - Main pipeline (QC → Alignment → Variant Calling)
-3. **Signal Handlers** - Pause, resume, cancel operations
-4. **Query Handlers** - Status, progress, performance metrics
-5. **Performance Tracking** - Compute vs coordinate time (granularity ratio)
+## What this example demonstrates
+
+1. **WASM app** – Implements `plexspaces:simple-actor` ABI (`init`, `handle`, `get-state`, `set-state`); GenServer-style ops: `run`, `query`, `signal`.
+2. **Single pipeline** – One actor runs QC → Alignment → Variant Calling synchronously.
+3. **Benchmarks** – Data size (input reads), compute vs coord time, efficiency, granularity. Uses 400k reads by default so the run is non-trivial and metrics are visible.
+4. **Observability** – Framework logs `WasmActor invoked` with `actor_id`, `op`, `payload_len`. Response includes `single_actor: true` and `data_size_reads`.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                 GenomicsPipelineWorkflow                        │
-├─────────────────────────────────────────────────────────────────┤
-│  State: PipelineState                                           │
-│    - sample_id, status, current_step                           │
-│    - qc_result, alignment_result, variant_result               │
-│    - compute_time_ms, coordinate_time_ms                       │
-│                                                                 │
-│  Handlers:                                                      │
-│    #[run_handler]              → Run 3-step pipeline            │
-│    #[signal_handler("pause")]  → Pause execution                │
-│    #[signal_handler("resume")] → Resume execution               │
-│    #[signal_handler("cancel")] → Cancel with reason             │
-│    #[query_handler("status")]  → Get current status             │
-│    #[query_handler("progress")]→ Get detailed progress          │
-│    #[query_handler("metrics")] → Get performance metrics        │
-└─────────────────────────────────────────────────────────────────┘
-```
+- **run**: Payload is `PipelineInput` (sample_id, num_reads, reference_genome, min_quality_score). Actor runs the three steps in WASM and returns `PipelineState` with results and compute/coordinate times. Response includes `single_actor: true` and `data_size_reads`.
+- **query**: Payload specifies `query` (`status`, `progress`, `metrics`). Metrics include `single_actor`, `data_size_reads`.
+- **signal**: Payload specifies `signal` (`pause`, `resume`, `cancel`).
 
-## Pipeline Steps
+## Data size and benchmarks
 
-```
-Input: FASTQ reads
-       │
-       ▼
-┌──────────────┐
-│ 1. QC        │ Filter low-quality reads, check adapters
-│              │ Output: passed_reads, avg_quality, gc_content
-└──────────────┘
-       │
-       ▼
-┌──────────────┐
-│ 2. Alignment │ Map reads to reference genome (hg38)
-│              │ Output: aligned_reads, alignment_rate
-└──────────────┘
-       │
-       ▼
-┌──────────────┐
-│ 3. Variants  │ Call SNPs and indels
-│              │ Output: total_variants, snps, indels
-└──────────────┘
-       │
-       ▼
-Output: PipelineState with all results
-```
+Default `num_reads` is 400k so the run takes a few seconds and metrics are meaningful. `test.sh` prints data size, compute/coord times, efficiency, and states clearly that the pipeline is single-actor on the entry node. Per-node actor counts (when multiple nodes are used) are printed from the nodes API.
 
-## SDK Pattern
+## Config
 
-```rust
-use plexspaces_sdk::*;
+`app-config.toml` defines one GenServer child, `pipeline`, with optional virtual_actor facet. The server loads the WASM and routes `run` / `query` / `signal` to this actor.
 
-// 1. Define workflow actor
-#[workflow_actor]
-struct GenomicsPipelineWorkflow {
-    state: PipelineState,
-    input: Option<PipelineInput>,
-}
+## Multi-node: what the test does (no distribution)
 
-// 2. Add workflow handlers
-#[plexspaces_handlers(workflow)]
-impl GenomicsPipelineWorkflow {
-    // Main pipeline execution
-    #[run_handler]
-    async fn run(&mut self, ctx: &ActorContext, input: Message) 
-        -> Result<Message, BehaviorError> {
-        // Step 1: Quality Control
-        // Step 2: Alignment
-        // Step 3: Variant Calling
-    }
-    
-    // Pause signal
-    #[signal_handler("pause")]
-    async fn on_pause(&mut self, ctx: &ActorContext, data: Message) 
-        -> Result<(), BehaviorError> {
-        self.state.is_paused = true;
-        Ok(())
-    }
-    
-    // Query metrics
-    #[query_handler("metrics")]
-    async fn get_metrics(&self, ctx: &ActorContext, params: Message) 
-        -> Result<Message, BehaviorError> {
-        // Return compute/coordinate time ratio
-    }
-}
+When you pass multiple host:port (e.g. `./test.sh localhost:8092 localhost:8094`):
 
-// 3. Spawn and run workflow
-let workflow: WorkflowRef = spawn_workflow_actor(
-    &ctx, service_locator, "sample-001", "sequencing",
-    GenomicsPipelineWorkflow::new(), vec![],
-).await?;
+1. **ConnectNodes**: Entry node connects to the other node(s) so the cluster is formed.
+2. **Deploy**: The same WASM app is deployed to **all** nodes (so each node could run this actor type).
+3. **One run**: The client sends **one** `run` to the **entry node** only. The **single** pipeline actor on the entry node executes the full run. No work is sent to other nodes.
+4. **Metrics**: The script may query each node’s API for actor counts and prints a clear line that execution was single-actor on the entry node.
 
-let result: PipelineState = workflow.run(&pipeline_input).await?;
-let metrics: Value = workflow.query("metrics").await?;
-```
+This example does **not** implement a leader that splits work to workers on other nodes. For that pattern, see the leader-worker SDK and multi-node examples that use it.
 
-## Key APIs
+## See also
 
-| API | Purpose |
-|-----|---------|
-| `#[workflow_actor]` | Mark struct as Workflow actor |
-| `#[run_handler]` | Main workflow execution entry |
-| `#[signal_handler("name")]` | Handle external signals (pause/resume/cancel) |
-| `#[query_handler("name")]` | Handle read-only queries (status/progress/metrics) |
-| `spawn_workflow_actor()` | Spawn workflow with SDK helper |
-| `WorkflowRef::run()` | Execute workflow with typed I/O |
-| `WorkflowRef::signal()` | Send signal to workflow |
-| `WorkflowRef::query()` | Query workflow state |
-
-## Performance Metrics
-
-The example tracks **granularity ratio** (compute time / coordinate time):
-
-- **< 10×**: Too much coordination overhead
-- **10×-100×**: Acceptable for small workloads
-- **> 100×**: Excellent efficiency
-
-## Use Cases
-
-- DNA sequencing (Illumina, PacBio, Nanopore)
-- Whole genome sequencing (WGS)
-- Exome sequencing
-- Clinical diagnostics
-- Cancer genomics
-- Variant annotation pipelines
-
-## See Also
-
-- [SDK Documentation](../../../../docs/sdk.md)
-- [Getting Started](../../../../docs/getting-started.md)
+- [migrating_skypilot](../../rust/apps/migrating_skypilot) – Same WASM app pattern
+- [Examples README](../../../README.md) – Multi-node and leader-worker design
 - [Architecture](../../../../docs/architecture.md)

@@ -31,11 +31,17 @@
 //! - **Placement Preferences**: Preferred nodes get higher scores, avoided nodes are excluded
 
 use plexspaces_proto::{
-    v1::actor::{ActorResourceRequirements, PlacementPreferences},
+    v1::actor::{ActorResourceRequirements, NodePlacement},
     common::v1::ResourceSpec,
     node::v1::NodeCapacity,
 };
 use std::collections::HashMap;
+
+/// Empty labels when placement is absent (no label filter).
+fn empty_labels() -> &'static HashMap<String, String> {
+    static EMPTY: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(HashMap::new)
+}
 
 /// Error types for node selection
 #[derive(Debug, thiserror::Error)]
@@ -76,32 +82,38 @@ impl NodeSelector {
         requirements: &ActorResourceRequirements,
         node_capacities: &HashMap<String, NodeCapacity>,
     ) -> NodeSelectionResult<(String, f64)> {
-        // Validate requirements
-        if let Some(ref resources) = requirements.resources {
-            if resources.cpu_cores < 0.0
-                || resources.memory_bytes < 0
-                || resources.disk_bytes < 0
-                || resources.gpu_count < 0
-            {
-                return Err(NodeSelectionError::InvalidRequirements(
-                    "Resource values must be non-negative".to_string(),
-                ));
+        let placement = requirements.placement.as_ref();
+
+        // Validate resource requirements from placement
+        if let Some(ref p) = placement {
+            if let Some(ref resources) = p.resource_requirements {
+                if resources.cpu_cores < 0.0
+                    || resources.memory_bytes < 0
+                    || resources.disk_bytes < 0
+                    || resources.gpu_count < 0
+                {
+                    return Err(NodeSelectionError::InvalidRequirements(
+                        "Resource values must be non-negative".to_string(),
+                    ));
+                }
             }
         }
+
+        let required_labels: &HashMap<String, String> = match placement {
+            Some(p) => &p.required_labels,
+            None => empty_labels(),
+        };
+        let required_resources = placement.and_then(|p| p.resource_requirements.as_ref());
 
         // Filter nodes by labels
         let mut candidates: Vec<(&String, &NodeCapacity)> = node_capacities
             .iter()
-            .filter(|(_, capacity)| {
-                Self::matches_labels(&requirements.required_labels, &capacity.labels)
-            })
+            .filter(|(_, capacity)| Self::matches_labels(required_labels, &capacity.labels))
             .collect();
 
         // Filter nodes by resource availability
-        if let Some(ref required_resources) = requirements.resources {
-            candidates.retain(|(_, capacity)| {
-                Self::has_sufficient_resources(required_resources, capacity)
-            });
+        if let Some(required) = required_resources {
+            candidates.retain(|(_, capacity)| Self::has_sufficient_resources(required, capacity));
         }
 
         if candidates.is_empty() {
@@ -110,27 +122,27 @@ impl NodeSelector {
             ));
         }
 
-        // Apply placement preferences and separate preferred nodes
-        let (preferred_nodes, other_nodes) = if let Some(ref placement) = requirements.placement {
-            let filtered = Self::apply_placement_preferences(candidates, placement);
+        // Apply placement preferences (avoid_node_ids, preferred_node_ids) and separate preferred nodes
+        let (preferred_nodes, other_nodes) = if let Some(placement) = placement {
+            let filtered = Self::apply_node_placement(candidates, placement);
             if filtered.is_empty() {
                 return Err(NodeSelectionError::NoMatchingNode(
                     "No nodes match placement preferences".to_string(),
                 ));
             }
-            
-            // Separate preferred nodes from others
             let mut preferred = Vec::new();
             let mut others = Vec::new();
-            
             for (node_id, capacity) in filtered {
-                if placement.preferred_node_ids.contains(node_id) {
+                let preferred_list = &placement.preferred_node_ids;
+                let single = !placement.preferred_node_id.is_empty();
+                if single && *node_id == placement.preferred_node_id
+                    || !preferred_list.is_empty() && preferred_list.contains(node_id)
+                {
                     preferred.push((node_id, capacity));
                 } else {
                     others.push((node_id, capacity));
                 }
             }
-            
             (preferred, others)
         } else {
             (candidates, Vec::new())
@@ -140,23 +152,21 @@ impl NodeSelector {
         let mut scored: Vec<(String, f64)> = preferred_nodes
             .into_iter()
             .map(|(node_id, capacity)| {
-                let score = Self::calculate_score(requirements, capacity);
+                let score = Self::calculate_score(placement, capacity);
                 (node_id.clone(), score)
             })
             .collect();
 
-        // If no preferred nodes, score other nodes
         if scored.is_empty() {
             scored = other_nodes
                 .into_iter()
                 .map(|(node_id, capacity)| {
-                    let score = Self::calculate_score(requirements, capacity);
+                    let score = Self::calculate_score(placement, capacity);
                     (node_id.clone(), score)
                 })
                 .collect();
         }
 
-        // Sort by score (descending) and return best node
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         Ok(scored[0].clone())
     }
@@ -187,36 +197,15 @@ impl NodeSelector {
         }
     }
 
-    /// Apply placement preferences (preferred nodes, affinity/anti-affinity)
-    fn apply_placement_preferences<'a>(
+    /// Apply NodePlacement: exclude avoid_node_ids (anti-affinity)
+    fn apply_node_placement<'a>(
         candidates: Vec<(&'a String, &'a NodeCapacity)>,
-        placement: &PlacementPreferences,
+        placement: &NodePlacement,
     ) -> Vec<(&'a String, &'a NodeCapacity)> {
-        // First, exclude nodes in avoid_node_ids (anti-affinity)
-        let filtered: Vec<(&'a String, &'a NodeCapacity)> = candidates
+        candidates
             .into_iter()
-            .filter(|(node_id, _)| !placement.avoid_node_ids.contains(node_id))
-            .collect();
-
-        // If preferred_node_ids is specified, prioritize those nodes
-        if !placement.preferred_node_ids.is_empty() {
-            let mut preferred = Vec::new();
-            let mut others = Vec::new();
-
-            for (node_id, capacity) in filtered {
-                if placement.preferred_node_ids.contains(node_id) {
-                    preferred.push((node_id, capacity));
-                } else {
-                    others.push((node_id, capacity));
-                }
-            }
-
-            // Return preferred nodes first, then others
-            preferred.extend(others);
-            preferred
-        } else {
-            filtered
-        }
+            .filter(|(node_id, _)| !placement.avoid_node_ids.contains(*node_id))
+            .collect()
     }
 
     /// Calculate node score using bin-packing algorithm
@@ -225,15 +214,13 @@ impl NodeSelector {
     /// Higher score = better fit
     /// - Resource utilization: Prefer nodes with higher utilization (bin-packing)
     /// - Resource balance: Prefer nodes with balanced resource usage
-    /// - Available capacity: Prefer nodes with more available resources (for future actors)
-    ///
-    /// Score = (cpu_utilization * 0.4) + (memory_utilization * 0.4) + (balance_score * 0.2)
     fn calculate_score(
-        requirements: &ActorResourceRequirements,
+        placement: Option<&NodePlacement>,
         capacity: &NodeCapacity,
     ) -> f64 {
+        let required = placement.and_then(|p| p.resource_requirements.as_ref());
         if let (Some(ref required), Some(ref total), Some(ref allocated)) = (
-            requirements.resources.as_ref(),
+            required,
             capacity.total.as_ref(),
             capacity.allocated.as_ref(),
         ) {
@@ -273,7 +260,7 @@ impl NodeSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_proto::v1::actor::PlacementStrategy;
+    use plexspaces_proto::v1::actor::NodePlacement;
 
     fn create_test_node_capacity(
         _node_id: &str,
@@ -320,19 +307,25 @@ mod tests {
         memory: u64,
         required_labels: HashMap<String, String>,
     ) -> ActorResourceRequirements {
-        let resources = ResourceSpec {
-            cpu_cores: cpu,
-            memory_bytes: memory,
-            disk_bytes: 0,
-            gpu_count: 0,
-            gpu_type: String::new(),
-        };
-
-        ActorResourceRequirements {
-            resources: Some(resources),
+        let placement = NodePlacement {
+            strategy: plexspaces_proto::v1::actor::NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+            cluster: String::new(),
+            node_ids: vec![],
             required_labels,
-            placement: None,
-            actor_groups: vec![],
+            preferred_node_ids: vec![],
+            avoid_node_ids: vec![],
+            resource_requirements: Some(ResourceSpec {
+                cpu_cores: cpu,
+                memory_bytes: memory,
+                disk_bytes: 0,
+                gpu_count: 0,
+                gpu_type: String::new(),
+            }),
+            affinity_labels: HashMap::new(),
+            preferred_node_id: String::new(),
+        };
+        ActorResourceRequirements {
+            placement: Some(placement),
         }
     }
 
@@ -409,11 +402,9 @@ mod tests {
         );
 
         let mut requirements = create_test_requirements(1.0, 512, HashMap::new());
-        requirements.placement = Some(PlacementPreferences {
-            strategy: PlacementStrategy::PlacementStrategyResourceBased as i32,
-            preferred_node_ids: vec!["node-2".to_string()],
-            avoid_node_ids: vec![],
-        });
+        if let Some(ref mut p) = requirements.placement {
+            p.preferred_node_ids = vec!["node-2".to_string()];
+        }
 
         let result = NodeSelector::select_node(&requirements, &capacities);
         assert!(result.is_ok());
@@ -435,11 +426,9 @@ mod tests {
         );
 
         let mut requirements = create_test_requirements(1.0, 512, HashMap::new());
-        requirements.placement = Some(PlacementPreferences {
-            strategy: PlacementStrategy::PlacementStrategyResourceBased as i32,
-            preferred_node_ids: vec![],
-            avoid_node_ids: vec!["node-1".to_string()],
-        });
+        if let Some(ref mut p) = requirements.placement {
+            p.avoid_node_ids = vec!["node-1".to_string()];
+        }
 
         let result = NodeSelector::select_node(&requirements, &capacities);
         assert!(result.is_ok());

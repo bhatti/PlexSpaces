@@ -1002,7 +1002,7 @@ Distributed lock coordination for task queues, resource coordination, and leader
 **Use Cases**:
 - Distributed task queues (ensure only one worker processes each job)
 - Resource coordination (prevent concurrent access)
-- Leader election (elect a master node)
+- Leader election (elect a leader node)
 
 **Example**:
 ```toml

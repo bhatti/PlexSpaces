@@ -7,8 +7,8 @@
 use anyhow::{Context, Result};
 use plexspaces_proto::actor::v1::{
     BulkUpdateShardGroupRequest, ConsistencyLevel, CreateShardGroupRequest,
-    MapShardGroupRequest, PartitionStrategy, ScatterGatherRequest,
-    ShardGroupAggregationStrategy,
+    DataParallelConfig, MapShardGroupRequest, PartitionStrategy, RebalancePolicy,
+    ScatterGatherRequest, ShardGroupAggregationStrategy,
 };
 use plexspaces_proto::common::v1::Message as ProtoMessage;
 use prost_types::Duration;
@@ -97,14 +97,31 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             .await;
 
         let req = CreateShardGroupRequest {
-            group_id,
+            config: Some(DataParallelConfig {
+                group_id,
+                shard_count,
+                partition_strategy: partition_strategy as i32,
+                rebalance_policy: RebalancePolicy::RebalancePolicyNone as i32,
+                placement: if labels.is_empty() {
+                    None
+                } else {
+                    Some(plexspaces_proto::actor::v1::NodePlacement {
+                        strategy: plexspaces_proto::actor::v1::NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                        cluster: String::new(),
+                        node_ids: vec![],
+                        required_labels: labels,
+                        preferred_node_ids: vec![],
+                        avoid_node_ids: vec![],
+                        resource_requirements: None,
+                        affinity_labels: std::collections::HashMap::new(),
+                        preferred_node_id: String::new(),
+                    })
+                },
+            }),
             actor_type,
-            shard_count,
-            partition_strategy: partition_strategy as i32,
             shard_config: None,
             initial_state: Vec::new(),
             metadata: HashMap::new(),
-            labels,
         };
 
         // Call ActorService directly (no gRPC)
@@ -347,14 +364,31 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         labels: HashMap<String, String>,
     ) -> Result<plexspaces_proto::actor::v1::ShardGroup> {
         let req = CreateShardGroupRequest {
-            group_id,
+            config: Some(DataParallelConfig {
+                group_id: group_id.clone(),
+                shard_count,
+                partition_strategy: partition_strategy as i32,
+                rebalance_policy: RebalancePolicy::RebalancePolicyNone as i32,
+                placement: if labels.is_empty() {
+                    None
+                } else {
+                    Some(plexspaces_proto::actor::v1::NodePlacement {
+                        strategy: plexspaces_proto::actor::v1::NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                        cluster: String::new(),
+                        node_ids: vec![],
+                        required_labels: labels,
+                        preferred_node_ids: vec![],
+                        avoid_node_ids: vec![],
+                        resource_requirements: None,
+                        affinity_labels: std::collections::HashMap::new(),
+                        preferred_node_id: String::new(),
+                    })
+                },
+            }),
             actor_type,
-            shard_count,
-            partition_strategy: partition_strategy as i32,
             shard_config: None,
             initial_state: Vec::new(),
             metadata: HashMap::new(),
-            labels,
         };
 
         let resp = self

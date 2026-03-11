@@ -839,25 +839,11 @@ impl NodeRegistryTrait for NodeRegistry {
         // Update cache
         self.update_cache(&node_id, registration.clone()).await;
 
-        // Persist to DB with backoff (if enabled)
-        if self.config.use_shared_db {
-            let obj_reg = Self::to_object_registration(&registration, ctx);
-            let object_registry = self.object_registry.clone();
-            let ctx_clone = ctx.clone();
-
-            if let Err(e) = self.with_db_backoff("register", || {
-                let registry = object_registry.clone();
-                let ctx = ctx_clone.clone();
-                let reg = obj_reg.clone();
-                async move {
-                    registry.register(&ctx, reg)
-                        .await
-                        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { format!("{}", e).into() })
-                }
-            }).await {
-                warn!("Failed to persist node registration to DB: {}", e);
-                // Continue anyway - SWIM will propagate
-            }
+        // Single ObjectRegistry path (no use_shared_db branch): system context so get_actor_service_client discovers connected nodes.
+        let system_ctx = RequestContext::new_without_auth(String::new(), String::new());
+        let obj_reg = Self::to_object_registration(&registration, &system_ctx);
+        if let Err(e) = self.object_registry.register(&system_ctx, obj_reg).await {
+            warn!("Failed to register node {} in ObjectRegistry: {}", node_id, e);
         }
 
         info!("Registered node: {}", node_id);
@@ -877,24 +863,17 @@ impl NodeRegistryTrait for NodeRegistry {
         // Remove from cache
         self.remove_from_cache(node_id).await;
 
-        // Remove from DB with backoff (if enabled)
-        if self.config.use_shared_db {
-            let object_registry = self.object_registry.clone();
-            let node_id_owned = node_id.to_string();
-            let ctx_clone = ctx.clone();
-
-            if let Err(e) = self.with_db_backoff("unregister", || {
-                let registry = object_registry.clone();
-                let ctx = ctx_clone.clone();
-                let nid = node_id_owned.clone();
-                async move {
-                    registry.unregister(&ctx, ObjectType::ObjectTypeNode, &nid)
-                        .await
-                        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { format!("{}", e).into() })
-                }
-            }).await {
-                warn!("Failed to remove node from DB: {}", e);
-            }
+        // Single ObjectRegistry path (same context as register_node).
+        let system_ctx = RequestContext::new_without_auth(String::new(), String::new());
+        if let Err(e) = self
+            .object_registry
+            .unregister(&system_ctx, ObjectType::ObjectTypeNode, node_id)
+            .await
+        {
+            warn!(
+                "Failed to unregister node {} from ObjectRegistry: {}",
+                node_id, e
+            );
         }
 
         info!("Unregistered node: {}", node_id);

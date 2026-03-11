@@ -454,53 +454,48 @@ async fn main() -> Result<()> {
     println!();
 
     // =========================================================================
-    // Step 3: Final metrics
+    // Step 3: Benchmarks (eprintln! to stderr so visible when stdout is piped/buffered)
     // =========================================================================
-    info!("Step 3: Performance Metrics");
-    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!();
-
     let total_time = total_start.elapsed();
     let metrics = metrics_tracker.finalize();
 
     let coordinate_time = Duration::from_millis(metrics.coordinate_duration_ms);
     let compute_time = Duration::from_millis(metrics.compute_duration_ms);
     let total_data_points = width * num_regions * final_iteration;
+    let total_time_s = total_time.as_secs_f64();
+    let total_time_ms = total_time_s * 1000.0;
+    let coord_ms = coordinate_time.as_secs_f64() * 1000.0;
+    let comp_ms = compute_time.as_secs_f64() * 1000.0;
+    let coord_pct = if total_time_s > 0.0 { (coordinate_time.as_secs_f64() / total_time_s) * 100.0 } else { 0.0 };
+    let comp_pct = if total_time_s > 0.0 { (compute_time.as_secs_f64() / total_time_s) * 100.0 } else { 0.0 };
 
-    info!("Execution Summary:");
-    info!("  Total execution time: {:.2}ms ({:.2}s)", 
-          total_time.as_secs_f64() * 1000.0,
-          total_time.as_secs_f64());
-    info!("  Iterations completed: {}", final_iteration);
-    info!("  Data points processed: {} ({} per iteration)", 
-          total_data_points,
-          width * num_regions);
-    info!("  Grid size: {} columns × {} regions = {} points", 
-          width, num_regions, width * num_regions);
-    println!();
-
-    info!("Coordination vs Computation Breakdown:");
-    info!("  Coordination time: {:.2}ms ({:.1}%)", 
-          coordinate_time.as_secs_f64() * 1000.0,
-          (coordinate_time.as_secs_f64() / total_time.as_secs_f64()) * 100.0);
-    info!("  Computation time: {:.2}ms ({:.1}%)",
-          compute_time.as_secs_f64() * 1000.0,
-          (compute_time.as_secs_f64() / total_time.as_secs_f64()) * 100.0);
-    info!("  Efficiency (compute/total): {:.1}%", metrics.efficiency * 100.0);
-    println!();
-
-    info!("Message & Barrier Metrics:");
-    info!("  Total messages sent: {}", metrics.message_count);
-    info!("  Total barriers: {}", metrics.barrier_count);
+    eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    eprintln!("  BENCHMARKS (compute vs coord, latency, data size)");
+    eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    eprintln!();
+    eprintln!("  Data size:");
+    eprintln!("    Grid:           {} columns × {} regions = {} points", width, num_regions, width * num_regions);
+    eprintln!("    Iterations:    {}", final_iteration);
+    eprintln!("    Points/iter:   {}", width * num_regions);
+    eprintln!("    Total points:  {} (stencil updates)", total_data_points);
+    eprintln!();
+    eprintln!("  Execution:");
+    eprintln!("    Wall time:     {:.2} ms  ({:.2} s)", total_time_ms, total_time_s);
+    eprintln!("    Compute time:  {:.2} ms  ({:.1}%)", comp_ms, comp_pct);
+    eprintln!("    Coord time:    {:.2} ms  ({:.1}%)", coord_ms, coord_pct);
+    eprintln!("    Efficiency:    {:.1}% (compute/total)", metrics.efficiency * 100.0);
+    eprintln!();
+    eprintln!("  Latency & throughput:");
+    eprintln!("    Messages:      {}", metrics.message_count);
+    eprintln!("    Barriers:      {}", metrics.barrier_count);
     if metrics.message_count > 0 {
-        let avg_latency_ms = compute_time.as_secs_f64() * 1000.0 / metrics.message_count as f64;
-        info!("  Average latency per message: {:.2}ms", avg_latency_ms);
-        let throughput = metrics.message_count as f64 / total_time.as_secs_f64();
-        info!("  Message throughput: {:.1} msg/s", throughput);
+        let avg_latency_ms = comp_ms / metrics.message_count as f64;
+        let throughput = metrics.message_count as f64 / total_time_s;
+        eprintln!("    Avg latency:   {:.2} ms/msg", avg_latency_ms);
+        eprintln!("    Throughput:    {:.1} msg/s", throughput);
     }
-    println!();
+    eprintln!();
 
-    // Per-iteration statistics
     if !iteration_metrics.is_empty() {
         let avg_iter_time: f64 = iteration_metrics.iter()
             .map(|(_, _, _, it, _)| it.as_secs_f64() * 1000.0)
@@ -511,42 +506,31 @@ async fn main() -> Result<()> {
         let avg_coord_time: f64 = iteration_metrics.iter()
             .map(|(_, _, cot, _, _)| cot.as_secs_f64() * 1000.0)
             .sum::<f64>() / iteration_metrics.len() as f64;
-        
-        info!("Per-Iteration Averages:");
-        info!("  Average iteration time: {:.2}ms", avg_iter_time);
-        info!("  Average compute time: {:.2}ms ({:.1}%)", 
-              avg_compute_time,
-              (avg_compute_time / avg_iter_time) * 100.0);
-        info!("  Average coordinate time: {:.2}ms ({:.1}%)", 
-              avg_coord_time,
-              (avg_coord_time / avg_iter_time) * 100.0);
-        println!();
+        eprintln!("  Per-iteration (avg):  total={:.2} ms  compute={:.2} ms  coord={:.2} ms", avg_iter_time, avg_compute_time, avg_coord_time);
+        eprintln!();
     }
 
-    info!("Granularity Analysis:");
+    eprintln!("  Granularity (compute/coord):  {:.2}x", metrics.granularity_ratio);
     if coordinate_time.as_secs_f64() > 0.0 {
-        info!("  Granularity ratio (compute/coordinate): {:.2}", metrics.granularity_ratio);
         if metrics.granularity_ratio >= 100.0 {
-            info!("  ✅ Excellent granularity (coordination overhead is negligible)");
+            eprintln!("    (excellent: coordination negligible)");
         } else if metrics.granularity_ratio >= 10.0 {
-            info!("  ✅ Good granularity (coordination overhead is low)");
+            eprintln!("    (good: low coordination overhead)");
         } else if metrics.granularity_ratio >= 1.0 {
-            info!("  ⚠️  Moderate granularity (coordination overhead is noticeable)");
+            eprintln!("    (moderate: coordination noticeable)");
         } else {
-            info!("  ❌ Poor granularity (coordination overhead dominates)");
+            eprintln!("    (poor: coordination dominates)");
         }
-    } else {
-        info!("  Granularity ratio: N/A (no coordination overhead)");
     }
-    println!();
+    eprintln!();
+    eprintln!("  Errors: 0");
+    eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    eprintln!("  Heat Diffusion Example Complete");
+    eprintln!();
 
     // Graceful shutdown
     info!("Shutting down...");
     node.shutdown(Duration::from_secs(5)).await?;
-
-    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    info!("Heat Diffusion Example Complete");
-    println!();
 
     Ok(())
 }

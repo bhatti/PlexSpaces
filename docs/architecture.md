@@ -438,13 +438,14 @@ graph TB
 - **Bulk Updates**: Route updates to shards based on partition key (DPA UpdateFunction)
 - **Parallel Map**: Query all shards simultaneously (DPA Map operator)
 - **Scatter-Gather**: Aggregate results with fault tolerance (DPA Scatter-Gather)
-- **Resource-Based Routing**: Labels flow to ActorResourceRequirements for intelligent node placement
+- **Resource-Based Routing**: Labels flow to DataParallelConfig.placement.required_labels (NodePlacement) for scheduler node matching
 - **Unified SDK**: `ParallelClient` and `UnifiedShardGroupClient` for both WASM/internal and gRPC
 
 **Architecture**:
 - Core functionality in `crates/services/src/actor_service/mod.rs` (ActorService trait)
 - SDK provides unified abstractions (`UnifiedShardGroupClient`, `ParallelClient`)
-- Labels flow: ShardGroup.labels → ActorResourceRequirements.required_labels → NodeSelector → Node placement
+- Labels flow: ShardGroup config.placement.required_labels (NodePlacement) → ActorResourceRequirements.placement → NodeSelector → Node placement
+- **Cohesive design**: One placement model (`NodePlacement`) for scheduling, ShardGroup, and scatter-gather; scheduler (`crates/scheduler`) uses `ActorResourceRequirements.placement`; CreateShardGroup passes `config.placement` into shard spawn; elastic pool uses `PoolConfig` for sizing and can align worker placement with NodeRegistry/placement when spanning nodes. See [Leader-Worker and ShardGroup Placement](detailed-design.md#leader-worker-and-shardgroup-placement) in detailed-design.
 
 **Parallel Operations**:
 - **Parallel Map**: Uses Erlang `pmap` pattern - sends query to all shards simultaneously, collects individual results
@@ -869,7 +870,7 @@ pub enum PatternField {
 struct Actor {
     id: ActorId,
     state: ActorState,
-    behavior: Box<dyn Actor>,  // Actor trait
+    behavior: Box<dyn Actor>,  // behavior implementation (SDK annotations generate this)
     mailbox: Mailbox,
     facets: Vec<Box<dyn Facet>>,
 }

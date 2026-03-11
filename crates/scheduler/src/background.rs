@@ -600,16 +600,23 @@ mod tests {
         let request = SchedulingRequest {
             request_id: "test-request-1".to_string(),
             requirements: Some(plexspaces_proto::v1::actor::ActorResourceRequirements {
-                resources: Some(plexspaces_proto::common::v1::ResourceSpec {
-                    cpu_cores: 1.0,
-                    memory_bytes: 512 * 1024 * 1024,
-                    disk_bytes: 0,
-                    gpu_count: 0,
-                    gpu_type: String::new(),
+                placement: Some(plexspaces_proto::v1::actor::NodePlacement {
+                    strategy: plexspaces_proto::v1::actor::NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                    cluster: String::new(),
+                    node_ids: vec![],
+                    required_labels: HashMap::new(),
+                    preferred_node_ids: vec![],
+                    avoid_node_ids: vec![],
+                    resource_requirements: Some(plexspaces_proto::common::v1::ResourceSpec {
+                        cpu_cores: 1.0,
+                        memory_bytes: 512 * 1024 * 1024,
+                        disk_bytes: 0,
+                        gpu_count: 0,
+                        gpu_type: String::new(),
+                    }),
+                    affinity_labels: HashMap::new(),
+                    preferred_node_id: String::new(),
                 }),
-                required_labels: HashMap::new(),
-                placement: None,
-                actor_groups: vec![],
             }),
             namespace: String::new(), // Empty for test
             tenant_id: String::new(), // Empty for test

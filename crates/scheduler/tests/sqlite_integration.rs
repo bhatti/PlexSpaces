@@ -62,19 +62,27 @@ mod sqlite_tests {
 
     /// Helper to create test scheduling request
     fn create_test_request(request_id: &str) -> SchedulingRequest {
+        use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
         SchedulingRequest {
             request_id: request_id.to_string(),
             requirements: Some(ActorResourceRequirements {
-                resources: Some(ResourceSpec {
-                    cpu_cores: 1.0,
-                    memory_bytes: 512 * 1024 * 1024,
-                    disk_bytes: 0,
-                    gpu_count: 0,
-                    gpu_type: String::new(),
+                placement: Some(NodePlacement {
+                    strategy: NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                    cluster: String::new(),
+                    node_ids: vec![],
+                    required_labels: HashMap::new(),
+                    preferred_node_ids: vec![],
+                    avoid_node_ids: vec![],
+                    resource_requirements: Some(ResourceSpec {
+                        cpu_cores: 1.0,
+                        memory_bytes: 512 * 1024 * 1024,
+                        disk_bytes: 0,
+                        gpu_count: 0,
+                        gpu_type: String::new(),
+                    }),
+                    affinity_labels: HashMap::new(),
+                    preferred_node_id: String::new(),
                 }),
-                required_labels: HashMap::new(),
-                placement: None,
-                actor_groups: vec![],
             }),
             namespace: "default".to_string(),
             tenant_id: "default".to_string(),
@@ -249,19 +257,27 @@ mod sqlite_tests {
             capacity_tracker,
         );
 
+        use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
         // Schedule actor
         let req = ScheduleActorRequest {
             requirements: Some(ActorResourceRequirements {
-                resources: Some(ResourceSpec {
-                    cpu_cores: 1.0,
-                    memory_bytes: 512 * 1024 * 1024,
-                    disk_bytes: 0,
-                    gpu_count: 0,
-                    gpu_type: String::new(),
+                placement: Some(NodePlacement {
+                    strategy: NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
+                    cluster: String::new(),
+                    node_ids: vec![],
+                    required_labels: HashMap::new(),
+                    preferred_node_ids: vec![],
+                    avoid_node_ids: vec![],
+                    resource_requirements: Some(ResourceSpec {
+                        cpu_cores: 1.0,
+                        memory_bytes: 512 * 1024 * 1024,
+                        disk_bytes: 0,
+                        gpu_count: 0,
+                        gpu_type: String::new(),
+                    }),
+                    affinity_labels: HashMap::new(),
+                    preferred_node_id: String::new(),
                 }),
-                required_labels: HashMap::new(),
-                placement: None,
-                actor_groups: vec![],
             }),
             request_id: String::new(),
         };

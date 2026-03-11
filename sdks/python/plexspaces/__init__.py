@@ -50,6 +50,7 @@ from .decorators import (
 )
 from .host import host
 from .workflow import default_retry_config, with_retry
+from .leader_worker import LeaderWorkerClient, list_worker_node_ids
 
 __all__ = [
     "actor",
@@ -63,5 +64,7 @@ __all__ = [
     "init_handler",
     "host",
     "with_retry",
+    "LeaderWorkerClient",
+    "list_worker_node_ids",
     "__version__",
 ]

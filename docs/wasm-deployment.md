@@ -12,6 +12,25 @@ PlexSpaces supports deploying WebAssembly (WASM) applications from multiple lang
 
 ## Architecture
 
+### Node-Local Application Metrics
+
+Deployed WASM applications report node-local benchmark and runtime counters through
+`ApplicationMetrics`. This is the source of truth for application-level summaries returned by
+`GetApplicationStatus`.
+
+`ApplicationMetrics` is intentionally extensible:
+
+- `actor_counts`: counts by role/type on the current node
+- `message_count`, `error_count`: node-local totals
+- `counter_metrics`: application-defined counters such as `scatter_gather_rounds` or
+  `tuple_operations`
+- `latency_totals_ms`, `latency_max_ms`, `latency_samples`: raw latency aggregates keyed by metric
+  type such as `worker.compute`, `worker.coordination`, or `leader`
+
+For multi-node WASM examples such as `heat_diffusion`, each node records its own metrics locally and
+the leader aggregates them by calling `application-get-status` on all participating nodes. This
+avoids any shared-database assumption and keeps per-node accounting aligned with deployment topology.
+
 ### Namespace (Required)
 
 Namespace is now **required** for all WASM deployments. It scopes all actors within an application and is used to construct actor IDs.
@@ -788,6 +807,7 @@ When deploying via HTTP/gRPC API, you can optionally save WASM files to disk for
 - ⚠️ **Production**: Use proper deployment pipelines
 - Files are saved atomically to prevent corruption
 - Format: `{wasm_apps_directory}/{app-name}/app.wasm` and `{wasm_apps_directory}/{app-name}/application-spec.toml`
+- If `namespace` is omitted from `application-spec.toml`, WASM deployment derives it from the app name so actor IDs and app isolation remain stable across deploy and restart.
 
 **Example Workflow**:
 ```bash
@@ -1094,6 +1114,18 @@ WASM actors using the simple-actor WIT can use the **elastic pool** API to check
 | `pool-get-metrics(pool-name)` | Returns JSON metrics (e.g. total_actors, available_actors, busy_actors, current_load) or `"ERROR:message"`. |
 
 **SDK usage**: Python `host.pool_checkout` / `host.pool_checkin` / `host.pool_get_metrics`; Go `host.PoolCheckout` / `host.PoolCheckin` / `host.PoolGetMetrics`; TypeScript `host.poolCheckout` / `host.poolCheckin` / `host.poolGetMetrics`. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) (Python, Go, TypeScript, Rust) for a full example combining pool, tuple space (work queue), and process group fallback.
+
+### ShardGroup scatter-gather (WASM host)
+
+Deployable WASM apps can also use the framework shard-group APIs through the simple-actor host. This keeps leader-worker apps on the same core `ActorService` path used by native Rust.
+
+| WIT function | Description |
+|--------------|-------------|
+| `create-shard-group(request-json)` | Creates a shard group from JSON fields such as `group_id`, `actor_type`, `shard_count`, and `placement`. Returns JSON with the created group metadata or `"ERROR:message"`. |
+| `bulk-update-shard-group(request-json)` | Sends update messages to shards using JSON fields `group_id`, `updates`, `consistency_level`, `timeout_ms`, and `wait_for_responses`. |
+| `scatter-gather(request-json)` | Broadcasts a query to all shards using JSON fields `group_id`, `query`, `aggregation`, `min_responses`, and `timeout_ms`. Returns aggregate result, per-shard payloads, and stats as JSON. |
+
+Use this for WASM leader-worker applications that need framework-owned scatter/gather without dropping down to gRPC or hand-written host bindings. See [Heat Diffusion](../examples/rust/apps/heat_diffusion/README.md) for a Rust WASM example that deploys to multiple nodes and drives workers through the host shard-group surface.
 
 ### Key-Value Storage (WASM)
 
@@ -1495,4 +1527,3 @@ Tests cover:
 - [wasm-opt Documentation](https://github.com/WebAssembly/binaryen)
 - [HTTP Multipart Upload Best Practices](https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/POST)
 - [WASM Calculator Example](../examples/simple/wasm_calculator/README.md)
-

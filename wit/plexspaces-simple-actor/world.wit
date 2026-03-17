@@ -172,6 +172,34 @@ interface host {
     pool-checkin: func(pool-name: string, actor-id: string, checkout-id: string, healthy: bool) -> string;
     /// Get pool metrics (size, available, busy, load). Returns JSON object or "ERROR:message".
     pool-get-metrics: func(pool-name: string) -> string;
+
+    // ============================================================================
+    // ShardGroup / scatter-gather
+    // ============================================================================
+
+    /// Create a shard group using the framework DataParallelConfig and actor type.
+    /// request-json uses the framework field names (group_id, shard_count, actor_type, placement, etc.).
+    /// Returns JSON object with created group metadata or "ERROR:message".
+    create-shard-group: func(request-json: string) -> string;
+
+    /// Send bulk updates to shard group members.
+    /// request-json uses group_id, updates, consistency_level, timeout_ms, wait_for_responses.
+    /// Returns JSON object with update statistics or "ERROR:message".
+    bulk-update-shard-group: func(request-json: string) -> string;
+
+    /// Scatter a query to all shards and gather responses.
+    /// request-json uses group_id, query, timeout_ms, aggregation, min_responses.
+    /// Returns JSON object with aggregate result, shard responses, and stats or "ERROR:message".
+    scatter-gather: func(request-json: string) -> string;
+
+    /// Merge a node-local application metrics delta.
+    /// metrics-json uses the ApplicationMetrics field names (actor_counts, message_count, counter_metrics, latency_* maps).
+    /// Returns merged metrics JSON or "ERROR:message".
+    application-metrics-add: func(application-id: string, metrics-json: string) -> string;
+
+    /// Get application status from a node participating in the application.
+    /// Returns JSON with node_id, node_address, status, and metrics, or "ERROR:message".
+    application-get-status: func(application-id: string, node-id: string) -> string;
     
     // ============================================================================
     // TupleSpace (Linda-style coordination)

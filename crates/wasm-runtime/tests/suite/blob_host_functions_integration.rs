@@ -12,22 +12,22 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_wasm_runtime::component_host::BlobImpl;
+    use object_store::local::LocalFileSystem;
+    use plexspaces_blob::{repository::sql::SqlBlobRepository, BlobService};
+    use plexspaces_core::ActorId;
+    use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::blob::Host as BlobHost;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::types::Context;
-    use plexspaces_core::ActorId;
-    use plexspaces_blob::{BlobService, repository::sql::SqlBlobRepository};
-    use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
-    use std::sync::Arc;
+    use plexspaces_wasm_runtime::component_host::BlobImpl;
     use plexspaces_wasm_runtime::HostFunctions;
+    use std::sync::Arc;
     use tempfile::TempDir;
-    use object_store::local::LocalFileSystem;
 
     async fn create_test_blob_service() -> (Arc<BlobService>, TempDir) {
         // Install sqlx::any default drivers before any database operations
         // This is required for AnyPool to work with sqlite
         sqlx::any::install_default_drivers();
-        
+
         // Create temp directory for local filesystem
         let temp_dir = TempDir::new().unwrap();
         let local_store = Arc::new(LocalFileSystem::new_with_prefix(temp_dir.path()).unwrap());
@@ -35,20 +35,23 @@ mod tests {
         // Use in-memory SQLite database for tests (fast, isolated, no file cleanup needed)
         // Not recovery-related, so memory is appropriate
         // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
-        use sqlx::AnyPool;
         use sqlx::any::AnyPoolOptions;
-        
+        use sqlx::AnyPool;
+
         let db_url = "sqlite::memory:";
-        
+
         let any_pool = AnyPoolOptions::new()
             .max_connections(1)
             .connect(db_url)
             .await
             .unwrap();
-        
+
         // Auto-apply migrations using new() - migrations are automatically applied
-        let repository = Arc::new(SqlBlobRepository::new(any_pool).await
-            .expect("Failed to create blob repository with migrations"));
+        let repository = Arc::new(
+            SqlBlobRepository::new(any_pool)
+                .await
+                .expect("Failed to create blob repository with migrations"),
+        );
 
         // Create blob config
         let config = ProtoBlobConfig {
@@ -72,15 +75,15 @@ mod tests {
 
     fn create_test_host_functions_with_blob(blob_service: Arc<BlobService>) -> Arc<HostFunctions> {
         Arc::new(HostFunctions::with_all_services(
-            None, // message_sender
-            None, // channel_service
-            None, // keyvalue_store
-            None, // process_group_registry
-            None, // lock_manager
-            None, // object_registry
-            None, // journal_storage
+            None,               // message_sender
+            None,               // channel_service
+            None,               // keyvalue_store
+            None,               // process_group_registry
+            None,               // lock_manager
+            None,               // object_registry
+            None,               // journal_storage
             Some(blob_service), // blob_service
-            None, // elastic_pool_service
+            None,               // elastic_pool_service
         ))
     }
 
@@ -155,7 +158,11 @@ mod tests {
             )
             .await;
 
-        assert!(download_result.is_ok(), "Download failed: {:?}", download_result.as_ref().err());
+        assert!(
+            download_result.is_ok(),
+            "Download failed: {:?}",
+            download_result.as_ref().err()
+        );
         let downloaded_data = download_result.unwrap();
         assert_eq!(downloaded_data, data);
     }
@@ -189,7 +196,11 @@ mod tests {
             )
             .await;
 
-        assert!(delete_result.is_ok(), "Delete failed: {:?}", delete_result.as_ref().err());
+        assert!(
+            delete_result.is_ok(),
+            "Delete failed: {:?}",
+            delete_result.as_ref().err()
+        );
 
         // Verify it's deleted by trying to download
         let download_result = blob_impl
@@ -233,8 +244,16 @@ mod tests {
             )
             .await;
 
-        assert!(exists_result.is_ok(), "Exists check failed: {:?}", exists_result.as_ref().err());
-        assert_eq!(exists_result.unwrap(), true, "Blob should exist after upload");
+        assert!(
+            exists_result.is_ok(),
+            "Exists check failed: {:?}",
+            exists_result.as_ref().err()
+        );
+        assert_eq!(
+            exists_result.unwrap(),
+            true,
+            "Blob should exist after upload"
+        );
 
         // Check non-existent blob
         let not_exists_result = blob_impl
@@ -339,7 +358,11 @@ mod tests {
             )
             .await;
 
-        assert!(metadata_result.is_ok(), "Get metadata failed: {:?}", metadata_result.as_ref().err());
+        assert!(
+            metadata_result.is_ok(),
+            "Get metadata failed: {:?}",
+            metadata_result.as_ref().err()
+        );
         let metadata = metadata_result.unwrap();
         assert_eq!(metadata.blob_id, upload_result.blob_id);
         assert_eq!(metadata.bucket, "test-bucket");
@@ -379,7 +402,11 @@ mod tests {
             )
             .await;
 
-        assert!(copy_result.is_ok(), "Copy failed: {:?}", copy_result.as_ref().err());
+        assert!(
+            copy_result.is_ok(),
+            "Copy failed: {:?}",
+            copy_result.as_ref().err()
+        );
         let dest_metadata = copy_result.unwrap();
         assert_eq!(dest_metadata.bucket, "test-bucket");
         assert_eq!(dest_metadata.key, "dest.txt");
@@ -403,7 +430,8 @@ mod tests {
     async fn test_blob_upload_without_service() {
         // Test error handling when blob service is not configured
         let host_functions = Arc::new(HostFunctions::with_all_services(
-            None, None, None, None, None, None, None, None, None, // No blob_service, no elastic_pool
+            None, None, None, None, None, None, None, None,
+            None, // No blob_service, no elastic_pool
         ));
         let mut blob_impl = create_test_blob_impl(host_functions);
 
@@ -461,4 +489,3 @@ mod tests {
         assert_eq!(blobs.len(), 0);
     }
 }
-

@@ -104,5 +104,6 @@ pub use manager::LockManager;
 pub use memory::MemoryLockManager;
 
 // Re-export proto types for convenience
-pub use plexspaces_proto::locks::prv::{AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions};
-
+pub use plexspaces_proto::locks::prv::{
+    AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions,
+};

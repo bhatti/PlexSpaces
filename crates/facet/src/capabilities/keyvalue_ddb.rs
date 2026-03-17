@@ -23,7 +23,7 @@
 //! Uses the same table schema as the main keyvalue DDB implementation
 //! but with a simpler interface matching the facet's needs.
 
-use super::{KeyValueStore, KeyValueStoreResult, KeyValueStoreError};
+use super::{KeyValueStore, KeyValueStoreError, KeyValueStoreResult};
 use async_trait::async_trait;
 use aws_sdk_dynamodb::{
     error::ProvideErrorMetadata,
@@ -111,12 +111,7 @@ impl DynamoDBStore {
     #[instrument(skip(client), fields(table_name = %table_name))]
     async fn ensure_table_exists(client: &DynamoDbClient, table_name: &str) -> Result<(), String> {
         // Check if table exists
-        match client
-            .describe_table()
-            .table_name(table_name)
-            .send()
-            .await
-        {
+        match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
                 debug!(table_name = %table_name, "DynamoDB table already exists");
                 return Ok(());
@@ -124,10 +119,18 @@ impl DynamoDBStore {
             Err(e) => {
                 // Table doesn't exist, create it
                 let error_msg = format!("{}", e);
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_msg.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_msg.clone());
 
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         error = %e,
                         error_code = %error_code,
@@ -239,7 +242,10 @@ impl DynamoDBStore {
 
     /// Wait for table to become active.
     #[instrument(skip(client), fields(table_name = %table_name))]
-    async fn wait_for_table_active(client: &DynamoDbClient, table_name: &str) -> Result<(), String> {
+    async fn wait_for_table_active(
+        client: &DynamoDbClient,
+        table_name: &str,
+    ) -> Result<(), String> {
         use aws_sdk_dynamodb::types::TableStatus;
 
         let mut attempts = 0;
@@ -371,19 +377,34 @@ impl DynamoDBStore {
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S("KV".to_string()));
         item.insert("key".to_string(), AttributeValue::S(key.to_string()));
-        item.insert("value".to_string(), AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(value)));
-        item.insert("tenant_namespace".to_string(), AttributeValue::S(tenant_namespace));
+        item.insert(
+            "value".to_string(),
+            AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(value)),
+        );
+        item.insert(
+            "tenant_namespace".to_string(),
+            AttributeValue::S(tenant_namespace),
+        );
         item.insert("prefix_key".to_string(), AttributeValue::S(prefix_key));
         item.insert("prefix".to_string(), AttributeValue::S(prefix));
-        item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
-        item.insert("updated_at".to_string(), AttributeValue::N(now_secs.to_string()));
+        item.insert(
+            "created_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
+        item.insert(
+            "updated_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
         item.insert(
             "schema_version".to_string(),
             AttributeValue::N(self.schema_version.to_string()),
         );
 
         if let Some(expires_at) = expires_at_secs {
-            item.insert("expires_at".to_string(), AttributeValue::N(expires_at.to_string()));
+            item.insert(
+                "expires_at".to_string(),
+                AttributeValue::N(expires_at.to_string()),
+            );
         }
 
         if let Some(ttl) = ttl_secs {
@@ -412,7 +433,11 @@ impl KeyValueStore for DynamoDBStore {
                 if let Some(item) = result.item().cloned() {
                     // Check if expired
                     if let Some(expires_at_attr) = item.get("expires_at") {
-                        if let Some(expires_at_secs) = expires_at_attr.as_n().ok().and_then(|s| s.parse::<i64>().ok()) {
+                        if let Some(expires_at_secs) = expires_at_attr
+                            .as_n()
+                            .ok()
+                            .and_then(|s| s.parse::<i64>().ok())
+                        {
                             let now_secs = Utc::now().timestamp();
                             if expires_at_secs <= now_secs {
                                 return Ok(None);
@@ -428,7 +453,10 @@ impl KeyValueStore for DynamoDBStore {
                 }
                 Ok(None)
             }
-            Err(e) => Err(KeyValueStoreError::StorageError(format!("DynamoDB get_item failed: {}", e))),
+            Err(e) => Err(KeyValueStoreError::StorageError(format!(
+                "DynamoDB get_item failed: {}",
+                e
+            ))),
         }
     }
 
@@ -446,7 +474,9 @@ impl KeyValueStore for DynamoDBStore {
             .set_item(Some(item))
             .send()
             .await
-            .map_err(|e| KeyValueStoreError::StorageError(format!("DynamoDB put_item failed: {}", e)))?;
+            .map_err(|e| {
+                KeyValueStoreError::StorageError(format!("DynamoDB put_item failed: {}", e))
+            })?;
 
         Ok(())
     }
@@ -467,7 +497,9 @@ impl KeyValueStore for DynamoDBStore {
             .set_item(Some(item))
             .send()
             .await
-            .map_err(|e| KeyValueStoreError::StorageError(format!("DynamoDB put_item failed: {}", e)))?;
+            .map_err(|e| {
+                KeyValueStoreError::StorageError(format!("DynamoDB put_item failed: {}", e))
+            })?;
 
         Ok(())
     }
@@ -482,7 +514,9 @@ impl KeyValueStore for DynamoDBStore {
             .key("sk", AttributeValue::S("KV".to_string()))
             .send()
             .await
-            .map_err(|e| KeyValueStoreError::StorageError(format!("DynamoDB delete_item failed: {}", e)))?;
+            .map_err(|e| {
+                KeyValueStoreError::StorageError(format!("DynamoDB delete_item failed: {}", e))
+            })?;
 
         Ok(())
     }
@@ -495,7 +529,11 @@ impl KeyValueStore for DynamoDBStore {
         }
     }
 
-    async fn list_keys(&self, ctx: &RequestContext, prefix: &str) -> KeyValueStoreResult<Vec<String>> {
+    async fn list_keys(
+        &self,
+        ctx: &RequestContext,
+        prefix: &str,
+    ) -> KeyValueStoreResult<Vec<String>> {
         let tenant_namespace = Self::tenant_namespace_key(ctx);
 
         let mut keys = Vec::new();
@@ -538,7 +576,10 @@ impl KeyValueStore for DynamoDBStore {
                         prefix = %prefix,
                         "Failed to query keys from DynamoDB"
                     );
-                    return Err(KeyValueStoreError::StorageError(format!("DynamoDB query failed: {}", e)));
+                    return Err(KeyValueStoreError::StorageError(format!(
+                        "DynamoDB query failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -568,7 +609,9 @@ impl KeyValueStore for DynamoDBStore {
         key: &str,
         delta: i64,
     ) -> KeyValueStoreResult<i64> {
-        let current: i64 = self.get(ctx, key).await?
+        let current: i64 = self
+            .get(ctx, key)
+            .await?
             .and_then(|v| String::from_utf8(v).ok())
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
@@ -577,4 +620,3 @@ impl KeyValueStore for DynamoDBStore {
         Ok(new_val)
     }
 }
-

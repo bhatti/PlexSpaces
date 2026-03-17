@@ -29,9 +29,11 @@
 //! - Tracks dependency state transitions (healthy → degraded → unhealthy)
 //! - Provides metrics for dashboard monitoring
 
-use plexspaces_core::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult};
 use plexspaces_circuit_breaker::CircuitBreaker;
-use plexspaces_proto::circuitbreaker::prv::{CircuitBreakerConfig, CircuitBreakerMetrics, CircuitState, FailureStrategy};
+use plexspaces_core::{HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker};
+use plexspaces_proto::circuitbreaker::prv::{
+    CircuitBreakerConfig, CircuitBreakerMetrics, CircuitState, FailureStrategy,
+};
 use plexspaces_proto::system::v1::{CircuitBreakerHealthMetrics, DependencyCircuitBreakerInfo};
 use prost_types::Duration as ProstDuration;
 use std::sync::Arc;
@@ -50,10 +52,10 @@ use tokio::sync::RwLock;
 pub struct CircuitBreakerHealthChecker {
     /// Underlying health checker
     checker: Arc<dyn HealthChecker>,
-    
+
     /// Circuit breaker for tracking state
     circuit: Arc<RwLock<CircuitBreaker>>,
-    
+
     /// Whether this dependency is critical
     is_critical: bool,
 }
@@ -71,58 +73,53 @@ impl CircuitBreakerHealthChecker {
     /// ## Design Notes
     /// Uses existing CircuitBreaker implementation from plexspaces-circuit-breaker crate.
     /// Follows proto-first design by using CircuitBreakerConfig from proto definitions.
-    pub fn new(
-        checker: Arc<dyn HealthChecker>,
-        config: Option<CircuitBreakerConfig>,
-    ) -> Self {
+    pub fn new(checker: Arc<dyn HealthChecker>, config: Option<CircuitBreakerConfig>) -> Self {
         let is_critical = checker.is_critical();
-        
-        let config = config.unwrap_or_else(|| {
-            CircuitBreakerConfig {
-                name: format!("health-checker-{}", checker.name()),
-                failure_strategy: FailureStrategy::FailureStrategyConsecutive as i32,
-                failure_threshold: 5,
-                success_threshold: 2,
-                timeout: Some(ProstDuration {
-                    seconds: 60,
-                    nanos: 0,
-                }),
-                max_half_open_requests: 3,
-                ..Default::default()
-            }
+
+        let config = config.unwrap_or_else(|| CircuitBreakerConfig {
+            name: format!("health-checker-{}", checker.name()),
+            failure_strategy: FailureStrategy::FailureStrategyConsecutive as i32,
+            failure_threshold: 5,
+            success_threshold: 2,
+            timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
+            max_half_open_requests: 3,
+            ..Default::default()
         });
-        
+
         let circuit = CircuitBreaker::new(config);
-        
+
         Self {
             checker,
             circuit: Arc::new(RwLock::new(circuit)),
             is_critical,
         }
     }
-    
+
     /// Create with default configuration (convenience method)
     pub fn with_defaults(checker: Arc<dyn HealthChecker>) -> Self {
         Self::new(checker, None)
     }
-    
+
     /// Get the underlying health checker
     pub fn checker(&self) -> &Arc<dyn HealthChecker> {
         &self.checker
     }
-    
+
     /// Get circuit breaker state
     pub async fn get_circuit_state(&self) -> CircuitState {
         let circuit = self.circuit.read().await;
         circuit.get_state().await
     }
-    
+
     /// Get circuit breaker metrics
     pub async fn get_circuit_metrics(&self) -> CircuitBreakerMetrics {
         let circuit = self.circuit.read().await;
         circuit.get_metrics().await
     }
-    
+
     /// Get circuit breaker info for dependency health check
     ///
     /// ## Returns
@@ -134,12 +131,12 @@ impl CircuitBreakerHealthChecker {
     pub async fn get_circuit_breaker_info(&self) -> Option<DependencyCircuitBreakerInfo> {
         Some(self.get_circuit_breaker_info_impl().await)
     }
-    
+
     async fn get_circuit_breaker_info_impl(&self) -> DependencyCircuitBreakerInfo {
         let circuit = self.circuit.read().await;
         let state = circuit.get_state().await;
         let metrics = circuit.get_metrics().await;
-        
+
         DependencyCircuitBreakerInfo {
             circuit_name: metrics.name.clone(),
             state: state as i32,
@@ -155,13 +152,13 @@ impl CircuitBreakerHealthChecker {
             }),
         }
     }
-    
+
     /// Check if circuit is open (dependency unavailable)
     pub async fn is_circuit_open(&self) -> bool {
         let circuit = self.circuit.read().await;
         !circuit.is_request_allowed().await
     }
-    
+
     /// Check if dependency is in degraded mode
     ///
     /// ## Returns
@@ -176,19 +173,18 @@ impl HealthChecker for CircuitBreakerHealthChecker {
     fn name(&self) -> &str {
         self.checker.name()
     }
-    
+
     fn is_critical(&self) -> bool {
         self.is_critical
     }
-    
-    
+
     async fn check(&self, ctx: &HealthCheckContext) -> HealthCheckResult {
         // Check if circuit allows the request
         let circuit_allowed = {
             let circuit = self.circuit.read().await;
             circuit.is_request_allowed().await
         };
-        
+
         if !circuit_allowed {
             // Circuit is open - fail fast for critical dependencies
             if self.is_critical {
@@ -203,10 +199,10 @@ impl HealthChecker for CircuitBreakerHealthChecker {
                 self.checker.name()
             )));
         }
-        
+
         // Circuit allows request - perform actual health check
         let result = self.checker.check(ctx).await;
-        
+
         // Update circuit breaker based on result
         {
             let circuit = self.circuit.read().await;
@@ -219,7 +215,7 @@ impl HealthChecker for CircuitBreakerHealthChecker {
                 }
             }
         }
-        
+
         result
     }
 }
@@ -229,29 +225,29 @@ mod tests {
     use super::*;
     use plexspaces_core::health_checker::PingChecker;
     use plexspaces_core::HealthCheckContext;
-    
+
     #[tokio::test]
     async fn test_circuit_breaker_health_checker_success() {
         let checker = Arc::new(PingChecker);
         let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
-        
+
         let ctx = HealthCheckContext::default();
         let result = cb_checker.check(&ctx).await;
-        
+
         assert!(result.is_ok());
         assert_eq!(cb_checker.name(), "ping");
         assert!(!cb_checker.is_critical());
     }
-    
+
     #[tokio::test]
     async fn test_circuit_breaker_health_checker_metrics() {
         let checker = Arc::new(PingChecker);
         let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
-        
+
         let metrics = cb_checker.get_circuit_metrics().await;
         assert_eq!(metrics.state, CircuitState::CircuitStateClosed as i32);
     }
-    
+
     #[tokio::test]
     async fn test_circuit_breaker_health_checker_degraded_mode() {
         let checker = Arc::new(PingChecker);
@@ -261,26 +257,29 @@ mod tests {
             failure_strategy: FailureStrategy::FailureStrategyConsecutive as i32,
             failure_threshold: 1,
             success_threshold: 1,
-            timeout: Some(ProstDuration { seconds: 1, nanos: 0 }),
+            timeout: Some(ProstDuration {
+                seconds: 1,
+                nanos: 0,
+            }),
             max_half_open_requests: 1,
             ..Default::default()
         };
         let cb_checker = CircuitBreakerHealthChecker::new(Arc::new(PingChecker), Some(config));
-        
+
         // Initially not degraded
         assert!(!cb_checker.is_degraded().await);
-        
+
         // Since PingChecker always succeeds, we can't test degraded mode easily
         // This test verifies the API works
         let is_degraded = cb_checker.is_degraded().await;
         assert!(!is_degraded); // PingChecker is non-critical but should succeed
     }
-    
+
     #[tokio::test]
     async fn test_circuit_breaker_info() {
         let checker = Arc::new(PingChecker);
         let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
-        
+
         let info = cb_checker.get_circuit_breaker_info().await;
         assert!(info.is_some());
         let info = info.unwrap();
@@ -289,4 +288,3 @@ mod tests {
         assert!(info.metrics.is_some());
     }
 }
-

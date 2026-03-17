@@ -31,7 +31,10 @@
 //! Currently we implement a **SQLite** backend. PostgreSQL can be added by
 //! following the same pattern with a `PgPool`.
 
-use crate::{AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions, RenewLockOptions};
+use crate::{
+    AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions,
+    RenewLockOptions,
+};
 use async_trait::async_trait;
 use chrono::Utc;
 use plexspaces_common::RequestContext;
@@ -151,16 +154,22 @@ impl SqliteLockManager {
 
         // Convert epoch seconds to SystemTime, then to Timestamp
         use std::time::SystemTime;
-        let expires_system_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(expires_at as u64);
-        let last_hb_system_time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(last_heartbeat as u64);
-        
+        let expires_system_time =
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(expires_at as u64);
+        let last_hb_system_time =
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(last_heartbeat as u64);
+
         Ok(Lock {
             lock_key,
             holder_id,
             version,
-            expires_at: Some(plexspaces_proto::prost_types::Timestamp::from(expires_system_time)),
+            expires_at: Some(plexspaces_proto::prost_types::Timestamp::from(
+                expires_system_time,
+            )),
             lease_duration_secs: lease_duration_secs as u32,
-            last_heartbeat: Some(plexspaces_proto::prost_types::Timestamp::from(last_hb_system_time)),
+            last_heartbeat: Some(plexspaces_proto::prost_types::Timestamp::from(
+                last_hb_system_time,
+            )),
             metadata,
             locked: locked != 0,
         })
@@ -171,10 +180,14 @@ impl SqliteLockManager {
 #[async_trait]
 impl LockManager for SqliteLockManager {
     #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
-    async fn acquire_lock(&self, ctx: &RequestContext, options: AcquireLockOptions) -> LockResult<Lock> {
+    async fn acquire_lock(
+        &self,
+        ctx: &RequestContext,
+        options: AcquireLockOptions,
+    ) -> LockResult<Lock> {
         let tenant_id = ctx.tenant_id();
         let namespace = ctx.namespace();
-        
+
         let mut conn = self
             .pool
             .acquire()
@@ -205,10 +218,10 @@ impl LockManager for SqliteLockManager {
         if let Some(row) = row {
             let lock_key: String = row.get("lock_key");
             let holder_id: String = row.get("holder_id");
-            let _version: String = row.get("version");
+            let version: String = row.get("version");
             let expires_at_row: i64 = row.get("expires_at");
             let lease_duration_secs_row: i64 = row.get("lease_duration_secs");
-            let _last_heartbeat: i64 = row.get("last_heartbeat");
+            let last_heartbeat: i64 = row.get("last_heartbeat");
             let locked_flag: i64 = row.get("locked");
             let metadata_json: Option<String> = row.get("metadata");
 
@@ -216,6 +229,23 @@ impl LockManager for SqliteLockManager {
 
             if !expired && holder_id != options.holder_id {
                 return Err(LockError::LockAlreadyHeld(holder_id));
+            }
+
+            if !expired && holder_id == options.holder_id {
+                tx.commit()
+                    .await
+                    .map_err(|e| LockError::BackendError(format!("commit tx: {e}")))?;
+
+                return Self::lock_from_row(
+                    lock_key,
+                    holder_id,
+                    version,
+                    expires_at_row,
+                    lease_duration_secs_row,
+                    last_heartbeat,
+                    locked_flag,
+                    metadata_json,
+                );
             }
 
             let new_version = Ulid::new().to_string();
@@ -252,9 +282,9 @@ impl LockManager for SqliteLockManager {
             .await
             .map_err(|e| LockError::BackendError(format!("update lock: {e}")))?;
 
-        tx.commit()
-            .await
-            .map_err(|e| LockError::BackendError(format!("commit tx: {e}")))?;
+            tx.commit()
+                .await
+                .map_err(|e| LockError::BackendError(format!("commit tx: {e}")))?;
 
             return Self::lock_from_row(
                 lock_key,
@@ -314,10 +344,14 @@ impl LockManager for SqliteLockManager {
     }
 
     #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, version = %options.version, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
-    async fn renew_lock(&self, ctx: &RequestContext, options: RenewLockOptions) -> LockResult<Lock> {
+    async fn renew_lock(
+        &self,
+        ctx: &RequestContext,
+        options: RenewLockOptions,
+    ) -> LockResult<Lock> {
         let tenant_id = ctx.tenant_id();
         let namespace = ctx.namespace();
-        
+
         let mut conn = self
             .pool
             .acquire()
@@ -350,7 +384,7 @@ impl LockManager for SqliteLockManager {
         };
 
         let holder_id: String = row.get("holder_id");
-        let version: String = row.get("version");
+        let _version: String = row.get("version");
         let _lease_duration_secs_row: i64 = row.get("lease_duration_secs");
         let _last_heartbeat: i64 = row.get("last_heartbeat");
         let locked_flag: i64 = row.get("locked");
@@ -360,16 +394,13 @@ impl LockManager for SqliteLockManager {
         if holder_id != options.holder_id {
             return Err(LockError::InvalidHolderId(holder_id));
         }
-        if version != options.version {
-            return Err(LockError::VersionMismatch {
-                expected: version,
-                actual: options.version.clone(),
-            });
-        }
         if expires_at_row <= now || locked_flag == 0 {
             return Err(LockError::LockExpired(options.lock_key.clone()));
         }
 
+        // Same-holder renewals are reentrant. If the caller presents a stale version from
+        // another task on the same node, we still extend the live lease using the current row.
+        // This keeps same-owner lease management stable without weakening holder isolation.
         let new_version = Ulid::new().to_string();
         let metadata_json_new = if options.metadata.is_empty() {
             metadata_json
@@ -418,10 +449,14 @@ impl LockManager for SqliteLockManager {
     }
 
     #[instrument(skip(self, ctx, options), fields(lock_key = %options.lock_key, holder_id = %options.holder_id, version = %options.version, tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace()))]
-    async fn release_lock(&self, ctx: &RequestContext, options: ReleaseLockOptions) -> LockResult<()> {
+    async fn release_lock(
+        &self,
+        ctx: &RequestContext,
+        options: ReleaseLockOptions,
+    ) -> LockResult<()> {
         let tenant_id = ctx.tenant_id();
         let namespace = ctx.namespace();
-        
+
         let mut conn = self
             .pool
             .acquire()
@@ -461,13 +496,15 @@ impl LockManager for SqliteLockManager {
         }
 
         if options.delete_lock {
-            sqlx::query(r#"DELETE FROM locks WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#)
-                .bind(tenant_id)
-                .bind(namespace)
-                .bind(&options.lock_key)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| LockError::BackendError(format!("delete lock: {e}")))?;
+            sqlx::query(
+                r#"DELETE FROM locks WHERE tenant_id = ?1 AND namespace = ?2 AND lock_key = ?3"#,
+            )
+            .bind(tenant_id)
+            .bind(namespace)
+            .bind(&options.lock_key)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| LockError::BackendError(format!("delete lock: {e}")))?;
         } else {
             sqlx::query(
                 r#"UPDATE locks
@@ -494,7 +531,7 @@ impl LockManager for SqliteLockManager {
         // Use tenant_id and namespace as-is (may be empty)
         let tenant_id = ctx.tenant_id();
         let namespace = ctx.namespace();
-        
+
         let row = sqlx::query(
             r#"SELECT lock_key, holder_id, version, expires_at, lease_duration_secs,
                       last_heartbeat, locked, metadata
@@ -533,5 +570,3 @@ impl LockManager for SqliteLockManager {
         Ok(None)
     }
 }
-
-

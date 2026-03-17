@@ -28,7 +28,7 @@ use tokio::sync::Barrier;
 async fn test_span_cloning_panic_reproduction() {
     // This test reproduces the scenario that causes "tried to clone a span that already closed" panic
     // The panic occurs when OpenTelemetry Context objects with spans are cloned after spans are closed.
-    
+
     let config = TracingMiddlewareConfig {
         backend: "test".to_string(),
         endpoint: "http://localhost:4318".to_string(),
@@ -42,9 +42,7 @@ async fn test_span_cloning_panic_reproduction() {
             middleware_type: MiddlewareType::MiddlewareTypeTracing as i32,
             enabled: true,
             priority: 20,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(config)),
         }],
     };
 
@@ -58,11 +56,11 @@ async fn test_span_cloning_panic_reproduction() {
     for i in 0..10 {
         let chain_clone = chain.clone();
         let barrier_clone = barrier.clone();
-        
+
         let handle = tokio::spawn(async move {
             // Wait for all tasks to be ready
             barrier_clone.wait().await;
-            
+
             let context = InterceptorRequest {
                 method: format!("/ActorService/Method{}", i),
                 headers: std::collections::HashMap::new(),
@@ -94,7 +92,7 @@ async fn test_span_cloning_panic_reproduction() {
             let result = chain_clone.after_response(&response_context).await;
             assert!(result.is_ok(), "after_response should not panic");
         });
-        
+
         handles.push(handle);
     }
 
@@ -109,7 +107,7 @@ async fn test_span_cloning_panic_reproduction() {
 async fn test_span_cloning_with_error_handling() {
     // Test that error handling doesn't trigger span cloning panics
     // This reproduces the scenario where errors occur and spans might be cloned during error handling
-    
+
     let config = TracingMiddlewareConfig {
         backend: "test".to_string(),
         endpoint: "http://localhost:4318".to_string(),
@@ -123,9 +121,7 @@ async fn test_span_cloning_with_error_handling() {
             middleware_type: MiddlewareType::MiddlewareTypeTracing as i32,
             enabled: true,
             priority: 20,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(config)),
         }],
     };
 
@@ -161,7 +157,10 @@ async fn test_span_cloning_with_error_handling() {
     };
 
     let result = chain.after_response(&response_context).await;
-    assert!(result.is_ok(), "after_response should not panic even after error");
+    assert!(
+        result.is_ok(),
+        "after_response should not panic even after error"
+    );
 }
 
 #[tokio::test]
@@ -169,7 +168,7 @@ async fn test_tracing_interceptor_no_panic_on_rapid_requests() {
     // Test rapid sequential requests to ensure spans don't cause panics
     // This reproduces the scenario from the migrating_orbit example where
     // multiple concurrent requests trigger span cloning issues
-    
+
     let config = TracingMiddlewareConfig {
         backend: "test".to_string(),
         endpoint: "http://localhost:4318".to_string(),
@@ -183,9 +182,7 @@ async fn test_tracing_interceptor_no_panic_on_rapid_requests() {
             middleware_type: MiddlewareType::MiddlewareTypeTracing as i32,
             enabled: true,
             priority: 20,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(config)),
         }],
     };
 

@@ -76,7 +76,12 @@ async fn test_spawn_actor_no_facets() {
 
     let registration_future = async {
         loop {
-            if lookup_actor_ref(&node, &actor_id).await.ok().flatten().is_some() {
+            if lookup_actor_ref(&node, &actor_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some()
+            {
                 break;
             }
             tokio::task::yield_now().await;
@@ -128,7 +133,12 @@ async fn test_spawn_actor_with_facet() {
 
     let registration_future = async {
         loop {
-            if lookup_actor_ref(&node, &actor_id).await.ok().flatten().is_some() {
+            if lookup_actor_ref(&node, &actor_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some()
+            {
                 break;
             }
             tokio::task::yield_now().await;
@@ -202,7 +212,10 @@ async fn test_facet_service_get_facet_normal_actor() {
     let facets_arc = facets.unwrap();
     let facets_guard = facets_arc.read().await;
     let timer_facet_arc = facets_guard.get_facet("timer");
-    assert!(timer_facet_arc.is_some(), "TimerFacet should be retrievable");
+    assert!(
+        timer_facet_arc.is_some(),
+        "TimerFacet should be retrievable"
+    );
 }
 
 #[tokio::test]
@@ -304,7 +317,10 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
     assert!(facets.is_some(), "Facets should be stored");
 
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
-    actor_registry.unregister_with_cleanup(&actor_id).await.unwrap();
+    actor_registry
+        .unregister_with_cleanup(&actor_id)
+        .await
+        .unwrap();
 
     let facets_after = node.clone().get_facets(&actor_id).await;
     assert!(
@@ -388,5 +404,8 @@ async fn test_facet_storage_direct() {
     let facets_arc = facets_arc.unwrap();
     let facets_guard = facets_arc.read().await;
     let timer_facet_arc = facets_guard.get_facet("timer");
-    assert!(timer_facet_arc.is_some(), "TimerFacet should be retrievable");
+    assert!(
+        timer_facet_arc.is_some(),
+        "TimerFacet should be retrievable"
+    );
 }

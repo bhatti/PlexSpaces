@@ -323,11 +323,12 @@ pub trait TupleSpaceStorage: Send + Sync {
 /// # Ok(())
 /// # }
 /// ```
-pub async fn create_storage(
-    db_url: &str,
-) -> Result<Box<dyn TupleSpaceStorage>, TupleSpaceError> {
+pub async fn create_storage(db_url: &str) -> Result<Box<dyn TupleSpaceStorage>, TupleSpaceError> {
     // Determine backend type from connection string
-    if db_url.contains(":memory:") || db_url.starts_with("sqlite:") || db_url.starts_with("sqlite://") {
+    if db_url.contains(":memory:")
+        || db_url.starts_with("sqlite:")
+        || db_url.starts_with("sqlite://")
+    {
         #[cfg(feature = "sql-backend")]
         {
             // Extract path from SQLite connection string
@@ -335,17 +336,20 @@ pub async fn create_storage(
                 ":memory:".to_string()
             } else if db_url.starts_with("sqlite:///") {
                 // Format: "sqlite:///absolute/path" - preserve leading /
-                let extracted = db_url.strip_prefix("sqlite:///")
+                let extracted = db_url
+                    .strip_prefix("sqlite:///")
                     .and_then(|s| s.split('?').next())
                     .unwrap_or(db_url);
                 format!("/{}", extracted) // Restore leading /
             } else if db_url.starts_with("sqlite://") {
-                db_url.strip_prefix("sqlite://")
+                db_url
+                    .strip_prefix("sqlite://")
                     .and_then(|s| s.split('?').next())
                     .unwrap_or(db_url)
                     .to_string()
             } else if db_url.starts_with("sqlite:") {
-                db_url.strip_prefix("sqlite:")
+                db_url
+                    .strip_prefix("sqlite:")
                     .and_then(|s| s.split('?').next())
                     .unwrap_or(db_url)
                     .to_string()
@@ -354,19 +358,20 @@ pub async fn create_storage(
                     "Invalid SQLite connection string format".to_string(),
                 ));
             };
-            
+
             // Ensure directory exists for file-based SQLite databases
             if path != ":memory:" && !path.is_empty() {
                 if let Some(parent) = std::path::Path::new(&path).parent() {
                     std::fs::create_dir_all(parent).map_err(|e| {
                         TupleSpaceError::InvalidConfiguration(format!(
                             "Failed to create database directory '{}': {}",
-                            parent.display(), e
+                            parent.display(),
+                            e
                         ))
                     })?;
                 }
             }
-            
+
             use sql::{SqlStorage, SqliteConfig};
             // Create SQLite storage config
             let sqlite_config = SqliteConfig {
@@ -386,7 +391,7 @@ pub async fn create_storage(
     } else if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {
         #[cfg(feature = "sql-backend")]
         {
-            use sql::{SqlStorage, PostgresConfig};
+            use sql::{PostgresConfig, SqlStorage};
             // Create PostgreSQL storage config
             let postgres_config = PostgresConfig {
                 connection_string: db_url.to_string(),
@@ -421,15 +426,16 @@ pub async fn create_storage(
         }
         #[cfg(not(feature = "sql-backend"))]
         {
-            Err(TupleSpaceError::NotSupported(
-                format!("Unsupported database URL: {} (and sql-backend not enabled)", db_url)
-            ))
+            Err(TupleSpaceError::NotSupported(format!(
+                "Unsupported database URL: {} (and sql-backend not enabled)",
+                db_url
+            )))
         }
     }
 }
 
 /// Create default in-memory storage using SQLite :memory:
-/// 
+///
 /// Convenience function for tests and simple use cases
 #[cfg(feature = "sql-backend")]
 pub async fn create_memory_storage() -> Result<Box<dyn TupleSpaceStorage>, TupleSpaceError> {
@@ -457,7 +463,10 @@ mod tests {
         });
 
         let result = create_storage(config).await;
-        assert!(result.is_ok(), "Memory storage (via SQLite :memory:) should work");
+        assert!(
+            result.is_ok(),
+            "Memory storage (via SQLite :memory:) should work"
+        );
     }
 
     #[cfg(feature = "sql-backend")]

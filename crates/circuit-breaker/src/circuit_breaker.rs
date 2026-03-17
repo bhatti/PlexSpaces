@@ -545,11 +545,17 @@ mod tests {
 
         // Manually transition to half-open (simulate timeout)
         circuit.state.write().await.transition_to_half_open();
-        assert_eq!(circuit.get_state().await, CircuitState::CircuitStateHalfOpen);
+        assert_eq!(
+            circuit.get_state().await,
+            CircuitState::CircuitStateHalfOpen
+        );
 
         // One success
         circuit.record_success().await;
-        assert_eq!(circuit.get_state().await, CircuitState::CircuitStateHalfOpen);
+        assert_eq!(
+            circuit.get_state().await,
+            CircuitState::CircuitStateHalfOpen
+        );
 
         // Second success - should close
         circuit.record_success().await;
@@ -564,7 +570,10 @@ mod tests {
         // Trip and transition to half-open
         circuit.trip().await;
         circuit.state.write().await.transition_to_half_open();
-        assert_eq!(circuit.get_state().await, CircuitState::CircuitStateHalfOpen);
+        assert_eq!(
+            circuit.get_state().await,
+            CircuitState::CircuitStateHalfOpen
+        );
 
         // Any failure in half-open → back to open
         circuit.record_failure().await;

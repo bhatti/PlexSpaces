@@ -24,9 +24,9 @@
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
     use plexspaces_actor::ActorBuilder;
     use plexspaces_core::{Actor, BehaviorType, Message};
-    use async_trait::async_trait;
 
     struct TestBehavior;
 
@@ -106,8 +106,11 @@ mod tests {
     #[test]
     fn test_actor_builder_wasm_module_validation() {
         // Valid WASM module
-        let _builder1 = ActorBuilder::new(Box::new(TestBehavior))
-            .with_wasm_module("counter-actor", "1.0.0", "abc123");
+        let _builder1 = ActorBuilder::new(Box::new(TestBehavior)).with_wasm_module(
+            "counter-actor",
+            "1.0.0",
+            "abc123",
+        );
 
         // Empty module name should be rejected (or use default)
         // This test verifies validation logic
@@ -130,4 +133,3 @@ mod tests {
         assert!(true);
     }
 }
-

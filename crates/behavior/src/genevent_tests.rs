@@ -24,11 +24,9 @@
 mod tests {
     use super::super::*;
     use async_trait::async_trait;
-    use plexspaces_core::{
-        Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType,
-    };
+    use plexspaces_core::{Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType};
     use plexspaces_proto::common::v1::Message;
-    
+
     /// Helper to create a test message
     fn create_test_message(payload: Vec<u8>) -> Message {
         Message {
@@ -95,7 +93,7 @@ mod tests {
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
         let ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
-            String::new(), // tenant_id (empty if auth disabled)
+            String::new(),         // tenant_id (empty if auth disabled)
             "test-ns".to_string(), // namespace
             service_locator,
             None,

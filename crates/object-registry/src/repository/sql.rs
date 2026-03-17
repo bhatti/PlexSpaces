@@ -31,11 +31,11 @@
 use super::{DiscoverFilter, ObjectRegistryRepository, RepositoryError, RepositoryResult};
 use async_trait::async_trait;
 use plexspaces_common::RequestContext;
-use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
+use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration};
 use prost::Message;
 use sqlx::{Pool, Postgres, Row, Sqlite};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{debug, error, instrument};
+use tracing::{debug, instrument};
 
 /// SQLite Object Registry Repository
 ///
@@ -88,9 +88,13 @@ impl SqliteObjectRegistryRepository {
             grpc_address TEXT NOT NULL, object_category TEXT, health_status INTEGER NOT NULL DEFAULT 0,
             last_heartbeat BIGINT, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL,
             registration_blob BLOB NOT NULL, PRIMARY KEY (tenant_id, namespace, object_id))"#;
-        sqlx::query(SCHEMA).execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        sqlx::query(SCHEMA)
+            .execute(pool)
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_type ON object_registrations(tenant_id, namespace, object_type)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_node ON object_registrations(tenant_id, namespace, node_id)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_object_registrations_unique_node_registration ON object_registrations(tenant_id, namespace, node_id) WHERE object_type = 7 AND node_id IS NOT NULL AND node_id <> ''").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_heartbeat ON object_registrations(tenant_id, namespace, last_heartbeat)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_health ON object_registrations(tenant_id, namespace, health_status)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_object_registrations_category ON object_registrations(tenant_id, namespace, object_category)").execute(pool).await.map_err(|e| RepositoryError::Storage(e.to_string()))?;
@@ -118,10 +122,7 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
     ) -> RepositoryResult<()> {
         let now = Self::now_unix();
         let blob = registration.encode_to_vec();
-        let last_heartbeat = registration
-            .last_heartbeat
-            .as_ref()
-            .map(|t| t.seconds);
+        let last_heartbeat = registration.last_heartbeat.as_ref().map(|t| t.seconds);
 
         sqlx::query(
             r#"
@@ -191,24 +192,22 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
                     .map_err(|e| RepositoryError::Storage(e.to_string()))?;
                 let mut registration = ObjectRegistration::decode(&blob[..])
                     .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-                
+
                 // Merge indexed columns that may have been updated separately (heartbeat optimization)
-                let last_heartbeat: Option<i64> = row
-                    .try_get("last_heartbeat")
-                    .unwrap_or(None);
+                let last_heartbeat: Option<i64> = row.try_get("last_heartbeat").unwrap_or(None);
                 if let Some(ts) = last_heartbeat {
                     registration.last_heartbeat = Some(prost_types::Timestamp {
                         seconds: ts,
                         nanos: 0,
                     });
                 }
-                
+
                 // Also merge health_status from indexed column
                 let health_status: i32 = row
                     .try_get("health_status")
                     .unwrap_or(registration.health_status);
                 registration.health_status = health_status;
-                
+
                 Ok(Some(registration))
             }
             None => Ok(None),
@@ -243,10 +242,8 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
     ) -> RepositoryResult<Vec<ObjectRegistration>> {
         // Build dynamic WHERE clause
         let mut conditions = vec!["tenant_id = ?".to_string(), "namespace = ?".to_string()];
-        let mut bindings: Vec<String> = vec![
-            ctx.tenant_id().to_string(),
-            ctx.namespace().to_string(),
-        ];
+        let mut bindings: Vec<String> =
+            vec![ctx.tenant_id().to_string(), ctx.namespace().to_string()];
 
         if let Some(obj_type) = filter.object_type.as_ref() {
             conditions.push("object_type = ?".to_string());
@@ -401,10 +398,8 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
     ) -> RepositoryResult<usize> {
         // Build dynamic WHERE clause (same as discover, including heartbeat filters)
         let mut conditions = vec!["tenant_id = ?".to_string(), "namespace = ?".to_string()];
-        let mut bindings: Vec<String> = vec![
-            ctx.tenant_id().to_string(),
-            ctx.namespace().to_string(),
-        ];
+        let mut bindings: Vec<String> =
+            vec![ctx.tenant_id().to_string(), ctx.namespace().to_string()];
 
         if let Some(obj_type) = filter.object_type.as_ref() {
             conditions.push("object_type = ?".to_string());
@@ -600,24 +595,23 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
                     .map_err(|e| RepositoryError::Storage(e.to_string()))?;
                 let mut registration = ObjectRegistration::decode(&blob[..])
                     .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
-                
+
                 // Merge indexed columns that may have been updated separately (heartbeat optimization)
-                let last_heartbeat: Option<chrono::DateTime<chrono::Utc>> = row
-                    .try_get("last_heartbeat")
-                    .unwrap_or(None);
+                let last_heartbeat: Option<chrono::DateTime<chrono::Utc>> =
+                    row.try_get("last_heartbeat").unwrap_or(None);
                 if let Some(ts) = last_heartbeat {
                     registration.last_heartbeat = Some(prost_types::Timestamp {
                         seconds: ts.timestamp(),
                         nanos: 0,
                     });
                 }
-                
+
                 // Also merge health_status from indexed column
                 let health_status: i32 = row
                     .try_get("health_status")
                     .unwrap_or(registration.health_status);
                 registration.health_status = health_status;
-                
+
                 Ok(Some(registration))
             }
             None => Ok(None),
@@ -721,14 +715,12 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
         }
 
         if let Some(before) = filter.last_heartbeat_before {
-            let ts = chrono::DateTime::from_timestamp(before, 0)
-                .unwrap_or_else(chrono::Utc::now);
+            let ts = chrono::DateTime::from_timestamp(before, 0).unwrap_or_else(chrono::Utc::now);
             query_builder = query_builder.bind(ts);
         }
 
         if let Some(after) = filter.last_heartbeat_after {
-            let ts = chrono::DateTime::from_timestamp(after, 0)
-                .unwrap_or_else(chrono::Utc::now);
+            let ts = chrono::DateTime::from_timestamp(after, 0).unwrap_or_else(chrono::Utc::now);
             query_builder = query_builder.bind(ts);
         }
 
@@ -778,8 +770,7 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
         object_id: &str,
         timestamp: i64,
     ) -> RepositoryResult<()> {
-        let ts = chrono::DateTime::from_timestamp(timestamp, 0)
-            .unwrap_or_else(chrono::Utc::now);
+        let ts = chrono::DateTime::from_timestamp(timestamp, 0).unwrap_or_else(chrono::Utc::now);
         let now = Self::now_timestamp();
 
         let result = sqlx::query(
@@ -870,7 +861,10 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
         // Include heartbeat filters (same as discover)
         if filter.last_heartbeat_before.is_some() {
             param_count += 1;
-            conditions.push(format!("(last_heartbeat IS NULL OR last_heartbeat < ${})", param_count));
+            conditions.push(format!(
+                "(last_heartbeat IS NULL OR last_heartbeat < ${})",
+                param_count
+            ));
         }
 
         if filter.last_heartbeat_after.is_some() {
@@ -906,14 +900,12 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
 
         // Bind heartbeat filter values (convert Unix timestamp to DateTime for PostgreSQL)
         if let Some(before) = filter.last_heartbeat_before {
-            let ts = chrono::DateTime::from_timestamp(before, 0)
-                .unwrap_or_else(chrono::Utc::now);
+            let ts = chrono::DateTime::from_timestamp(before, 0).unwrap_or_else(chrono::Utc::now);
             query_builder = query_builder.bind(ts);
         }
 
         if let Some(after) = filter.last_heartbeat_after {
-            let ts = chrono::DateTime::from_timestamp(after, 0)
-                .unwrap_or_else(chrono::Utc::now);
+            let ts = chrono::DateTime::from_timestamp(after, 0).unwrap_or_else(chrono::Utc::now);
             query_builder = query_builder.bind(ts);
         }
 
@@ -974,8 +966,10 @@ mod tests {
         let repo = SqliteObjectRegistryRepository::new(":memory:")
             .await
             .unwrap();
-        let ctx =
-            RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
 
         let reg = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
         repo.put(&ctx, &reg).await.unwrap();
@@ -990,8 +984,10 @@ mod tests {
         let repo = SqliteObjectRegistryRepository::new(":memory:")
             .await
             .unwrap();
-        let ctx =
-            RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
 
         let reg = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
         repo.put(&ctx, &reg).await.unwrap();
@@ -1007,8 +1003,10 @@ mod tests {
         let repo = SqliteObjectRegistryRepository::new(":memory:")
             .await
             .unwrap();
-        let ctx =
-            RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
 
         let actor = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
         let service = create_test_registration("service-1", ObjectType::ObjectTypeService);
@@ -1031,8 +1029,10 @@ mod tests {
         let repo = SqliteObjectRegistryRepository::new(":memory:")
             .await
             .unwrap();
-        let ctx =
-            RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
 
         let reg = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
         repo.put(&ctx, &reg).await.unwrap();
@@ -1052,8 +1052,10 @@ mod tests {
         let repo = SqliteObjectRegistryRepository::new(":memory:")
             .await
             .unwrap();
-        let ctx =
-            RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
 
         let mut reg = create_test_registration("actor-1", ObjectType::ObjectTypeActor);
         repo.put(&ctx, &reg).await.unwrap();
@@ -1066,10 +1068,7 @@ mod tests {
         assert_eq!(found.version, "2.0.0");
 
         // Should still be only one entry
-        let count = repo
-            .count(&ctx, &DiscoverFilter::default())
-            .await
-            .unwrap();
+        let count = repo.count(&ctx, &DiscoverFilter::default()).await.unwrap();
         assert_eq!(count, 1);
     }
 }

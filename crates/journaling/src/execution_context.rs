@@ -300,24 +300,25 @@ impl ExecutionContextImpl {
                     inner
                         .side_effect_cache
                         .insert(side_effect_id.clone(), output_bytes.clone());
-                    
+
                     // Record metrics
                     metrics::counter!("plexspaces_journaling_side_effects_executed_total",
                         "side_effect_type" => side_effect_type.clone(),
                         "actor_id" => inner.actor_id.clone()
-                    ).increment(1);
+                    )
+                    .increment(1);
                     metrics::histogram!("plexspaces_journaling_side_effect_execution_duration_seconds",
                         "side_effect_type" => side_effect_type.clone(),
                         "actor_id" => inner.actor_id.clone()
                     ).record(duration.as_secs_f64());
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        actor_id = %inner.actor_id,
-                        side_effect_id = %side_effect_id,
-                        side_effect_type = %side_effect_type,
-                        duration_ms = duration.as_millis(),
-                        "Side effect executed and cached"
-                    );
+                        tracing::debug!(
+                            actor_id = %inner.actor_id,
+                            side_effect_id = %side_effect_id,
+                            side_effect_type = %side_effect_type,
+                            duration_ms = duration.as_millis(),
+                            "Side effect executed and cached"
+                        );
                     }
                 }
 

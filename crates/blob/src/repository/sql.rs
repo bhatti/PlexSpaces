@@ -23,11 +23,11 @@ use chrono::{DateTime, Utc};
 use sqlx::{Pool, Row};
 use std::sync::Arc;
 
-use crate::{BlobError, BlobResult};
-use crate::helpers::{datetime_to_timestamp, timestamp_to_datetime};
-use plexspaces_proto::storage::v1::BlobMetadata;
-use plexspaces_core::RequestContext;
 use super::{BlobRepository, ListFilters};
+use crate::helpers::{datetime_to_timestamp, timestamp_to_datetime};
+use crate::{BlobError, BlobResult};
+use plexspaces_core::RequestContext;
+use plexspaces_proto::storage::v1::BlobMetadata;
 
 /// SQL-based blob metadata repository
 pub struct SqlBlobRepository {
@@ -38,14 +38,14 @@ impl SqlBlobRepository {
     /// Create new SQL repository with automatic migration
     /// This ensures migrations are automatically applied when the repository is created
     /// For in-memory SQLite (sqlite::memory:), migrations are always applied
-    /// 
+    ///
     /// IMPORTANT: For in-memory SQLite, ensure the pool uses max_connections=1
     /// to avoid connection-specific database issues
     pub async fn new(pool: Pool<sqlx::Any>) -> Result<Self, sqlx::Error> {
         // Auto-apply migrations using the pool
         // For in-memory SQLite with max_connections=1, all operations use the same connection
         Self::migrate(&pool).await?;
-        
+
         Ok(Self {
             pool: Arc::new(pool),
         })
@@ -56,24 +56,25 @@ impl SqlBlobRepository {
     /// For in-memory SQLite, uses a single connection for all operations to ensure consistency
     async fn migrate(pool: &Pool<sqlx::Any>) -> Result<(), sqlx::Error> {
         use tracing::{debug, error, info};
-        
+
         // Detect database type
-        let (is_sqlite, db_version) = match sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
-            .fetch_optional(pool)
-            .await
-        {
-            Ok(Some(version)) => (true, format!("SQLite {}", version)),
-            Ok(None) => (true, "SQLite".to_string()),
-            Err(_) => (false, "PostgreSQL".to_string()),
-        };
-        
+        let (is_sqlite, db_version) =
+            match sqlx::query_scalar::<_, String>("SELECT sqlite_version()")
+                .fetch_optional(pool)
+                .await
+            {
+                Ok(Some(version)) => (true, format!("SQLite {}", version)),
+                Ok(None) => (true, "SQLite".to_string()),
+                Err(_) => (false, "PostgreSQL".to_string()),
+            };
+
         if is_sqlite {
             // For SQLite (especially in-memory), use a single connection for all operations
             let mut conn = pool.acquire().await.map_err(|e| {
                 error!("Blob migration failed to acquire connection: {}", e);
                 e
             })?;
-            
+
             // Create table and indexes
             sqlx::query(
                 r#"
@@ -122,7 +123,7 @@ impl SqlBlobRepository {
             }
 
             info!(
-                db = %db_version, 
+                db = %db_version,
                 table = "blob_metadata",
                 "Blob storage migration completed"
             );
@@ -249,14 +250,20 @@ impl BlobRepository for SqlBlobRepository {
         let metadata_json = serde_json::to_string(&metadata.metadata)?;
         let tags_json = serde_json::to_string(&metadata.tags)?;
 
-        let expires_at = metadata.expires_at.as_ref()
+        let expires_at = metadata
+            .expires_at
+            .as_ref()
             .and_then(|ts| timestamp_to_datetime(Some(ts.clone())))
             .map(|dt| dt.to_rfc3339());
-        let created_at = metadata.created_at.as_ref()
+        let created_at = metadata
+            .created_at
+            .as_ref()
             .and_then(|ts| timestamp_to_datetime(Some(ts.clone())))
             .unwrap_or_else(Utc::now)
             .to_rfc3339();
-        let updated_at = metadata.updated_at.as_ref()
+        let updated_at = metadata
+            .updated_at
+            .as_ref()
             .and_then(|ts| timestamp_to_datetime(Some(ts.clone())))
             .unwrap_or_else(Utc::now)
             .to_rfc3339();
@@ -312,7 +319,9 @@ impl BlobRepository for SqlBlobRepository {
         let tags_json = serde_json::to_string(&metadata.tags)?;
         let updated_at = Utc::now().to_rfc3339();
 
-        let expires_at = metadata.expires_at.as_ref()
+        let expires_at = metadata
+            .expires_at
+            .as_ref()
             .and_then(|ts| timestamp_to_datetime(Some(ts.clone())))
             .map(|dt| dt.to_rfc3339());
 
@@ -375,7 +384,7 @@ impl BlobRepository for SqlBlobRepository {
         // For admin/internal contexts with empty namespace, skip namespace filter
         let mut where_clauses: Vec<String> = vec!["tenant_id = $1".to_string()];
         let mut bind_index = 2;
-        
+
         // Add namespace filter only if not admin/internal with empty namespace
         if !ctx.should_skip_namespace_filter() {
             where_clauses.push(format!("namespace = ${}", bind_index));
@@ -403,9 +412,8 @@ impl BlobRepository for SqlBlobRepository {
 
         // Count total
         let count_query = format!("SELECT COUNT(*) FROM blob_metadata WHERE {}", where_clause);
-        let mut count_query = sqlx::query(&count_query)
-            .bind(ctx.tenant_id());
-        
+        let mut count_query = sqlx::query(&count_query).bind(ctx.tenant_id());
+
         // Bind namespace only if not admin/internal with empty namespace
         if !ctx.should_skip_namespace_filter() {
             count_query = count_query.bind(ctx.namespace());
@@ -424,10 +432,7 @@ impl BlobRepository for SqlBlobRepository {
             count_query = count_query.bind(sha256);
         }
 
-        let total_count: i64 = count_query
-            .fetch_one(&*self.pool)
-            .await?
-            .get(0);
+        let total_count: i64 = count_query.fetch_one(&*self.pool).await?.get(0);
 
         // Fetch results
         let list_query = format!(
@@ -440,12 +445,13 @@ impl BlobRepository for SqlBlobRepository {
             ORDER BY created_at DESC
             LIMIT ${} OFFSET ${}
             "#,
-            where_clause, bind_index, bind_index + 1
+            where_clause,
+            bind_index,
+            bind_index + 1
         );
 
-        let mut list_query = sqlx::query(&list_query)
-            .bind(ctx.tenant_id());
-        
+        let mut list_query = sqlx::query(&list_query).bind(ctx.tenant_id());
+
         // Bind namespace only if not admin/internal with empty namespace
         if !ctx.should_skip_namespace_filter() {
             list_query = list_query.bind(ctx.namespace());
@@ -559,15 +565,16 @@ where
     let expires_at_str: Option<String> = row.try_get("expires_at").ok().flatten();
     let created_at_str: String = row.try_get("created_at")?;
     let updated_at_str: String = row.try_get("updated_at")?;
-    
-    let expires_at = expires_at_str.as_ref()
+
+    let expires_at = expires_at_str
+        .as_ref()
         .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&Utc));
-    
+
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)
         .map_err(|e| BlobError::InternalError(format!("Failed to parse created_at: {}", e)))?
         .with_timezone(&Utc);
-    
+
     let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
         .map_err(|e| BlobError::InternalError(format!("Failed to parse updated_at: {}", e)))?
         .with_timezone(&Utc);

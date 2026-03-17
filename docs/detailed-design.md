@@ -1823,7 +1823,7 @@ Leader-worker patterns use **existing building blocks** only; no dedicated sessi
 
 **Unified placement**:
 
-- **ShardGroup**: Placement is defined in `DataParallelConfig.placement` (type `NodePlacement`). Labels, affinity, and resource requirements live in `NodePlacement` (e.g. `required_labels`, `resource_requirements`, `preferred_node_ids`, `avoid_node_ids`). The scheduler (`crates/scheduler`) matches nodes using `ActorResourceRequirements.placement` (same single `NodePlacement`).
+- **ShardGroup**: Placement is defined in `DataParallelConfig.placement` (type `NodePlacement`). Labels, affinity, and resource requirements live in `NodePlacement` (e.g. `required_labels`, `resource_requirements`, `avoid_node_ids`). The scheduler (`crates/scheduler`) matches nodes using `ActorResourceRequirements.placement` (same single `NodePlacement`).
 - **CreateShardGroupRequest**: Takes `config: DataParallelConfig`; there is no separate `labels` field—labels are in `config.placement.required_labels`.
 - **Scatter-gather / MapShardGroup**: Unchanged; they operate on the ShardGroup’s `shard_actor_ids`. Multi-node placement is achieved by creating the group with `config.placement` (e.g. `from_registry` or explicit `node_ids`), so shards are spread across nodes; ScatterGather and MapShardGroup then fan out to those actors.
 

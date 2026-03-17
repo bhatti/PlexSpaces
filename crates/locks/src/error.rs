@@ -97,4 +97,3 @@ impl From<aws_sdk_dynamodb::Error> for LockError {
         LockError::BackendError(format!("DynamoDB error: {}", err))
     }
 }
-

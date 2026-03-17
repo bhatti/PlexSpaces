@@ -187,7 +187,12 @@ impl ReminderFacet {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(storage: Arc<dyn JournalStorage>, config: Value, priority: i32, service_locator: Arc<dyn ServiceLocator>) -> Self {
+    pub fn new(
+        storage: Arc<dyn JournalStorage>,
+        config: Value,
+        priority: i32,
+        service_locator: Arc<dyn ServiceLocator>,
+    ) -> Self {
         ReminderFacet {
             config,
             priority,
@@ -209,8 +214,16 @@ impl ReminderFacet {
     ///
     /// ## Returns
     /// New ReminderFacet with default priority (50) and empty config
-    pub fn with_storage(storage: Arc<dyn JournalStorage>, service_locator: Arc<dyn ServiceLocator>) -> Self {
-        Self::new(storage, serde_json::json!({}), REMINDER_FACET_DEFAULT_PRIORITY, service_locator)
+    pub fn with_storage(
+        storage: Arc<dyn JournalStorage>,
+        service_locator: Arc<dyn ServiceLocator>,
+    ) -> Self {
+        Self::new(
+            storage,
+            serde_json::json!({}),
+            REMINDER_FACET_DEFAULT_PRIORITY,
+            service_locator,
+        )
     }
 
     /// Create a new reminder facet with activation provider
@@ -247,7 +260,6 @@ impl ReminderFacet {
             activation_provider: Some(activation_provider),
         }
     }
-
 
     /// Register a reminder
     ///
@@ -562,7 +574,11 @@ impl Facet for ReminderFacet {
         drop(id);
 
         // Load existing reminders from storage
-        let loaded_reminders = self.storage.load_reminders(actor_id).await.unwrap_or_default();
+        let loaded_reminders = self
+            .storage
+            .load_reminders(actor_id)
+            .await
+            .unwrap_or_default();
 
         // Restore reminders to memory
         let mut reminders = self.reminders.write().await;
@@ -728,7 +744,6 @@ impl Facet for ReminderFacet {
     fn get_priority(&self) -> i32 {
         self.priority
     }
-    
 }
 
 /// Reminder errors
@@ -757,9 +772,9 @@ pub enum ReminderError {
 
 /// Convert proto Duration to std::time::Duration
 fn proto_duration_to_std(duration: &Option<prost_types::Duration>) -> Option<Duration> {
-    duration.as_ref().map(|d| {
-        Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64)
-    })
+    duration
+        .as_ref()
+        .map(|d| Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64))
 }
 
 /// Convert proto Timestamp to SystemTime
@@ -780,10 +795,10 @@ mod tests {
     /// Creates a test facet with SQLite :memory: backend.
     /// Uses in-memory SQLite for fast, isolated test execution.
     async fn create_test_facet() -> ReminderFacet {
-        use plexspaces_services::ServiceLocatorImpl;
         use plexspaces_core::ServiceLocator;
+        use plexspaces_services::ServiceLocatorImpl;
         use std::sync::Arc;
-        
+
         let storage: Arc<dyn JournalStorage> =
             Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let service_locator: Arc<dyn ServiceLocator> = Arc::new(ServiceLocatorImpl::new());

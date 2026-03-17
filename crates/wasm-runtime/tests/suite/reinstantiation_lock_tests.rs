@@ -39,12 +39,12 @@
 #[cfg(test)]
 #[cfg(feature = "component-model")]
 mod tests {
-use plexspaces_wasm_runtime::{WasmConfig, WasmRuntime, ResourceLimits};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::time::timeout;
+    use plexspaces_wasm_runtime::{ResourceLimits, WasmConfig, WasmRuntime};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+    use tokio::time::timeout;
 
-use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
+    use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
 
     /// Standard test config for calculator component
     fn test_config() -> WasmConfig {
@@ -96,10 +96,11 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
 
         let module = timeout(
             Duration::from_secs(60),
-            runtime.load_module("calculator", "1.0.0", &wasm_bytes)
-        ).await
-            .expect("Module loading timed out")
-            .expect("Failed to load module");
+            runtime.load_module("calculator", "1.0.0", &wasm_bytes),
+        )
+        .await
+        .expect("Module loading timed out")
+        .expect("Failed to load module");
 
         let config = test_config();
         let actor_id = "test-actor-1".to_string();
@@ -110,12 +111,21 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 actor_id.clone(),
                 &[],
                 config,
-                None, None, None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 None, // elastic_pool_service
-            )
-        ).await
-            .expect("Instantiation timed out");
-        
+            ),
+        )
+        .await
+        .expect("Instantiation timed out");
+
         let instance = match instance {
             Ok(inst) => Arc::new(inst),
             Err(e) if should_skip(&e) => {
@@ -129,7 +139,7 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
         // Each message triggers re-instantiation, but the lock ensures only one happens at a time
         let num_messages = 20;
         let start_time = Instant::now();
-        
+
         let handles: Vec<_> = (0..num_messages)
             .map(|i| {
                 let instance = instance.clone();
@@ -137,8 +147,9 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                     let payload = format!(r#"{{"operands":[{},{}]}}"#, i, i + 1);
                     timeout(
                         Duration::from_secs(30), // Increased timeout for re-instantiation
-                        instance.handle_message("sender", "add", payload.into_bytes())
-                    ).await
+                        instance.handle_message("sender", "add", payload.into_bytes()),
+                    )
+                    .await
                 })
             })
             .collect();
@@ -146,14 +157,20 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
         // Wait for all messages to complete with overall timeout
         let results = timeout(
             Duration::from_secs(120), // Overall timeout for all messages
-            futures::future::join_all(handles)
-        ).await;
+            futures::future::join_all(handles),
+        )
+        .await;
 
         let results: Vec<_> = match results {
-            Ok(results) => results.into_iter().map(|r| r.expect("Task panicked")).collect(),
+            Ok(results) => results
+                .into_iter()
+                .map(|r| r.expect("Task panicked"))
+                .collect(),
             Err(_) => {
                 eprintln!("Test timed out - this may indicate the concurrency lock is working (serializing messages)");
-                eprintln!("If component model bindings are not available, test will skip on first error");
+                eprintln!(
+                    "If component model bindings are not available, test will skip on first error"
+                );
                 return;
             }
         };
@@ -168,13 +185,19 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 Ok(Ok(response)) => {
                     // Response should be JSON with result
                     let response_str = String::from_utf8_lossy(&response);
-                    if response_str.contains("\"result\"") || response_str.contains("\"status\":\"ok\"") || response_str.contains("sum") {
+                    if response_str.contains("\"result\"")
+                        || response_str.contains("\"status\":\"ok\"")
+                        || response_str.contains("sum")
+                    {
                         success_count += 1;
                     }
                 }
                 Ok(Err(e)) => {
                     if should_skip(e) {
-                        eprintln!("Skipping test due to component model bindings not available: {}", e);
+                        eprintln!(
+                            "Skipping test due to component model bindings not available: {}",
+                            e
+                        );
                         skip_due_to_bindings = true;
                         break;
                     }
@@ -182,7 +205,9 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 }
                 Err(_) => {
                     // Timeout on individual message - this could indicate lock is working
-                    eprintln!("Individual message timed out - may indicate serialization is working");
+                    eprintln!(
+                        "Individual message timed out - may indicate serialization is working"
+                    );
                 }
             }
         }
@@ -248,10 +273,11 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
 
         let module = timeout(
             Duration::from_secs(60),
-            runtime.load_module("calculator", "1.0.0", &wasm_bytes)
-        ).await
-            .expect("Module loading timed out")
-            .expect("Failed to load module");
+            runtime.load_module("calculator", "1.0.0", &wasm_bytes),
+        )
+        .await
+        .expect("Module loading timed out")
+        .expect("Failed to load module");
 
         // Create 5 different actor instances
         let num_actors = 5;
@@ -265,14 +291,24 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                     actor_id,
                     &[],
                     config.clone(),
-                    None, None, None, None, None, None, None, None, None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
                     None, // elastic_pool_service
                 )
             })
             .collect();
 
         let instances: Vec<_> = futures::future::join_all(
-            instances.into_iter().map(|fut| timeout(Duration::from_secs(10), fut))
+            instances
+                .into_iter()
+                .map(|fut| timeout(Duration::from_secs(10), fut)),
         )
         .await
         .into_iter()
@@ -286,7 +322,7 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                         }
                         panic!("Instantiation failed: {}", e);
                     })
-                    .expect("Failed to create instance")
+                    .expect("Failed to create instance"),
             )
         })
         .collect();
@@ -310,8 +346,9 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                         );
                         timeout(
                             Duration::from_secs(5),
-                            instance.handle_message("sender", "add", payload.into_bytes())
-                        ).await
+                            instance.handle_message("sender", "add", payload.into_bytes()),
+                        )
+                        .await
                     })
                 })
             })
@@ -320,14 +357,20 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
         // Wait for all messages to complete with overall timeout
         let results = timeout(
             Duration::from_secs(120), // Overall timeout for all messages
-            futures::future::join_all(handles)
-        ).await;
+            futures::future::join_all(handles),
+        )
+        .await;
 
         let results: Vec<_> = match results {
-            Ok(results) => results.into_iter().map(|r| r.expect("Task panicked")).collect(),
+            Ok(results) => results
+                .into_iter()
+                .map(|r| r.expect("Task panicked"))
+                .collect(),
             Err(_) => {
                 eprintln!("Test timed out - this may indicate the concurrency lock is working (serializing messages)");
-                eprintln!("If component model bindings are not available, test will skip on first error");
+                eprintln!(
+                    "If component model bindings are not available, test will skip on first error"
+                );
                 return;
             }
         };
@@ -341,13 +384,18 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
             match result {
                 Ok(Ok(response)) => {
                     let response_str = String::from_utf8_lossy(&response);
-                    if response_str.contains("\"result\"") || response_str.contains("\"status\":\"ok\"") {
+                    if response_str.contains("\"result\"")
+                        || response_str.contains("\"status\":\"ok\"")
+                    {
                         success_count += 1;
                     }
                 }
                 Ok(Err(e)) => {
                     if should_skip(e) {
-                        eprintln!("Skipping test due to component model bindings not available: {}", e);
+                        eprintln!(
+                            "Skipping test due to component model bindings not available: {}",
+                            e
+                        );
                         skip_due_to_bindings = true;
                         break;
                     }
@@ -355,7 +403,9 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 }
                 Err(_) => {
                     // Timeout on individual message - this could indicate lock is working
-                    eprintln!("Individual message timed out - may indicate serialization is working");
+                    eprintln!(
+                        "Individual message timed out - may indicate serialization is working"
+                    );
                 }
             }
         }
@@ -419,10 +469,11 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
 
         let module = timeout(
             Duration::from_secs(60),
-            runtime.load_module("calculator", "1.0.0", &wasm_bytes)
-        ).await
-            .expect("Module loading timed out")
-            .expect("Failed to load module");
+            runtime.load_module("calculator", "1.0.0", &wasm_bytes),
+        )
+        .await
+        .expect("Module loading timed out")
+        .expect("Failed to load module");
 
         let config = test_config();
         let actor_id = "test-actor-lock".to_string();
@@ -433,12 +484,21 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 actor_id.clone(),
                 &[],
                 config,
-                None, None, None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 None, // elastic_pool_service
-            )
-        ).await
-            .expect("Instantiation timed out");
-        
+            ),
+        )
+        .await
+        .expect("Instantiation timed out");
+
         let instance = match instance {
             Ok(inst) => Arc::new(inst),
             Err(e) if should_skip(&e) => {
@@ -461,8 +521,9 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                     let payload = format!(r#"{{"operands":[{},{}]}}"#, i, i + 1);
                     timeout(
                         Duration::from_secs(30), // Increased timeout for re-instantiation
-                        instance.handle_message("sender", "add", payload.into_bytes())
-                    ).await
+                        instance.handle_message("sender", "add", payload.into_bytes()),
+                    )
+                    .await
                 })
             })
             .collect();
@@ -474,12 +535,14 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
             futures::future::join_all(handles),
         )
         .await;
-        
+
         let results = match results {
             Ok(results) => results,
             Err(_) => {
                 eprintln!("Test timed out after 180 seconds - this may indicate the lock is working (serializing 50 messages)");
-                eprintln!("If component model bindings are not available, test will skip on first error");
+                eprintln!(
+                    "If component model bindings are not available, test will skip on first error"
+                );
                 return;
             }
         };
@@ -494,18 +557,24 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
             match result.expect("Task panicked") {
                 Ok(Ok(response)) => {
                     let response_str = String::from_utf8_lossy(&response);
-                    if response_str.contains("\"result\"") || response_str.contains("\"status\":\"ok\"") {
+                    if response_str.contains("\"result\"")
+                        || response_str.contains("\"status\":\"ok\"")
+                    {
                         success_count += 1;
                     }
                 }
                 Ok(Err(e)) => {
                     let error_str = e.to_string();
                     if should_skip(&error_str) {
-                        eprintln!("Skipping test due to component model bindings not available: {}", error_str);
+                        eprintln!(
+                            "Skipping test due to component model bindings not available: {}",
+                            error_str
+                        );
                         skip_due_to_bindings = true;
                         break;
                     }
-                    if error_str.contains("concurrent limit") || error_str.contains("memory stripe") {
+                    if error_str.contains("concurrent limit") || error_str.contains("memory stripe")
+                    {
                         concurrent_limit_errors += 1;
                     } else {
                         panic!("Unexpected error: {}", e);
@@ -513,7 +582,9 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 }
                 Err(_) => {
                     // Timeout on individual message - this could indicate lock is working
-                    eprintln!("Individual message timed out - may indicate serialization is working");
+                    eprintln!(
+                        "Individual message timed out - may indicate serialization is working"
+                    );
                 }
             }
         }
@@ -525,8 +596,7 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
 
         // Verify no concurrent limit errors occurred
         assert_eq!(
-            concurrent_limit_errors,
-            0,
+            concurrent_limit_errors, 0,
             "Should have 0 concurrent limit errors, but got {}",
             concurrent_limit_errors
         );
@@ -576,10 +646,11 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
 
         let module = timeout(
             Duration::from_secs(60),
-            runtime.load_module("calculator", "1.0.0", &wasm_bytes)
-        ).await
-            .expect("Module loading timed out")
-            .expect("Failed to load module");
+            runtime.load_module("calculator", "1.0.0", &wasm_bytes),
+        )
+        .await
+        .expect("Module loading timed out")
+        .expect("Failed to load module");
 
         let config = test_config();
         let actor_id = "test-actor-order".to_string();
@@ -590,12 +661,21 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 actor_id.clone(),
                 &[],
                 config,
-                None, None, None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 None, // elastic_pool_service
-            )
-        ).await
-            .expect("Instantiation timed out");
-        
+            ),
+        )
+        .await
+        .expect("Instantiation timed out");
+
         let instance = match instance {
             Ok(inst) => Arc::new(inst),
             Err(e) if should_skip(&e) => {
@@ -614,8 +694,9 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                     let payload = format!(r#"{{"op":"add","a":{},"b":{}}}"#, i, 1000);
                     let result = timeout(
                         Duration::from_secs(5),
-                        instance.handle_message("sender", "add", payload.into_bytes())
-                    ).await;
+                        instance.handle_message("sender", "add", payload.into_bytes()),
+                    )
+                    .await;
                     (i, result)
                 })
             })
@@ -624,14 +705,20 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
         // Wait for all messages to complete with overall timeout
         let results = timeout(
             Duration::from_secs(120), // Overall timeout for all messages
-            futures::future::join_all(handles)
-        ).await;
+            futures::future::join_all(handles),
+        )
+        .await;
 
         let results: Vec<_> = match results {
-            Ok(results) => results.into_iter().map(|r| r.expect("Task panicked")).collect(),
+            Ok(results) => results
+                .into_iter()
+                .map(|r| r.expect("Task panicked"))
+                .collect(),
             Err(_) => {
                 eprintln!("Test timed out - this may indicate the concurrency lock is working (serializing messages)");
-                eprintln!("If component model bindings are not available, test will skip on first error");
+                eprintln!(
+                    "If component model bindings are not available, test will skip on first error"
+                );
                 return;
             }
         };
@@ -643,13 +730,19 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
             match result {
                 Ok(Ok(response)) => {
                     let response_str = String::from_utf8_lossy(&response);
-                    if response_str.contains("\"result\"") || response_str.contains("\"status\":\"ok\"") || response_str.contains("sum") {
+                    if response_str.contains("\"result\"")
+                        || response_str.contains("\"status\":\"ok\"")
+                        || response_str.contains("sum")
+                    {
                         success_count += 1;
                     }
                 }
                 Ok(Err(e)) => {
                     if should_skip(e) {
-                        eprintln!("Skipping test due to component model bindings not available: {}", e);
+                        eprintln!(
+                            "Skipping test due to component model bindings not available: {}",
+                            e
+                        );
                         skip_due_to_bindings = true;
                         break;
                     }
@@ -657,7 +750,10 @@ use crate::suite::shared_wasm_module::get_shared_wasm_bytes;
                 }
                 Err(_) => {
                     // Timeout on individual message - this could indicate lock is working
-                    eprintln!("Message {} timed out - may indicate serialization is working", seq);
+                    eprintln!(
+                        "Message {} timed out - may indicate serialization is working",
+                        seq
+                    );
                 }
             }
         }

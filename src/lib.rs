@@ -36,6 +36,7 @@
 // Core modules that implement the 5 pillars
 // Independent crates - re-export them here
 pub use plexspaces_actor as actor; // Pillar 2: Erlang/OTP actors
+pub use plexspaces_actor::supervisor as supervision; // Pillar 2: Fault tolerance (merged into actor crate)
 pub use plexspaces_behavior as behavior; // OTP-style behaviors
 pub use plexspaces_core as core; // Core types (ActorId, ActorContext, etc.)
 pub use plexspaces_facet as facet; // Dynamic behavior composition
@@ -44,7 +45,6 @@ pub use plexspaces_lattice as lattice;
 pub use plexspaces_mailbox as mailbox;
 pub use plexspaces_node as node; // Distribution and clustering
 pub use plexspaces_persistence as journal; // Pillar 3: Durable execution
-pub use plexspaces_actor::supervisor as supervision; // Pillar 2: Fault tolerance (merged into actor crate)
 pub use plexspaces_tuplespace as tuplespace; // Pillar 1: Universal coordination // Storage backend for registry and coordination
 
 // Re-export release parser from common crate

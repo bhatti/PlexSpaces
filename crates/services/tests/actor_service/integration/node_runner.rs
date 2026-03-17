@@ -14,14 +14,16 @@
 //! Example:
 //!   node_runner node1 9001
 
-use plexspaces_services::actor_service::ActorServiceImpl;
-use plexspaces_core::{ActorRegistry, ObjectRegistry as CoreObjectRegistry, ObjectRegistration};
+use async_trait::async_trait;
+use plexspaces_core::{ActorRegistry, ObjectRegistration, ObjectRegistry as CoreObjectRegistry};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
-use plexspaces_proto::object_registry::v1::{ObjectRegistration as ProtoObjectRegistration, ObjectType};
+use plexspaces_proto::object_registry::v1::{
+    ObjectRegistration as ProtoObjectRegistration, ObjectType,
+};
 use plexspaces_proto::ActorServiceServer;
+use plexspaces_services::actor_service::ActorServiceImpl;
 use std::sync::Arc;
 use tonic::transport::Server;
-use async_trait::async_trait;
 
 /// Simple wrapper to adapt ObjectRegistryImpl to CoreObjectRegistry trait
 struct ObjectRegistryAdapter {
@@ -36,11 +38,17 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
         object_id: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+        let obj_type = object_type
+            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         self.inner
             .lookup(ctx, obj_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn lookup_full(
@@ -52,7 +60,12 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
         self.inner
             .lookup_full(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn register(
@@ -60,10 +73,12 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
         ctx: &plexspaces_core::RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .register(ctx, registration)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        self.inner.register(ctx, registration).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn discover(
@@ -78,9 +93,23 @@ impl CoreObjectRegistry for ObjectRegistryAdapter {
         limit: usize,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .discover(ctx, object_type, object_category, capabilities, labels, health_status, offset, limit)
+            .discover(
+                ctx,
+                object_type,
+                object_category,
+                capabilities,
+                labels,
+                health_status,
+                offset,
+                limit,
+            )
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn unregister(
@@ -149,8 +178,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Port: {}", port);
 
     // Create in-memory object registry using SQLite :memory:
-    let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await
-        .map_err(|e| format!("Failed to create object registry repository: {}", e))?);
+    let repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .map_err(|e| format!("Failed to create object registry repository: {}", e))?,
+    );
     let object_registry_impl = Arc::new(ObjectRegistryImpl::new(repo));
     let object_registry: Arc<dyn CoreObjectRegistry> = Arc::new(ObjectRegistryAdapter {
         inner: object_registry_impl.clone(),
@@ -165,47 +197,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create ServiceLocator and register services manually
     // Note: For binaries, we can't use create_default_service_locator from node crate
     // So we create a minimal ServiceLocator and register services manually
-    use plexspaces_services::ServiceLocatorImpl;
-    use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
     use plexspaces_core::GrpcConnectionManager;
+    use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
+    use plexspaces_services::ServiceLocatorImpl;
     let service_locator_impl = Arc::new(ServiceLocatorImpl::new());
-    
+
     // Register ObjectRegistry (required for get_actor_service_client)
-    let object_registry_trait: Arc<dyn plexspaces_core::ObjectRegistry> = object_registry_impl.clone();
-    service_locator_impl.register_object_registry(object_registry_trait).await;
-    
+    let object_registry_trait: Arc<dyn plexspaces_core::ObjectRegistry> =
+        object_registry_impl.clone();
+    service_locator_impl
+        .register_object_registry(object_registry_trait)
+        .await;
+
     // Register GrpcConnectionManager (required for get_actor_service_client)
     // NOTE: default_tenant_id and default_namespace have been removed.
     // Tenant comes from auth (JWT/mTLS); namespace from application/actor.
     let connection_manager = Arc::new(GrpcConnectionManager::new(Some(2)));
-    service_locator_impl.register_grpc_connection_manager(connection_manager).await;
-    
+    service_locator_impl
+        .register_grpc_connection_manager(connection_manager)
+        .await;
+
     // Register services using service_locator_impl directly (not trait object)
     // because register_service has `where Self: Sized` constraint
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
-    service_locator_impl.register_service(actor_registry.clone()).await;
-    service_locator_impl.register_service(reply_waiter_registry).await;
-    
+    service_locator_impl
+        .register_service(actor_registry.clone())
+        .await;
+    service_locator_impl
+        .register_service(reply_waiter_registry)
+        .await;
+
     // Register VirtualActorManager
     use plexspaces_core::VirtualActorManager;
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
-    service_locator_impl.register_service(virtual_actor_manager).await;
-    
+    service_locator_impl
+        .register_service(virtual_actor_manager)
+        .await;
+
     // Register FacetManager (from ActorRegistry) - use wrapper since FacetManager doesn't implement Service
     use plexspaces_core::facet_service_wrapper::FacetManagerServiceWrapper;
     let facet_manager = actor_registry.facet_manager().clone();
     let facet_manager_wrapper = Arc::new(FacetManagerServiceWrapper::new(facet_manager));
-    service_locator_impl.register_service_by_name(plexspaces_core::service_names::FACET_MANAGER, facet_manager_wrapper).await;
-    
+    service_locator_impl
+        .register_service_by_name(
+            plexspaces_core::service_names::FACET_MANAGER,
+            facet_manager_wrapper,
+        )
+        .await;
+
     // Register ActorFactoryImpl
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
+    use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorFactory};
     // Cast to trait object for ActorFactoryImpl::new_arc (which needs ServiceLocator trait)
     let service_locator: Arc<dyn ServiceLocatorTrait> = service_locator_impl.clone();
     let actor_factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
     // Use service_locator_impl for registration (has Sized constraint)
-    service_locator_impl.register_service_by_name(plexspaces_core::service_names::ACTOR_FACTORY_IMPL, actor_factory.clone()).await;
+    service_locator_impl
+        .register_service_by_name(
+            plexspaces_core::service_names::ACTOR_FACTORY_IMPL,
+            actor_factory.clone(),
+        )
+        .await;
     let factory_trait: Arc<dyn ActorFactory> = actor_factory.clone();
-    service_locator_impl.register_actor_factory(factory_trait).await;
+    service_locator_impl
+        .register_actor_factory(factory_trait)
+        .await;
     let service = ActorServiceImpl::new(service_locator_impl, node_id.to_string());
 
     // Start gRPC server

@@ -40,13 +40,12 @@
 //! - Throughput: > 1M messages/second (limited by network)
 //! - Persistence: None (messages lost on restart)
 
-use crate::{Channel, ChannelError, ChannelResult};
 use crate::observability::record_channel_error;
-use tracing::{debug, info};
+use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelProvider, ChannelConfig, ChannelStats, UdpConfig,
+    channel_config, ChannelConfig, ChannelProvider, ChannelStats, UdpConfig,
 };
 use plexspaces_proto::common::v1::Message;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
@@ -56,6 +55,7 @@ use std::time::Duration;
 use tokio::net::UdpSocket as TokioUdpSocket;
 use tokio::sync::broadcast;
 use tokio::time::timeout;
+use tracing::{debug, info};
 
 /// UDP channel implementation using UDP multicast
 ///
@@ -124,15 +124,12 @@ impl UdpChannel {
         let multicast_ip: Ipv4Addr = if udp_config.multicast_address.is_empty() {
             Ipv4Addr::new(239, 255, 0, 1)
         } else {
-            udp_config
-                .multicast_address
-                .parse()
-                .map_err(|e| {
-                    ChannelError::InvalidConfiguration(format!(
-                        "Invalid multicast address '{}': {}",
-                        udp_config.multicast_address, e
-                    ))
-                })?
+            udp_config.multicast_address.parse().map_err(|e| {
+                ChannelError::InvalidConfiguration(format!(
+                    "Invalid multicast address '{}': {}",
+                    udp_config.multicast_address, e
+                ))
+            })?
         };
 
         // Validate multicast range
@@ -155,15 +152,12 @@ impl UdpChannel {
         let bind_ip: Ipv4Addr = if udp_config.bind_address.is_empty() {
             Ipv4Addr::new(0, 0, 0, 0)
         } else {
-            udp_config
-                .bind_address
-                .parse()
-                .map_err(|e| {
-                    ChannelError::InvalidConfiguration(format!(
-                        "Invalid bind address '{}': {}",
-                        udp_config.bind_address, e
-                    ))
-                })?
+            udp_config.bind_address.parse().map_err(|e| {
+                ChannelError::InvalidConfiguration(format!(
+                    "Invalid bind address '{}': {}",
+                    udp_config.bind_address, e
+                ))
+            })?
         };
 
         let bind_addr = SocketAddr::new(IpAddr::V4(bind_ip), multicast_port as u16);
@@ -175,49 +169,60 @@ impl UdpChannel {
         // Use default multicast TTL of 1 (local network only)
         // Note: message_ttl_seconds is for message expiration, not multicast TTL
         let ttl = 1;
-        let std_socket = tokio::task::spawn_blocking(move || -> Result<std::net::UdpSocket, std::io::Error> {
-            let socket = socket2::Socket::new(
-                socket2::Domain::IPV4,
-                socket2::Type::DGRAM,
-                Some(socket2::Protocol::UDP),
-            )?;
+        let std_socket =
+            tokio::task::spawn_blocking(move || -> Result<std::net::UdpSocket, std::io::Error> {
+                let socket = socket2::Socket::new(
+                    socket2::Domain::IPV4,
+                    socket2::Type::DGRAM,
+                    Some(socket2::Protocol::UDP),
+                )?;
 
-            // Set reuse address and reuse port for multicast
-            // SO_REUSEADDR: Allows binding to same address/port (required for multicast)
-            // SO_REUSEPORT: Allows multiple sockets to bind to same address/port (required on macOS/Linux)
-            socket.set_reuse_address(true)?;
-            #[cfg(unix)]
-            {
-                // SO_REUSEPORT is available on Unix systems (macOS, Linux)
-                // This allows multiple sockets to bind to the same multicast address/port
-                if let Err(e) = socket.set_reuse_port(true) {
-                    // If SO_REUSEPORT is not supported, log warning but continue
-                    // Some systems may not support it, but SO_REUSEADDR should still work
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        debug!("SO_REUSEPORT not supported: {}, continuing with SO_REUSEADDR only", e);
+                // Set reuse address and reuse port for multicast
+                // SO_REUSEADDR: Allows binding to same address/port (required for multicast)
+                // SO_REUSEPORT: Allows multiple sockets to bind to same address/port (required on macOS/Linux)
+                socket.set_reuse_address(true)?;
+                #[cfg(unix)]
+                {
+                    // SO_REUSEPORT is available on Unix systems (macOS, Linux)
+                    // This allows multiple sockets to bind to the same multicast address/port
+                    if let Err(e) = socket.set_reuse_port(true) {
+                        // If SO_REUSEPORT is not supported, log warning but continue
+                        // Some systems may not support it, but SO_REUSEADDR should still work
+                        if tracing::enabled!(tracing::Level::DEBUG) {
+                            debug!(
+                                "SO_REUSEPORT not supported: {}, continuing with SO_REUSEADDR only",
+                                e
+                            );
+                        }
                     }
                 }
-            }
 
-            // CRITICAL: Set socket to non-blocking before binding
-            // Tokio requires non-blocking sockets for async operations
-            socket.set_nonblocking(true)?;
+                // CRITICAL: Set socket to non-blocking before binding
+                // Tokio requires non-blocking sockets for async operations
+                socket.set_nonblocking(true)?;
 
-            // Bind socket
-            socket.bind(&bind_addr_clone.into())?;
+                // Bind socket
+                socket.bind(&bind_addr_clone.into())?;
 
-            // Set multicast TTL
-            socket.set_multicast_ttl_v4(ttl)?;
+                // Set multicast TTL
+                socket.set_multicast_ttl_v4(ttl)?;
 
-            // Join multicast group
-            socket.join_multicast_v4(&multicast_ip_clone, &Ipv4Addr::new(0, 0, 0, 0))?;
+                // Join multicast group
+                socket.join_multicast_v4(&multicast_ip_clone, &Ipv4Addr::new(0, 0, 0, 0))?;
 
-            // Convert to std::net::UdpSocket (now non-blocking)
-            Ok(socket.into())
-        })
-        .await
-        .map_err(|e| ChannelError::BackendError(format!("Failed to create socket in blocking context: {}", e)))?
-        .map_err(|e| ChannelError::BackendError(format!("Failed to create UDP socket: {}", e)))?;
+                // Convert to std::net::UdpSocket (now non-blocking)
+                Ok(socket.into())
+            })
+            .await
+            .map_err(|e| {
+                ChannelError::BackendError(format!(
+                    "Failed to create socket in blocking context: {}",
+                    e
+                ))
+            })?
+            .map_err(|e| {
+                ChannelError::BackendError(format!("Failed to create UDP socket: {}", e))
+            })?;
 
         // Convert to Tokio socket
         let socket = TokioUdpSocket::from_std(std_socket)
@@ -296,7 +301,7 @@ impl UdpChannel {
         channel_name: String,
     ) {
         let mut buf = vec![0u8; max_message_size];
-        
+
         loop {
             if closed.load(Ordering::Relaxed) {
                 break;
@@ -317,7 +322,7 @@ impl UdpChannel {
                                 &channel_name,
                                 "deserialize",
                                 &format!("Failed to deserialize: {}", e),
-                                "udp"
+                                "udp",
                             );
                         }
                     }
@@ -329,7 +334,7 @@ impl UdpChannel {
                             &channel_name,
                             "receive",
                             &format!("Failed to receive: {}", e),
-                            "udp"
+                            "udp",
                         );
                     }
                 }
@@ -356,7 +361,7 @@ impl Channel for UdpChannel {
         }
 
         let payload = Self::serialize_message(&message)?;
-        
+
         // Check message size
         // Use default max UDP packet size (65507 bytes)
         let max_size = 65507;
@@ -510,7 +515,7 @@ impl Channel for UdpChannel {
             messages_pending: 0, // UDP has no queue
             messages_failed: self.stats.messages_failed.load(Ordering::Relaxed),
             avg_latency_us: 0, // Not tracked for UDP
-            throughput: 0.0,    // Not tracked for UDP
+            throughput: 0.0,   // Not tracked for UDP
             backend_stats: {
                 let mut stats = std::collections::HashMap::new();
                 stats.insert(

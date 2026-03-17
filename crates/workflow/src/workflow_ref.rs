@@ -33,10 +33,10 @@
 //! let result: Output = workflow.run(&input).await?;
 //! ```
 
-use std::sync::Arc;
+use crate::WorkflowError;
 use plexspaces_actor::{ActorFactoryImpl, WorkflowRef};
 use plexspaces_core::{RequestContext, ServiceLocator as ServiceLocatorTrait};
-use crate::WorkflowError;
+use std::sync::Arc;
 
 /// Spawn a workflow actor and return a WorkflowRef for interacting with it.
 ///
@@ -68,18 +68,21 @@ where
     B: plexspaces_core::Actor + Send + 'static,
 {
     // Get ActorFactory from service locator and downcast to ActorFactoryImpl
-    let factory_dyn = service_locator
-        .get_actor_factory()
-        .await
-        .ok_or_else(|| WorkflowError::Execution("ActorFactory not found in ServiceLocator".to_string()))?;
-    
+    let factory_dyn = service_locator.get_actor_factory().await.ok_or_else(|| {
+        WorkflowError::Execution("ActorFactory not found in ServiceLocator".to_string())
+    })?;
+
     let factory = factory_dyn
         .as_any()
         .downcast_ref::<ActorFactoryImpl>()
-        .ok_or_else(|| WorkflowError::Execution("ActorFactory is not ActorFactoryImpl".to_string()))?;
-    
+        .ok_or_else(|| {
+            WorkflowError::Execution("ActorFactory is not ActorFactoryImpl".to_string())
+        })?;
+
     // Delegate to factory's typed spawn method
-    factory.spawn_workflow(ctx, workflow_id, behavior, facets).await
+    factory
+        .spawn_workflow(ctx, workflow_id, behavior, facets)
+        .await
         .map_err(|e: plexspaces_actor::WorkflowRefError| WorkflowError::Execution(e.to_string()))
 }
 

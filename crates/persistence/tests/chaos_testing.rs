@@ -44,7 +44,6 @@ fn create_test_message(payload: Vec<u8>) -> Message {
     proto_msg.into()
 }
 
-
 // ============================================================================
 // Chaos Injection Framework
 // ============================================================================
@@ -550,7 +549,8 @@ async fn test_concurrent_reads_writes_with_chaos() {
                 chaos.maybe_partition(5).await;
 
                 if chaos.maybe_fail().await.is_ok() {
-                    let message = create_test_message(format!("writer-{}-msg-{}", i, j).into_bytes());
+                    let message =
+                        create_test_message(format!("writer-{}-msg-{}", i, j).into_bytes());
                     if journal.record_message_received(&message).await.is_ok() {
                         writes += 1;
                     }

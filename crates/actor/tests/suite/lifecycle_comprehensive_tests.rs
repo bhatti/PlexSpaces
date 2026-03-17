@@ -26,12 +26,15 @@
 //! - EXIT message handling
 //! - Edge cases (concurrent calls, multiple calls, etc.)
 
-use plexspaces_actor::Actor;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorError, ActorId, BehaviorError, ExitAction, ExitReason, Message};
-use plexspaces_mailbox::{Mailbox, MailboxConfig};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use async_trait::async_trait;
+use plexspaces_actor::Actor;
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, ActorError, ActorId, BehaviorError, ExitAction, ExitReason,
+    Message,
+};
+use plexspaces_mailbox::{Mailbox, MailboxConfig};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use ulid::Ulid;
 
@@ -121,7 +124,7 @@ impl plexspaces_core::Actor for ComprehensiveLifecycleActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         self.init_called.store(true, Ordering::SeqCst);
         self.init_call_count.fetch_add(1, Ordering::SeqCst);
-        
+
         let result = self.init_result.lock().unwrap().clone();
         result.map_err(|e| ActorError::InvalidState(e))
     }
@@ -156,9 +159,13 @@ impl plexspaces_core::Actor for ComprehensiveLifecycleActor {
         self.handle_exit_call_count.fetch_add(1, Ordering::SeqCst);
         *self.handle_exit_from.lock().unwrap() = Some(from.clone());
         *self.handle_exit_reason.lock().unwrap() = Some(reason.clone());
-        
+
         // Return configured action or default to Propagate
-        let action = self.handle_exit_action.lock().unwrap().clone()
+        let action = self
+            .handle_exit_action
+            .lock()
+            .unwrap()
+            .clone()
             .unwrap_or(ExitAction::Propagate);
         Ok(action)
     }
@@ -176,8 +183,10 @@ impl plexspaces_core::Actor for ComprehensiveLifecycleActor {
 async fn test_init_called_before_message_loop() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let init_called = actor_impl.init_called.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -189,9 +198,12 @@ async fn test_init_called_before_message_loop() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
-    assert!(init_called.load(Ordering::SeqCst), "init() should be called before message loop");
-    
+
+    assert!(
+        init_called.load(Ordering::SeqCst),
+        "init() should be called before message loop"
+    );
+
     let _ = actor.stop().await;
     let _ = handle.await;
 }
@@ -200,8 +212,10 @@ async fn test_init_called_before_message_loop() {
 async fn test_init_called_only_once() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let init_call_count = actor_impl.init_call_count.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -213,9 +227,13 @@ async fn test_init_called_only_once() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
-    assert_eq!(init_call_count.load(Ordering::SeqCst), 1, "init() should be called exactly once");
-    
+
+    assert_eq!(
+        init_call_count.load(Ordering::SeqCst),
+        1,
+        "init() should be called exactly once"
+    );
+
     let _ = actor.stop().await;
     let _ = handle.await;
 }
@@ -224,8 +242,10 @@ async fn test_init_called_only_once() {
 async fn test_init_failure_prevents_start() {
     let actor_impl = ComprehensiveLifecycleActor::new()
         .with_init_error("init failed: database connection error".to_string());
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -237,17 +257,22 @@ async fn test_init_failure_prevents_start() {
 
     let result = actor.start().await;
     assert!(result.is_err(), "Actor start should fail if init() fails");
-    
+
     if let Err(e) = result {
-        assert!(e.to_string().contains("init failed"), "Error should contain init failure message");
+        assert!(
+            e.to_string().contains("init failed"),
+            "Error should contain init failure message"
+        );
     }
 }
 
 #[tokio::test]
 async fn test_init_success_allows_start() {
     let actor_impl = ComprehensiveLifecycleActor::new();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -258,8 +283,11 @@ async fn test_init_success_allows_start() {
     );
 
     let result = actor.start().await;
-    assert!(result.is_ok(), "Actor start should succeed if init() succeeds");
-    
+    assert!(
+        result.is_ok(),
+        "Actor start should succeed if init() succeeds"
+    );
+
     if let Ok(handle) = result {
         let _ = actor.stop().await;
         let _ = handle.await;
@@ -271,8 +299,10 @@ async fn test_init_called_before_any_messages() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let init_called = actor_impl.init_called.clone();
     let message_count = actor_impl.message_count.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -284,10 +314,13 @@ async fn test_init_called_before_any_messages() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
+
     // init() should be called before any messages are processed
-    assert!(init_called.load(Ordering::SeqCst), "init() should be called");
-    
+    assert!(
+        init_called.load(Ordering::SeqCst),
+        "init() should be called"
+    );
+
     // Now send a message after actor has started (init() already called)
     let proto_msg = Message {
         id: Ulid::new().to_string(),
@@ -301,11 +334,11 @@ async fn test_init_called_before_any_messages() {
         // If mailbox is full, that's okay - the key test is that init() was called
         tracing::debug!("Mailbox full when enqueueing test message: {}", e);
     }
-    
+
     // Give it time to process the message if it was enqueued
     sleep(Duration::from_millis(200)).await;
     // The key assertion is that init() was called before any message processing
-    
+
     let _ = actor.stop().await;
     let _ = handle.await;
 }
@@ -319,8 +352,10 @@ async fn test_terminate_called_on_graceful_shutdown() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let terminate_called = actor_impl.terminate_called.clone();
     let terminate_reason = actor_impl.terminate_reason.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -332,16 +367,19 @@ async fn test_terminate_called_on_graceful_shutdown() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
+
     actor.stop().await.expect("Actor should stop");
-    
-    assert!(terminate_called.load(Ordering::SeqCst), "terminate() should be called on stop");
+
+    assert!(
+        terminate_called.load(Ordering::SeqCst),
+        "terminate() should be called on stop"
+    );
     assert_eq!(
         terminate_reason.lock().unwrap().as_ref(),
         Some(&ExitReason::Shutdown),
         "terminate() should be called with Shutdown reason"
     );
-    
+
     let _ = handle.await;
 }
 
@@ -349,8 +387,10 @@ async fn test_terminate_called_on_graceful_shutdown() {
 async fn test_terminate_called_only_once() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let terminate_call_count = actor_impl.terminate_call_count.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -362,14 +402,18 @@ async fn test_terminate_called_only_once() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
+
     // Call stop() multiple times - terminate() should only be called once
     let _ = actor.stop().await;
     let _ = actor.stop().await;
     let _ = actor.stop().await;
-    
-    assert_eq!(terminate_call_count.load(Ordering::SeqCst), 1, "terminate() should be called exactly once");
-    
+
+    assert_eq!(
+        terminate_call_count.load(Ordering::SeqCst),
+        1,
+        "terminate() should be called exactly once"
+    );
+
     let _ = handle.await;
 }
 
@@ -377,8 +421,10 @@ async fn test_terminate_called_only_once() {
 async fn test_terminate_called_with_correct_reason() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let terminate_reason = actor_impl.terminate_reason.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -390,12 +436,16 @@ async fn test_terminate_called_with_correct_reason() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
+
     actor.stop().await.expect("Actor should stop");
-    
+
     let reason = terminate_reason.lock().unwrap().clone();
-    assert_eq!(reason, Some(ExitReason::Shutdown), "terminate() should receive Shutdown reason");
-    
+    assert_eq!(
+        reason,
+        Some(ExitReason::Shutdown),
+        "terminate() should receive Shutdown reason"
+    );
+
     let _ = handle.await;
 }
 
@@ -403,8 +453,10 @@ async fn test_terminate_called_with_correct_reason() {
 async fn test_terminate_called_before_state_terminated() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let terminate_called = actor_impl.terminate_called.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -416,21 +468,28 @@ async fn test_terminate_called_before_state_terminated() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
+
     // Check state before stop
     let state_before = actor.state().await;
-    assert_ne!(state_before, plexspaces_actor::ActorState::Terminated, "State should not be Terminated before stop");
-    
+    assert_ne!(
+        state_before,
+        plexspaces_actor::ActorState::Terminated,
+        "State should not be Terminated before stop"
+    );
+
     actor.stop().await.expect("Actor should stop");
-    
+
     // terminate() should be called
-    assert!(terminate_called.load(Ordering::SeqCst), "terminate() should be called");
-    
+    assert!(
+        terminate_called.load(Ordering::SeqCst),
+        "terminate() should be called"
+    );
+
     // State should be Terminated after stop
     let state_after = actor.state().await;
     // Note: State might be Terminated or still Active depending on timing
     // The important thing is that terminate() was called
-    
+
     let _ = handle.await;
 }
 
@@ -442,10 +501,12 @@ async fn test_terminate_called_before_state_terminated() {
 async fn test_handle_exit_called_when_trap_exit_true() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let handle_exit_called = actor_impl.handle_exit_called.clone();
-    
+
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
-    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let service_locator =
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+            .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -455,27 +516,32 @@ async fn test_handle_exit_called_when_trap_exit_true() {
     );
     ctx.trap_exit = true;
     let ctx = Arc::new(ctx);
-    
+
     let mut actor_impl_test = ComprehensiveLifecycleActor::new();
     let handle_exit_called_test = actor_impl_test.handle_exit_called.clone();
     let from = ActorId::from("linked-actor");
     let reason = ExitReason::Error("linked actor crashed".to_string());
-    
+
     let result = actor_impl_test.handle_exit(&ctx, &from, &reason).await;
     assert!(result.is_ok(), "handle_exit() should succeed");
-    
-    assert!(handle_exit_called_test.load(Ordering::SeqCst), "handle_exit() should be called when trap_exit=true");
+
+    assert!(
+        handle_exit_called_test.load(Ordering::SeqCst),
+        "handle_exit() should be called when trap_exit=true"
+    );
 }
 
 #[tokio::test]
 async fn test_handle_exit_propagate_action_terminates_actor() {
-    let actor_impl = ComprehensiveLifecycleActor::new()
-        .with_handle_exit_action(ExitAction::Propagate);
+    let actor_impl =
+        ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Propagate);
     let terminate_called = actor_impl.terminate_called.clone();
-    
+
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
-    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let service_locator =
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+            .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -485,26 +551,31 @@ async fn test_handle_exit_propagate_action_terminates_actor() {
     );
     ctx.trap_exit = true;
     let ctx = Arc::new(ctx);
-    
-    let mut actor_impl = ComprehensiveLifecycleActor::new()
-        .with_handle_exit_action(ExitAction::Propagate);
+
+    let mut actor_impl =
+        ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Propagate);
     let from = ActorId::from("linked-actor");
     let reason = ExitReason::Error("linked actor crashed".to_string());
-    
+
     let result = actor_impl.handle_exit(&ctx, &from, &reason).await;
-    assert_eq!(result.unwrap(), ExitAction::Propagate, "handle_exit() should return Propagate");
-    
+    assert_eq!(
+        result.unwrap(),
+        ExitAction::Propagate,
+        "handle_exit() should return Propagate"
+    );
+
     // When Propagate is returned, actor should terminate (tested in EXIT message handling)
 }
 
 #[tokio::test]
 async fn test_handle_exit_handle_action_continues_actor() {
-    let actor_impl = ComprehensiveLifecycleActor::new()
-        .with_handle_exit_action(ExitAction::Handle);
-    
+    let actor_impl = ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Handle);
+
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
-    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let service_locator =
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+            .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -514,18 +585,25 @@ async fn test_handle_exit_handle_action_continues_actor() {
     );
     ctx.trap_exit = true;
     let ctx = Arc::new(ctx);
-    
-    let mut actor_impl_test = ComprehensiveLifecycleActor::new()
-        .with_handle_exit_action(ExitAction::Handle);
+
+    let mut actor_impl_test =
+        ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Handle);
     let handle_exit_called_test = actor_impl_test.handle_exit_called.clone();
     let from = ActorId::from("linked-actor");
     let reason = ExitReason::Error("linked actor crashed".to_string());
-    
+
     let result = actor_impl_test.handle_exit(&ctx, &from, &reason).await;
     assert!(result.is_ok(), "handle_exit() should succeed");
-    assert_eq!(result.unwrap(), ExitAction::Handle, "handle_exit() should return Handle");
-    assert!(handle_exit_called_test.load(Ordering::SeqCst), "handle_exit() should be called");
-    
+    assert_eq!(
+        result.unwrap(),
+        ExitAction::Handle,
+        "handle_exit() should return Handle"
+    );
+    assert!(
+        handle_exit_called_test.load(Ordering::SeqCst),
+        "handle_exit() should be called"
+    );
+
     // When Handle is returned, actor should continue (tested in EXIT message handling)
 }
 
@@ -534,10 +612,12 @@ async fn test_handle_exit_receives_correct_parameters() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let handle_exit_from = actor_impl.handle_exit_from.clone();
     let handle_exit_reason = actor_impl.handle_exit_reason.clone();
-    
+
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
-    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let service_locator =
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+            .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -547,15 +627,15 @@ async fn test_handle_exit_receives_correct_parameters() {
     );
     ctx.trap_exit = true;
     let ctx = Arc::new(ctx);
-    
+
     let mut actor_impl_test = ComprehensiveLifecycleActor::new();
     let handle_exit_from_test = actor_impl_test.handle_exit_from.clone();
     let handle_exit_reason_test = actor_impl_test.handle_exit_reason.clone();
     let from = ActorId::from("linked-actor-123");
     let reason = ExitReason::Error("database timeout".to_string());
-    
+
     let _ = actor_impl_test.handle_exit(&ctx, &from, &reason).await;
-    
+
     assert_eq!(
         handle_exit_from_test.lock().unwrap().as_ref(),
         Some(&"linked-actor-123".to_string()),
@@ -576,8 +656,10 @@ async fn test_handle_exit_receives_correct_parameters() {
 async fn test_exit_message_terminates_actor_when_not_trapping() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let terminate_called = actor_impl.terminate_called.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -592,12 +674,12 @@ async fn test_exit_message_terminates_actor_when_not_trapping() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
+
     // Send EXIT message (create proto Message directly)
-    use plexspaces_proto::common::v1::Message;
-    use ulid::Ulid;
     use chrono::Utc;
+    use plexspaces_proto::common::v1::Message;
     use prost_types::Timestamp;
+    use ulid::Ulid;
     let mut headers = std::collections::HashMap::new();
     headers.insert("type".to_string(), "__EXIT__".to_string());
     headers.insert("exit_from".to_string(), "linked-actor".to_string());
@@ -630,14 +712,14 @@ async fn test_exit_message_terminates_actor_when_not_trapping() {
         Ok(_) => {
             // Wait for message processing - EXIT message should cause termination
             sleep(Duration::from_millis(500)).await;
-            
+
             // Actor should terminate (not trapping exits) - EXIT message causes immediate termination
             // Note: Since we can't set trap_exit=false explicitly (context is private),
             // the default behavior (trap_exit=false) should cause termination
             // However, the EXIT message handling requires trap_exit to be set correctly
             // For now, we verify that the EXIT message was processed
             // In a full integration test with proper context setup, this would work correctly
-            
+
             // The test verifies that EXIT messages are handled in the message loop
             // Full integration with trap_exit will be tested in integration tests
         }
@@ -648,19 +730,20 @@ async fn test_exit_message_terminates_actor_when_not_trapping() {
             // The important thing is that the code structure is correct
         }
     }
-    
+
     let _ = actor.stop().await;
     let _ = handle.await;
 }
 
 #[tokio::test]
 async fn test_exit_message_calls_handle_exit_when_trapping() {
-    let actor_impl = ComprehensiveLifecycleActor::new()
-        .with_handle_exit_action(ExitAction::Handle);
+    let actor_impl = ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Handle);
     let handle_exit_called = actor_impl.handle_exit_called.clone();
     let terminate_called = actor_impl.terminate_called.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -675,14 +758,16 @@ async fn test_exit_message_calls_handle_exit_when_trapping() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
+
     // Note: Since we can't modify context.trap_exit directly (it's private),
     // we test handle_exit() directly instead of via EXIT message
     // The EXIT message handling is tested in integration tests where we can set trap_exit
-    
+
     // Test handle_exit() directly
     use plexspaces_core::ServiceLocator;
-    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let service_locator =
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+            .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -692,18 +777,25 @@ async fn test_exit_message_calls_handle_exit_when_trapping() {
     );
     ctx.trap_exit = true;
     let ctx = Arc::new(ctx);
-    
-    let mut actor_impl_test = ComprehensiveLifecycleActor::new()
-        .with_handle_exit_action(ExitAction::Handle);
+
+    let mut actor_impl_test =
+        ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Handle);
     let handle_exit_called_test = actor_impl_test.handle_exit_called.clone();
     let from = ActorId::from("linked-actor");
     let reason = ExitReason::Error("crashed".to_string());
-    
+
     let result = actor_impl_test.handle_exit(&ctx, &from, &reason).await;
     assert!(result.is_ok(), "handle_exit() should succeed");
-    assert_eq!(result.unwrap(), ExitAction::Handle, "handle_exit() should return Handle");
-    assert!(handle_exit_called_test.load(Ordering::SeqCst), "handle_exit() should be called");
-    
+    assert_eq!(
+        result.unwrap(),
+        ExitAction::Handle,
+        "handle_exit() should return Handle"
+    );
+    assert!(
+        handle_exit_called_test.load(Ordering::SeqCst),
+        "handle_exit() should be called"
+    );
+
     let _ = actor.stop().await;
     let _ = handle.await;
 }
@@ -716,8 +808,10 @@ async fn test_exit_message_calls_handle_exit_when_trapping() {
 async fn test_init_called_even_if_actor_stopped_immediately() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let init_called = actor_impl.init_called.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -730,20 +824,24 @@ async fn test_init_called_even_if_actor_stopped_immediately() {
     let handle = actor.start().await.expect("Actor should start");
     // Stop immediately
     let _ = actor.stop().await;
-    
+
     // init() should still be called
-    assert!(init_called.load(Ordering::SeqCst), "init() should be called even if actor stopped immediately");
-    
+    assert!(
+        init_called.load(Ordering::SeqCst),
+        "init() should be called even if actor stopped immediately"
+    );
+
     let _ = handle.await;
 }
 
 #[tokio::test]
 async fn test_terminate_not_called_if_init_fails() {
-    let actor_impl = ComprehensiveLifecycleActor::new()
-        .with_init_error("init failed".to_string());
+    let actor_impl = ComprehensiveLifecycleActor::new().with_init_error("init failed".to_string());
     let terminate_called = actor_impl.terminate_called.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -755,18 +853,22 @@ async fn test_terminate_not_called_if_init_fails() {
 
     let result = actor.start().await;
     assert!(result.is_err(), "Actor start should fail");
-    
+
     // terminate() should NOT be called if init() fails
-    assert!(!terminate_called.load(Ordering::SeqCst), "terminate() should not be called if init() fails");
+    assert!(
+        !terminate_called.load(Ordering::SeqCst),
+        "terminate() should not be called if init() fails"
+    );
 }
 
 #[tokio::test]
 async fn test_multiple_exit_messages_handled_correctly() {
-    let actor_impl = ComprehensiveLifecycleActor::new()
-        .with_handle_exit_action(ExitAction::Handle);
+    let actor_impl = ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Handle);
     let handle_exit_call_count = actor_impl.handle_exit_call_count.clone();
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -779,7 +881,9 @@ async fn test_multiple_exit_messages_handled_correctly() {
     // Note: Since we can't modify context.trap_exit directly (it's private),
     // we test handle_exit() directly by calling it multiple times
     use plexspaces_core::ServiceLocator;
-    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let service_locator =
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+            .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -789,20 +893,20 @@ async fn test_multiple_exit_messages_handled_correctly() {
     );
     ctx.trap_exit = true;
     let ctx = Arc::new(ctx);
-    
+
     // Use the same actor_impl that's in the actor, but we can't access it directly
     // So we test handle_exit() directly on a new instance with the same configuration
-    let mut actor_impl_test = ComprehensiveLifecycleActor::new()
-        .with_handle_exit_action(ExitAction::Handle);
+    let mut actor_impl_test =
+        ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Handle);
     let handle_exit_call_count_test = actor_impl_test.handle_exit_call_count.clone();
-    
+
     // Call handle_exit() multiple times
     for i in 0..5 {
         let from = ActorId::from(format!("linked-actor-{}", i));
         let reason = ExitReason::Error(format!("crashed-{}", i));
         let _ = actor_impl_test.handle_exit(&ctx, &from, &reason).await;
     }
-    
+
     // handle_exit() should be called for each call
     assert_eq!(
         handle_exit_call_count_test.load(Ordering::SeqCst),
@@ -815,10 +919,12 @@ async fn test_multiple_exit_messages_handled_correctly() {
 async fn test_exit_message_with_linked_reason() {
     let actor_impl = ComprehensiveLifecycleActor::new();
     let handle_exit_reason = actor_impl.handle_exit_reason.clone();
-    
+
     // Test handle_exit() with Linked reason directly (no need to create actor)
     use plexspaces_core::ServiceLocator;
-    let service_locator = plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let service_locator =
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+            .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -828,7 +934,7 @@ async fn test_exit_message_with_linked_reason() {
     );
     ctx.trap_exit = true;
     let ctx = Arc::new(ctx);
-    
+
     let mut actor_impl_test = ComprehensiveLifecycleActor::new();
     let handle_exit_reason_test = actor_impl_test.handle_exit_reason.clone();
     let linked_reason = ExitReason::Error("nested error".to_string());
@@ -837,14 +943,14 @@ async fn test_exit_message_with_linked_reason() {
         reason: Box::new(linked_reason.clone()),
     };
     let from = ActorId::from("linked-actor");
-    
+
     let _ = actor_impl_test.handle_exit(&ctx, &from, &exit_reason).await;
-    
+
     // Check that handle_exit received the Linked reason
     let received_reason = handle_exit_reason_test.lock().unwrap().clone();
-    assert_eq!(received_reason, Some(exit_reason), "handle_exit() should receive Linked reason");
+    assert_eq!(
+        received_reason,
+        Some(exit_reason),
+        "handle_exit() should receive Linked reason"
+    );
 }
-
-
-
-

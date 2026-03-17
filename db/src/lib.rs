@@ -121,7 +121,10 @@ mod tests {
     #[test]
     fn test_normalize_sqlite_url() {
         assert_eq!(normalize_sqlite_url(":memory:"), "sqlite::memory:");
-        assert_eq!(normalize_sqlite_url("/tmp/db.sqlite"), "sqlite:///tmp/db.sqlite?mode=rwc");
+        assert_eq!(
+            normalize_sqlite_url("/tmp/db.sqlite"),
+            "sqlite:///tmp/db.sqlite?mode=rwc"
+        );
         assert_eq!(
             normalize_sqlite_url("sqlite:///path?mode=rwc"),
             "sqlite:///path?mode=rwc"

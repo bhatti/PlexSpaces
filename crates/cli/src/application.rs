@@ -26,14 +26,14 @@
 
 use anyhow::{Context, Result};
 use plexspaces_proto::application::v1::{
-    application_service_client::ApplicationServiceClient,
-    DeployApplicationRequest, UndeployApplicationRequest, ListApplicationsRequest,
-    ApplicationSpec, ApplicationType, ShutdownStrategy,
+    application_service_client::ApplicationServiceClient, ApplicationSpec, ApplicationType,
+    DeployApplicationRequest, ListApplicationsRequest, ShutdownStrategy,
+    UndeployApplicationRequest,
 };
 use plexspaces_proto::wasm::v1::WasmModule;
+use reqwest::multipart;
 use std::fs;
 use tonic::transport::Channel;
-use reqwest::multipart;
 
 /// Deploy an application (like AWS Lambda deploy)
 ///
@@ -54,7 +54,7 @@ pub async fn deploy(
     // Set max message size to 5MB for gRPC (matches server setting)
     // Note: For large WASM files (>5MB), use HTTP multipart endpoint instead
     const GRPC_MAX_MESSAGE_SIZE: usize = 5 * 1024 * 1024; // 5MB
-    
+
     let channel = Channel::from_shared(format!("http://{}", node_addr))
         .context("Invalid node address")?
         .connect()
@@ -82,25 +82,26 @@ pub async fn deploy(
     let wasm_module = if let Some(wasm_path) = wasm_file {
         let wasm_bytes = fs::read(wasm_path)
             .with_context(|| format!("Failed to read WASM file: {}", wasm_path))?;
-        
+
         let file_size = wasm_bytes.len();
         const GRPC_MAX_SIZE: usize = 5 * 1024 * 1024; // 5MB
         const HTTP_MAX_SIZE: usize = 100 * 1024 * 1024; // 100MB
-        
+
         // Check if file exceeds gRPC limit
         if file_size > GRPC_MAX_SIZE {
             if file_size > HTTP_MAX_SIZE {
                 anyhow::bail!(
                     "WASM file size {} bytes exceeds maximum {} bytes. \
                     Please optimize the file with wasm-opt or split into smaller modules.",
-                    file_size, HTTP_MAX_SIZE
+                    file_size,
+                    HTTP_MAX_SIZE
                 );
             }
-            
+
             // File is >5MB but <=100MB - use HTTP multipart upload
             println!("⚠️  WASM file size ({:.2}MB) exceeds gRPC limit (5MB), using HTTP multipart upload", 
                 file_size as f64 / (1024.0 * 1024.0));
-            
+
             return deploy_via_http_multipart(
                 node_addr,
                 app_id,
@@ -109,7 +110,8 @@ pub async fn deploy(
                 wasm_path,
                 config_file,
                 release_config_file,
-            ).await;
+            )
+            .await;
         }
 
         Some(WasmModule {
@@ -127,12 +129,12 @@ pub async fn deploy(
     let app_config = if let Some(config_path) = config_file {
         let _config_str = fs::read_to_string(config_path)
             .with_context(|| format!("Failed to read config file: {}", config_path))?;
-        
+
         // TODO: Parse TOML/JSON to ApplicationSpec
         // For now, create minimal config
         Some(ApplicationSpec {
             name: name.to_string(),
-            tenant_id: String::new(), // Set by server from JWT
+            tenant_id: String::new(),      // Set by server from JWT
             namespace: app_id.to_string(), // Use app_id as namespace
             version: version.to_string(),
             description: format!("Application {}", name),
@@ -145,6 +147,7 @@ pub async fn deploy(
             shutdown_timeout: None,
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
+            seed_nodes: vec![],
         })
     } else if wasm_module.is_none() {
         // Config required if not WASM
@@ -153,7 +156,7 @@ pub async fn deploy(
         // For WASM apps, create minimal config
         Some(ApplicationSpec {
             name: name.to_string(),
-            tenant_id: String::new(), // Set by server from JWT
+            tenant_id: String::new(),      // Set by server from JWT
             namespace: app_id.to_string(), // Use app_id as namespace
             version: version.to_string(),
             description: format!("WASM application {}", name),
@@ -166,6 +169,7 @@ pub async fn deploy(
             shutdown_timeout: None,
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
+            seed_nodes: vec![],
         })
     };
 
@@ -173,14 +177,16 @@ pub async fn deploy(
     let _release_config = if let Some(release_path) = release_config_file {
         use plexspaces_node::config_loader::ConfigLoader;
         let path = std::path::Path::new(release_path);
-        let is_yaml = path.extension()
+        let is_yaml = path
+            .extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| ext == "yaml" || ext == "yml")
             .unwrap_or(false);
         if is_yaml {
             let loader = ConfigLoader::new();
-            let mut spec = loader.load_release_spec(release_path).await
-                .map_err(|e| anyhow::anyhow!("Failed to load release config from {}: {}", release_path, e))?;
+            let mut spec = loader.load_release_spec(release_path).await.map_err(|e| {
+                anyhow::anyhow!("Failed to load release config from {}: {}", release_path, e)
+            })?;
             // Apply env overrides and set defaults through config_manager
             plexspaces_common::config_manager::initialize(&mut spec);
             Some(spec)
@@ -239,15 +245,15 @@ async fn deploy_via_http_multipart(
     } else {
         anyhow::bail!("Node address must include port: {}", node_addr);
     };
-    
+
     let host = if let Some(colon_pos) = node_addr.rfind(':') {
         &node_addr[..colon_pos]
     } else {
         node_addr
     };
-    
+
     let http_url = format!("http://{}:{}", host, http_port);
-    
+
     // OBSERVABILITY: Log HTTP multipart deployment
     tracing::info!(
         application_id = %app_id,
@@ -260,43 +266,48 @@ async fn deploy_via_http_multipart(
         "Deploying application via HTTP multipart"
     );
     println!("📤 Uploading via HTTP multipart (supports files up to 100MB)");
-    
+
     // Read WASM file
-    let wasm_bytes = fs::read(wasm_path)
-        .with_context(|| format!("Failed to read WASM file: {}", wasm_path))?;
-    
+    let wasm_bytes =
+        fs::read(wasm_path).with_context(|| format!("Failed to read WASM file: {}", wasm_path))?;
+
     // Verify file size is within 100MB limit
     const HTTP_MAX_SIZE: usize = 100 * 1024 * 1024; // 100MB
     if wasm_bytes.len() > HTTP_MAX_SIZE {
         anyhow::bail!(
             "WASM file size {} bytes exceeds maximum {} bytes. \
             Please optimize the file with wasm-opt or split into smaller modules.",
-            wasm_bytes.len(), HTTP_MAX_SIZE
+            wasm_bytes.len(),
+            HTTP_MAX_SIZE
         );
     }
-    
+
     // Create multipart form
     let mut form = multipart::Form::new()
         .text("application_id", app_id.to_string())
         .text("name", name.to_string())
         .text("version", version.to_string())
-        .part("wasm_file",
+        .part(
+            "wasm_file",
             multipart::Part::bytes(wasm_bytes)
-                .file_name(std::path::Path::new(wasm_path).file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("actor.wasm")
-                    .to_string())
+                .file_name(
+                    std::path::Path::new(wasm_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("actor.wasm")
+                        .to_string(),
+                )
                 .mime_str("application/wasm")
-                .context("Failed to set MIME type")?
+                .context("Failed to set MIME type")?,
         );
-    
+
     // Add config file if provided
     if let Some(config_path) = config_file {
         let config_str = fs::read_to_string(config_path)
             .with_context(|| format!("Failed to read config file: {}", config_path))?;
         form = form.text("config", config_str);
     }
-    
+
     // Send HTTP request
     let client = reqwest::Client::new();
     let response = client
@@ -305,17 +316,26 @@ async fn deploy_via_http_multipart(
         .send()
         .await
         .context("Failed to send HTTP request")?;
-    
+
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("HTTP deployment failed ({}): {}", status, error_text);
     }
-    
-    let json: serde_json::Value = response.json().await
+
+    let json: serde_json::Value = response
+        .json()
+        .await
         .context("Failed to parse JSON response")?;
-    
-    if json.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+
+    if json
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         // OBSERVABILITY: Log successful HTTP deployment
         tracing::info!(
             application_id = %app_id,
@@ -332,7 +352,8 @@ async fn deploy_via_http_multipart(
         }
         Ok(())
     } else {
-        let error = json.get("error")
+        let error = json
+            .get("error")
             .and_then(|v| v.as_str())
             .unwrap_or("Unknown error");
         // OBSERVABILITY: Log failed HTTP deployment
@@ -351,7 +372,7 @@ pub async fn undeploy(node_addr: &str, app_id: &str) -> Result<()> {
     // Set max message size to 5MB for gRPC (matches server setting)
     // Note: For large WASM files (>5MB), use HTTP multipart endpoint instead
     const GRPC_MAX_MESSAGE_SIZE: usize = 5 * 1024 * 1024; // 5MB
-    
+
     let channel = Channel::from_shared(format!("http://{}", node_addr))
         .context("Invalid node address")?
         .connect()
@@ -406,7 +427,7 @@ pub async fn list(node_addr: &str) -> Result<()> {
     // Set max message size to 5MB for gRPC (matches server setting)
     // Note: For large WASM files (>5MB), use HTTP multipart endpoint instead
     const GRPC_MAX_MESSAGE_SIZE: usize = 5 * 1024 * 1024; // 5MB
-    
+
     let channel = Channel::from_shared(format!("http://{}", node_addr))
         .context("Invalid node address")?
         .connect()
@@ -433,10 +454,12 @@ pub async fn list(node_addr: &str) -> Result<()> {
         println!("   No applications deployed");
     } else {
         for app in response.applications {
-            println!("   - {} (v{}) - Status: {:?}", app.name, app.version, app.status);
+            println!(
+                "   - {} (v{}) - Status: {:?}",
+                app.name, app.version, app.status
+            );
         }
     }
 
     Ok(())
 }
-

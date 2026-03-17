@@ -4,7 +4,9 @@
 // Tests for ActorRef integration with ServiceLocator (TDD)
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::{ActorRegistry, ServiceLocator, actor_context::ObjectRegistry as ObjectRegistryTrait, Message};
+use plexspaces_core::{
+    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorRegistry, Message, ServiceLocator,
+};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 use std::sync::Arc;
@@ -37,7 +39,12 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         self.inner
             .lookup(ctx, obj_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn lookup_full(
@@ -49,7 +56,12 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         self.inner
             .lookup_full(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn register(
@@ -57,10 +69,12 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         ctx: &plexspaces_core::RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .register(ctx, registration)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        self.inner.register(ctx, registration).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn discover(
@@ -75,9 +89,23 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         offset: usize,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
         self.inner
-            .discover(ctx, object_type, object_category, capabilities, labels, health_status, limit, offset)
+            .discover(
+                ctx,
+                object_type,
+                object_category,
+                capabilities,
+                labels,
+                health_status,
+                limit,
+                offset,
+            )
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn unregister(
@@ -89,7 +117,12 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         self.inner
             .unregister(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn heartbeat(
@@ -101,7 +134,12 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         self.inner
             .heartbeat(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 }
 
@@ -109,28 +147,37 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 async fn test_actor_ref_remote_uses_service_locator() {
     // Test: Remote ActorRef should use ServiceLocator for gRPC client caching
     use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
-    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
-        Arc::new(ObjectRegistryAdapter { inner: object_registry_impl });
+    let service_locator =
+        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let object_repo = Arc::new(
+        plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
+    let object_registry_impl =
+        Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
+    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
+        inner: object_registry_impl,
+    });
     let actor_registry = Arc::new(ActorRegistry::new(
         object_registry_trait,
         "test-node".to_string(),
     ));
-    
+
     // Register ActorRegistry in ServiceLocator
-    service_locator.register_actor_registry(actor_registry.clone()).await;
-    
+    service_locator
+        .register_actor_registry(actor_registry.clone())
+        .await;
+
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
         "test-actor@remote-node",
-        "test", // tenant_id
+        "test",    // tenant_id
         "default", // namespace
         "remote-node",
         service_locator.clone(),
     );
-    
+
     assert!(actor_ref.is_remote());
     assert_eq!(actor_ref.id(), "test-actor@remote-node");
 }
@@ -139,12 +186,21 @@ async fn test_actor_ref_remote_uses_service_locator() {
 async fn test_actor_ref_remote_tell_uses_service_locator() {
     // Test: Remote ActorRef.tell() should use ServiceLocator to get gRPC client
     use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
-    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
-    
+    let service_locator =
+        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let object_repo = Arc::new(
+        plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
+    let object_registry_impl =
+        Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
+
     // Register node address in ObjectRegistry
-    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "default".to_string(),
+        "default".to_string(),
+    );
     let node_registration = ObjectRegistration {
         object_id: "remote-node".to_string(),
         object_type: ObjectType::ObjectTypeNode as i32,
@@ -152,41 +208,50 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
         grpc_address: "http://127.0.0.1:9999".to_string(),
         ..Default::default()
     };
-    object_registry_impl.register(&ctx, node_registration).await.unwrap();
-    
+    object_registry_impl
+        .register(&ctx, node_registration)
+        .await
+        .unwrap();
+
     // Create ActorRegistry with the ObjectRegistry that has the node registered
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
-        Arc::new(ObjectRegistryAdapter { inner: object_registry_impl.clone() });
+    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
+        inner: object_registry_impl.clone(),
+    });
     let actor_registry = Arc::new(ActorRegistry::new(
         object_registry_trait,
         "test-node".to_string(),
     ));
-    
+
     // Register ActorRegistry in ServiceLocator
-    service_locator.register_actor_registry(actor_registry.clone()).await;
-    
+    service_locator
+        .register_actor_registry(actor_registry.clone())
+        .await;
+
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
         "test-actor@remote-node",
-        "test", // tenant_id
+        "test",    // tenant_id
         "default", // namespace
         "remote-node",
         service_locator.clone(),
     );
-    
+
     // Send message (will fail to connect, but should use ServiceLocator)
     // Use timeout to prevent hanging
     let message = create_test_message(b"test".to_vec());
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        actor_ref.tell(message)
-    ).await;
-    
+    let result =
+        tokio::time::timeout(std::time::Duration::from_secs(5), actor_ref.tell(message)).await;
+
     // Should fail with timeout or connection error (no server), but should have used ServiceLocator
     match result {
         Ok(Err(e)) => {
             // Connection error is expected
-            assert!(e.to_string().contains("Connection") || e.to_string().contains("connection") || e.to_string().contains("Failed") || e.to_string().contains("gRPC"));
+            assert!(
+                e.to_string().contains("Connection")
+                    || e.to_string().contains("connection")
+                    || e.to_string().contains("Failed")
+                    || e.to_string().contains("gRPC")
+            );
         }
         Err(_) => {
             // Timeout is also acceptable - connection attempt was made
@@ -201,12 +266,21 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
 async fn test_actor_ref_remote_ask_uses_service_locator() {
     // Test: Remote ActorRef.ask() should use ServiceLocator to get gRPC client
     use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let object_repo = Arc::new(plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
-    let object_registry_impl = Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
-    
+    let service_locator =
+        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let object_repo = Arc::new(
+        plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
+    let object_registry_impl =
+        Arc::new(plexspaces_object_registry::ObjectRegistry::new(object_repo));
+
     // Register node address in ObjectRegistry
-    let ctx = plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "default".to_string(),
+        "default".to_string(),
+    );
     let node_registration = ObjectRegistration {
         object_id: "remote-node".to_string(),
         object_type: ObjectType::ObjectTypeNode as i32,
@@ -214,41 +288,54 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
         grpc_address: "http://127.0.0.1:9999".to_string(),
         ..Default::default()
     };
-    object_registry_impl.register(&ctx, node_registration).await.unwrap();
-    
+    object_registry_impl
+        .register(&ctx, node_registration)
+        .await
+        .unwrap();
+
     // Create ActorRegistry with the ObjectRegistry that has the node registered
-    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = 
-        Arc::new(ObjectRegistryAdapter { inner: object_registry_impl.clone() });
+    let object_registry_trait: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
+        inner: object_registry_impl.clone(),
+    });
     let actor_registry = Arc::new(ActorRegistry::new(
         object_registry_trait,
         "test-node".to_string(),
     ));
-    
+
     // Register ActorRegistry in ServiceLocator
-    service_locator.register_actor_registry(actor_registry.clone()).await;
-    
+    service_locator
+        .register_actor_registry(actor_registry.clone())
+        .await;
+
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
         "test-actor@remote-node",
-        "test", // tenant_id
+        "test",    // tenant_id
         "default", // namespace
         "remote-node",
         service_locator.clone(),
     );
-    
+
     // Send ask request (will fail to connect, but should use ServiceLocator)
     // Use timeout to prevent hanging (ask already has timeout, but wrap in additional timeout for safety)
     let message = create_test_message(b"test".to_vec());
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        actor_ref.ask(message, std::time::Duration::from_secs(1))
-    ).await;
-    
+        actor_ref.ask(message, std::time::Duration::from_secs(1)),
+    )
+    .await;
+
     // Should fail with connection error or timeout (no server), but should have used ServiceLocator
     match result {
         Ok(Err(e)) => {
             // Connection error or timeout is expected
-            assert!(e.to_string().contains("Connection") || e.to_string().contains("connection") || e.to_string().contains("Failed") || e.to_string().contains("Timeout") || e.to_string().contains("gRPC"));
+            assert!(
+                e.to_string().contains("Connection")
+                    || e.to_string().contains("connection")
+                    || e.to_string().contains("Failed")
+                    || e.to_string().contains("Timeout")
+                    || e.to_string().contains("gRPC")
+            );
         }
         Err(_) => {
             // Outer timeout is also acceptable - connection attempt was made
@@ -263,27 +350,43 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
 async fn test_actor_ref_local_unchanged() {
     // Test: Local ActorRef should work the same (no ServiceLocator needed)
     use plexspaces_mailbox::mailbox_config_default;
-    let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap());
+    let mailbox = Arc::new(
+        Mailbox::new(
+            mailbox_config_default(),
+            format!("test-mailbox-{}", ulid::Ulid::new()),
+        )
+        .await
+        .unwrap(),
+    );
     use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    let actor_ref = ActorRef::local("test-actor", "test", "test", mailbox.clone(), service_locator.clone());
-    
+    let service_locator =
+        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let actor_ref = ActorRef::local(
+        "test-actor",
+        "test",
+        "test",
+        mailbox.clone(),
+        service_locator.clone(),
+    );
+
     assert!(actor_ref.is_local());
     assert_eq!(actor_ref.id(), "test-actor");
-    
+
     // Register actor before calling tell()
     use plexspaces_core::{ActorRegistry, RequestContext};
     if let Some(registry) = service_locator.actor_registry().await {
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-        registry.register_actor(&ctx, actor_id, sender, None, None, None, None).await;
+        registry
+            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .await;
     }
-    
+
     // Send message should work
     let message = create_test_message(b"test".to_vec());
     actor_ref.tell(message).await.unwrap();
-    
+
     // Verify message was delivered
     let received = mailbox.dequeue().await;
     assert!(received.is_some());

@@ -818,13 +818,14 @@ The Rust SDK provides unified abstractions for ShardGroup (data-parallel actors)
 - **Unified API**: Same interface for WASM and gRPC (via `UnifiedShardGroupClient`)
 - **Boilerplate Removal**: Auto RequestContext, JSON conversion, error handling
 - **Resource-Based Routing**: Labels flow to DataParallelConfig.placement.required_labels (NodePlacement) for scheduler node matching
-- **High-Level API**: `ParallelClient` provides map/reduce operations
+- **Canonical API**: `ShardGroupClient` and `UnifiedShardGroupClient` provide map, scatter-gather, and bulk update operations
 
 **Example: Unified ShardGroup Client**
 
 ```rust
-use plexspaces_sdk::{UnifiedShardGroupClient, ParallelClient, PartitionStrategy};
+use plexspaces_sdk::{UnifiedShardGroupClient, PartitionStrategy};
 use std::collections::HashMap;
+use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
 
 // Option 1: WASM/internal (uses ServiceLocator directly)
 let mut client = UnifiedShardGroupClient::from_service_locator(service_locator).await?;
@@ -837,13 +838,22 @@ let mut client = UnifiedShardGroupClient::from_node_addr("http://localhost:8000"
 let mut labels = HashMap::new();
 labels.insert("cluster".to_string(), "prod".to_string());
 labels.insert("zone".to_string(), "us-west-1".to_string());
+let placement = NodePlacement {
+    strategy: NodePlacementStrategy::NodePlacementStrategyFromRegistry as i32,
+    cluster: "prod".to_string(),
+    node_ids: vec![],
+    required_labels: labels,
+    avoid_node_ids: vec![],
+    resource_requirements: None,
+    affinity_labels: HashMap::new(),
+};
 
 let group = client.create_shard_group(
     "worker-pool-1".to_string(),
     "worker".to_string(),
     4, // 4 shards
     PartitionStrategy::PartitionStrategyHash,
-    labels,
+    Some(placement),
 ).await?;
 
 // Bulk update: route tasks to workers based on partition key
@@ -873,46 +883,41 @@ let scatter_resp = client.scatter_gather(
 ).await?;
 ```
 
-**Example: High-Level Parallel Processing**
+**Example: ShardGroup Operations**
 
 ```rust
-use plexspaces_sdk::{ParallelClient, PartitionStrategy, ShardGroupAggregationStrategy};
-use std::collections::HashMap;
+use plexspaces_sdk::{ShardGroupClient, ShardGroupClientTrait};
+use plexspaces_proto::actor::v1::{
+    ConsistencyLevel, PartitionStrategy, ShardGroupAggregationStrategy,
+};
 
-// Connect to node (or use from_service_locator for WASM)
-// Uses health-aware connection: checks liveness, waits for readiness
-let mut parallel_client = ParallelClient::connect("http://localhost:8000").await?;
+let mut client = ShardGroupClient::connect_grpc("http://localhost:8000").await?;
 
-// Create worker pool (ShardGroup with worker actors)
-let mut labels = HashMap::new();
-labels.insert("cluster".to_string(), "prod".to_string());
-let pool_id = parallel_client.create_worker_pool(
-    "pool-1",
+let group = client.create_shard_group(
+    "pool-1".to_string(),
     "worker",
     4,
     PartitionStrategy::PartitionStrategyHash,
-    labels,
+    None,
 ).await?;
+let pool_id = group.config.expect("config").group_id;
 
-// Parallel map: query all workers
-let results = parallel_client.parallel_map(
-    &pool_id,
+let map_resp = client.map(
+    pool_id.clone(),
     json!({"action": "get_all"}),
 ).await?;
 
-// Parallel reduce: aggregate results
-let aggregated = parallel_client.parallel_reduce(
-    &pool_id,
+let aggregated = client.scatter_gather(
+    pool_id.clone(),
     json!({"action": "get_total"}),
     ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
     2,
 ).await?;
 
-// Parallel update: bulk writes
 let mut updates = HashMap::new();
 updates.insert("key-1".to_string(), json!({"action": "increment"}));
-let stats = parallel_client.parallel_update(
-    &pool_id,
+let stats = client.bulk_update(
+    pool_id,
     updates,
     ConsistencyLevel::ConsistencyLevelEventual,
     false,
@@ -924,6 +929,11 @@ let stats = parallel_client.parallel_update(
 - **SDK Decorators**: `UnifiedShardGroupClient` wraps ActorService and removes boilerplate
 - **Feature Flags**: `grpc` feature (enabled by default) for remote clients; WASM builds can disable it
 - **Labels Flow**: ShardGroup config.placement.required_labels (NodePlacement) → ActorResourceRequirements.placement → NodeSelector → Node placement
+
+For WASM apps using the simple-actor WIT world, node-local benchmark counters should be recorded
+through `application-metrics-add` and read back with `application-get-status`. The SDK/WIT layer is
+only the decorator; the authoritative per-node application metrics live in the application manager
+inside the main Rust framework crates.
 
 See [Firecracker Multi-Tenant Example](../examples/rust/embedded/firecracker_multi_tenant/README.md) for a complete data-parallel actors demonstration.
 
@@ -964,7 +974,7 @@ client.checkin("my-pool", &handle.actor_id, &handle.checkout_id, true).await?;
 
 Node setup: register `PoolRegistry` (from `plexspaces_elastic_pool`), then create pools via the registry or `registry.register_pool(name, pool)` before starting.
 
-**WASM host API**: The simple-actor WIT exposes `pool-checkout`, `pool-checkin`, and `pool-get-metrics` so that Python, Go, and TypeScript WASM actors can use the same pool service. The runtime injects `ElasticPoolService` into `HostFunctions`; when the pool is not configured, checkout returns an error and application code can fall back to process group broadcast. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) (Python, Go, TypeScript, Rust) for a full example.
+**WASM host API**: The simple-actor WIT exposes `pool-checkout`, `pool-checkin`, and `pool-get-metrics` so that Python, Go, TypeScript, and Rust WASM actors can use the same pool service. The same host now also exposes shard-group helpers for deployable apps: `create-shard-group`, `bulk-update-shard-group`, and `scatter-gather`. The runtime injects the framework `ActorService` and `ElasticPoolService` into `HostFunctions`, so the WIT surface stays a thin decorator over the core crates. When the relevant service is not configured, the host call returns `"ERROR:message"`. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) for pool usage and [Heat Diffusion](../examples/rust/apps/heat_diffusion/README.md) for shard-group scatter-gather from a Rust WASM app.
 
 ### Example: GenServer with annotations (webhook_handler-style)
 
@@ -1066,7 +1076,7 @@ PlexSpaces follows the **Orleans model** for time-based operations:
 
 ## Node Connectivity (Health-Aware Connection)
 
-The SDK provides `NodeClient` for production-grade node connectivity with health checks, retry logic, and graceful error handling.
+The SDK provides `NodeClient` for production-grade node connectivity with health checks, retry logic, and graceful error handling. For server-side behavior (node startup `cluster_seed_nodes`, application deploy `seed_nodes`, connect timeout, and cluster matching), see [Services Reference](services.md#node-connectivity-and-seed-nodes) and [Architecture](architecture.md#node-connectivity-and-seed-nodes).
 
 ### Health-Aware Connection (Kubernetes + Erlang-inspired)
 
@@ -1192,7 +1202,7 @@ When connecting to multiple nodes, the SDK:
 
 1. **Pre-checks liveness** for all nodes in parallel (avoids unnecessary attempts)
 2. **Filters out dead nodes** before calling core API
-3. **Calls core ConnectNodes API** for alive nodes (handles ping, registration, SWIM)
+3. **Calls core ConnectNodes API** for alive nodes (registers seed addresses immediately and lets SWIM reconcile node identity + heartbeat)
 4. **Returns combined results** (connected + failed with detailed reasons)
 
 This production-grade approach ensures:

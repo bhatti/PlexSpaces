@@ -64,7 +64,7 @@ pub struct MailboxConfig {
 Messages can have priorities (High, Normal, Low):
 
 ```rust
-let message = Message::new(b"data".to_vec())
+let message = new_message("data")
     .with_priority(Priority::High);
 mailbox.send(message).await?;
 ```
@@ -104,7 +104,7 @@ Messages with `idempotency_key` are automatically deduplicated:
 use plexspaces_mailbox::Message;
 
 // Send message with idempotency key
-let message = Message::new(b"data".to_vec())
+let message = new_message("data")
     .with_idempotency_key("unique-request-id-123");
 
 mailbox.enqueue(message.clone()).await?;
@@ -132,12 +132,13 @@ pub trait MailboxMetrics {
 ### Basic Mailbox Usage
 
 ```rust
-use plexspaces_mailbox::{Mailbox, MailboxConfig, Message};
+use plexspaces_core::new_message;
+use plexspaces_mailbox::{Mailbox, MailboxConfig};
 
 let mailbox = Mailbox::new(MailboxConfig::default());
 
 // Send message
-let message = Message::new(b"hello".to_vec());
+let message = new_message("hello");
 mailbox.send(message).await?;
 
 // Receive message
@@ -157,12 +158,12 @@ let config = MailboxConfig {
 let mailbox = Mailbox::new(config);
 
 // Send high-priority message
-let urgent = Message::new(b"urgent".to_vec())
+let urgent = new_message("urgent")
     .with_priority(Priority::High);
 mailbox.send(urgent).await?;
 
 // Send normal-priority message
-let normal = Message::new(b"normal".to_vec())
+let normal = new_message("normal")
     .with_priority(Priority::Normal);
 mailbox.send(normal).await?;
 ```
@@ -181,7 +182,7 @@ let mailbox = Mailbox::new(config);
 
 // If mailbox is full, oldest message will be dropped
 for i in 0..200 {
-    let msg = Message::new(format!("msg{}", i).into_bytes());
+    let msg = new_message(format!("msg{}", i));
     mailbox.send(msg).await?; // May drop older messages
 }
 ```
@@ -221,4 +222,3 @@ This crate is used by:
 
 - Implementation: `crates/mailbox/src/`
 - Tests: `crates/mailbox/src/` (unit tests)
-

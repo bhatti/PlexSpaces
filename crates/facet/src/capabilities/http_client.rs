@@ -33,10 +33,7 @@ pub const HTTP_CLIENT_FACET_DEFAULT_PRIORITY: i32 = 20;
 impl HttpClientFacet {
     /// Create a new HTTP client facet
     pub fn new(config: serde_json::Value, priority: i32) -> Self {
-        HttpClientFacet {
-            config,
-            priority,
-        }
+        HttpClientFacet { config, priority }
     }
 }
 
@@ -45,11 +42,11 @@ impl Facet for HttpClientFacet {
     fn facet_type(&self) -> &str {
         "http_client"
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -65,11 +62,11 @@ impl Facet for HttpClientFacet {
     async fn on_detach(&mut self, _actor_id: &str) -> Result<(), FacetError> {
         Ok(())
     }
-    
+
     fn get_config(&self) -> serde_json::Value {
         self.config.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }

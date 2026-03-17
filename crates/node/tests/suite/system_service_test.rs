@@ -19,14 +19,14 @@
 //! Unit tests for SystemService implementation
 
 use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_services::system_service::SystemServiceImpl;
-use plexspaces_proto::system::v1::{
-    GetSystemInfoRequest, GetMetricsRequest, GetConfigRequest, GetHealthRequest,
-    GetDetailedHealthRequest, LivenessProbeRequest, ReadinessProbeRequest,
-    StartupProbeRequest, GetNodeReadinessRequest, GetShutdownStatusRequest,
-    CreateBackupRequest, ListBackupsRequest, GetLogsRequest,
-};
 use plexspaces_proto::system::v1::system_service_server::SystemService;
+use plexspaces_proto::system::v1::{
+    CreateBackupRequest, GetConfigRequest, GetDetailedHealthRequest, GetHealthRequest,
+    GetLogsRequest, GetMetricsRequest, GetNodeReadinessRequest, GetShutdownStatusRequest,
+    GetSystemInfoRequest, ListBackupsRequest, LivenessProbeRequest, ReadinessProbeRequest,
+    StartupProbeRequest,
+};
+use plexspaces_services::system_service::SystemServiceImpl;
 use std::sync::Arc;
 use tonic::Request;
 
@@ -54,18 +54,18 @@ fn create_system_service_without_node() -> SystemServiceImpl {
 #[tokio::test]
 async fn test_get_system_info() {
     let (service, _node) = create_system_service_with_node().await;
-    
+
     let request = Request::new(GetSystemInfoRequest {
         include_details: true,
     });
-    
+
     let response = service.get_system_info(request).await;
     assert!(response.is_ok());
-    
+
     let response = response.unwrap();
     let inner = response.into_inner();
     assert!(inner.system_info.is_some());
-    
+
     let system_info = inner.system_info.unwrap();
     assert!(!system_info.version.is_empty());
     assert!(system_info.cpu_cores > 0);
@@ -75,11 +75,11 @@ async fn test_get_system_info() {
 #[tokio::test]
 async fn test_get_system_info_without_node() {
     let service = create_system_service_without_node();
-    
+
     let request = Request::new(GetSystemInfoRequest {
         include_details: false,
     });
-    
+
     let response = service.get_system_info(request).await;
     assert!(response.is_ok());
 }
@@ -87,16 +87,16 @@ async fn test_get_system_info_without_node() {
 #[tokio::test]
 async fn test_get_metrics() {
     let (service, _node) = create_system_service_with_node().await;
-    
+
     let request = Request::new(GetMetricsRequest {
         start_time: None,
         end_time: None,
         interval: None,
     });
-    
+
     let response = service.get_metrics(request).await;
     assert!(response.is_ok());
-    
+
     let response = response.unwrap();
     let inner = response.into_inner();
     assert!(!inner.metrics.is_empty());
@@ -105,15 +105,15 @@ async fn test_get_metrics() {
 #[tokio::test]
 async fn test_get_config() {
     let (service, _node) = create_system_service_with_node().await;
-    
+
     let request = Request::new(GetConfigRequest {
         key_pattern: "node.*".to_string(),
         include_secrets: false,
     });
-    
+
     let response = service.get_config(request).await;
     assert!(response.is_ok());
-    
+
     let response = response.unwrap();
     let inner = response.into_inner();
     assert!(!inner.settings.is_empty());
@@ -122,15 +122,15 @@ async fn test_get_config() {
 #[tokio::test]
 async fn test_get_config_with_pattern() {
     let (service, _node) = create_system_service_with_node().await;
-    
+
     let request = Request::new(GetConfigRequest {
         key_pattern: "node.listen_addr".to_string(),
         include_secrets: false,
     });
-    
+
     let response = service.get_config(request).await;
     assert!(response.is_ok());
-    
+
     let response = response.unwrap();
     let inner = response.into_inner();
     // Should have at least one matching setting
@@ -140,11 +140,9 @@ async fn test_get_config_with_pattern() {
 #[tokio::test]
 async fn test_get_health() {
     let service = create_system_service_without_node();
-    
-    let request = Request::new(GetHealthRequest {
-        components: vec![],
-    });
-    
+
+    let request = Request::new(GetHealthRequest { components: vec![] });
+
     let response = service.get_health(request).await;
     assert!(response.is_ok());
 }
@@ -152,11 +150,11 @@ async fn test_get_health() {
 #[tokio::test]
 async fn test_get_detailed_health() {
     let service = create_system_service_without_node();
-    
+
     let request = Request::new(GetDetailedHealthRequest {
         include_non_critical: true,
     });
-    
+
     let response = service.get_detailed_health(request).await;
     assert!(response.is_ok());
 }
@@ -164,9 +162,9 @@ async fn test_get_detailed_health() {
 #[tokio::test]
 async fn test_liveness_probe() {
     let service = create_system_service_without_node();
-    
+
     let request = Request::new(LivenessProbeRequest {});
-    
+
     let response = service.liveness_probe(request).await;
     assert!(response.is_ok());
 }
@@ -174,9 +172,9 @@ async fn test_liveness_probe() {
 #[tokio::test]
 async fn test_readiness_probe() {
     let service = create_system_service_without_node();
-    
+
     let request = Request::new(ReadinessProbeRequest {});
-    
+
     let response = service.readiness_probe(request).await;
     assert!(response.is_ok());
 }
@@ -184,9 +182,9 @@ async fn test_readiness_probe() {
 #[tokio::test]
 async fn test_startup_probe() {
     let service = create_system_service_without_node();
-    
+
     let request = Request::new(StartupProbeRequest {});
-    
+
     let response = service.startup_probe(request).await;
     assert!(response.is_ok());
 }
@@ -194,9 +192,9 @@ async fn test_startup_probe() {
 #[tokio::test]
 async fn test_get_node_readiness() {
     let service = create_system_service_without_node();
-    
+
     let request = Request::new(GetNodeReadinessRequest {});
-    
+
     let response = service.get_node_readiness(request).await;
     assert!(response.is_ok());
 }
@@ -204,12 +202,12 @@ async fn test_get_node_readiness() {
 #[tokio::test]
 async fn test_get_shutdown_status() {
     let service = create_system_service_without_node();
-    
+
     let request = Request::new(GetShutdownStatusRequest {});
-    
+
     let response = service.get_shutdown_status(request).await;
     assert!(response.is_ok());
-    
+
     let response = response.unwrap();
     let inner = response.into_inner();
     assert!(inner.status.is_some());
@@ -218,7 +216,7 @@ async fn test_get_shutdown_status() {
 #[tokio::test]
 async fn test_create_backup() {
     let service = create_system_service_without_node();
-    
+
     let request = Request::new(CreateBackupRequest {
         r#type: 0, // BackupType::BackupTypeUnspecified
         components: vec![],
@@ -226,10 +224,10 @@ async fn test_create_backup() {
         compress: false,
         encrypt: false,
     });
-    
+
     let response = service.create_backup(request).await;
     assert!(response.is_ok());
-    
+
     let response = response.unwrap();
     let inner = response.into_inner();
     assert!(inner.backup.is_some());
@@ -238,16 +236,16 @@ async fn test_create_backup() {
 #[tokio::test]
 async fn test_list_backups() {
     let service = create_system_service_without_node();
-    
+
     let request = Request::new(ListBackupsRequest {
         page_request: None,
         r#type: 0,
         status: 0,
     });
-    
+
     let response = service.list_backups(request).await;
     assert!(response.is_ok());
-    
+
     let response = response.unwrap();
     let inner = response.into_inner();
     assert!(inner.page_response.is_some());
@@ -256,7 +254,7 @@ async fn test_list_backups() {
 #[tokio::test]
 async fn test_get_logs() {
     let service = create_system_service_without_node();
-    
+
     let request = Request::new(GetLogsRequest {
         start_time: None,
         end_time: None,
@@ -265,7 +263,7 @@ async fn test_get_logs() {
         query: String::new(),
         page_request: None,
     });
-    
+
     let response = service.get_logs(request).await;
     assert!(response.is_ok());
 }
@@ -273,14 +271,16 @@ async fn test_get_logs() {
 #[tokio::test]
 async fn test_set_config() {
     let (service, _node) = create_system_service_with_node().await;
-    
-    use plexspaces_proto::system::v1::{SetConfigRequest, ConfigSetting};
+
     use plexspaces_proto::prost_types::Value;
-    
+    use plexspaces_proto::system::v1::{ConfigSetting, SetConfigRequest};
+
     let settings = vec![ConfigSetting {
         key: "test.key".to_string(),
         value: Some(Value {
-            kind: Some(plexspaces_proto::prost_types::value::Kind::StringValue("test_value".to_string())),
+            kind: Some(plexspaces_proto::prost_types::value::Kind::StringValue(
+                "test_value".to_string(),
+            )),
         }),
         description: "Test setting".to_string(),
         is_secret: false,
@@ -288,14 +288,13 @@ async fn test_set_config() {
         updated_at: None,
         updated_by: String::new(),
     }];
-    
+
     let request = Request::new(SetConfigRequest {
         settings,
         validate_only: false,
     });
-    
+
     let response = service.set_config(request).await;
     // This might fail if validation is strict, but should not panic
     let _ = response;
 }
-

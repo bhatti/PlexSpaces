@@ -60,7 +60,11 @@ pub struct HealthEvent {
 }
 
 /// Health event callback function type
-pub type HealthEventCallback = Arc<dyn Fn(HealthEvent) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+pub type HealthEventCallback = Arc<
+    dyn Fn(HealthEvent) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// VM Health Monitor
 ///
@@ -204,10 +208,7 @@ impl VmHealthMonitor {
                     _ => {
                         let mut failures = self.consecutive_failures.write().await;
                         *failures += 1;
-                        HealthStatus::Unhealthy(format!(
-                            "API reports state: {}",
-                            info.state
-                        ))
+                        HealthStatus::Unhealthy(format!("API reports state: {}", info.state))
                     }
                 }
             }
@@ -244,7 +245,7 @@ impl VmHealthMonitor {
         // Clone callback and last_status for the task
         let health_event_callback = Arc::clone(&self.health_event_callback);
         let last_health_status = Arc::clone(&self.last_health_status);
-        
+
         // Get VM ID for events
         let vm_id = {
             let vm_guard = self.vm.read().await;
@@ -271,13 +272,13 @@ impl VmHealthMonitor {
                     };
                     monitor.check_health().await
                 };
-                
+
                 // Check if status changed
                 let status_changed = {
                     let last_status = last_health_status.read().await;
                     last_status.as_ref() != Some(&status)
                 };
-                
+
                 // Emit health events via callback if registered and status changed
                 if status_changed {
                     if let Some(ref callback) = health_event_callback.read().await.as_ref() {
@@ -285,7 +286,7 @@ impl VmHealthMonitor {
                             let last_status = last_health_status.read().await;
                             last_status.clone()
                         };
-                        
+
                         let event = HealthEvent {
                             vm_id: vm_id.clone(),
                             timestamp: std::time::SystemTime::now(),
@@ -295,7 +296,7 @@ impl VmHealthMonitor {
                         callback(event).await;
                     }
                 }
-                
+
                 // Update last known status
                 {
                     let mut last_status = last_health_status.write().await;
@@ -411,13 +412,12 @@ mod tests {
         // But if we had a Failed state, it would increment
 
         // Test with threshold
-        let monitor_with_threshold = VmHealthMonitor::with_threshold(
-            vm_arc.clone(),
-            Duration::from_secs(5),
-            5,
-        );
+        let monitor_with_threshold =
+            VmHealthMonitor::with_threshold(vm_arc.clone(), Duration::from_secs(5), 5);
         // Can't access failure_threshold directly (private), but we can verify it works
-        assert_eq!(monitor_with_threshold.check_interval(), Duration::from_secs(5));
+        assert_eq!(
+            monitor_with_threshold.check_interval(),
+            Duration::from_secs(5)
+        );
     }
 }
-

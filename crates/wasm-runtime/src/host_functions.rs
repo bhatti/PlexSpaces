@@ -6,10 +6,17 @@
 //! Host functions provided to WASM actors
 
 use async_trait::async_trait;
-use plexspaces_core::{ChannelService, ElasticPoolService, RequestContext, KeyValueStore, LockManager};
 use plexspaces_core::actor_context::ObjectRegistry;
 use plexspaces_core::JournalStorage;
+use plexspaces_core::{
+    ChannelService, ElasticPoolService, KeyValueStore, LockManager, RequestContext,
+};
 use plexspaces_process_groups::ProcessGroupRegistry;
+use plexspaces_proto::actor::v1::{
+    BulkUpdateShardGroupRequest, BulkUpdateShardGroupResponse, CreateShardGroupRequest,
+    CreateShardGroupResponse, ScatterGatherRequest, ScatterGatherResponse,
+};
+use plexspaces_proto::application::v1::{ApplicationInfo, ApplicationMetrics};
 use plexspaces_proto::common::v1::Message;
 use std::sync::Arc;
 
@@ -37,7 +44,13 @@ pub trait MessageSender: Send + Sync {
     ///
     /// ## Returns
     /// Success or error
-    async fn send_message(&self, from: &str, to: &str, message_type: &str, message: &str) -> Result<(), String>;
+    async fn send_message(
+        &self,
+        from: &str,
+        to: &str,
+        message_type: &str,
+        message: &str,
+    ) -> Result<(), String>;
 
     /// Send a message and wait for reply (request-reply pattern)
     ///
@@ -90,12 +103,7 @@ pub trait MessageSender: Send + Sync {
     ///
     /// ## Returns
     /// Success or error
-    async fn stop_actor(
-        &self,
-        from: &str,
-        actor_id: &str,
-        timeout_ms: u64,
-    ) -> Result<(), String>;
+    async fn stop_actor(&self, from: &str, actor_id: &str, timeout_ms: u64) -> Result<(), String>;
 
     /// Link two actors (bidirectional death propagation)
     ///
@@ -137,11 +145,7 @@ pub trait MessageSender: Send + Sync {
     ///
     /// ## Returns
     /// Monitor reference (u64) or error
-    async fn monitor_actor(
-        &self,
-        from: &str,
-        actor_id: &str,
-    ) -> Result<u64, String>;
+    async fn monitor_actor(&self, from: &str, actor_id: &str) -> Result<u64, String>;
 
     /// Remove monitoring for an actor
     ///
@@ -158,6 +162,58 @@ pub trait MessageSender: Send + Sync {
         actor_id: &str,
         monitor_ref: u64,
     ) -> Result<(), String>;
+
+    /// Create a shard group via the framework actor service.
+    async fn create_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: CreateShardGroupRequest,
+    ) -> Result<CreateShardGroupResponse, String> {
+        let _ = (ctx, req);
+        Err("create_shard_group not implemented".to_string())
+    }
+
+    /// Bulk update a shard group via the framework actor service.
+    async fn bulk_update_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: BulkUpdateShardGroupRequest,
+    ) -> Result<BulkUpdateShardGroupResponse, String> {
+        let _ = (ctx, req);
+        Err("bulk_update_shard_group not implemented".to_string())
+    }
+
+    /// Scatter-gather via the framework actor service.
+    async fn scatter_gather(
+        &self,
+        ctx: &RequestContext,
+        req: ScatterGatherRequest,
+    ) -> Result<ScatterGatherResponse, String> {
+        let _ = (ctx, req);
+        Err("scatter_gather not implemented".to_string())
+    }
+
+    /// Merge a node-local metrics delta into an application.
+    async fn merge_application_metrics(
+        &self,
+        ctx: &RequestContext,
+        application_id: &str,
+        metrics: ApplicationMetrics,
+    ) -> Result<ApplicationMetrics, String> {
+        let _ = (ctx, application_id, metrics);
+        Err("merge_application_metrics not implemented".to_string())
+    }
+
+    /// Get application status for a local or remote node.
+    async fn get_application_status(
+        &self,
+        ctx: &RequestContext,
+        application_id: &str,
+        node_id: &str,
+    ) -> Result<(ApplicationInfo, String), String> {
+        let _ = (ctx, application_id, node_id);
+        Err("get_application_status not implemented".to_string())
+    }
 }
 
 /// Host functions for WASM actors
@@ -270,7 +326,7 @@ impl HostFunctions {
             elastic_pool_service,
         }
     }
-    
+
     /// Get blob service if available
     pub fn blob_service(&self) -> Option<&Arc<BlobService>> {
         self.blob_service.as_ref()
@@ -317,7 +373,13 @@ impl HostFunctions {
     }
 
     /// Send message via message sender if available
-    pub async fn send_message(&self, from: &str, to: &str, message_type: &str, message: &str) -> Result<(), String> {
+    pub async fn send_message(
+        &self,
+        from: &str,
+        to: &str,
+        message_type: &str,
+        message: &str,
+    ) -> Result<(), String> {
         if let Some(sender) = &self.message_sender {
             sender.send_message(from, to, message_type, message).await
         } else {
@@ -380,11 +442,7 @@ impl HostFunctions {
     }
 
     /// Delete key-value store operation helper
-    pub async fn delete_keyvalue(
-        &self,
-        ctx: &RequestContext,
-        key: &str,
-    ) -> Result<(), String> {
+    pub async fn delete_keyvalue(&self, ctx: &RequestContext, key: &str) -> Result<(), String> {
         if let Some(kv) = &self.keyvalue_store {
             kv.delete(ctx, key)
                 .await
@@ -419,7 +477,9 @@ impl HostFunctions {
         timeout_ms: u64,
     ) -> Result<Vec<u8>, String> {
         if let Some(sender) = &self.message_sender {
-            sender.ask(from, to, message_type, payload, timeout_ms).await
+            sender
+                .ask(from, to, message_type, payload, timeout_ms)
+                .await
         } else {
             Err("Message sender not configured for ask".to_string())
         }
@@ -436,9 +496,82 @@ impl HostFunctions {
         durable: bool,
     ) -> Result<String, String> {
         if let Some(sender) = &self.message_sender {
-            sender.spawn_actor(from, module_ref, initial_state, actor_id, labels, durable).await
+            sender
+                .spawn_actor(from, module_ref, initial_state, actor_id, labels, durable)
+                .await
         } else {
             Err("Message sender not configured for spawn_actor".to_string())
+        }
+    }
+
+    /// Create a shard group through the framework actor service.
+    pub async fn create_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: CreateShardGroupRequest,
+    ) -> Result<CreateShardGroupResponse, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.create_shard_group(ctx, req).await
+        } else {
+            Err("Actor service not configured for create_shard_group".to_string())
+        }
+    }
+
+    /// Bulk update a shard group through the framework actor service.
+    pub async fn bulk_update_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: BulkUpdateShardGroupRequest,
+    ) -> Result<BulkUpdateShardGroupResponse, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.bulk_update_shard_group(ctx, req).await
+        } else {
+            Err("Actor service not configured for bulk_update_shard_group".to_string())
+        }
+    }
+
+    /// Scatter-gather through the framework actor service.
+    pub async fn scatter_gather(
+        &self,
+        ctx: &RequestContext,
+        req: ScatterGatherRequest,
+    ) -> Result<ScatterGatherResponse, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.scatter_gather(ctx, req).await
+        } else {
+            Err("Actor service not configured for scatter_gather".to_string())
+        }
+    }
+
+    /// Merge a node-local application metrics delta.
+    pub async fn merge_application_metrics(
+        &self,
+        ctx: &RequestContext,
+        application_id: &str,
+        metrics: ApplicationMetrics,
+    ) -> Result<ApplicationMetrics, String> {
+        if let Some(sender) = &self.message_sender {
+            sender
+                .merge_application_metrics(ctx, application_id, metrics)
+                .await
+        } else {
+            Err("Application metrics service not configured".to_string())
+        }
+    }
+
+    /// Get application status from a local or remote node.
+    pub async fn get_application_status(
+        &self,
+        ctx: &RequestContext,
+        application_id: &str,
+        node_id: &str,
+    ) -> Result<(ApplicationInfo, String), String> {
+        if let Some(sender) = &self.message_sender {
+            sender
+                .get_application_status(ctx, application_id, node_id)
+                .await
+        } else {
+            Err("Application service not configured".to_string())
         }
     }
 
@@ -485,11 +618,7 @@ impl HostFunctions {
     }
 
     /// Monitor an actor via message sender if available
-    pub async fn monitor_actor(
-        &self,
-        from: &str,
-        actor_id: &str,
-    ) -> Result<u64, String> {
+    pub async fn monitor_actor(&self, from: &str, actor_id: &str) -> Result<u64, String> {
         if let Some(sender) = &self.message_sender {
             sender.monitor_actor(from, actor_id).await
         } else {
@@ -569,7 +698,10 @@ impl HostFunctions {
             } else {
                 None
             };
-            match channel_service.receive_from_queue(queue_name, timeout).await {
+            match channel_service
+                .receive_from_queue(queue_name, timeout)
+                .await
+            {
                 Ok(Some(message)) => {
                     let message_type = message.message_type.clone();
                     Ok(Some((message_type, message.payload.clone())))
@@ -592,12 +724,12 @@ impl Default for HostFunctions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
     use plexspaces_core::ChannelService;
     use plexspaces_proto::common::v1::Message;
+    use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::sync::RwLock;
-    use std::collections::HashMap;
-    use futures::StreamExt;
 
     /// Mock ChannelService for testing
     struct MockChannelService {
@@ -632,7 +764,8 @@ mod tests {
             message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             let mut queues = self.queues.write().await;
-            queues.entry(queue_name.to_string())
+            queues
+                .entry(queue_name.to_string())
                 .or_insert_with(Vec::new)
                 .push(message);
             Ok("msg-001".to_string())
@@ -644,7 +777,8 @@ mod tests {
             message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             let mut topics = self.topics.write().await;
-            topics.entry(topic_name.to_string())
+            topics
+                .entry(topic_name.to_string())
                 .or_insert_with(Vec::new)
                 .push(message);
             Ok("msg-001".to_string())
@@ -653,7 +787,10 @@ mod tests {
         async fn subscribe_to_topic(
             &self,
             _topic_name: &str,
-        ) -> Result<futures::stream::BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
+        ) -> Result<
+            futures::stream::BoxStream<'static, Message>,
+            Box<dyn std::error::Error + Send + Sync>,
+        > {
             use futures::stream;
             Ok(Box::pin(stream::empty()))
         }
@@ -768,9 +905,7 @@ mod tests {
             .await;
 
         // Then receive it
-        let result = host_functions
-            .receive_from_queue("test-queue", 1000)
-            .await;
+        let result = host_functions.receive_from_queue("test-queue", 1000).await;
 
         assert!(result.is_ok());
         let received = result.unwrap();
@@ -786,9 +921,7 @@ mod tests {
         let host_functions = HostFunctions::with_channel_service(channel_service);
 
         // Try to receive from empty queue
-        let result = host_functions
-            .receive_from_queue("empty-queue", 100)
-            .await;
+        let result = host_functions.receive_from_queue("empty-queue", 100).await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -798,9 +931,7 @@ mod tests {
     async fn test_receive_from_queue_without_channel_service() {
         let host_functions = HostFunctions::new();
 
-        let result = host_functions
-            .receive_from_queue("test-queue", 1000)
-            .await;
+        let result = host_functions.receive_from_queue("test-queue", 1000).await;
 
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "Channel service not configured");

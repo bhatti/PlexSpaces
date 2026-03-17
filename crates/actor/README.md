@@ -139,7 +139,7 @@ let service_locator = Arc::new(ServiceLocator::new());
 let remote_ref = ActorRef::remote("counter@node2", "node2", service_locator);
 
 // Send message (fire-and-forget) - same API for local and remote
-let message = Message::new(b"increment".to_vec());
+let message = new_message("increment");
 actor_ref.tell(message).await?;
 remote_ref.tell(message).await?;
 
@@ -210,8 +210,10 @@ This crate is used by:
 Messages support Time-To-Live (TTL) for automatic expiration:
 
 ```rust
+use plexspaces_core::new_message;
 use std::time::Duration;
-let message = Message::new(b"data".to_vec())
+
+let message = new_message("data")
     .with_ttl(Duration::from_secs(30));
 
 // Check if expired
@@ -244,4 +246,3 @@ let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 - Implementation: `crates/actor/src/`
 - Tests: `crates/actor/src/` (unit tests)
 - Proto definitions: `proto/plexspaces/v1/actor_runtime.proto`
-

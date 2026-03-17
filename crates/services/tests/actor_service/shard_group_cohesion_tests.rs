@@ -16,27 +16,24 @@
 //!   → capabilities["cluster"] from ConnectNodes
 //! ```
 
-use plexspaces_services::actor_service::ActorServiceImpl;
-use plexspaces_core::{
-    ActorRegistry, RequestContext,
-    actor_context::ObjectRegistry as ObjectRegistryTrait,
-    Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType,
-    NodeRegistryTrait, ServiceLocator,
-};
+use async_trait::async_trait;
 use plexspaces_behavior::GenServer;
+use plexspaces_core::Message;
+use plexspaces_core::{
+    actor_context::ObjectRegistry as ObjectRegistryTrait, Actor as ActorTrait, ActorContext,
+    ActorRegistry, BehaviorError, BehaviorType, NodeRegistryTrait, RequestContext, ServiceLocator,
+};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{
-    actor_service_server::ActorService as ActorServiceTrait,
-    CreateShardGroupRequest,
+    actor_service_server::ActorService as ActorServiceTrait, CreateShardGroupRequest,
 };
-use plexspaces_proto::v1::actor::ActorResourceRequirements;
 use plexspaces_proto::node::v1::NodeCapacity;
 use plexspaces_proto::object_registry::v1::ObjectRegistration;
-use std::sync::Arc;
+use plexspaces_proto::v1::actor::ActorResourceRequirements;
+use plexspaces_services::actor_service::ActorServiceImpl;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tonic::Request;
-use async_trait::async_trait;
-use plexspaces_core::Message;
 
 // Simple counter actor for testing
 struct CounterActor {
@@ -79,41 +76,68 @@ impl GenServer for CounterActor {
 // Helper to create test ActorService (same as shard_group_tests.rs)
 async fn create_test_actor_service(
     node_id: &str,
-) -> (Arc<ActorServiceImpl>, Arc<ActorRegistry>, Arc<plexspaces_services::ServiceLocatorImpl>) {
-    use plexspaces_node::create_default_service_locator;
+) -> (
+    Arc<ActorServiceImpl>,
+    Arc<ActorRegistry>,
+    Arc<plexspaces_services::ServiceLocatorImpl>,
+) {
     use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
+    use plexspaces_node::create_default_service_locator;
 
-    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
     let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
         inner: object_registry_impl,
     });
     let actor_registry = Arc::new(ActorRegistry::new(object_registry, node_id.to_string()));
 
-    let service_locator = create_default_service_locator(Some(node_id.to_string()), None, None).await;
-    service_locator.register_service(actor_registry.clone()).await;
+    let service_locator =
+        create_default_service_locator(Some(node_id.to_string()), None, None).await;
+    service_locator
+        .register_service(actor_registry.clone())
+        .await;
 
     // Register ActorFactory (required for spawn_actor to work)
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
     use plexspaces_core::{FacetManager, FacetManagerServiceWrapper, VirtualActorManager};
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
-    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(FacetManager::new())));
-    service_locator.register_service(virtual_actor_manager).await;
+    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
+        FacetManager::new(),
+    )));
+    service_locator
+        .register_service(virtual_actor_manager)
+        .await;
     service_locator.register_service(facet_manager).await;
-    let actor_factory = ActorFactoryImpl::new_arc(service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>).await;
-    service_locator.register_service_by_name(plexspaces_core::service_names::ACTOR_FACTORY_IMPL, actor_factory.clone()).await;
+    let actor_factory = ActorFactoryImpl::new_arc(
+        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+    )
+    .await;
+    service_locator
+        .register_service_by_name(
+            plexspaces_core::service_names::ACTOR_FACTORY_IMPL,
+            actor_factory.clone(),
+        )
+        .await;
     let factory_trait: Arc<dyn plexspaces_actor::ActorFactory> = actor_factory.clone();
     service_locator.register_actor_factory(factory_trait).await;
 
     // Register BehaviorRegistry and behavior for "counter" actor type
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     let behavior_registry = BehaviorRegistry::new();
-    behavior_registry.register_simple("counter", || {
-        Box::pin(async move {
-            Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>)
+    behavior_registry
+        .register_simple("counter", || {
+            Box::pin(
+                async move { Ok(Box::new(CounterActor::new()) as Box<dyn plexspaces_core::Actor>) },
+            )
         })
-    }).await;
-    service_locator.register_behavior_registry(Arc::new(behavior_registry)).await;
+        .await;
+    service_locator
+        .register_behavior_registry(Arc::new(behavior_registry))
+        .await;
 
     // Disable auth for tests
     let config = plexspaces_proto::node::v1::SecurityConfig {
@@ -122,8 +146,12 @@ async fn create_test_actor_service(
     };
     service_locator.register_security_config(config).await;
 
-    let service_locator_impl = service_locator.clone() as Arc<plexspaces_services::ServiceLocatorImpl>;
-    let actor_service = Arc::new(ActorServiceImpl::new(service_locator.clone(), node_id.to_string()));
+    let service_locator_impl =
+        service_locator.clone() as Arc<plexspaces_services::ServiceLocatorImpl>;
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        node_id.to_string(),
+    ));
     (actor_service, actor_registry, service_locator_impl)
 }
 
@@ -140,11 +168,17 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         object_id: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
     ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+        let obj_type = object_type
+            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         self.inner
             .lookup(ctx, obj_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn lookup_full(
@@ -156,7 +190,12 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         self.inner
             .lookup_full(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn register(
@@ -164,10 +203,12 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         ctx: &RequestContext,
         registration: ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .register(ctx, registration)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        self.inner.register(ctx, registration).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn discover(
@@ -193,7 +234,12 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         self.inner
             .unregister(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn heartbeat(
@@ -205,7 +251,12 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
         self.inner
             .heartbeat(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 }
 
@@ -219,7 +270,10 @@ async fn test_shard_group_labels_mapped_to_actor_resource_requirements() {
     labels.insert("zone".to_string(), "us-west-1".to_string());
     labels.insert("tier".to_string(), "compute".to_string());
 
-    use plexspaces_proto::actor::v1::{DataParallelConfig, NodePlacement, NodePlacementStrategy, PartitionStrategy, RebalancePolicy};
+    use plexspaces_proto::actor::v1::{
+        DataParallelConfig, NodePlacement, NodePlacementStrategy, PartitionStrategy,
+        RebalancePolicy,
+    };
     let req = Request::new(CreateShardGroupRequest {
         config: Some(DataParallelConfig {
             group_id: "labeled-group".to_string(),
@@ -231,11 +285,9 @@ async fn test_shard_group_labels_mapped_to_actor_resource_requirements() {
                 cluster: String::new(),
                 node_ids: vec![],
                 required_labels: labels.clone(),
-                preferred_node_ids: vec![],
                 avoid_node_ids: vec![],
                 resource_requirements: None,
                 affinity_labels: HashMap::new(),
-                preferred_node_id: String::new(),
             }),
         }),
         actor_type: "counter".to_string(),
@@ -245,12 +297,23 @@ async fn test_shard_group_labels_mapped_to_actor_resource_requirements() {
     });
 
     let result = _service.create_shard_group(req).await;
-    assert!(result.is_ok(), "CreateShardGroup should succeed with labels");
+    assert!(
+        result.is_ok(),
+        "CreateShardGroup should succeed with labels"
+    );
 
     let response = result.unwrap().into_inner();
     let group = response.group.as_ref().expect("group should be present");
-    let stored = group.config.as_ref().and_then(|c| c.placement.as_ref()).map(|p| &p.required_labels);
-    assert_eq!(stored, Some(&labels), "ShardGroup config.placement should store required_labels");
+    let stored = group
+        .config
+        .as_ref()
+        .and_then(|c| c.placement.as_ref())
+        .map(|p| &p.required_labels);
+    assert_eq!(
+        stored,
+        Some(&labels),
+        "ShardGroup config.placement should store required_labels"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -258,71 +321,77 @@ async fn test_node_selector_filters_by_required_labels() {
     // Test: Verify that NodeSelector correctly filters nodes by ActorResourceRequirements.required_labels
     // This verifies the second step: ActorResourceRequirements.required_labels → NodeSelector filtering
     // Note: This test requires plexspaces-scheduler as a dev dependency
-    
+
     use plexspaces_proto::common::v1::ResourceSpec;
     use plexspaces_scheduler::node_selector::NodeSelector;
-    
+
     // Create node capacities with different labels
     let mut node_capacities = HashMap::new();
-    
+
     // Node 1: Matches labels
-    node_capacities.insert("node1".to_string(), NodeCapacity {
-        labels: HashMap::from([
-            ("cluster".to_string(), "prod".to_string()),
-            ("zone".to_string(), "us-west-1".to_string()),
-        ]),
-        total: Some(ResourceSpec {
-            cpu_cores: 4.0,
-            memory_bytes: 8 * 1024 * 1024 * 1024,
-            disk_bytes: 100 * 1024 * 1024 * 1024,
-            gpu_count: 0,
-            gpu_type: String::new(),
-        }),
-        available: Some(ResourceSpec {
-            cpu_cores: 2.0,
-            memory_bytes: 4 * 1024 * 1024 * 1024,
-            disk_bytes: 50 * 1024 * 1024 * 1024,
-            gpu_count: 0,
-            gpu_type: String::new(),
-        }),
-        allocated: Some(ResourceSpec {
-            cpu_cores: 2.0,
-            memory_bytes: 4 * 1024 * 1024 * 1024,
-            disk_bytes: 50 * 1024 * 1024 * 1024,
-            gpu_count: 0,
-            gpu_type: String::new(),
-        }),
-    });
-    
+    node_capacities.insert(
+        "node1".to_string(),
+        NodeCapacity {
+            labels: HashMap::from([
+                ("cluster".to_string(), "prod".to_string()),
+                ("zone".to_string(), "us-west-1".to_string()),
+            ]),
+            total: Some(ResourceSpec {
+                cpu_cores: 4.0,
+                memory_bytes: 8 * 1024 * 1024 * 1024,
+                disk_bytes: 100 * 1024 * 1024 * 1024,
+                gpu_count: 0,
+                gpu_type: String::new(),
+            }),
+            available: Some(ResourceSpec {
+                cpu_cores: 2.0,
+                memory_bytes: 4 * 1024 * 1024 * 1024,
+                disk_bytes: 50 * 1024 * 1024 * 1024,
+                gpu_count: 0,
+                gpu_type: String::new(),
+            }),
+            allocated: Some(ResourceSpec {
+                cpu_cores: 2.0,
+                memory_bytes: 4 * 1024 * 1024 * 1024,
+                disk_bytes: 50 * 1024 * 1024 * 1024,
+                gpu_count: 0,
+                gpu_type: String::new(),
+            }),
+        },
+    );
+
     // Node 2: Doesn't match (different cluster)
-    node_capacities.insert("node2".to_string(), NodeCapacity {
-        labels: HashMap::from([
-            ("cluster".to_string(), "dev".to_string()),  // Different cluster
-            ("zone".to_string(), "us-west-1".to_string()),
-        ]),
-        total: Some(ResourceSpec {
-            cpu_cores: 4.0,
-            memory_bytes: 8 * 1024 * 1024 * 1024,
-            disk_bytes: 100 * 1024 * 1024 * 1024,
-            gpu_count: 0,
-            gpu_type: String::new(),
-        }),
-        available: Some(ResourceSpec {
-            cpu_cores: 2.0,
-            memory_bytes: 4 * 1024 * 1024 * 1024,
-            disk_bytes: 50 * 1024 * 1024 * 1024,
-            gpu_count: 0,
-            gpu_type: String::new(),
-        }),
-        allocated: Some(ResourceSpec {
-            cpu_cores: 2.0,
-            memory_bytes: 4 * 1024 * 1024 * 1024,
-            disk_bytes: 50 * 1024 * 1024 * 1024,
-            gpu_count: 0,
-            gpu_type: String::new(),
-        }),
-    });
-    
+    node_capacities.insert(
+        "node2".to_string(),
+        NodeCapacity {
+            labels: HashMap::from([
+                ("cluster".to_string(), "dev".to_string()), // Different cluster
+                ("zone".to_string(), "us-west-1".to_string()),
+            ]),
+            total: Some(ResourceSpec {
+                cpu_cores: 4.0,
+                memory_bytes: 8 * 1024 * 1024 * 1024,
+                disk_bytes: 100 * 1024 * 1024 * 1024,
+                gpu_count: 0,
+                gpu_type: String::new(),
+            }),
+            available: Some(ResourceSpec {
+                cpu_cores: 2.0,
+                memory_bytes: 4 * 1024 * 1024 * 1024,
+                disk_bytes: 50 * 1024 * 1024 * 1024,
+                gpu_count: 0,
+                gpu_type: String::new(),
+            }),
+            allocated: Some(ResourceSpec {
+                cpu_cores: 2.0,
+                memory_bytes: 4 * 1024 * 1024 * 1024,
+                disk_bytes: 50 * 1024 * 1024 * 1024,
+                gpu_count: 0,
+                gpu_type: String::new(),
+            }),
+        },
+    );
+
     use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
     let requirements = ActorResourceRequirements {
         placement: Some(NodePlacement {
@@ -333,7 +402,6 @@ async fn test_node_selector_filters_by_required_labels() {
                 ("cluster".to_string(), "prod".to_string()),
                 ("zone".to_string(), "us-west-1".to_string()),
             ]),
-            preferred_node_ids: vec![],
             avoid_node_ids: vec![],
             resource_requirements: Some(ResourceSpec {
                 cpu_cores: 1.0,
@@ -343,32 +411,38 @@ async fn test_node_selector_filters_by_required_labels() {
                 gpu_type: String::new(),
             }),
             affinity_labels: HashMap::new(),
-            preferred_node_id: String::new(),
         }),
     };
-    
+
     // NodeSelector should select node1 (matches labels), not node2 (different cluster)
     let result = NodeSelector::select_node(&requirements, &node_capacities);
     assert!(result.is_ok(), "NodeSelector should find matching node");
     let (selected_node, _score) = result.unwrap();
-    assert_eq!(selected_node, "node1", "NodeSelector should select node with matching labels");
+    assert_eq!(
+        selected_node, "node1",
+        "NodeSelector should select node with matching labels"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_capabilities_to_labels_mapping() {
     // Test: Verify that NodeRegistration.capabilities are correctly mapped to ObjectRegistration.metadata.labels
     // This verifies: capabilities → metadata.labels → NodeCapacity.labels
-    
+
     use plexspaces_proto::node::v1::NodeRegistration;
     use plexspaces_services::node_registry::{NodeRegistry, NodeRegistryConfig};
     use std::time::Duration;
-    
-    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+
+    let object_repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
     let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
         inner: object_registry_impl.clone(),
     });
-    
+
     // Enable shared DB so registration persists to ObjectRegistry
     let mut config = NodeRegistryConfig::default();
     config.use_shared_db = true;
@@ -376,21 +450,21 @@ async fn test_capabilities_to_labels_mapping() {
     config.db_max_attempts = 3;
     config.db_backoff_base = Duration::from_millis(10);
     config.db_backoff_cap = Duration::from_millis(100);
-    
+
     let node_registry = NodeRegistry::new(
         object_registry.clone(),
         "test-node".to_string(),
         "127.0.0.1:8000".to_string(),
         config,
     );
-    
+
     let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
-    
+
     // Create NodeRegistration with capabilities (as ConnectNodes would set)
     let mut capabilities = HashMap::new();
     capabilities.insert("cluster".to_string(), "prod".to_string());
     capabilities.insert("zone".to_string(), "us-west-1".to_string());
-    
+
     let node_reg = NodeRegistration {
         node_id: "test-node".to_string(),
         node_address: "127.0.0.1:8000".to_string(),
@@ -400,39 +474,52 @@ async fn test_capabilities_to_labels_mapping() {
         last_heartbeat: None,
         ..Default::default()
     };
-    
+
     // Register node
-    node_registry.register_node(&ctx, node_reg.clone()).await
+    node_registry
+        .register_node(&ctx, node_reg.clone())
+        .await
         .expect("Failed to register node");
-    
+
     // Give it a moment for async DB write
     tokio::time::sleep(Duration::from_millis(50)).await;
-    
+
     // Verify that ObjectRegistration has metadata.labels from capabilities
     // We need to query ObjectRegistry directly since lookup_node returns NodeRegistration
     use plexspaces_proto::object_registry::v1::ObjectType;
-    let obj_reg = object_registry_impl.lookup_full(&ctx, ObjectType::ObjectTypeNode, "test-node").await
+    let obj_reg = object_registry_impl
+        .lookup_full(&ctx, ObjectType::ObjectTypeNode, "test-node")
+        .await
         .expect("Failed to lookup node")
         .expect("Node should be found");
-    
-    assert!(obj_reg.metadata.is_some(), "ObjectRegistration should have metadata");
+
+    assert!(
+        obj_reg.metadata.is_some(),
+        "ObjectRegistration should have metadata"
+    );
     let metadata = obj_reg.metadata.as_ref().unwrap();
-    assert_eq!(metadata.labels, capabilities, "metadata.labels should match capabilities");
+    assert_eq!(
+        metadata.labels, capabilities,
+        "metadata.labels should match capabilities"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_shard_group_cohesion_end_to_end() {
     // Test: End-to-end verification that ShardGroup labels flow through the entire system
     // This is a simplified test that verifies the components work together
-    
+
     // 1. Create ShardGroup with labels
     let (_service, _registry, _locator) = create_test_actor_service("test-node").await;
-    
+
     let mut labels = HashMap::new();
     labels.insert("cluster".to_string(), "prod".to_string());
     labels.insert("zone".to_string(), "us-west-1".to_string());
-    
-    use plexspaces_proto::actor::v1::{DataParallelConfig, NodePlacement, NodePlacementStrategy, PartitionStrategy, RebalancePolicy};
+
+    use plexspaces_proto::actor::v1::{
+        DataParallelConfig, NodePlacement, NodePlacementStrategy, PartitionStrategy,
+        RebalancePolicy,
+    };
     let req = Request::new(CreateShardGroupRequest {
         config: Some(DataParallelConfig {
             group_id: "cohesion-test-group".to_string(),
@@ -444,11 +531,9 @@ async fn test_shard_group_cohesion_end_to_end() {
                 cluster: String::new(),
                 node_ids: vec![],
                 required_labels: labels.clone(),
-                preferred_node_ids: vec![],
                 avoid_node_ids: vec![],
                 resource_requirements: None,
                 affinity_labels: HashMap::new(),
-                preferred_node_id: String::new(),
             }),
         }),
         actor_type: "counter".to_string(),
@@ -463,12 +548,20 @@ async fn test_shard_group_cohesion_end_to_end() {
     let response = result.unwrap().into_inner();
     let group = response.group.as_ref().expect("group should be present");
 
-    let stored = group.config.as_ref().and_then(|c| c.placement.as_ref()).map(|p| &p.required_labels);
-    assert_eq!(stored, Some(&labels), "ShardGroup config.placement should store required_labels");
-    
+    let stored = group
+        .config
+        .as_ref()
+        .and_then(|c| c.placement.as_ref())
+        .map(|p| &p.required_labels);
+    assert_eq!(
+        stored,
+        Some(&labels),
+        "ShardGroup config.placement should store required_labels"
+    );
+
     // Verify shards were created
     assert_eq!(group.shard_actor_ids.len(), 2, "Should have 2 shard actors");
-    
+
     // Note: Full end-to-end test would require:
     // 1. Multiple nodes with different labels
     // 2. NodeSelector to actually place shards

@@ -56,10 +56,15 @@ async fn is_redis_available() -> bool {
     #[cfg(not(feature = "test-helpers"))]
     {
         // Fallback: fast TCP connection check
+        use std::time::Duration;
         use tokio::net::TcpStream;
         use tokio::time::timeout;
-        use std::time::Duration;
-        timeout(Duration::from_millis(500), TcpStream::connect("localhost:6379")).await.is_ok()
+        timeout(
+            Duration::from_millis(500),
+            TcpStream::connect("localhost:6379"),
+        )
+        .await
+        .is_ok()
     }
 }
 

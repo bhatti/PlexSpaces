@@ -24,10 +24,10 @@
 //! - Generate default release config
 //! - Create JWT tokens for API authentication (tenant_id, roles, groups, is_admin)
 
-use anyhow::{Result, Context};
-use std::path::PathBuf;
+use anyhow::{Context, Result};
 use clap::Args;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Generate mTLS certificates
 ///
@@ -48,93 +48,125 @@ pub async fn generate_mtls_certificates(
 ) -> Result<()> {
     use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
     use time::OffsetDateTime;
-    
+
     let cert_dir = output_dir.unwrap_or_else(|| PathBuf::from("./certs"));
     let ca_cn = ca_common_name.unwrap_or_else(|| "PlexSpaces CA".to_string());
     let server_cn = server_common_name.unwrap_or_else(|| "PlexSpaces Server".to_string());
     let validity = validity_days.unwrap_or(90);
-    
+
     // Create directory if it doesn't exist
-    std::fs::create_dir_all(&cert_dir)
-        .with_context(|| format!("Failed to create certificate directory: {}", cert_dir.display()))?;
-    
+    std::fs::create_dir_all(&cert_dir).with_context(|| {
+        format!(
+            "Failed to create certificate directory: {}",
+            cert_dir.display()
+        )
+    })?;
+
     println!("Generating mTLS certificates in: {}", cert_dir.display());
-    
+
     // Generate CA certificate
     println!("  → Generating CA certificate...");
-    let ca_key_pair = KeyPair::generate()
-        .context("Failed to generate CA key pair")?;
-    
-    let mut ca_params = CertificateParams::new(vec![])
-        .context("Failed to create CA certificate parameters")?;
+    let ca_key_pair = KeyPair::generate().context("Failed to generate CA key pair")?;
+
+    let mut ca_params =
+        CertificateParams::new(vec![]).context("Failed to create CA certificate parameters")?;
     ca_params.distinguished_name = DistinguishedName::new();
-    ca_params.distinguished_name.push(DnType::CommonName, &ca_cn);
-    ca_params.distinguished_name.push(DnType::OrganizationName, "PlexSpaces");
+    ca_params
+        .distinguished_name
+        .push(DnType::CommonName, &ca_cn);
+    ca_params
+        .distinguished_name
+        .push(DnType::OrganizationName, "PlexSpaces");
     ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-    
+
     // rcgen uses time crate, not chrono
     let now = OffsetDateTime::now_utc();
     ca_params.not_before = now;
     ca_params.not_after = now + time::Duration::days(365);
-    
-    let ca_cert = ca_params.self_signed(&ca_key_pair)
+
+    let ca_cert = ca_params
+        .self_signed(&ca_key_pair)
         .context("Failed to generate CA certificate")?;
-    
+
     let ca_cert_path = cert_dir.join("ca.crt");
     let ca_key_path = cert_dir.join("ca.key");
-    
+
     std::fs::write(&ca_cert_path, ca_cert.pem().as_bytes())
         .with_context(|| format!("Failed to write CA certificate: {}", ca_cert_path.display()))?;
     std::fs::write(&ca_key_path, ca_key_pair.serialize_pem().as_bytes())
         .with_context(|| format!("Failed to write CA key: {}", ca_key_path.display()))?;
-    
+
     println!("    ✓ CA certificate: {}", ca_cert_path.display());
     println!("    ✓ CA private key: {}", ca_key_path.display());
-    
+
     // Generate server certificate signed by CA
     println!("  → Generating server certificate...");
-    let server_key_pair = KeyPair::generate()
-        .context("Failed to generate server key pair")?;
-    
-    let mut server_params = CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()])
-        .context("Failed to create server certificate parameters")?;
+    let server_key_pair = KeyPair::generate().context("Failed to generate server key pair")?;
+
+    let mut server_params =
+        CertificateParams::new(vec!["localhost".to_string(), "127.0.0.1".to_string()])
+            .context("Failed to create server certificate parameters")?;
     server_params.distinguished_name = DistinguishedName::new();
-    server_params.distinguished_name.push(DnType::CommonName, &server_cn);
-    server_params.distinguished_name.push(DnType::OrganizationName, "PlexSpaces");
-    
+    server_params
+        .distinguished_name
+        .push(DnType::CommonName, &server_cn);
+    server_params
+        .distinguished_name
+        .push(DnType::OrganizationName, "PlexSpaces");
+
     // rcgen uses time crate, not chrono
     let now = OffsetDateTime::now_utc();
     server_params.not_before = now;
     server_params.not_after = now + time::Duration::days(validity as i64);
-    
-    let server_cert = server_params.signed_by(&server_key_pair, &ca_cert, &ca_key_pair)
+
+    let server_cert = server_params
+        .signed_by(&server_key_pair, &ca_cert, &ca_key_pair)
         .context("Failed to generate server certificate")?;
-    
+
     let server_cert_path = cert_dir.join("server.crt");
     let server_key_path = cert_dir.join("server.key");
-    
-    std::fs::write(&server_cert_path, server_cert.pem().as_bytes())
-        .with_context(|| format!("Failed to write server certificate: {}", server_cert_path.display()))?;
+
+    std::fs::write(&server_cert_path, server_cert.pem().as_bytes()).with_context(|| {
+        format!(
+            "Failed to write server certificate: {}",
+            server_cert_path.display()
+        )
+    })?;
     std::fs::write(&server_key_path, server_key_pair.serialize_pem().as_bytes())
         .with_context(|| format!("Failed to write server key: {}", server_key_path.display()))?;
-    
+
     println!("    ✓ Server certificate: {}", server_cert_path.display());
     println!("    ✓ Server private key: {}", server_key_path.display());
-    
+
     println!("\n✅ mTLS certificates generated successfully!");
     println!("\nTo use these certificates, set environment variables:");
-    println!("  export PLEXSPACES_MTLS_CA_CERT=\"{}\"", ca_cert_path.display());
-    println!("  export PLEXSPACES_MTLS_SERVER_CERT=\"{}\"", server_cert_path.display());
-    println!("  export PLEXSPACES_MTLS_SERVER_KEY=\"{}\"", server_key_path.display());
+    println!(
+        "  export PLEXSPACES_MTLS_CA_CERT=\"{}\"",
+        ca_cert_path.display()
+    );
+    println!(
+        "  export PLEXSPACES_MTLS_SERVER_CERT=\"{}\"",
+        server_cert_path.display()
+    );
+    println!(
+        "  export PLEXSPACES_MTLS_SERVER_KEY=\"{}\"",
+        server_key_path.display()
+    );
     println!("\nOr configure in release.yaml:");
     println!("  runtime:");
     println!("    security:");
     println!("      mtls:");
     println!("        enable_mtls: true");
-    println!("        ca_certificate_path: \"{}\"", ca_cert_path.display());
-    println!("        server_certificate_path: \"{}\"", server_cert_path.display());
+    println!(
+        "        ca_certificate_path: \"{}\"",
+        ca_cert_path.display()
+    );
+    println!(
+        "        server_certificate_path: \"{}\"",
+        server_cert_path.display()
+    );
     println!("        server_key_path: \"{}\"", server_key_path.display());
-    
+
     Ok(())
 }
 
@@ -157,24 +189,26 @@ pub async fn generate_release_config(
     listen_addr: Option<String>,
 ) -> Result<()> {
     use plexspaces_common::release_config::create_default_release_config;
-    
+
     let output = output_path.unwrap_or_else(|| PathBuf::from("release.yaml"));
     let name = release_name.unwrap_or_else(|| "plexspaces-cluster".to_string());
     let version = release_version.unwrap_or_else(|| "1.0.0".to_string());
     let node = node_id.unwrap_or_else(|| "node-1".to_string());
     let addr = listen_addr.unwrap_or_else(|| "0.0.0.0:8000".to_string());
-    
+
     println!("Generating default release configuration...");
     println!("  Release: {} v{}", name, version);
     println!("  Node ID: {}", node);
     println!("  Listen Address: {}", addr);
-    
-    let release_spec = create_default_release_config(name.clone(), version.clone(), node.clone(), addr.clone()).await;
-    
+
+    let release_spec =
+        create_default_release_config(name.clone(), version.clone(), node.clone(), addr.clone())
+            .await;
+
     // Generate YAML manually (proto types don't serialize directly to YAML)
-    let cert_dir = std::env::var("PLEXSPACES_MTLS_CERT_DIR")
-        .unwrap_or_else(|_| "/app/certs".to_string());
-    
+    let cert_dir =
+        std::env::var("PLEXSPACES_MTLS_CERT_DIR").unwrap_or_else(|_| "/app/certs".to_string());
+
     let yaml = format!(
         r#"# PlexSpaces Release Configuration
 # Generated by: plexspaces generate-release-config
@@ -238,28 +272,30 @@ shutdown:
   graceful_timeout_seconds: 30
   force_timeout_seconds: 10
 "#,
-        release_spec.name,
-        release_spec.version,
-        node,
-        node,
-        addr,
-        addr,
-        cert_dir
+        release_spec.name, release_spec.version, node, node, addr, addr, cert_dir
     );
-    
+
     std::fs::write(&output, yaml.as_bytes())
         .with_context(|| format!("Failed to write release config: {}", output.display()))?;
-    
+
     println!("✅ Release configuration generated: {}", output.display());
     println!("\nTo use this configuration:");
-    println!("  plexspaces start --node-id {} --listen-addr {} --release-config {}", node, addr, output.display());
+    println!(
+        "  plexspaces start --node-id {} --listen-addr {} --release-config {}",
+        node,
+        addr,
+        output.display()
+    );
     println!("\nTo customize security settings:");
-    println!("  1. Edit {} and modify the security section", output.display());
+    println!(
+        "  1. Edit {} and modify the security section",
+        output.display()
+    );
     println!("  2. Set PLEXSPACES_JWT_SECRET env var for JWT authentication");
     println!("  3. For mTLS, either:");
     println!("     - Set auto_generate_certs: true (development)");
     println!("     - Or set certificate paths and use plexspaces generate-mtls to create them");
-    
+
     Ok(())
 }
 

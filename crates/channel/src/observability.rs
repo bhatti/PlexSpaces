@@ -154,12 +154,7 @@ pub fn record_channel_dlq(
 /// - Logs at error level
 /// - Includes structured fields for error tracking
 /// - Can be extended with error counters
-pub fn record_channel_error(
-    channel_name: &str,
-    operation: &str,
-    error: &str,
-    backend: &str,
-) {
+pub fn record_channel_error(channel_name: &str, operation: &str, error: &str, backend: &str) {
     tracing::error!(
         channel = %channel_name,
         operation = %operation,
@@ -189,7 +184,7 @@ pub fn record_channel_latency(
     backend: &str,
 ) {
     let latency_us = duration.as_micros() as u64;
-    
+
     trace!(
         channel = %channel_name,
         operation = %operation,
@@ -271,10 +266,3 @@ pub fn backend_name(backend: i32) -> &'static str {
         _ => "unknown",
     }
 }
-
-
-
-
-
-
-

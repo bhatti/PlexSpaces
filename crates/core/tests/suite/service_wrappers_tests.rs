@@ -5,14 +5,16 @@
 
 use plexspaces_core::service_wrappers::TupleSpaceProviderWrapper;
 use plexspaces_core::TupleSpaceProvider;
-use plexspaces_tuplespace::{Pattern, PatternField, Tuple, TupleField, TupleSpace, TupleSpaceError};
+use plexspaces_tuplespace::{
+    Pattern, PatternField, Tuple, TupleField, TupleSpace, TupleSpaceError,
+};
 use std::sync::Arc;
 
 #[tokio::test]
 async fn test_tuplespace_provider_wrapper_new() {
     let tuplespace = Arc::new(TupleSpace::default());
     let wrapper = TupleSpaceProviderWrapper::new(tuplespace.clone());
-    
+
     // Wrapper should be created successfully - test by using it
     let tuple = Tuple::new(vec![
         TupleField::String("test".to_string()),
@@ -66,7 +68,10 @@ async fn test_tuplespace_provider_wrapper_read() {
     assert!(results.is_ok());
     let tuples = results.unwrap();
     assert_eq!(tuples.len(), 1);
-    assert_eq!(tuples[0].fields()[0], TupleField::String("read-test".to_string()));
+    assert_eq!(
+        tuples[0].fields()[0],
+        TupleField::String("read-test".to_string())
+    );
     assert_eq!(tuples[0].fields()[1], TupleField::Integer(100));
 }
 
@@ -108,7 +113,10 @@ async fn test_tuplespace_provider_wrapper_take() {
     assert!(result.is_ok());
     let taken = result.unwrap();
     assert!(taken.is_some());
-    assert_eq!(taken.unwrap().fields()[0], TupleField::String("take-test".to_string()));
+    assert_eq!(
+        taken.unwrap().fields()[0],
+        TupleField::String("take-test".to_string())
+    );
 
     // Verify tuple was removed
     let results = tuplespace.read_all(pattern.clone()).await.unwrap();
@@ -209,4 +217,3 @@ async fn test_tuplespace_provider_wrapper_multiple_operations() {
     let count3 = wrapper.count(&pattern).await.unwrap();
     assert_eq!(count3, 1);
 }
-

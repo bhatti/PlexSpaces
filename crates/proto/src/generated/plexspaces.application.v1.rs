@@ -98,6 +98,12 @@ pub struct ApplicationSpec {
     /// - criticality: "high"
     #[prost(message, optional, tag="14")]
     pub metadata: ::core::option::Option<super::super::common::v1::Metadata>,
+    /// Seed nodes (gRPC addresses) to connect to when this application is deployed.
+    /// The node will connect to these addresses if not already connected, so
+    /// leader-worker and scatter/gather can use workers on other nodes.
+    /// Example: \["localhost:8091", "localhost:8093"\]
+    #[prost(string, repeated, tag="15")]
+    pub seed_nodes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
 /// Supervisor specification (Erlang/OTP supervisor)
 ///
@@ -357,15 +363,46 @@ pub struct ApplicationInfo {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ApplicationMetrics {
-    /// Number of actors in the application
-    #[prost(uint32, tag="1")]
-    pub actor_count: u32,
+    /// Actor counts by role/type within the application on this node.
+    /// Examples:
+    /// - leader: 1
+    /// - worker: 8
+    /// - supervisor: 1
+    #[prost(map="string, uint64", tag="1")]
+    pub actor_counts: ::std::collections::HashMap<::prost::alloc::string::String, u64>,
     /// Number of supervisors
     #[prost(uint32, tag="2")]
     pub supervisor_count: u32,
     /// Uptime in seconds
     #[prost(uint64, tag="3")]
     pub uptime_seconds: u64,
+    /// Total messages processed by this application on this node.
+    #[prost(uint64, tag="4")]
+    pub message_count: u64,
+    /// Total errors observed by this application on this node.
+    #[prost(uint64, tag="5")]
+    pub error_count: u64,
+    /// General-purpose counters for application-defined metrics.
+    /// Examples:
+    /// - tuple_operations: 690
+    /// - scatter_gather_rounds: 30
+    /// - ts_write_count: 64
+    /// - ts_read_count: 64
+    #[prost(map="string, uint64", tag="6")]
+    pub counter_metrics: ::std::collections::HashMap<::prost::alloc::string::String, u64>,
+    /// Cumulative latency totals in milliseconds by metric type.
+    /// Examples:
+    /// - compute: 511
+    /// - coordination: 65419
+    /// - worker: 65930
+    #[prost(map="string, uint64", tag="7")]
+    pub latency_totals_ms: ::std::collections::HashMap<::prost::alloc::string::String, u64>,
+    /// Maximum observed latency in milliseconds by metric type.
+    #[prost(map="string, uint64", tag="8")]
+    pub latency_max_ms: ::std::collections::HashMap<::prost::alloc::string::String, u64>,
+    /// Number of latency samples contributing to latency_totals_ms for each type.
+    #[prost(map="string, uint64", tag="9")]
+    pub latency_samples: ::std::collections::HashMap<::prost::alloc::string::String, u64>,
 }
 /// Get application status request
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -388,6 +425,12 @@ pub struct GetApplicationStatusResponse {
     /// Error if application not found
     #[prost(string, optional, tag="3")]
     pub error: ::core::option::Option<::prost::alloc::string::String>,
+    /// Node ID that served this status response.
+    #[prost(string, tag="4")]
+    pub node_id: ::prost::alloc::string::String,
+    /// Node address that served this status response.
+    #[prost(string, tag="5")]
+    pub node_address: ::prost::alloc::string::String,
 }
 /// Application type
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]

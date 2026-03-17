@@ -6,9 +6,9 @@
 use plexspaces_common::skip_if_unavailable;
 use plexspaces_common::test_helpers::firecracker_available;
 use plexspaces_firecracker::{
-    ApplicationDeployment, FirecrackerVm, VmConfig, VmRegistry, VmState,
     health::{HealthStatus, VmHealthMonitor},
     supervisor::{RestartPolicy, VmSupervisor},
+    ApplicationDeployment, FirecrackerVm, VmConfig, VmRegistry, VmState,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -217,7 +217,7 @@ async fn test_vm_stop_idempotent() {
     };
 
     let mut vm = FirecrackerVm::create(config).await.unwrap();
-    
+
     // Stop should handle already-stopped state gracefully
     // In Created state, stop should fail (needs Ready/Running)
     let _result = vm.stop().await;
@@ -286,7 +286,11 @@ async fn test_health_monitor_with_running_vm() {
 
     // Perform health check
     let status = monitor.check_health().await;
-    assert_eq!(status, HealthStatus::Healthy, "Running VM should be healthy");
+    assert_eq!(
+        status,
+        HealthStatus::Healthy,
+        "Running VM should be healthy"
+    );
 
     // Check that VM's health status was updated
     // Note: health_status() is called by the monitor internally
@@ -340,7 +344,10 @@ async fn test_health_monitor_detects_failure() {
 
     // Health check should detect failure
     let status = monitor.check_health().await;
-    assert!(matches!(status, HealthStatus::Unhealthy(_)), "Stopped VM should be unhealthy");
+    assert!(
+        matches!(status, HealthStatus::Unhealthy(_)),
+        "Stopped VM should be unhealthy"
+    );
 }
 
 // ============================================================================

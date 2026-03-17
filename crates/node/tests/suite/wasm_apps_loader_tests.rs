@@ -44,7 +44,10 @@ fn test_scan_empty_temp_directory() {
 #[test]
 fn test_scan_nonexistent_directory() {
     let apps = scan_wasm_apps_directory(Path::new("/nonexistent/path/xyz123")).unwrap();
-    assert!(apps.is_empty(), "Nonexistent directory should yield no apps");
+    assert!(
+        apps.is_empty(),
+        "Nonexistent directory should yield no apps"
+    );
 }
 
 #[test]
@@ -199,10 +202,10 @@ fn test_wasm_magic_number_validation() {
 
     // Test various invalid WASM files (all should be rejected)
     let invalid_contents = vec![
-        b"".to_vec(),                           // Empty
-        b"abc".to_vec(),                        // Too short (3 bytes)
-        b"\x00\x00\x00\x00".to_vec(),           // Wrong magic (null bytes)
-        b"WASM".to_vec(),                       // Text instead of binary magic
+        b"".to_vec(),                 // Empty
+        b"abc".to_vec(),              // Too short (3 bytes)
+        b"\x00\x00\x00\x00".to_vec(), // Wrong magic (null bytes)
+        b"WASM".to_vec(),             // Text instead of binary magic
     ];
 
     for (idx, content) in invalid_contents.iter().enumerate() {
@@ -210,7 +213,11 @@ fn test_wasm_magic_number_validation() {
         fs::create_dir_all(&invalid_dir).unwrap();
         fs::write(invalid_dir.join("app.wasm"), content).unwrap();
         let apps = scan_wasm_apps_directory(temp_dir.path()).unwrap();
-        assert!(apps.is_empty(), "Invalid WASM content {:?} should be rejected", content);
+        assert!(
+            apps.is_empty(),
+            "Invalid WASM content {:?} should be rejected",
+            content
+        );
         // Clean up for next iteration
         fs::remove_dir_all(&invalid_dir).unwrap();
     }
@@ -336,49 +343,58 @@ fn get_webapps_path() -> std::path::PathBuf {
 async fn test_node_auto_deploy_with_webapps_directory() {
     use plexspaces_node::NodeBuilder;
     use std::sync::Arc;
-    
+
     // Use the shared webapps directory with calculator app
     let webapps_path = get_webapps_path();
-    
+
     // Skip test if webapps directory doesn't exist
     if !webapps_path.exists() {
-        eprintln!("⚠️  Skipping test: webapps directory not found at {:?}", webapps_path);
+        eprintln!(
+            "⚠️  Skipping test: webapps directory not found at {:?}",
+            webapps_path
+        );
         return;
     }
-    
+
     // Verify calculator app exists (using subdirectory format)
     let calculator_dir = webapps_path.join("calculator");
     let calculator_wasm = calculator_dir.join("app.wasm");
     if !calculator_wasm.exists() {
-        eprintln!("⚠️  Skipping test: calculator/app.wasm not found at {:?}", calculator_wasm);
+        eprintln!(
+            "⚠️  Skipping test: calculator/app.wasm not found at {:?}",
+            calculator_wasm
+        );
         return;
     }
-    
+
     // Set env var for auto-deploy directory
     let env_var_name = "PLEXSPACES_WASM_APPS_DIR";
     let original_value = std::env::var(env_var_name).ok();
     std::env::set_var(env_var_name, webapps_path.to_str().unwrap());
-    
+
     // Create and start node
-    let node = Arc::new(NodeBuilder::new("auto-deploy-calculator-test")
-        .with_listen_addr("127.0.0.1:0")
-        .build().await);
-    
+    let node = Arc::new(
+        NodeBuilder::new("auto-deploy-calculator-test")
+            .with_listen_addr("127.0.0.1:0")
+            .build()
+            .await,
+    );
+
     // Start node in background (this triggers auto-deploy)
     let node_clone = node.clone();
     let handle = tokio::spawn(async move {
         let _ = node_clone.start().await;
     });
-    
+
     // Wait for node to start and auto-deploy to attempt
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-    
+
     // Node should have started successfully regardless of auto-deploy result
     // Auto-deploy of complex WASM modules may fail due to runtime limitations,
     // but that's expected behavior (errors are logged, node continues)
     // The key test is that the node starts and doesn't panic
     let _ = node.service_locator();
-    
+
     // Cleanup
     handle.abort();
     if let Some(val) = original_value {
@@ -386,7 +402,7 @@ async fn test_node_auto_deploy_with_webapps_directory() {
     } else {
         std::env::remove_var(env_var_name);
     }
-    
+
     eprintln!("✅ Node started successfully with WASM auto-deploy directory configured");
 }
 
@@ -394,32 +410,35 @@ async fn test_node_auto_deploy_with_webapps_directory() {
 async fn test_node_startup_with_empty_wasm_apps_dir() {
     use plexspaces_node::NodeBuilder;
     use std::sync::Arc;
-    
+
     // Create empty temp directory
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
-    
+
     // Set env var to empty directory
     let env_var_name = "PLEXSPACES_WASM_APPS_DIR";
     let original_value = std::env::var(env_var_name).ok();
     std::env::set_var(env_var_name, temp_dir.path().to_str().unwrap());
-    
+
     // Create and start node - should not fail with empty directory
-    let node = Arc::new(NodeBuilder::new("empty-dir-test-node")
-        .with_listen_addr("127.0.0.1:0")
-        .build().await);
-    
+    let node = Arc::new(
+        NodeBuilder::new("empty-dir-test-node")
+            .with_listen_addr("127.0.0.1:0")
+            .build()
+            .await,
+    );
+
     let node_clone = node.clone();
     let handle = tokio::spawn(async move {
         let _ = node_clone.start().await;
     });
-    
+
     // Wait for node to start
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    
+
     // Node should have started successfully (no panic)
     // Just verify we can access the service locator
     let _ = node.service_locator();
-    
+
     // Cleanup
     handle.abort();
     if let Some(val) = original_value {
@@ -433,28 +452,31 @@ async fn test_node_startup_with_empty_wasm_apps_dir() {
 async fn test_node_startup_with_nonexistent_wasm_apps_dir() {
     use plexspaces_node::NodeBuilder;
     use std::sync::Arc;
-    
+
     // Set env var to nonexistent directory
     let env_var_name = "PLEXSPACES_WASM_APPS_DIR";
     let original_value = std::env::var(env_var_name).ok();
     std::env::set_var(env_var_name, "/nonexistent/path/that/does/not/exist");
-    
+
     // Create and start node - should not fail, just log warning
-    let node = Arc::new(NodeBuilder::new("nonexistent-dir-test-node")
-        .with_listen_addr("127.0.0.1:0")
-        .build().await);
-    
+    let node = Arc::new(
+        NodeBuilder::new("nonexistent-dir-test-node")
+            .with_listen_addr("127.0.0.1:0")
+            .build()
+            .await,
+    );
+
     let node_clone = node.clone();
     let handle = tokio::spawn(async move {
         let _ = node_clone.start().await;
     });
-    
+
     // Wait for node to start
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-    
+
     // Node should have started successfully (no panic)
     let _ = node.service_locator();
-    
+
     // Cleanup
     handle.abort();
     if let Some(val) = original_value {
@@ -468,22 +490,29 @@ async fn test_node_startup_with_nonexistent_wasm_apps_dir() {
 fn test_webapps_directory_structure() {
     // Verify the webapps directory has correct structure
     let webapps_path = get_webapps_path();
-    
+
     if !webapps_path.exists() {
         eprintln!("⚠️  webapps directory not found - skipping structure test");
         return;
     }
-    
+
     // Check calculator app structure (subdirectory format)
     let calculator_dir = webapps_path.join("calculator");
     let app_wasm = calculator_dir.join("app.wasm");
-    
+
     assert!(app_wasm.exists(), "calculator/app.wasm should exist");
-    
+
     // Verify WASM file has correct magic number
     let wasm_bytes = fs::read(&app_wasm).expect("Should be able to read calculator/app.wasm");
-    assert!(wasm_bytes.len() >= 4, "WASM file should have at least 4 bytes");
-    assert_eq!(&wasm_bytes[0..4], b"\0asm", "WASM file should have correct magic number");
-    
+    assert!(
+        wasm_bytes.len() >= 4,
+        "WASM file should have at least 4 bytes"
+    );
+    assert_eq!(
+        &wasm_bytes[0..4],
+        b"\0asm",
+        "WASM file should have correct magic number"
+    );
+
     eprintln!("✅ webapps calculator structure verified: calculator/app.wasm ({} bytes), application-spec.toml", wasm_bytes.len());
 }

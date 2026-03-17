@@ -8,20 +8,20 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_wasm_runtime::component_host::{
-        LoggingImpl, MessagingImpl, TuplespaceImpl, ChannelsImpl, DurabilityImpl,
-    };
+    use plexspaces_core::ActorId;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::{
+        channels::Host as ChannelsHost,
+        durability::Host as DurabilityHost,
         logging::Host as LoggingHost,
         messaging::Host as MessagingHost,
         tuplespace::Host as TuplespaceHost,
-        channels::Host as ChannelsHost,
-        durability::Host as DurabilityHost,
         types::{Context, SpawnOptions},
     };
-    use plexspaces_core::ActorId;
-    use std::sync::Arc;
+    use plexspaces_wasm_runtime::component_host::{
+        ChannelsImpl, DurabilityImpl, LoggingImpl, MessagingImpl, TuplespaceImpl,
+    };
     use plexspaces_wasm_runtime::HostFunctions;
+    use std::sync::Arc;
 
     // Helper to create context for tests
     fn test_context(tenant_id: &str, namespace: &str) -> Context {
@@ -37,11 +37,11 @@ mod tests {
     }
 
     fn create_test_host_functions_with_channel_service() -> Arc<HostFunctions> {
+        use async_trait::async_trait;
+        use futures::stream;
         use plexspaces_core::ChannelService;
         use plexspaces_proto::common::v1::Message;
         use std::collections::HashMap;
-        use futures::stream;
-        use async_trait::async_trait;
 
         struct MockChannelService {
             queues: Arc<tokio::sync::RwLock<HashMap<String, Vec<Message>>>>,
@@ -65,7 +65,8 @@ mod tests {
                 message: Message,
             ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
                 let mut queues = self.queues.write().await;
-                queues.entry(queue_name.to_string())
+                queues
+                    .entry(queue_name.to_string())
                     .or_insert_with(Vec::new)
                     .push(message);
                 Ok("msg-001".to_string())
@@ -77,7 +78,8 @@ mod tests {
                 message: Message,
             ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
                 let mut topics = self.topics.write().await;
-                topics.entry(topic_name.to_string())
+                topics
+                    .entry(topic_name.to_string())
                     .or_insert_with(Vec::new)
                     .push(message);
                 Ok("msg-001".to_string())
@@ -86,7 +88,10 @@ mod tests {
             async fn subscribe_to_topic(
                 &self,
                 _topic_name: &str,
-            ) -> Result<futures::stream::BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
+            ) -> Result<
+                futures::stream::BoxStream<'static, Message>,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Ok(Box::pin(stream::empty()))
             }
 
@@ -128,15 +133,20 @@ mod tests {
         assert!(parent_id.is_none()); // No parent in test
 
         // Test tell (should work even without message sender)
-        let _ = messaging.tell("target".to_string(), "msg".to_string(), vec![]).await;
+        let _ = messaging
+            .tell("target".to_string(), "msg".to_string(), vec![])
+            .await;
 
         // Test ask (should return error without message sender, but function exists)
         use plexspaces_wasm_runtime::component_host::plexspaces::actor::types::ActorError;
-        let ask_result: Result<Vec<u8>, ActorError> = messaging.ask("target".to_string(), "msg".to_string(), vec![], 1000).await;
+        let ask_result: Result<Vec<u8>, ActorError> = messaging
+            .ask("target".to_string(), "msg".to_string(), vec![], 1000)
+            .await;
         assert!(ask_result.is_err()); // Expected without message sender
 
         // Test reply (will fail without pending ask, which is expected behavior)
-        let reply_result: Result<(), ActorError> = messaging.reply("corr-123".to_string(), vec![]).await;
+        let reply_result: Result<(), ActorError> =
+            messaging.reply("corr-123".to_string(), vec![]).await;
         assert!(reply_result.is_err()); // Reply fails without pending ask (expected behavior)
 
         // Test spawn (should return error without message sender)
@@ -147,7 +157,9 @@ mod tests {
             durable: false,
             supervisor: None,
         };
-        let spawn_result: Result<String, ActorError> = messaging.spawn("module@1.0.0".to_string(), vec![], spawn_options).await;
+        let spawn_result: Result<String, ActorError> = messaging
+            .spawn("module@1.0.0".to_string(), vec![], spawn_options)
+            .await;
         assert!(spawn_result.is_err()); // Expected without message sender
 
         // Test stop (should return error without message sender)
@@ -157,13 +169,16 @@ mod tests {
         // Test link/unlink/monitor/demonitor (all return error without message sender)
         assert!(messaging.link("target".to_string()).await.is_err()); // Requires message sender
         assert!(messaging.unlink("target".to_string()).await.is_err()); // Requires message sender
-        // monitor returns error without message sender
+                                                                        // monitor returns error without message sender
         assert!(messaging.monitor("target".to_string()).await.is_err());
         // demonitor returns error (not implemented)
         assert!(messaging.demonitor(0).await.is_err());
 
         // Test send_after/cancel_timer
-        let timer_id = messaging.send_after(100, "msg".to_string(), vec![]).await.unwrap();
+        let timer_id = messaging
+            .send_after(100, "msg".to_string(), vec![])
+            .await
+            .unwrap();
         assert!(messaging.cancel_timer(timer_id).await.is_ok());
 
         // Test sleep
@@ -181,20 +196,54 @@ mod tests {
         let mut channels = ChannelsImpl::new(host_functions.clone());
 
         // Test send_to_queue
-        let _ = channels.send_to_queue(test_context("", ""), "queue".to_string(), "msg".to_string(), vec![]).await;
+        let _ = channels
+            .send_to_queue(
+                test_context("", ""),
+                "queue".to_string(),
+                "msg".to_string(),
+                vec![],
+            )
+            .await;
 
         // Test receive_from_queue
-        let _ = channels.receive_from_queue(test_context("", ""), "queue".to_string(), 0).await;
+        let _ = channels
+            .receive_from_queue(test_context("", ""), "queue".to_string(), 0)
+            .await;
 
         // Test publish_to_topic
-        let _ = channels.publish_to_topic(test_context("", ""), "topic".to_string(), "msg".to_string(), vec![]).await;
+        let _ = channels
+            .publish_to_topic(
+                test_context("", ""),
+                "topic".to_string(),
+                "msg".to_string(),
+                vec![],
+            )
+            .await;
 
         // Test ack/nack
-        assert!(channels.ack(test_context("", ""), "queue".to_string(), "msg-123".to_string()).await.is_ok());
-        assert!(channels.nack(test_context("", ""), "queue".to_string(), "msg-123".to_string(), true).await.is_ok());
+        assert!(channels
+            .ack(
+                test_context("", ""),
+                "queue".to_string(),
+                "msg-123".to_string()
+            )
+            .await
+            .is_ok());
+        assert!(channels
+            .nack(
+                test_context("", ""),
+                "queue".to_string(),
+                "msg-123".to_string(),
+                true
+            )
+            .await
+            .is_ok());
 
         // Test subscribe/unsubscribe
-        let sub_id = channels.subscribe_to_topic(test_context("", ""), "topic".to_string(), None).await.unwrap();
+        let sub_id = channels
+            .subscribe_to_topic(test_context("", ""), "topic".to_string(), None)
+            .await
+            .unwrap();
         assert!(channels.unsubscribe_from_topic(sub_id).await.is_ok());
     }
 
@@ -212,9 +261,15 @@ mod tests {
         let _ = tuplespace.take(test_context("", ""), vec![]).await;
         let _ = tuplespace.count(test_context("", ""), vec![]).await;
         let _ = tuplespace.read_all(test_context("", ""), vec![], 10).await;
-        let _ = tuplespace.write_with_ttl(test_context("", ""), vec![], 1000).await;
-        let _ = tuplespace.read_blocking(test_context("", ""), vec![], 100).await;
-        let _ = tuplespace.take_blocking(test_context("", ""), vec![], 100).await;
+        let _ = tuplespace
+            .write_with_ttl(test_context("", ""), vec![], 1000)
+            .await;
+        let _ = tuplespace
+            .read_blocking(test_context("", ""), vec![], 100)
+            .await;
+        let _ = tuplespace
+            .take_blocking(test_context("", ""), vec![], 100)
+            .await;
     }
 
     /// Test that all durability functions are accessible
@@ -226,15 +281,23 @@ mod tests {
         let mut durability = DurabilityImpl::new(actor_id, host_functions);
 
         // All durability functions should be accessible
-        let _ = durability.persist(test_context("", ""), "event".to_string(), vec![]).await;
+        let _ = durability
+            .persist(test_context("", ""), "event".to_string(), vec![])
+            .await;
         let _ = durability.persist_batch(test_context("", ""), vec![]).await;
         let _ = durability.checkpoint(test_context("", "")).await;
         let _ = durability.get_sequence(test_context("", "")).await;
-        let _ = durability.get_checkpoint_sequence(test_context("", "")).await;
+        let _ = durability
+            .get_checkpoint_sequence(test_context("", ""))
+            .await;
         let is_replaying = durability.is_replaying(test_context("", "")).await.unwrap();
         assert_eq!(is_replaying, false); // Not replaying in test
-        let _ = durability.cache_side_effect(test_context("", ""), "key".to_string(), vec![]).await;
-        let _ = durability.read_journal(test_context("", ""), 0, 0, 100).await;
+        let _ = durability
+            .cache_side_effect(test_context("", ""), "key".to_string(), vec![])
+            .await;
+        let _ = durability
+            .read_journal(test_context("", ""), 0, 0, 100)
+            .await;
         let _ = durability.compact(test_context("", ""), 0).await;
     }
 
@@ -257,8 +320,3 @@ mod tests {
         logging.add_span_event("event".to_string(), vec![]).await;
     }
 }
-
-
-
-
-

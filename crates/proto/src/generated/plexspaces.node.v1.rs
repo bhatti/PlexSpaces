@@ -161,6 +161,14 @@ pub struct NodeRegistryConfig {
     /// Default: 30 seconds
     #[prost(uint32, tag="22")]
     pub db_sync_interval_seconds: u32,
+    /// Maximum age in seconds for node registrations to be considered active.
+    ///
+    /// NodeRegistry returns only nodes whose last_heartbeat or updated_at is
+    /// within this window. This keeps placement consistent with the
+    /// object-registry source of truth while allowing asynchronous SWIM updates.
+    /// Default: 86400 seconds (24 hours)
+    #[prost(uint32, tag="23")]
+    pub active_node_window_seconds: u32,
 }
 /// SWIM protocol configuration
 ///
@@ -1324,6 +1332,12 @@ pub struct PingResponse {
     /// Cluster name (for same-cluster check on ConnectNodes; empty means no cluster)
     #[prost(string, tag="5")]
     pub cluster_name: ::prost::alloc::string::String,
+    /// Responding node's gRPC address
+    #[prost(string, tag="6")]
+    pub node_address: ::prost::alloc::string::String,
+    /// Last heartbeat observed by the responding node for itself
+    #[prost(message, optional, tag="7")]
+    pub last_heartbeat: ::core::option::Option<::prost_types::Timestamp>,
 }
 /// Indirect ping request - Ask intermediary to ping target
 #[allow(clippy::derive_partial_eq_without_eq)]

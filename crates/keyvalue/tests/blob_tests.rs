@@ -20,9 +20,12 @@
 
 #[cfg(feature = "blob-backend")]
 mod tests {
-    use plexspaces_keyvalue::{KeyValueStore, blob::{BlobKVStore, BlobKVConfig}};
-    use plexspaces_common::RequestContext;
     use object_store::local::LocalFileSystem;
+    use plexspaces_common::RequestContext;
+    use plexspaces_keyvalue::{
+        blob::{BlobKVConfig, BlobKVStore},
+        KeyValueStore,
+    };
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -124,8 +127,12 @@ mod tests {
         let (kv, _temp_dir) = create_test_service().await;
         let ctx = create_test_context("tenant-1", "ns-1");
 
-        kv.put(&ctx, "config:timeout", b"30s".to_vec()).await.unwrap();
-        kv.put(&ctx, "config:max_size", b"10000".to_vec()).await.unwrap();
+        kv.put(&ctx, "config:timeout", b"30s".to_vec())
+            .await
+            .unwrap();
+        kv.put(&ctx, "config:max_size", b"10000".to_vec())
+            .await
+            .unwrap();
         kv.put(&ctx, "other:key", b"value".to_vec()).await.unwrap();
 
         let keys = kv.list(&ctx, "config:").await.unwrap();
@@ -153,12 +160,9 @@ mod tests {
         let (kv, _temp_dir) = create_test_service().await;
         let ctx = create_test_context("tenant-1", "ns-1");
 
-        kv.multi_put(
-            &ctx,
-            &[("k1", b"v1".to_vec()), ("k2", b"v2".to_vec())],
-        )
-        .await
-        .unwrap();
+        kv.multi_put(&ctx, &[("k1", b"v1".to_vec()), ("k2", b"v2".to_vec())])
+            .await
+            .unwrap();
 
         assert_eq!(kv.get(&ctx, "k1").await.unwrap(), Some(b"v1".to_vec()));
         assert_eq!(kv.get(&ctx, "k2").await.unwrap(), Some(b"v2".to_vec()));
@@ -170,9 +174,14 @@ mod tests {
         let ctx = create_test_context("tenant-1", "ns-1");
 
         // TTL is best-effort without metadata storage
-        kv.put_with_ttl(&ctx, "session:123", b"data".to_vec(), std::time::Duration::from_secs(60))
-            .await
-            .unwrap();
+        kv.put_with_ttl(
+            &ctx,
+            "session:123",
+            b"data".to_vec(),
+            std::time::Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
 
         let value = kv.get(&ctx, "session:123").await.unwrap();
         assert_eq!(value, Some(b"data".to_vec()));
@@ -183,9 +192,14 @@ mod tests {
         let (kv, _temp_dir) = create_test_service().await;
         let ctx = create_test_context("tenant-1", "ns-1");
 
-        kv.put_with_ttl(&ctx, "session:123", b"data".to_vec(), std::time::Duration::from_secs(30))
-            .await
-            .unwrap();
+        kv.put_with_ttl(
+            &ctx,
+            "session:123",
+            b"data".to_vec(),
+            std::time::Duration::from_secs(30),
+        )
+        .await
+        .unwrap();
 
         // Refresh TTL (re-uploads to update last_modified)
         kv.refresh_ttl(&ctx, "session:123", std::time::Duration::from_secs(120))
@@ -217,7 +231,12 @@ mod tests {
 
         // CAS with correct expected value
         let acquired3 = kv
-            .cas(&ctx, "lock:resource", Some(b"node1".to_vec()), b"node2".to_vec())
+            .cas(
+                &ctx,
+                "lock:resource",
+                Some(b"node1".to_vec()),
+                b"node2".to_vec(),
+            )
             .await
             .unwrap();
         assert!(acquired3);
@@ -297,8 +316,14 @@ mod tests {
         kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 
     #[tokio::test]
@@ -310,8 +335,14 @@ mod tests {
         kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 
     #[tokio::test]
@@ -321,10 +352,7 @@ mod tests {
 
         let result = kv.watch(&ctx, "key1").await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("not supported"));
+        assert!(result.unwrap_err().to_string().contains("not supported"));
     }
 
     #[tokio::test]
@@ -334,9 +362,6 @@ mod tests {
 
         let result = kv.watch_prefix(&ctx, "prefix:").await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("not supported"));
+        assert!(result.unwrap_err().to_string().contains("not supported"));
     }
 }

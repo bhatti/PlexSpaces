@@ -29,10 +29,10 @@
 //! - `max_pool_per_actor_type`: 100
 //! - `activation_strategy`: LAZY
 
-use std::time::Duration;
-use prost_types::Duration as ProtoDuration;
-use plexspaces_proto::node::v1::DefaultVirtualActorConfig;
 use crate::ActivationStrategy;
+use plexspaces_proto::node::v1::DefaultVirtualActorConfig;
+use prost_types::Duration as ProtoDuration;
+use std::time::Duration;
 
 /// Default idle timeout: 5 minutes
 pub const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 300;
@@ -41,7 +41,8 @@ pub const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 300;
 pub const DEFAULT_MAX_POOL_PER_ACTOR_TYPE: u32 = 100;
 
 /// Default activation strategy: LAZY
-pub const DEFAULT_ACTIVATION_STRATEGY: ActivationStrategy = ActivationStrategy::ActivationStrategyLazy;
+pub const DEFAULT_ACTIVATION_STRATEGY: ActivationStrategy =
+    ActivationStrategy::ActivationStrategyLazy;
 
 /// Get idle timeout from DefaultVirtualActorConfig, applying defaults
 ///
@@ -66,7 +67,13 @@ pub fn get_idle_timeout(config: Option<&DefaultVirtualActorConfig>) -> Duration 
 /// Max pool size (defaults to 100 if not set or 0)
 pub fn get_max_pool_per_actor_type(config: Option<&DefaultVirtualActorConfig>) -> u32 {
     config
-        .and_then(|c| if c.max_pool_per_actor_type > 0 { Some(c.max_pool_per_actor_type) } else { None })
+        .and_then(|c| {
+            if c.max_pool_per_actor_type > 0 {
+                Some(c.max_pool_per_actor_type)
+            } else {
+                None
+            }
+        })
         .unwrap_or(DEFAULT_MAX_POOL_PER_ACTOR_TYPE)
 }
 
@@ -125,7 +132,7 @@ mod tests {
             max_pool_per_actor_type: 0,
             activation_strategy: 0,
         });
-        
+
         let timeout = get_idle_timeout(config.as_ref());
         assert_eq!(timeout, Duration::from_secs(600));
     }
@@ -143,7 +150,7 @@ mod tests {
             max_pool_per_actor_type: 200,
             activation_strategy: 0,
         });
-        
+
         let pool_size = get_max_pool_per_actor_type(config.as_ref());
         assert_eq!(pool_size, 200);
     }
@@ -161,7 +168,7 @@ mod tests {
             max_pool_per_actor_type: 0, // Invalid, should use default
             activation_strategy: 0,
         });
-        
+
         let pool_size = get_max_pool_per_actor_type(config.as_ref());
         assert_eq!(pool_size, DEFAULT_MAX_POOL_PER_ACTOR_TYPE);
     }
@@ -173,7 +180,7 @@ mod tests {
             max_pool_per_actor_type: 0,
             activation_strategy: ActivationStrategy::ActivationStrategyEager as i32,
         });
-        
+
         let strategy = get_activation_strategy(config.as_ref());
         assert_eq!(strategy, ActivationStrategy::ActivationStrategyEager);
     }
@@ -191,7 +198,7 @@ mod tests {
             max_pool_per_actor_type: 0,
             activation_strategy: ActivationStrategy::ActivationStrategyUnspecified as i32,
         });
-        
+
         let strategy = get_activation_strategy(config.as_ref());
         assert_eq!(strategy, DEFAULT_ACTIVATION_STRATEGY);
     }

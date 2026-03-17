@@ -263,21 +263,19 @@
 //! - Sending is lock-free (tokio::mpsc channel)
 //! - No shared mutable state (immutable after creation)
 
-use plexspaces_core::{ActorId, ReplyWaiter, MessageSender, RequestContext};
+use async_trait::async_trait;
+use plexspaces_core::{ActorId, MessageSender, ReplyWaiter, RequestContext};
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use ulid::Ulid;
-use async_trait::async_trait;
 
 use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
 
 // Import proto types for gRPC communication
-use plexspaces_proto::actor::v1::{
-    actor_service_client::ActorServiceClient, SendMessageRequest,
-};
+use plexspaces_proto::actor::v1::{actor_service_client::ActorServiceClient, SendMessageRequest};
 use prost_types;
 // Message alias removed - using Message directly
 
@@ -302,7 +300,6 @@ pub enum ActorRefError {
     #[error("Remote messaging not implemented: {0}")]
     RemoteNotImplemented(String),
 }
-
 
 /// A reference to an actor that can receive messages
 ///
@@ -354,9 +351,9 @@ pub struct ActorRef {
 
     /// Location-specific implementation (local vs remote)
     inner: ActorRefInner,
-    
+
     /// Current temporary sender ID (if any)
-    /// 
+    ///
     /// ## Purpose
     /// Tracks the current temporary sender ActorRef ID created when ask() is called from outside actor context.
     /// Used for cleanup tracking only - the ActorRegistry is the source of truth.
@@ -482,7 +479,7 @@ impl ActorRef {
     pub fn id(&self) -> &ActorId {
         &self.id
     }
-    
+
     /// Check if this ActorRef has a waiting ReplyWaiter for the given correlation_id
     /// and notify it with the reply message.
     ///
@@ -523,7 +520,10 @@ impl ActorRef {
                 message_id, message_type, correlation_id, sender_id, receiver_id
             );
         }
-        tracing::warn!("ReplyWaiterRegistry not available - cannot notify waiter for correlation_id: {}", correlation_id);
+        tracing::warn!(
+            "ReplyWaiterRegistry not available - cannot notify waiter for correlation_id: {}",
+            correlation_id
+        );
         false
     }
 
@@ -553,7 +553,6 @@ impl ActorRef {
         .set(0.0);
     }
 
-
     /// Check if this is a local actor
     pub fn is_local(&self) -> bool {
         matches!(self.inner, ActorRefInner::Local { .. })
@@ -563,9 +562,9 @@ impl ActorRef {
     pub fn is_remote(&self) -> bool {
         matches!(self.inner, ActorRefInner::Remote { .. })
     }
-    
+
     /// Check if an actor ID is a temporary sender ID (format: "{TEMP_SENDER_PREFIX}-{correlation_id}@{node_id}")
-    /// 
+    ///
     /// ## Purpose
     /// Temporary sender IDs are used when ask() is called from outside an actor context
     /// to prevent self-messaging. They have a distinct format that never matches actor IDs.
@@ -573,45 +572,53 @@ impl ActorRef {
         use plexspaces_core::TEMP_SENDER_PREFIX;
         actor_id.starts_with(&format!("{}-", TEMP_SENDER_PREFIX)) && actor_id.contains('@')
     }
-    
+
     /// Extract correlation_id from a temporary sender ID
-    /// 
+    ///
     /// ## Format
     /// Temporary sender ID format: "{TEMP_SENDER_PREFIX}-{correlation_id}@{node_id}"
-    /// 
+    ///
     /// ## Returns
     /// - Some(correlation_id) if the ID is a valid temporary sender ID
     /// - None otherwise
-    /// 
+    ///
     /// ## Design Note
     /// This is a simple helper - we extract correlation_id from the temporary sender ID format.
     fn extract_correlation_id_from_temporary_sender(temporary_sender_id: &str) -> Option<String> {
         use plexspaces_core::TEMP_SENDER_PREFIX;
-        if let Some(prefix_removed) = temporary_sender_id.strip_prefix(&format!("{}-", TEMP_SENDER_PREFIX)) {
+        if let Some(prefix_removed) =
+            temporary_sender_id.strip_prefix(&format!("{}-", TEMP_SENDER_PREFIX))
+        {
             if let Some((corr_id, _node_id)) = prefix_removed.split_once('@') {
                 return Some(corr_id.to_string());
             }
         }
         None
     }
-    
+
     /// Get the caller's node ID from ActorRegistry
-    /// 
+    ///
     /// ## Purpose
     /// Used to create temporary sender IDs that include the caller's node_id
     /// for proper remote routing of replies.
     async fn get_caller_node_id(&self) -> Result<String, ActorRefError> {
         match &self.inner {
-            ActorRefInner::Local { service_locator, .. } |
-            ActorRefInner::Remote { service_locator, .. } => {
+            ActorRefInner::Local {
+                service_locator, ..
+            }
+            | ActorRefInner::Remote {
+                service_locator, ..
+            } => {
                 use plexspaces_core::ActorRegistry;
-                let registry: Arc<ActorRegistry> = service_locator.actor_registry().await
-                    .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry not available".to_string()))?;
+                let registry: Arc<ActorRegistry> =
+                    service_locator.actor_registry().await.ok_or_else(|| {
+                        ActorRefError::SendFailed("ActorRegistry not available".to_string())
+                    })?;
                 Ok(registry.local_node_id().to_string())
             }
         }
     }
-    
+
     /// Get namespace for this actor
     ///
     /// ## Purpose
@@ -624,14 +631,14 @@ impl ActorRef {
     pub fn namespace(&self) -> &str {
         &self.namespace
     }
-    
+
     /// Create RequestContext with tenant_id from caller and namespace from this ActorRef.
-    /// 
+    ///
     /// ## Purpose
     /// Creates a RequestContext combining:
     /// - **tenant_id**: From caller (auth source - JWT/mTLS). Without auth, can be empty.
     /// - **namespace**: From this ActorRef (source of truth is application/actor).
-    /// 
+    ///
     /// ## Arguments
     /// - `tenant_id`: Tenant identifier from auth (JWT/mTLS). Empty if auth is disabled.
     ///
@@ -673,13 +680,17 @@ impl ActorRef {
     /// ## When to Use
     /// - Always pass tenant_id from the external call/auth when available
     /// - For internal operations where auth is disabled, pass empty string
-    async fn get_default_request_context(&self, tenant_id: impl Into<String>) -> Result<plexspaces_core::RequestContext, ActorRefError> {
+    async fn get_default_request_context(
+        &self,
+        tenant_id: impl Into<String>,
+    ) -> Result<plexspaces_core::RequestContext, ActorRefError> {
         use plexspaces_core::RequestContext;
         // Tenant comes from caller (auth), namespace from this ActorRef
-        Ok(RequestContext::new_without_auth(tenant_id.into(), self.namespace.clone()))
+        Ok(RequestContext::new_without_auth(
+            tenant_id.into(),
+            self.namespace.clone(),
+        ))
     }
-    
-    
 
     /// Get the remote node ID (if remote)
     pub fn remote_node_id(&self) -> Option<&str> {
@@ -699,8 +710,12 @@ impl ActorRef {
     /// Reference to the ServiceLocator
     pub fn service_locator(&self) -> &Arc<dyn ServiceLocatorTrait> {
         match &self.inner {
-            ActorRefInner::Local { service_locator, .. } => service_locator,
-            ActorRefInner::Remote { service_locator, .. } => service_locator,
+            ActorRefInner::Local {
+                service_locator, ..
+            } => service_locator,
+            ActorRefInner::Remote {
+                service_locator, ..
+            } => service_locator,
         }
     }
 
@@ -749,60 +764,13 @@ impl ActorRef {
     /// let msg = plexspaces_mailbox::Message::json(&data)?.with_message_type("foo");
     /// actor_ref.tell(msg).await?;
     /// ```
-    pub async fn tell(
-        &self,
-        message: impl Into<Message>,
-    ) -> Result<(), ActorRefError> {
+    pub async fn tell(&self, message: impl Into<Message>) -> Result<(), ActorRefError> {
         self.tell_impl(message.into()).await
     }
 
     /// Internal implementation of tell() - used by both inherent method and MessageSender trait
-    async fn tell_impl(
-        &self,
-        message: Message,
-    ) -> Result<(), ActorRefError> {
+    async fn tell_impl(&self, message: Message) -> Result<(), ActorRefError> {
         use plexspaces_core::monitoring;
-        
-        use std::thread_local;
-
-        // RECURSION DETECTION: Track call depth to detect infinite loops
-        thread_local! {
-            static TELL_DEPTH: std::cell::Cell<usize> = std::cell::Cell::new(0);
-        }
-        
-        let depth = TELL_DEPTH.with(|d| {
-            let current = d.get();
-            d.set(current + 1);
-            current
-        });
-        
-        // Safety check: prevent infinite recursion
-        const MAX_RECURSION_DEPTH: usize = 10;
-        if depth > MAX_RECURSION_DEPTH {
-            let _ = TELL_DEPTH.with(|d| d.set(0)); // Reset on error
-            tracing::error!(
-                "Infinite recursion detected in ActorRef::tell (depth: {})",
-                depth
-            );
-            return Err(ActorRefError::SendFailed(format!(
-                "Infinite recursion detected in ActorRef::tell (depth: {})",
-                depth
-            )));
-        }
-        
-        // Guard to ensure depth is reset when function returns
-        struct DepthGuard;
-        impl Drop for DepthGuard {
-            fn drop(&mut self) {
-                TELL_DEPTH.with(|d| {
-                    let current = d.get();
-                    if current > 0 {
-                        d.set(current - 1);
-                    }
-                });
-            }
-        }
-        let _guard = DepthGuard;
 
         let actor_id = self.id.clone();
         let message_type = message.message_type.clone();
@@ -831,7 +799,7 @@ impl ActorRef {
                 );
             }
         }
-        
+
         // VALIDATION: Check if receiver matches this ActorRef
         // We log a warning but don't error - message might be intentionally routed elsewhere.
         if message.receiver_id != actor_id {
@@ -857,7 +825,7 @@ impl ActorRef {
         // This handles the case where lookup_actor_ref() creates an ActorRef from a lazy virtual actor's mailbox
         // but the actor isn't active yet. We need to trigger activation via VirtualActorWrapper.
         // CRITICAL: This check MUST happen BEFORE sending to mailbox to ensure lazy activation works
-        
+
         // COMMENTED OUT: Testing if this virtual actor check is redundant
         // if let Some(manager) = self.service_locator().virtual_actor_manager().await {
         //     let is_virtual = manager.is_virtual(&actor_id).await;
@@ -865,7 +833,7 @@ impl ActorRef {
         //     if is_virtual && !is_active {
         //         // Lazy virtual actor that isn't active - use VirtualActorWrapper to trigger activation
         //         // Get VirtualActorWrapper from registry (it should be there for lazy virtual actors)
-        //         
+        //
         //         if let Some(registry) = self.service_locator().actor_registry().await {
         //             if let Some(virtual_wrapper) = registry.lookup_actor(&actor_id).await {
         //                 // VirtualActorWrapper will handle activation and message delivery
@@ -882,9 +850,10 @@ impl ActorRef {
         //         manager.update_last_access(&actor_id).await;
         //     }
         // }
-        
+
         // Get ReplyWaiterRegistry once for all reply routing checks
-        let waiter_registry: Option<Arc<plexspaces_core::ReplyWaiterRegistry>> = self.service_locator().reply_waiter_registry().await;
+        let waiter_registry: Option<Arc<plexspaces_core::ReplyWaiterRegistry>> =
+            self.service_locator().reply_waiter_registry().await;
 
         // SIMPLIFIED ROUTING: Since we always create temporary sender for ask(), routing is simple:
         // - If receiver is temporary sender → REPLY → route to ReplyWaiter (bypass mailbox)
@@ -894,13 +863,14 @@ impl ActorRef {
         if Self::is_temporary_sender_id(&message.receiver_id) {
             // Prefer correlation_id from message, fallback to extracting from temporary sender ID
             // Store extracted correlation_id in a variable to avoid lifetime issues
-            let extracted_corr_id = Self::extract_correlation_id_from_temporary_sender(&message.receiver_id);
+            let extracted_corr_id =
+                Self::extract_correlation_id_from_temporary_sender(&message.receiver_id);
             let corr_id = if !message.correlation_id.is_empty() {
                 Some(&message.correlation_id)
             } else {
                 extracted_corr_id.as_ref()
             };
-            
+
             if let Some(corr_id) = corr_id {
                 if let Some(ref waiter_registry) = waiter_registry {
                     let message_clone = message.clone();
@@ -910,7 +880,7 @@ impl ActorRef {
                             message.id, message.message_type, corr_id, message.receiver_id, message.correlation_id, message.sender_id
                         );
                     }
-                    
+
                     if waiter_registry.notify(corr_id, message_clone).await {
                         if tracing::enabled!(tracing::Level::TRACE) {
                             tracing::trace!(
@@ -943,20 +913,23 @@ impl ActorRef {
         let local_node_id = self.get_local_node_id().await;
 
         let (result, is_local, remote_node_id) = match &self.inner {
-            ActorRefInner::Local { mailbox, service_locator } => {
+            ActorRefInner::Local {
+                mailbox,
+                service_locator,
+            } => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         "[TELL] LOCAL PATH: actor_ref_id={}, sender={:?}, receiver={}, correlation_id={:?}",
                         actor_id, message.sender_id, message.receiver_id, message.correlation_id
                     );
                 }
-                
+
                 // VALIDATION: Check if actor is registered before sending (LOCAL ACTORS ONLY)
                 // tell() should fail immediately if actor is not registered (synchronous check)
                 // Note: For local actors, having a mailbox implies the actor was created, but we still
                 // validate registration to ensure the actor hasn't been unregistered since creation.
                 // Remote actors don't need this check - they're validated via gRPC.
-                
+
                 if let Some(registry) = service_locator.actor_registry().await {
                     if registry.lookup_actor(&actor_id).await.is_none() {
                         tracing::warn!("[TELL] Local actor not registered: actor_id={}", actor_id);
@@ -968,7 +941,7 @@ impl ActorRef {
                 }
                 // If registry is not available, proceed anyway (fallback for test scenarios)
                 // In production, registry should always be available
-                
+
                 // REQUEST or normal message → send to mailbox
                 // (Reply routing to temporary sender is handled above before this match)
                 let msg_sender = message.sender_id.clone();
@@ -986,16 +959,18 @@ impl ActorRef {
                     });
                 if tracing::enabled!(tracing::Level::TRACE) {
                     tracing::trace!(
-                    "[TELL] MAILBOX SEND SUCCESS: actor_ref_id={}, sender={:?}, receiver={}",
-                    actor_id, msg_sender, msg_receiver
+                        "[TELL] MAILBOX SEND SUCCESS: actor_ref_id={}, sender={:?}, receiver={}",
+                        actor_id,
+                        msg_sender,
+                        msg_receiver
                     );
                 }
-                
+
                 // Record metrics for local messages (before returning)
                 let duration = start.elapsed();
                 let success = send_result.is_ok();
                 let error_type = send_result.as_ref().err().map(|e| format!("{:?}", e));
-                
+
                 let metrics_accessor = service_locator.get_node_metrics_accessor().await;
                 let actor_metrics = {
                     if let Some(registry) = service_locator.actor_registry().await {
@@ -1004,7 +979,7 @@ impl ActorRef {
                         None
                     }
                 };
-                
+
                 monitoring::record_message_routing_metrics(
                     &actor_id,
                     local_node_id.as_deref().unwrap_or("unknown"),
@@ -1015,33 +990,43 @@ impl ActorRef {
                     error_type.as_deref(),
                     metrics_accessor,
                     actor_metrics,
-                ).await;
-                
+                )
+                .await;
+
                 return send_result;
             }
-            ActorRefInner::Remote { node_id, service_locator } => {
+            ActorRefInner::Remote {
+                node_id,
+                service_locator,
+            } => {
                 // VALIDATION: Remote ActorRef must NOT point to local node (misconfiguration)
                 if let Some(ref local_id) = local_node_id {
                     if local_id == node_id {
                         tracing::error!("[TELL] ERROR: Remote ActorRef points to local node: node_id={}, local_node_id={}", node_id, local_id);
-                        let _ = TELL_DEPTH.with(|d| d.set(0)); // Reset on error
                         return Err(ActorRefError::SendFailed(format!(
                             "Invalid Remote ActorRef: node_id={} matches local_node_id={}. Use ActorRef::local() for local actors, not ActorRef::remote() with local node_id.",
                             node_id, local_id
                         )));
                     }
                 }
-                
+
                 // REMOTE PATH: Use gRPC client directly (not ActorService)
                 // ActorRef uses gRPC directly because it already knows it's remote.
                 // ActorService is the gRPC gateway for external clients.
                 let result = async {
                     // Get ActorServiceClient using ServiceLocator helper (handles ObjectRegistry lookup and connection pooling)
-                    let channel = service_locator.get_actor_service_client(node_id).await
-                        .map_err(|e| ActorRefError::SendFailed(format!("Failed to get ActorServiceClient: {}", e)))?;
-                    
+                    let channel = service_locator
+                        .get_actor_service_client(node_id)
+                        .await
+                        .map_err(|e| {
+                            ActorRefError::SendFailed(format!(
+                                "Failed to get ActorServiceClient: {}",
+                                e
+                            ))
+                        })?;
+
                     let mut client_ref = ActorServiceClient::new(channel);
-                    
+
                     // Convert message to proto
                     let proto_message = Self::to_proto_message(&message, &self.id)?;
 
@@ -1053,36 +1038,33 @@ impl ActorRef {
                     });
 
                     // Send via gRPC
-                    client_ref.send_message(request).await
-                        .map_err(|e| ActorRefError::SendFailed(format!("gRPC send failed: {}", e)))?;
-                    
+                    client_ref.send_message(request).await.map_err(|e| {
+                        ActorRefError::SendFailed(format!("gRPC send failed: {}", e))
+                    })?;
+
                     Ok::<(), ActorRefError>(())
-                }.await;
+                }
+                .await;
                 (result, false, Some(node_id.clone()))
             }
         };
-        
-        // Decrement recursion depth on return
-        let _ = TELL_DEPTH.with(|d| {
-            let current = d.get();
-            if current > 0 {
-                d.set(current - 1);
-            }
-        });
-        
+
         // OBSERVABILITY: Record comprehensive routing metrics
         let duration = start.elapsed();
         let success = result.is_ok();
         let error_type = result.as_ref().err().map(|e| format!("{:?}", e));
-        
+
         // Get NodeMetricsAccessor from ServiceLocator (if available)
         let service_locator = match &self.inner {
-            ActorRefInner::Local { service_locator, .. } | ActorRefInner::Remote { service_locator, .. } => {
-                service_locator.clone()
+            ActorRefInner::Local {
+                service_locator, ..
             }
+            | ActorRefInner::Remote {
+                service_locator, ..
+            } => service_locator.clone(),
         };
         let metrics_accessor = service_locator.get_node_metrics_accessor().await;
-        
+
         // Get ActorMetrics from ActorRegistry (preferred - ActorRegistry tracks metrics directly)
         let actor_metrics = {
             if let Some(registry) = service_locator.actor_registry().await {
@@ -1091,7 +1073,7 @@ impl ActorRef {
                 None
             }
         };
-        
+
         // Use monitoring helper for consistent metrics
         // Always call record_message_routing_metrics - it handles None node_id gracefully
         monitoring::record_message_routing_metrics(
@@ -1104,16 +1086,21 @@ impl ActorRef {
             error_type.as_deref(),
             metrics_accessor,
             actor_metrics,
-        ).await;
-        
+        )
+        .await;
+
         result
     }
-    
+
     /// Get local node ID from ActorRegistry (if available)
     async fn get_local_node_id(&self) -> Option<String> {
         match &self.inner {
-            ActorRefInner::Local { service_locator, .. } | ActorRefInner::Remote { service_locator, .. } => {
-                
+            ActorRefInner::Local {
+                service_locator, ..
+            }
+            | ActorRefInner::Remote {
+                service_locator, ..
+            } => {
                 if let Some(registry) = service_locator.actor_registry().await {
                     Some(registry.local_node_id().to_string())
                 } else {
@@ -1148,12 +1135,9 @@ impl ActorRef {
                     "try_tell not supported with Mailbox abstraction - use tell() with ActorContext instead".to_string(),
                 ))
             }
-            ActorRefInner::Remote { node_id, .. } => {
-                Err(ActorRefError::RemoteNotImplemented(format!(
-                    "try_tell for remote actor {} not yet implemented",
-                    node_id
-                )))
-            }
+            ActorRefInner::Remote { node_id, .. } => Err(ActorRefError::RemoteNotImplemented(
+                format!("try_tell for remote actor {} not yet implemented", node_id),
+            )),
         }
     }
 
@@ -1216,7 +1200,6 @@ impl ActorRef {
     /// - `ActorRefError::SendFailed` - Failed to send request message
     /// - `ActorRefError::ActorTerminated` - Actor terminated before reply
     pub async fn ask(
-
         &self,
         mut message: Message,
         timeout: Duration,
@@ -1274,7 +1257,7 @@ impl ActorRef {
         // Use unified route_message for both local and remote routing
         // CRITICAL: Use tenant_id from ActorRef (flows from API → ActorBuilder → ActorRef)
         let ctx = self.get_request_context();
-        
+
         // Use unified routing (returns Future for parallel operations)
         let routing_result = crate::routing::route_message(
             ctx,
@@ -1283,13 +1266,16 @@ impl ActorRef {
             message,
             true, // wait_for_response = true for ask()
             Some(timeout),
-        ).await;
-        
+        )
+        .await;
+
         // Extract message from routing result
-        let result = routing_result.map(|(_message_id, reply_opt)| {
-            reply_opt.ok_or_else(|| ActorRefError::SendFailed("No reply received".to_string()))
-        }).and_then(|r| r);
-        
+        let result = routing_result
+            .map(|(_message_id, reply_opt)| {
+                reply_opt.ok_or_else(|| ActorRefError::SendFailed("No reply received".to_string()))
+            })
+            .and_then(|r| r);
+
         // OBSERVABILITY: Track ask result and latency
         let duration = start.elapsed();
         match &result {
@@ -1298,10 +1284,12 @@ impl ActorRef {
                     "actor_id" => actor_id.clone(),
                     "message_type" => message_type.clone(),
                     "status" => "success"
-                ).increment(1);
+                )
+                .increment(1);
                 metrics::histogram!("plexspaces_actor_ref_ask_duration_seconds",
                     "actor_id" => actor_id.clone()
-                ).record(duration.as_secs_f64());
+                )
+                .record(duration.as_secs_f64());
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(duration_ms = duration.as_millis(), "Ask succeeded");
                 }
@@ -1316,18 +1304,20 @@ impl ActorRef {
                     "actor_id" => actor_id.clone(),
                     "message_type" => message_type.clone(),
                     "status" => "error"
-                ).increment(1);
+                )
+                .increment(1);
                 metrics::counter!("plexspaces_actor_ref_ask_errors_total",
                     "actor_id" => actor_id.clone(),
                     "error_type" => error_type
-                ).increment(1);
+                )
+                .increment(1);
                 tracing::error!(error = %e, duration_ms = duration.as_millis(), "Ask failed");
             }
         }
-        
+
         result
     }
-    
+
     /// Send a reply message to the sender of the original message
     ///
     /// ## Purpose
@@ -1368,19 +1358,23 @@ impl ActorRef {
         // Use send() method - temporary sender behaves like normal actor
         // Set message fields: receiver=target_actor_id, sender=current_actor, correlation_id
         use plexspaces_core::actor_context::ActorService;
-        let actor_service = service_locator.get_actor_service().await
-            .ok_or_else(|| ActorRefError::SendFailed("ActorService not available in ServiceLocator".to_string()))?;
-        
+        let actor_service = service_locator.get_actor_service().await.ok_or_else(|| {
+            ActorRefError::SendFailed("ActorService not available in ServiceLocator".to_string())
+        })?;
+
         let mut reply_msg = reply_message;
         reply_msg.receiver_id = target_actor_id.clone();
         reply_msg.sender_id = sender_id.clone();
         if let Some(corr_id) = correlation_id {
             reply_msg.correlation_id = corr_id.to_string();
         }
-        actor_service.send(&target_actor_id, reply_msg).await
+        actor_service
+            .send(&target_actor_id, reply_msg)
+            .await
             .map(|_| ()) // Ignore message_id return value
             .map_err(|e| ActorRefError::SendFailed(format!("ActorService::send() failed: {}", e)))
     }
+
 }
 
 impl std::fmt::Debug for ActorRef {
@@ -1391,13 +1385,12 @@ impl std::fmt::Debug for ActorRef {
                 .field("id", &self.id)
                 .field("location", &"Local")
                 .finish(),
-            ActorRefInner::Remote { node_id, .. } => {
-                f.debug_struct("ActorRef")
-                    .field("id", &self.id)
-                    .field("location", &"Remote")
-                    .field("node_id", node_id)
-                    .finish()
-            }
+            ActorRefInner::Remote { node_id, .. } => f
+                .debug_struct("ActorRef")
+                .field("id", &self.id)
+                .field("location", &"Remote")
+                .field("node_id", node_id)
+                .finish(),
         }
     }
 }
@@ -1412,14 +1405,8 @@ impl PartialEq for ActorRef {
         match (&self.inner, &other.inner) {
             (ActorRefInner::Local { .. }, ActorRefInner::Local { .. }) => true,
             (
-                ActorRefInner::Remote {
-                    node_id: id1,
-                    ..
-                },
-                ActorRefInner::Remote {
-                    node_id: id2,
-                    ..
-                },
+                ActorRefInner::Remote { node_id: id1, .. },
+                ActorRefInner::Remote { node_id: id2, .. },
             ) => {
                 // Compare by node_id
                 id1 == id2
@@ -1433,13 +1420,19 @@ impl PartialEq for ActorRef {
 impl MessageSender for ActorRef {
     async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Call the internal implementation to avoid recursion
-        self.tell_impl(message).await
+        self.tell_impl(message)
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
-    async fn ask(&self, message: Message, timeout: std::time::Duration) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
+    async fn ask(
+        &self,
+        message: Message,
+        timeout: std::time::Duration,
+    ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
         // Delegate to ActorRef::ask() which handles correlation-based reply routing
-        ActorRef::ask(self, message, timeout).await
+        ActorRef::ask(self, message, timeout)
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 
@@ -1458,7 +1451,7 @@ mod tests {
     use plexspaces_core::ActorContext;
     use plexspaces_mailbox::MailboxConfig;
     use ulid::Ulid;
-    
+
     /// Helper to create a test message
     fn create_test_message(payload: Vec<u8>) -> Message {
         Message {
@@ -1471,7 +1464,11 @@ mod tests {
     /// Helper to create a test mailbox
     pub(crate) async fn create_test_mailbox() -> Arc<Mailbox> {
         use plexspaces_mailbox::mailbox_config_default;
-        Arc::new(Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string()).await.expect("Failed to create mailbox"))
+        Arc::new(
+            Mailbox::new(mailbox_config_default(), "test-actor@test-node".to_string())
+                .await
+                .expect("Failed to create mailbox"),
+        )
     }
 
     /// Helper to create a test ServiceLocator with default services
@@ -1490,15 +1487,20 @@ mod tests {
         assert_eq!(actor_ref.id(), "test-actor");
         assert!(actor_ref.is_local());
         assert!(!actor_ref.is_remote());
-        assert_eq!(Arc::as_ptr(actor_ref.service_locator()), Arc::as_ptr(&service_locator));
+        assert_eq!(
+            Arc::as_ptr(actor_ref.service_locator()),
+            Arc::as_ptr(&service_locator)
+        );
     }
 
     /// TEST 2: Can create a remote ActorRef
     #[tokio::test]
     async fn test_create_remote_actor_ref() {
         use plexspaces_node::create_default_service_locator;
-        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-        let actor_ref = ActorRef::remote("remote-actor@node1", "", "test", "node1", service_locator);
+        let service_locator =
+            create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        let actor_ref =
+            ActorRef::remote("remote-actor@node1", "", "test", "node1", service_locator);
 
         assert_eq!(actor_ref.id(), "remote-actor@node1");
         assert!(!actor_ref.is_local());
@@ -1511,16 +1513,32 @@ mod tests {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox.clone(), service_locator.clone());
-        
+        let actor_ref = ActorRef::local(
+            "test-actor@node1",
+            "",
+            "test",
+            mailbox.clone(),
+            service_locator.clone(),
+        );
+
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
             // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true);
+            let ctx =
+                RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-            registry.register_actor(&ctx, "test-actor@node1".to_string(), sender, None, None, None, None).await;
+            registry
+                .register_actor(
+                    &ctx,
+                    "test-actor@node1".to_string(),
+                    sender,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
         }
 
         let message = create_test_message(b"hello".to_vec());
@@ -1531,41 +1549,81 @@ mod tests {
 
         // Verify received
         let received = mailbox_clone.dequeue().await.unwrap();
-        assert_eq!(received.id, message_id);
+        assert_eq!(received.id, format!("req-{}", message_id));
     }
 
-// Helper struct for testing - need to make it accessible
-struct MockActorService {
-    sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>>,
-}
+    // Helper struct for testing - need to make it accessible
+    struct MockActorService {
+        sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>>,
+    }
 
-impl MockActorService {
-    fn new() -> Self {
-        Self {
-            sent_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
+    impl MockActorService {
+        fn new() -> Self {
+            Self {
+                sent_messages: Arc::new(std::sync::Mutex::new(Vec::new())),
+            }
         }
     }
-}
 
     #[async_trait::async_trait]
     impl plexspaces_core::ActorService for MockActorService {
-        async fn spawn_actor(&self, _actor_id: &str, _actor_type: &str, _initial_state: Vec<u8>) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+        async fn spawn_actor(
+            &self,
+            _actor_id: &str,
+            _actor_type: &str,
+            _initial_state: Vec<u8>,
+        ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented".into())
         }
-        async fn send(&self, actor_id: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            self.sent_messages.lock().unwrap().push((actor_id.to_string(), message));
+        async fn send(
+            &self,
+            actor_id: &str,
+            message: Message,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            self.sent_messages
+                .lock()
+                .unwrap()
+                .push((actor_id.to_string(), message));
             Ok("msg-id".to_string())
         }
-        async fn create_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::CreateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        async fn create_shard_group(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
+        ) -> Result<
+            plexspaces_proto::actor::v1::CreateShardGroupResponse,
+            Box<dyn std::error::Error + Send + Sync>,
+        > {
             Err("MockActorService: create_shard_group not implemented".into())
         }
-        async fn bulk_update_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        async fn bulk_update_shard_group(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
+        ) -> Result<
+            plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse,
+            Box<dyn std::error::Error + Send + Sync>,
+        > {
             Err("MockActorService: bulk_update_shard_group not implemented".into())
         }
-        async fn map_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::MapShardGroupRequest) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        async fn map_shard_group(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
+        ) -> Result<
+            plexspaces_proto::actor::v1::MapShardGroupResponse,
+            Box<dyn std::error::Error + Send + Sync>,
+        > {
             Err("MockActorService: map_shard_group not implemented".into())
         }
-        async fn scatter_gather(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::ScatterGatherRequest) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+        async fn scatter_gather(
+            &self,
+            _ctx: &plexspaces_core::RequestContext,
+            _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
+        ) -> Result<
+            plexspaces_proto::actor::v1::ScatterGatherResponse,
+            Box<dyn std::error::Error + Send + Sync>,
+        > {
             Err("MockActorService: scatter_gather not implemented".into())
         }
     }
@@ -1575,10 +1633,11 @@ impl MockActorService {
         use plexspaces_core::ActorContext;
         use plexspaces_services::ServiceLocatorImpl;
         use std::sync::Arc;
-        
+
         // Create minimal ServiceLocator for test context (sync function, can't use async)
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
-        
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+            Arc::new(ServiceLocatorImpl::new());
+
         // Note: Services are not registered in test ServiceLocator
         // Tests that need services should register them explicitly
         ActorContext::new(
@@ -1589,7 +1648,6 @@ impl MockActorService {
             None,
         )
     }
-
 
     /// TEST 4: try_tell() - Note: Mailbox doesn't support try_send, so this test is skipped
     /// The try_tell() method now returns an error indicating async send should be used
@@ -1626,18 +1684,34 @@ impl MockActorService {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
         let service_locator = create_test_service_locator().await;
-        let actor_ref1 = ActorRef::local("test-actor@node1", "", "test", mailbox.clone(), service_locator.clone());
-        
+        let actor_ref1 = ActorRef::local(
+            "test-actor@node1",
+            "",
+            "test",
+            mailbox.clone(),
+            service_locator.clone(),
+        );
+
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
             // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true);
+            let ctx =
+                RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref1.clone());
-            registry.register_actor(&ctx, "test-actor@node1".to_string(), sender, None, None, None, None).await;
+            registry
+                .register_actor(
+                    &ctx,
+                    "test-actor@node1".to_string(),
+                    sender,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
         }
-        
+
         // Clone it
         let actor_ref2 = actor_ref1.clone();
 
@@ -1666,9 +1740,27 @@ impl MockActorService {
         let mailbox2 = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
 
-        let ref1 = ActorRef::local("actor-1", "", "test", mailbox1.clone(), service_locator.clone());
-        let ref2 = ActorRef::local("actor-1", "", "test", mailbox1.clone(), service_locator.clone());
-        let ref3 = ActorRef::local("actor-2", "", "test", mailbox2.clone(), service_locator.clone());
+        let ref1 = ActorRef::local(
+            "actor-1",
+            "",
+            "test",
+            mailbox1.clone(),
+            service_locator.clone(),
+        );
+        let ref2 = ActorRef::local(
+            "actor-1",
+            "",
+            "test",
+            mailbox1.clone(),
+            service_locator.clone(),
+        );
+        let ref3 = ActorRef::local(
+            "actor-2",
+            "",
+            "test",
+            mailbox2.clone(),
+            service_locator.clone(),
+        );
 
         assert_eq!(ref1, ref2); // Same ID and location
         assert_ne!(ref1, ref3); // Different ID
@@ -1747,32 +1839,49 @@ impl MockActorService {
         let mailbox = create_test_mailbox().await;
         let mailbox_clone = Arc::clone(&mailbox);
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("target-actor@node1", "", "test", mailbox.clone(), service_locator.clone());
-        
+        let actor_ref = ActorRef::local(
+            "target-actor@node1",
+            "",
+            "test",
+            mailbox.clone(),
+            service_locator.clone(),
+        );
+
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
             // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true);
+            let ctx =
+                RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
-            registry.register_actor(&ctx, "target-actor@node1".to_string(), sender, None, None, None, None).await;
+            registry
+                .register_actor(
+                    &ctx,
+                    "target-actor@node1".to_string(),
+                    sender,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
         }
-        
+
         let message = create_test_message(b"hello".to_vec());
         let message_id = message.id.clone();
 
         actor_ref.tell(message).await.unwrap();
 
         let received = mailbox_clone.dequeue().await.unwrap();
-        assert_eq!(received.id, message_id);
+        assert_eq!(received.id, format!("req-{}", message_id));
     }
 
     /// TEST 12: tell() - remote actor (different node) using unified API
     #[tokio::test]
     async fn test_tell_remote() {
         // Create a mock actor service that tracks sent messages
-        let sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
         let sent_messages_clone = sent_messages.clone();
 
         struct TrackingActorService {
@@ -1780,30 +1889,72 @@ impl MockActorService {
         }
         #[async_trait::async_trait]
         impl plexspaces_core::ActorService for TrackingActorService {
-            async fn spawn_actor(&self, _actor_id: &str, _actor_type: &str, _initial_state: Vec<u8>) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+            async fn spawn_actor(
+                &self,
+                _actor_id: &str,
+                _actor_type: &str,
+                _initial_state: Vec<u8>,
+            ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
+            {
                 Err("Not implemented".into())
             }
-            async fn send(&self, actor_id: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-                self.sent_messages.lock().unwrap().push((actor_id.to_string(), message));
+            async fn send(
+                &self,
+                actor_id: &str,
+                message: Message,
+            ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+                self.sent_messages
+                    .lock()
+                    .unwrap()
+                    .push((actor_id.to_string(), message));
                 Ok("msg-id".to_string())
             }
-            async fn create_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::CreateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn create_shard_group(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::CreateShardGroupResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("TrackingActorService: create_shard_group not implemented".into())
             }
-            async fn bulk_update_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn bulk_update_shard_group(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("TrackingActorService: bulk_update_shard_group not implemented".into())
             }
-            async fn map_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::MapShardGroupRequest) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn map_shard_group(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::MapShardGroupResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("TrackingActorService: map_shard_group not implemented".into())
             }
-            async fn scatter_gather(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::ScatterGatherRequest) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn scatter_gather(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::ScatterGatherResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("TrackingActorService: scatter_gather not implemented".into())
             }
         }
 
         // Create remote ActorRef with ServiceLocator
         use plexspaces_node::create_default_service_locator;
-        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        let service_locator =
+            create_default_service_locator(Some("test-node".to_string()), None, None).await;
         // Use actor crate's ActorRef for remote actors
         let actor_ref = ActorRef::remote(
             "target-actor@node2".to_string(),
@@ -1830,10 +1981,11 @@ impl MockActorService {
         use plexspaces_core::ActorContext;
         use plexspaces_services::ServiceLocatorImpl;
         use std::sync::Arc;
-        
+
         // Create minimal ServiceLocator for test context (sync function, can't use async)
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
-        
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+            Arc::new(ServiceLocatorImpl::new());
+
         // Note: Services are not registered in test ServiceLocator
         // Tests that need services should register them explicitly
         ActorContext::new(
@@ -1855,30 +2007,46 @@ impl MockActorService {
         let reply_mailbox = Arc::new(
             Mailbox::new(MailboxConfig::default(), reply_mailbox_id)
                 .await
-                .expect("Failed to create reply mailbox")
+                .expect("Failed to create reply mailbox"),
         );
         let reply_actor_id = format!("reply-{}@node1", correlation_id);
 
         // Create a local ActorRef that will receive the reply
         let target_mailbox_arc = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let target_ref = ActorRef::local("target@node1".to_string(), "".to_string(), "test".to_string(), Arc::clone(&target_mailbox_arc), service_locator.clone());
-        
+        let target_ref = ActorRef::local(
+            "target@node1".to_string(),
+            "".to_string(),
+            "test".to_string(),
+            Arc::clone(&target_mailbox_arc),
+            service_locator.clone(),
+        );
+
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
             // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true);
+            let ctx =
+                RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(target_ref.clone());
-            registry.register_actor(&ctx, "target@node1".to_string(), sender, None, None, None, None).await;
+            registry
+                .register_actor(
+                    &ctx,
+                    "target@node1".to_string(),
+                    sender,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
         }
 
         // Send reply message with correlation_id (simulating reply from another actor)
         let mut reply_message = create_test_message(b"reply".to_vec());
         reply_message.correlation_id = correlation_id.clone();
         reply_message.sender_id = "other-actor@node1".to_string(); // Different sender to avoid self-messaging check
-        
+
         // Send via ActorRef - ReplyWaiterRegistry routes it if there's a pending ask
         // For this test, we just verify the message can be sent
         target_ref.tell(reply_message.clone()).await.unwrap();
@@ -1896,12 +2064,18 @@ impl MockActorService {
         // Full ask() pattern with replies is tested in integration tests (ask_pattern_tests.rs)
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1".to_string(), "".to_string(), "test".to_string(), mailbox, service_locator);
+        let actor_ref = ActorRef::local(
+            "test-actor@node1".to_string(),
+            "".to_string(),
+            "test".to_string(),
+            mailbox,
+            service_locator,
+        );
 
         // Use unified ask() API - sends to self and waits for reply
         let request = create_test_message(b"request".to_vec());
         let result = actor_ref.ask(request, Duration::from_millis(100)).await;
-        
+
         // Should timeout since no reply will be sent
         // The message is sent to mailbox, but no one processes it, so ask() should timeout
         // However, if the message somehow gets processed (e.g., by a background task),
@@ -1926,29 +2100,68 @@ impl MockActorService {
         struct MockActorService;
         #[async_trait::async_trait]
         impl plexspaces_core::ActorService for MockActorService {
-            async fn spawn_actor(&self, _actor_id: &str, _actor_type: &str, _initial_state: Vec<u8>) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+            async fn spawn_actor(
+                &self,
+                _actor_id: &str,
+                _actor_type: &str,
+                _initial_state: Vec<u8>,
+            ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
+            {
                 Err("Not implemented".into())
             }
-            async fn send(&self, _actor_id: &str, _message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            async fn send(
+                &self,
+                _actor_id: &str,
+                _message: Message,
+            ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
                 Ok("msg-id".to_string())
             }
-            async fn create_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::CreateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn create_shard_group(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::CreateShardGroupResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("MockActorService: create_shard_group not implemented".into())
             }
-            async fn bulk_update_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn bulk_update_shard_group(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("MockActorService: bulk_update_shard_group not implemented".into())
             }
-            async fn map_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::MapShardGroupRequest) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn map_shard_group(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::MapShardGroupResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("MockActorService: map_shard_group not implemented".into())
             }
-            async fn scatter_gather(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::ScatterGatherRequest) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn scatter_gather(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::ScatterGatherResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("MockActorService: scatter_gather not implemented".into())
             }
         }
 
         // Create remote ActorRef using actor crate's ActorRef
         use plexspaces_node::create_default_service_locator;
-        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        let service_locator =
+            create_default_service_locator(Some("test-node".to_string()), None, None).await;
         let actor_ref = ActorRef::remote(
             "target-actor@node2".to_string(),
             "test".to_string(), // tenant_id
@@ -1960,9 +2173,7 @@ impl MockActorService {
         // Use unified ask() API - no ActorContext needed
         let request = create_test_message(b"remote request".to_vec());
         // Remote ask will fail (no server), but that's expected in unit test
-        let result = actor_ref
-            .ask(request, Duration::from_secs(1))
-            .await;
+        let result = actor_ref.ask(request, Duration::from_secs(1)).await;
         // Should fail with connection error (no server running)
         // The remote ActorRef tries to connect via gRPC, which fails without a server
         assert!(result.is_err());
@@ -1977,9 +2188,7 @@ impl MockActorService {
 
         let actor_ref = ActorRef::local("target-actor@node1", "", "test", mailbox, service_locator);
         let request = create_test_message(b"request".to_vec());
-        let result = actor_ref
-            .ask(request, Duration::from_millis(10))
-            .await;
+        let result = actor_ref.ask(request, Duration::from_millis(10)).await;
 
         // Should timeout since no reply will be sent
         // The message is sent to mailbox, but no one processes it, so ask() should timeout
@@ -2009,9 +2218,7 @@ impl MockActorService {
         let actor_ref = ActorRef::local("target-actor@node1", "", "test", mailbox, service_locator);
         // Send request but no one will reply (simulates terminated actor)
         let request = create_test_message(b"request".to_vec());
-        let result = actor_ref
-            .ask(request, Duration::from_millis(10))
-            .await;
+        let result = actor_ref.ask(request, Duration::from_millis(10)).await;
 
         // Should timeout since no reply will come
         // The message is sent to mailbox, but no one processes it, so ask() should timeout
@@ -2052,23 +2259,43 @@ impl MockActorService {
         let mailbox1 = create_test_mailbox().await;
         let mailbox1_clone = mailbox1.clone();
         let service_locator = create_test_service_locator().await;
-        let actor_ref1 = ActorRef::local("actor@node1", "", "test", mailbox1.clone(), service_locator.clone());
-        
+        let actor_ref1 = ActorRef::local(
+            "actor@node1",
+            "",
+            "test",
+            mailbox1.clone(),
+            service_locator.clone(),
+        );
+
         // Register actor before calling tell()
         use plexspaces_core::{ActorRegistry, RequestContext};
         if let Some(registry) = service_locator.actor_registry().await {
             // Tenant comes from auth, not config
-            let ctx = RequestContext::new_without_auth(String::new(), String::new())
-                .with_admin(true);
+            let ctx =
+                RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
             let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref1.clone());
-            registry.register_actor(&ctx, "actor@node1".to_string(), sender, None, None, None, None).await;
+            registry
+                .register_actor(
+                    &ctx,
+                    "actor@node1".to_string(),
+                    sender,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
         }
-        
-        actor_ref1.tell(create_test_message(b"local".to_vec())).await.unwrap();
+
+        actor_ref1
+            .tell(create_test_message(b"local".to_vec()))
+            .await
+            .unwrap();
         assert!(mailbox1_clone.dequeue().await.is_some());
 
         // Test remote (different node)
-        let sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sent_messages: Arc<std::sync::Mutex<Vec<(String, Message)>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
         let sent_messages_clone = sent_messages.clone();
 
         struct TrackingActorService {
@@ -2076,23 +2303,64 @@ impl MockActorService {
         }
         #[async_trait::async_trait]
         impl plexspaces_core::ActorService for TrackingActorService {
-            async fn spawn_actor(&self, _actor_id: &str, _actor_type: &str, _initial_state: Vec<u8>) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+            async fn spawn_actor(
+                &self,
+                _actor_id: &str,
+                _actor_type: &str,
+                _initial_state: Vec<u8>,
+            ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>>
+            {
                 Err("Not implemented".into())
             }
-            async fn send(&self, actor_id: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-                self.sent_messages.lock().unwrap().push((actor_id.to_string(), message));
+            async fn send(
+                &self,
+                actor_id: &str,
+                message: Message,
+            ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+                self.sent_messages
+                    .lock()
+                    .unwrap()
+                    .push((actor_id.to_string(), message));
                 Ok("msg-id".to_string())
             }
-            async fn create_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::CreateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn create_shard_group(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::CreateShardGroupResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("TrackingActorService: create_shard_group not implemented".into())
             }
-            async fn bulk_update_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn bulk_update_shard_group(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("TrackingActorService: bulk_update_shard_group not implemented".into())
             }
-            async fn map_shard_group(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::MapShardGroupRequest) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn map_shard_group(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::MapShardGroupResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("TrackingActorService: map_shard_group not implemented".into())
             }
-            async fn scatter_gather(&self, _ctx: &plexspaces_core::RequestContext, _req: plexspaces_proto::actor::v1::ScatterGatherRequest) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+            async fn scatter_gather(
+                &self,
+                _ctx: &plexspaces_core::RequestContext,
+                _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
+            ) -> Result<
+                plexspaces_proto::actor::v1::ScatterGatherResponse,
+                Box<dyn std::error::Error + Send + Sync>,
+            > {
                 Err("TrackingActorService: scatter_gather not implemented".into())
             }
         }
@@ -2102,7 +2370,10 @@ impl MockActorService {
         let mailbox2 = create_test_mailbox().await;
         let mailbox2_clone = Arc::clone(&mailbox2);
         let actor_ref2 = ActorRef::local("actor@node1", "", "test", mailbox2, service_locator);
-        actor_ref2.tell(create_test_message(b"remote".to_vec())).await.unwrap();
+        actor_ref2
+            .tell(create_test_message(b"remote".to_vec()))
+            .await
+            .unwrap();
         assert!(mailbox2_clone.dequeue().await.is_some());
     }
 
@@ -2119,7 +2390,7 @@ impl MockActorService {
         assert_ne!(node1, node2);
         assert_eq!(node1, Some("node1".to_string()));
         assert_eq!(node2, Some("node2".to_string()));
-        
+
         // Test is_actor_local logic
         let service_locator = create_test_service_locator().await;
         let is_local1 = crate::routing::is_actor_local("actor@node1", &service_locator).await;
@@ -2138,7 +2409,13 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_basic() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox, service_locator.clone());
+        let actor_ref = ActorRef::local(
+            "test-actor@node1",
+            "",
+            "test",
+            mailbox,
+            service_locator.clone(),
+        );
 
         // Create a ReplyWaiter and register it in ReplyWaiterRegistry
         let correlation_id = "corr-123".to_string();
@@ -2146,20 +2423,23 @@ impl MockActorService {
         let waiter_clone = waiter.clone();
 
         if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-            waiter_registry.register(correlation_id.clone(), waiter).await;
+            waiter_registry
+                .register(correlation_id.clone(), waiter)
+                .await;
         }
 
         // Spawn task to wait for reply
-        let wait_handle = tokio::spawn(async move {
-            waiter_clone.wait(std::time::Duration::from_secs(5)).await
-        });
+        let wait_handle =
+            tokio::spawn(async move { waiter_clone.wait(std::time::Duration::from_secs(5)).await });
 
         // Give the waiter time to start waiting
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         // Notify the waiter (uses ReplyWaiterRegistry)
         let reply = create_test_message(b"reply".to_vec());
-        let notified = actor_ref.try_notify_reply_waiter(&correlation_id, reply.clone()).await;
+        let notified = actor_ref
+            .try_notify_reply_waiter(&correlation_id, reply.clone())
+            .await;
         assert!(notified, "Waiter should be notified");
 
         // Verify reply was received
@@ -2172,11 +2452,19 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_unknown_correlation_id() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox, service_locator.clone());
+        let actor_ref = ActorRef::local(
+            "test-actor@node1",
+            "",
+            "test",
+            mailbox,
+            service_locator.clone(),
+        );
 
         // Try to notify with unknown correlation_id
         let reply = create_test_message(b"reply".to_vec());
-        let notified = actor_ref.try_notify_reply_waiter("unknown-corr-id", reply).await;
+        let notified = actor_ref
+            .try_notify_reply_waiter("unknown-corr-id", reply)
+            .await;
         assert!(!notified, "Should return false for unknown correlation_id");
     }
 
@@ -2185,7 +2473,13 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_multiple_correlation_ids() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox, service_locator.clone());
+        let actor_ref = ActorRef::local(
+            "test-actor@node1",
+            "",
+            "test",
+            mailbox,
+            service_locator.clone(),
+        );
 
         // Register multiple waiters in ReplyWaiterRegistry
         let corr_id1 = "corr-1".to_string();
@@ -2207,15 +2501,18 @@ impl MockActorService {
         }
 
         // Spawn tasks to wait for replies
-        let wait_handle1 = tokio::spawn(async move {
-            waiter1_clone.wait(std::time::Duration::from_secs(5)).await
-        });
-        let wait_handle2 = tokio::spawn(async move {
-            waiter2_clone.wait(std::time::Duration::from_secs(5)).await
-        });
-        let wait_handle3 = tokio::spawn(async move {
-            waiter3_clone.wait(std::time::Duration::from_secs(5)).await
-        });
+        let wait_handle1 =
+            tokio::spawn(
+                async move { waiter1_clone.wait(std::time::Duration::from_secs(5)).await },
+            );
+        let wait_handle2 =
+            tokio::spawn(
+                async move { waiter2_clone.wait(std::time::Duration::from_secs(5)).await },
+            );
+        let wait_handle3 =
+            tokio::spawn(
+                async move { waiter3_clone.wait(std::time::Duration::from_secs(5)).await },
+            );
 
         // Give waiters time to start
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -2225,9 +2522,21 @@ impl MockActorService {
         let reply2 = create_test_message(b"reply2".to_vec());
         let reply3 = create_test_message(b"reply3".to_vec());
 
-        assert!(actor_ref.try_notify_reply_waiter(&corr_id1, reply1.clone()).await);
-        assert!(actor_ref.try_notify_reply_waiter(&corr_id2, reply2.clone()).await);
-        assert!(actor_ref.try_notify_reply_waiter(&corr_id3, reply3.clone()).await);
+        assert!(
+            actor_ref
+                .try_notify_reply_waiter(&corr_id1, reply1.clone())
+                .await
+        );
+        assert!(
+            actor_ref
+                .try_notify_reply_waiter(&corr_id2, reply2.clone())
+                .await
+        );
+        assert!(
+            actor_ref
+                .try_notify_reply_waiter(&corr_id3, reply3.clone())
+                .await
+        );
 
         // Verify all replies were received
         assert_eq!(wait_handle1.await.unwrap().unwrap().payload, reply1.payload);
@@ -2240,7 +2549,13 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_concurrent() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox, service_locator.clone());
+        let actor_ref = ActorRef::local(
+            "test-actor@node1",
+            "",
+            "test",
+            mailbox,
+            service_locator.clone(),
+        );
 
         // Register multiple waiters in ReplyWaiterRegistry
         let mut handles: Vec<(tokio::task::JoinHandle<bool>, String)> = Vec::new();
@@ -2258,7 +2573,9 @@ impl MockActorService {
             let corr_id_clone = corr_id.clone();
             let handle = tokio::spawn(async move {
                 let reply = create_test_message(format!("reply-{}", i).into_bytes());
-                actor_ref_clone.try_notify_reply_waiter(&corr_id_clone, reply).await
+                actor_ref_clone
+                    .try_notify_reply_waiter(&corr_id_clone, reply)
+                    .await
             });
 
             handles.push((handle, corr_id));
@@ -2276,7 +2593,13 @@ impl MockActorService {
     async fn test_try_notify_reply_waiter_timeout() {
         let mailbox = create_test_mailbox().await;
         let service_locator = create_test_service_locator().await;
-        let _actor_ref = ActorRef::local("test-actor@node1", "", "test", mailbox, service_locator.clone());
+        let _actor_ref = ActorRef::local(
+            "test-actor@node1",
+            "",
+            "test",
+            mailbox,
+            service_locator.clone(),
+        );
 
         // Register a waiter in ReplyWaiterRegistry
         let correlation_id = "corr-timeout".to_string();
@@ -2284,12 +2607,16 @@ impl MockActorService {
         let waiter_clone = waiter.clone();
 
         if let Some(waiter_registry) = service_locator.reply_waiter_registry().await {
-            waiter_registry.register(correlation_id.clone(), waiter).await;
+            waiter_registry
+                .register(correlation_id.clone(), waiter)
+                .await;
         }
 
         // Spawn task that will timeout
         let wait_handle = tokio::spawn(async move {
-            waiter_clone.wait(std::time::Duration::from_millis(100)).await
+            waiter_clone
+                .wait(std::time::Duration::from_millis(100))
+                .await
         });
 
         // Wait for timeout
@@ -2297,4 +2624,3 @@ impl MockActorService {
         assert!(result.is_err(), "Should timeout");
     }
 }
-

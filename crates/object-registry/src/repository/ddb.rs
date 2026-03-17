@@ -118,7 +118,13 @@ impl DynamoDBObjectRegistryRepository {
     /// Ensure table exists with proper schema
     async fn ensure_table_exists(&self) -> RepositoryResult<()> {
         // Check if table exists
-        match self.client.describe_table().table_name(&self.table_name).send().await {
+        match self
+            .client
+            .describe_table()
+            .table_name(&self.table_name)
+            .send()
+            .await
+        {
             Ok(_) => {
                 debug!(table_name = %self.table_name, "Table already exists");
                 return Ok(());
@@ -356,14 +362,8 @@ impl ObjectRegistryRepository for DynamoDBObjectRegistryRepository {
             "last_heartbeat".to_string(),
             AttributeValue::N(last_heartbeat.to_string()),
         );
-        item.insert(
-            "created_at".to_string(),
-            AttributeValue::N(now.to_string()),
-        );
-        item.insert(
-            "updated_at".to_string(),
-            AttributeValue::N(now.to_string()),
-        );
+        item.insert("created_at".to_string(), AttributeValue::N(now.to_string()));
+        item.insert("updated_at".to_string(), AttributeValue::N(now.to_string()));
         item.insert(
             "registration_blob".to_string(),
             AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(blob)),
@@ -465,9 +465,7 @@ impl ObjectRegistryRepository for DynamoDBObjectRegistryRepository {
             let type_prefix = format!("{}#", obj_type.clone() as i32);
             (
                 Some("type_index"),
-                format!(
-                    "tenant_namespace = :tn AND begins_with(object_type_id, :tp)"
-                ),
+                format!("tenant_namespace = :tn AND begins_with(object_type_id, :tp)"),
             )
         } else if filter.last_heartbeat_before.is_some() || filter.last_heartbeat_after.is_some() {
             // Use heartbeat_index GSI
@@ -493,11 +491,17 @@ impl ObjectRegistryRepository for DynamoDBObjectRegistryRepository {
         }
 
         if let Some(before) = filter.last_heartbeat_before {
-            expression_values.insert(":hb_before".to_string(), AttributeValue::N(before.to_string()));
+            expression_values.insert(
+                ":hb_before".to_string(),
+                AttributeValue::N(before.to_string()),
+            );
         }
 
         if let Some(after) = filter.last_heartbeat_after {
-            expression_values.insert(":hb_after".to_string(), AttributeValue::N(after.to_string()));
+            expression_values.insert(
+                ":hb_after".to_string(),
+                AttributeValue::N(after.to_string()),
+            );
         }
 
         // Build filter expression for additional filters

@@ -11,13 +11,13 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_wasm_runtime::component_host::DurabilityImpl;
-    use plexspaces_wasm_runtime::component_host::plexspaces::actor::durability::Host;
-    use plexspaces_wasm_runtime::component_host::plexspaces::actor::types as actor_types;
     use plexspaces_core::ActorId;
     use plexspaces_journaling::{JournalStorage, SqliteJournalStorage};
-    use std::sync::Arc;
+    use plexspaces_wasm_runtime::component_host::plexspaces::actor::durability::Host;
+    use plexspaces_wasm_runtime::component_host::plexspaces::actor::types as actor_types;
+    use plexspaces_wasm_runtime::component_host::DurabilityImpl;
     use plexspaces_wasm_runtime::HostFunctions;
+    use std::sync::Arc;
 
     // Helper to create context for tests
     fn test_context(tenant_id: &str, namespace: &str) -> actor_types::Context {
@@ -29,8 +29,9 @@ mod tests {
     }
 
     async fn create_test_host_functions_with_journal() -> Arc<HostFunctions> {
-        let journal_storage: Arc<dyn JournalStorage + Send + Sync> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-        
+        let journal_storage: Arc<dyn JournalStorage + Send + Sync> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+
         Arc::new(HostFunctions::with_all_services(
             None, // No message sender
             None, // No channel service
@@ -52,11 +53,13 @@ mod tests {
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist an event
-        let result = durability.persist(
-            test_context("", ""),
-            "test.event".to_string(),
-            b"test-payload".to_vec(),
-        ).await;
+        let result = durability
+            .persist(
+                test_context("", ""),
+                "test.event".to_string(),
+                b"test-payload".to_vec(),
+            )
+            .await;
 
         // ASSERT: Should succeed and return sequence number
         assert!(result.is_ok(), "persist should succeed");
@@ -83,7 +86,11 @@ mod tests {
         // MemoryJournalStorage assigns sequences starting from 1 for the first event
         assert!(result.is_ok(), "persist_batch should succeed");
         let first_sequence = result.unwrap();
-        assert_eq!(first_sequence, 1, "First event in batch should have sequence 1, got {}", first_sequence);
+        assert_eq!(
+            first_sequence, 1,
+            "First event in batch should have sequence 1, got {}",
+            first_sequence
+        );
     }
 
     #[tokio::test]
@@ -94,9 +101,30 @@ mod tests {
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist some events
-        durability.persist(test_context("", ""), "event1".to_string(), b"payload1".to_vec()).await.unwrap();
-        durability.persist(test_context("", ""), "event2".to_string(), b"payload2".to_vec()).await.unwrap();
-        durability.persist(test_context("", ""), "event3".to_string(), b"payload3".to_vec()).await.unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event1".to_string(),
+                b"payload1".to_vec(),
+            )
+            .await
+            .unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event2".to_string(),
+                b"payload2".to_vec(),
+            )
+            .await
+            .unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event3".to_string(),
+                b"payload3".to_vec(),
+            )
+            .await
+            .unwrap();
 
         // ACT: Get sequence
         let result = durability.get_sequence(test_context("", "")).await;
@@ -115,8 +143,22 @@ mod tests {
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist some events
-        durability.persist(test_context("", ""), "event1".to_string(), b"payload1".to_vec()).await.unwrap();
-        durability.persist(test_context("", ""), "event2".to_string(), b"payload2".to_vec()).await.unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event1".to_string(),
+                b"payload1".to_vec(),
+            )
+            .await
+            .unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event2".to_string(),
+                b"payload2".to_vec(),
+            )
+            .await
+            .unwrap();
 
         // ACT: Create checkpoint
         let result = durability.checkpoint(test_context("", "")).await;
@@ -135,12 +177,28 @@ mod tests {
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist events and create checkpoint
-        durability.persist(test_context("", ""), "event1".to_string(), b"payload1".to_vec()).await.unwrap();
-        durability.persist(test_context("", ""), "event2".to_string(), b"payload2".to_vec()).await.unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event1".to_string(),
+                b"payload1".to_vec(),
+            )
+            .await
+            .unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event2".to_string(),
+                b"payload2".to_vec(),
+            )
+            .await
+            .unwrap();
         durability.checkpoint(test_context("", "")).await.unwrap();
 
         // ACT: Get checkpoint sequence
-        let result = durability.get_checkpoint_sequence(test_context("", "")).await;
+        let result = durability
+            .get_checkpoint_sequence(test_context("", ""))
+            .await;
 
         // ASSERT: Should return checkpoint sequence
         assert!(result.is_ok(), "get_checkpoint_sequence should succeed");
@@ -160,7 +218,11 @@ mod tests {
 
         // ASSERT: Should return false
         assert!(result.is_ok(), "is_replaying should succeed");
-        assert_eq!(result.unwrap(), false, "Should not be in replay mode by default");
+        assert_eq!(
+            result.unwrap(),
+            false,
+            "Should not be in replay mode by default"
+        );
     }
 
     #[tokio::test]
@@ -171,16 +233,22 @@ mod tests {
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Cache a side effect
-        let result = durability.cache_side_effect(
-            test_context("", ""),
-            "test-key".to_string(),
-            b"test-result".to_vec(),
-        ).await;
+        let result = durability
+            .cache_side_effect(
+                test_context("", ""),
+                "test-key".to_string(),
+                b"test-result".to_vec(),
+            )
+            .await;
 
         // ASSERT: Should succeed and return the value
         assert!(result.is_ok(), "cache_side_effect should succeed");
         let cached_value = result.unwrap();
-        assert_eq!(cached_value, b"test-result".to_vec(), "Should return cached value");
+        assert_eq!(
+            cached_value,
+            b"test-result".to_vec(),
+            "Should return cached value"
+        );
     }
 
     #[tokio::test]
@@ -191,19 +259,45 @@ mod tests {
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist some events
-        durability.persist(test_context("", ""), "event1".to_string(), b"payload1".to_vec()).await.unwrap();
-        durability.persist(test_context("", ""), "event2".to_string(), b"payload2".to_vec()).await.unwrap();
-        durability.persist(test_context("", ""), "event3".to_string(), b"payload3".to_vec()).await.unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event1".to_string(),
+                b"payload1".to_vec(),
+            )
+            .await
+            .unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event2".to_string(),
+                b"payload2".to_vec(),
+            )
+            .await
+            .unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event3".to_string(),
+                b"payload3".to_vec(),
+            )
+            .await
+            .unwrap();
 
         // ACT: Read journal
-        let result = durability.read_journal(test_context("", ""), 1, 0, 10).await;
+        let result = durability
+            .read_journal(test_context("", ""), 1, 0, 10)
+            .await;
 
         // ASSERT: Should succeed and return entries
         assert!(result.is_ok(), "read_journal should succeed");
         let entries = result.unwrap();
         assert_eq!(entries.len(), 3, "Should return 3 entries");
         assert_eq!(entries[0].sequence, 1, "First entry should have sequence 1");
-        assert_eq!(entries[0].event_type, "event1", "First entry should have event_type 'event1'");
+        assert_eq!(
+            entries[0].event_type, "event1",
+            "First entry should have event_type 'event1'"
+        );
     }
 
     #[tokio::test]
@@ -214,8 +308,22 @@ mod tests {
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Persist events and create checkpoint
-        durability.persist(test_context("", ""), "event1".to_string(), b"payload1".to_vec()).await.unwrap();
-        durability.persist(test_context("", ""), "event2".to_string(), b"payload2".to_vec()).await.unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event1".to_string(),
+                b"payload1".to_vec(),
+            )
+            .await
+            .unwrap();
+        durability
+            .persist(
+                test_context("", ""),
+                "event2".to_string(),
+                b"payload2".to_vec(),
+            )
+            .await
+            .unwrap();
         durability.checkpoint(test_context("", "")).await.unwrap();
 
         // ACT: Compact journal
@@ -233,11 +341,13 @@ mod tests {
         let mut durability = DurabilityImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Try to persist (should fail)
-        let result = durability.persist(
-            test_context("", ""),
-            "test.event".to_string(),
-            b"test-payload".to_vec(),
-        ).await;
+        let result = durability
+            .persist(
+                test_context("", ""),
+                "test.event".to_string(),
+                b"test-payload".to_vec(),
+            )
+            .await;
 
         // ASSERT: Should return error
         assert!(result.is_err(), "persist should fail without storage");
@@ -245,12 +355,13 @@ mod tests {
         // actor-error is now a string (JSON), not a record
         assert!(
             error.contains("internal") || error.contains("Internal"),
-            "Error should indicate internal error type, got: {}", error
+            "Error should indicate internal error type, got: {}",
+            error
         );
         assert!(
             error.contains("Journal storage not configured") || error.contains("not configured"),
-            "Error message should mention storage not configured, got: {}", error
+            "Error message should mention storage not configured, got: {}",
+            error
         );
     }
 }
-

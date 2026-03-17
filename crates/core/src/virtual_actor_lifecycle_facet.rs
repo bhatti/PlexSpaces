@@ -35,8 +35,8 @@
 //! guarantees.
 
 use async_trait::async_trait;
-use std::time::{Duration, SystemTime};
 use plexspaces_common::ActivationStrategy;
+use std::time::{Duration, SystemTime};
 
 /// Lifecycle state for virtual actors
 #[derive(Debug, Clone, PartialEq)]
@@ -66,25 +66,25 @@ pub struct VirtualActorLifecycleState {
 pub trait VirtualActorLifecycleFacet: Send + Sync + std::fmt::Debug {
     /// Get activation strategy (lazy, eager, prewarm)
     async fn get_activation_strategy(&self) -> ActivationStrategy;
-    
+
     /// Get current lifecycle state
     async fn get_lifecycle_state(&self) -> VirtualActorLifecycleState;
-    
+
     /// Check if actor should be activated
     async fn should_activate(&self) -> bool;
-    
+
     /// Check if actor should be deactivated (idle timeout exceeded)
     async fn should_deactivate(&self) -> bool;
-    
+
     /// Start activation process (returns false if already activating)
     async fn start_activation(&self) -> bool;
-    
+
     /// Mark actor as activated
     async fn mark_activated(&self);
-    
+
     /// Mark actor as deactivated
     async fn mark_deactivated(&self);
-    
+
     /// Update last access time
     async fn update_access_time(&self);
 }

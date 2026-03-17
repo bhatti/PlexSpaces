@@ -28,36 +28,32 @@
 //! - Provides pagination for large datasets
 //! - Production-ready error handling and validation
 
+use chrono::Utc;
+use prost_types::Timestamp;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use chrono::Utc;
 use tonic::{Request, Response, Status};
-use prost_types::Timestamp;
 
-use plexspaces_core::{RequestContext, ServiceLocator as ServiceLocatorTrait, ServiceLocator, ActorRegistry, ActorId};
+use plexspaces_core::{
+    ActorId, ActorRegistry, RequestContext, ServiceLocator as ServiceLocatorTrait, ServiceLocator,
+};
+use plexspaces_proto::application::v1::application_service_client::ApplicationServiceClient;
+use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use plexspaces_proto::dashboard::v1::{
-    dashboard_service_server::DashboardService,
-    GetSummaryRequest, GetSummaryResponse,
-    GetNodesRequest, GetNodesResponse,
-    GetNodeDashboardRequest, GetNodeDashboardResponse,
-    GetApplicationsRequest, GetApplicationsResponse,
-    GetActorsRequest, GetActorsResponse,
-    GetWorkflowsRequest, GetWorkflowsResponse,
-    GetDependencyHealthRequest, GetDependencyHealthResponse,
-    ActorInfo, NodeSummaryMetrics,
+    dashboard_service_server::DashboardService, ActorInfo, GetActorsRequest, GetActorsResponse,
+    GetApplicationsRequest, GetApplicationsResponse, GetDependencyHealthRequest,
+    GetDependencyHealthResponse, GetNodeDashboardRequest, GetNodeDashboardResponse,
+    GetNodesRequest, GetNodesResponse, GetSummaryRequest, GetSummaryResponse, GetWorkflowsRequest,
+    GetWorkflowsResponse, NodeSummaryMetrics,
+};
+use plexspaces_proto::metrics::v1::{ActorMetrics, SystemMetrics};
+use plexspaces_proto::node::v1::{
+    Node as ProtoNode, NodeMetrics as ProtoNodeMetrics, NodeStatus, NodeType,
 };
 use plexspaces_proto::system::v1::DetailedHealthCheck;
-use plexspaces_proto::node::v1::{
-    Node as ProtoNode, NodeType, NodeStatus, NodeMetrics as ProtoNodeMetrics,
-};
-use plexspaces_proto::application::v1::{
-    application_service_client::ApplicationServiceClient,
-};
-use plexspaces_proto::common::v1::{PageRequest, PageResponse};
-use plexspaces_proto::metrics::v1::{SystemMetrics, ActorMetrics};
 
 /// Trait for accessing detailed health information
-/// 
+///
 /// ## Purpose
 /// Abstracts health reporter access to avoid circular dependency between dashboard and node crates.
 /// Dashboard can use this trait to get dependency health without importing node crate.
@@ -71,7 +67,7 @@ pub trait HealthReporterAccess: Send + Sync {
 pub struct DashboardServiceImpl {
     /// Service locator for accessing all services
     service_locator: Arc<dyn ServiceLocator>,
-    
+
     /// Optional health reporter access (to avoid circular dependency)
     health_reporter_access: Option<Arc<dyn HealthReporterAccess>>,
 }
@@ -84,7 +80,7 @@ impl DashboardServiceImpl {
             health_reporter_access: None,
         }
     }
-    
+
     /// Create new dashboard service with health reporter access
     pub fn with_health_reporter(
         service_locator: Arc<dyn ServiceLocatorTrait>,
@@ -95,7 +91,7 @@ impl DashboardServiceImpl {
             health_reporter_access: Some(health_reporter_access),
         }
     }
-    
+
     /// Get service locator reference
     pub fn service_locator(&self) -> &Arc<dyn ServiceLocatorTrait> {
         &self.service_locator
@@ -104,7 +100,8 @@ impl DashboardServiceImpl {
     /// Get tenant ID from request context (for filtering)
     fn get_tenant_id_from_context(&self, request: &Request<()>) -> Option<String> {
         // Extract tenant_id from request metadata (set by auth middleware)
-        request.metadata()
+        request
+            .metadata()
             .get("x-tenant-id")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string())
@@ -113,7 +110,8 @@ impl DashboardServiceImpl {
     /// Check if user is admin (from request context)
     fn is_admin(&self, request: &Request<()>) -> bool {
         // Check for admin role in metadata (set by auth middleware)
-        request.metadata()
+        request
+            .metadata()
             .get("x-user-role")
             .and_then(|v| v.to_str().ok())
             .map(|s| s == "admin")
@@ -146,11 +144,16 @@ impl DashboardServiceImpl {
     /// Convert Node to ProtoNode
     async fn node_to_proto(&self) -> Result<ProtoNode, Status> {
         // Get NodeMetricsAccessor from ServiceLocator
-        let metrics_accessor = self.service_locator.get_node_metrics_accessor().await
-            .ok_or_else(|| Status::internal("NodeMetricsAccessor not registered in ServiceLocator"))?;
-        
+        let metrics_accessor = self
+            .service_locator
+            .get_node_metrics_accessor()
+            .await
+            .ok_or_else(|| {
+                Status::internal("NodeMetricsAccessor not registered in ServiceLocator")
+            })?;
+
         let metrics = metrics_accessor.get_metrics().await;
-        
+
         Ok(ProtoNode {
             id: metrics.node_id.clone(),
             node_type: NodeType::NodeTypeProcess as i32,
@@ -190,14 +193,20 @@ impl DashboardServiceImpl {
     }
 
     /// Get dependency health status
-    async fn get_dependency_health_internal(&self, include_non_critical: bool) -> DetailedHealthCheck {
+    async fn get_dependency_health_internal(
+        &self,
+        include_non_critical: bool,
+    ) -> DetailedHealthCheck {
         // Use health reporter access if available
         if let Some(health_access) = &self.health_reporter_access {
-            health_access.get_detailed_health(include_non_critical).await
+            health_access
+                .get_detailed_health(include_non_critical)
+                .await
         } else {
             // Fallback: return empty health check if health reporter not available
             DetailedHealthCheck {
-                overall_status: plexspaces_proto::system::v1::HealthStatus::HealthStatusUnhealthy as i32,
+                overall_status: plexspaces_proto::system::v1::HealthStatus::HealthStatusUnhealthy
+                    as i32,
                 component_checks: vec![],
                 dependency_checks: vec![],
                 critical_dependencies_healthy: false,
@@ -208,8 +217,10 @@ impl DashboardServiceImpl {
 
     /// Get system metrics from node
     async fn get_system_metrics(&self) -> Option<SystemMetrics> {
+        use plexspaces_proto::metrics::v1::{
+            ComponentMetrics, CpuMetrics, DiskMetrics, MemoryMetrics, NetworkMetrics,
+        };
         use sysinfo::System;
-        use plexspaces_proto::metrics::v1::{CpuMetrics, MemoryMetrics, DiskMetrics, NetworkMetrics, ComponentMetrics};
 
         let mut system = System::new();
         system.refresh_all();
@@ -219,7 +230,12 @@ impl DashboardServiceImpl {
         let available_memory = system.available_memory();
         let cpu_count = system.cpus().len() as u32;
         let cpu_usage = if cpu_count > 0 {
-            system.cpus().iter().map(|cpu| cpu.cpu_usage() as f64).sum::<f64>() / cpu_count as f64
+            system
+                .cpus()
+                .iter()
+                .map(|cpu| cpu.cpu_usage() as f64)
+                .sum::<f64>()
+                / cpu_count as f64
         } else {
             0.0
         };
@@ -227,11 +243,15 @@ impl DashboardServiceImpl {
         // Get actors by type using actor_type_index
         let mut active_actors_by_type: HashMap<String, u32> = HashMap::new();
         if let Some(actor_registry) = self.service_locator.actor_registry().await {
-            let index: tokio::sync::RwLockReadGuard<'_, HashMap<(String, String, String), Vec<ActorId>>> = actor_registry.actor_type_index().read().await;
+            let index: tokio::sync::RwLockReadGuard<
+                '_,
+                HashMap<(String, String, String), Vec<ActorId>>,
+            > = actor_registry.actor_type_index().read().await;
             for ((_tenant, _namespace, actor_type), actor_ids) in index.iter() {
-                *active_actors_by_type.entry(actor_type.clone()).or_insert(0) += actor_ids.len() as u32;
+                *active_actors_by_type.entry(actor_type.clone()).or_insert(0) +=
+                    actor_ids.len() as u32;
             }
-            
+
             // Also count actors without type (registered but not in index)
             let registered_ids = actor_registry.registered_actor_ids().read().await;
             let mut typed_actors: HashSet<ActorId> = HashSet::new();
@@ -242,7 +262,9 @@ impl DashboardServiceImpl {
             }
             let untyped_count = registered_ids.len().saturating_sub(typed_actors.len());
             if untyped_count > 0 {
-                *active_actors_by_type.entry("unknown".to_string()).or_insert(0) += untyped_count as u32;
+                *active_actors_by_type
+                    .entry("unknown".to_string())
+                    .or_insert(0) += untyped_count as u32;
             }
         }
 
@@ -275,7 +297,7 @@ impl DashboardServiceImpl {
                 let total_disk_bytes: u64 = disks.iter().map(|d| d.total_space()).sum();
                 let available_disk_bytes: u64 = disks.iter().map(|d| d.available_space()).sum();
                 let used_disk_bytes = total_disk_bytes.saturating_sub(available_disk_bytes);
-                
+
                 if total_disk_bytes > 0 {
                     Some(DiskMetrics {
                         total_gb: total_disk_bytes / (1024 * 1024 * 1024),
@@ -302,28 +324,26 @@ impl DashboardServiceImpl {
             }),
             components: Some(ComponentMetrics {
                 active_actors_by_type,
-                active_vms: 0, // VM registry not yet integrated
-                tuplespace_size: 0, // TupleSpace size tracking not yet integrated
+                active_vms: 0,           // VM registry not yet integrated
+                tuplespace_size: 0,      // TupleSpace size tracking not yet integrated
                 active_subscriptions: 0, // Subscription tracking not yet implemented
-                active_transactions: 0, // Transaction tracking not yet implemented
+                active_transactions: 0,  // Transaction tracking not yet implemented
             }),
         })
     }
 
     /// Get journal size and checkpoint for durable actor
-    async fn get_durable_actor_metrics(
-        &self,
-        actor_id: &ActorId,
-    ) -> (u64, Option<Timestamp>) {
+    async fn get_durable_actor_metrics(&self, actor_id: &ActorId) -> (u64, Option<Timestamp>) {
         // Check if actor has durability facet
         if let Some(facet_manager_wrapper) = self.service_locator.get_facet_manager().await {
             let facet_manager = facet_manager_wrapper.inner_clone();
-            if let Some(facet_container_arc) = facet_manager.get_facets(&actor_id.to_string()).await {
+            if let Some(facet_container_arc) = facet_manager.get_facets(&actor_id.to_string()).await
+            {
                 let facet_container = facet_container_arc.read().await;
                 // Check if durability facet is attached using list_facets()
                 let facet_types = facet_container.list_facets();
                 let has_durability = facet_types.iter().any(|t| t == "durability");
-                
+
                 if has_durability {
                     // Journal metrics would require accessing DurabilityFacet's storage backend
                     // This would need a method on DurabilityFacet to expose checkpoint info
@@ -332,7 +352,7 @@ impl DashboardServiceImpl {
                 }
             }
         }
-        
+
         (0, None)
     }
 
@@ -341,7 +361,7 @@ impl DashboardServiceImpl {
         if let Some(actor_registry) = self.service_locator.actor_registry().await {
             let metrics_handle = actor_registry.actor_metrics();
             let metrics = metrics_handle.read().await;
-            
+
             // Get metrics for this specific actor
             // Note: ActorMetrics in registry is aggregate, not per-actor
             // For per-actor metrics, we'd need to track them separately
@@ -349,7 +369,12 @@ impl DashboardServiceImpl {
             // ActorMetrics is a proto struct with fields, not methods
             Some(ActorMetrics {
                 spawn_total: metrics.spawn_total,
-                active: if actor_registry.registered_actor_ids().read().await.contains(actor_id) {
+                active: if actor_registry
+                    .registered_actor_ids()
+                    .read()
+                    .await
+                    .contains(actor_id)
+                {
                     1
                 } else {
                     0
@@ -388,7 +413,7 @@ impl DashboardServiceImpl {
         let parts: Vec<&str> = actor_id.split('@').collect();
         let name_part = parts[0];
         let name_parts: Vec<&str> = name_part.split('/').collect();
-        
+
         if name_parts.len() == 2 {
             (name_parts[0].to_string(), String::new()) // Namespace from actor ID, empty tenant
         } else {
@@ -414,7 +439,7 @@ impl DashboardServiceImpl {
         let total_size = items.len();
         let start = offset.min(total_size);
         let end = (start + limit).min(total_size);
-        
+
         let paginated_items = items[start..end].to_vec();
         let has_next = end < total_size;
 
@@ -437,18 +462,22 @@ impl DashboardServiceImpl {
         let ctx = self.request_context_for_dashboard(tenant_id, None).await;
 
         // Use NodeRegistry (which internally uses ObjectRegistry with caching)
-        let node_registry = self.service_locator.get_node_registry().await
+        let node_registry = self
+            .service_locator
+            .get_node_registry()
+            .await
             .ok_or_else(|| Status::internal("NodeRegistry not found in ServiceLocator"))?;
-        
+
         let cluster = cluster_id.as_deref();
         let (registrations, _next_token) = node_registry
             .list_nodes(&ctx, cluster, 1000, "")
             .await
             .map_err(|e| Status::internal(format!("Failed to list nodes: {}", e)))?;
-        
+
         // Convert NodeRegistrations to ProtoNodes
-        let nodes = registrations.into_iter().map(|reg| {
-            ProtoNode {
+        let nodes = registrations
+            .into_iter()
+            .map(|reg| ProtoNode {
                 id: reg.node_id.clone(),
                 node_type: NodeType::NodeTypeProcess as i32,
                 status: reg.status,
@@ -462,9 +491,9 @@ impl DashboardServiceImpl {
                 auto_generate_certs: false,
                 cluster_name: reg.capabilities.get("cluster").cloned().unwrap_or_default(),
                 actor_ids: vec![],
-            }
-        }).collect();
-        
+            })
+            .collect();
+
         Ok(nodes)
     }
 }
@@ -496,9 +525,17 @@ impl DashboardService for DashboardServiceImpl {
         };
 
         // Get nodes list (local + remote)
-        let cluster_id = if req.cluster_id.is_empty() { None } else { Some(req.cluster_id.clone()) };
-        let local_nodes = self.get_nodes_internal(tenant_id.clone(), cluster_id.clone(), None).await?;
-        let remote_nodes = self.query_remote_nodes(tenant_id.clone(), cluster_id.clone()).await?;
+        let cluster_id = if req.cluster_id.is_empty() {
+            None
+        } else {
+            Some(req.cluster_id.clone())
+        };
+        let local_nodes = self
+            .get_nodes_internal(tenant_id.clone(), cluster_id.clone(), None)
+            .await?;
+        let remote_nodes = self
+            .query_remote_nodes(tenant_id.clone(), cluster_id.clone())
+            .await?;
         let all_nodes = [local_nodes, remote_nodes].concat();
         let total_nodes = all_nodes.len() as u32;
 
@@ -531,10 +568,15 @@ impl DashboardService for DashboardServiceImpl {
         let total_tenants = if is_admin {
             // Collect unique tenant IDs from applications and actors
             let mut tenant_ids = HashSet::new();
-            
+
             // Get from applications (if they have tenant metadata)
-            let app_manager = self.service_locator.application_manager().await
-                .ok_or_else(|| Status::internal("ApplicationManager not available in ServiceLocator"))?;
+            let app_manager = self
+                .service_locator
+                .application_manager()
+                .await
+                .ok_or_else(|| {
+                    Status::internal("ApplicationManager not available in ServiceLocator")
+                })?;
             let app_names = app_manager.list_applications().await;
             for name in app_names {
                 if let Some(_info) = app_manager.get_application_info(&name).await {
@@ -542,7 +584,7 @@ impl DashboardService for DashboardServiceImpl {
                     // Skip applications without tenant_id (don't add hardcoded "default")
                 }
             }
-            
+
             // Get from actors (parse from actor IDs or get from isolation context)
             if let Some(actor_registry) = self.service_locator.actor_registry().await {
                 let registered_ids = actor_registry.registered_actor_ids().read().await;
@@ -551,45 +593,62 @@ impl DashboardService for DashboardServiceImpl {
                     tenant_ids.insert(tenant);
                 }
             }
-            
+
             tenant_ids.len() as u32
         } else if let Some(ref tid) = tenant_id {
             if tid.is_empty() {
                 // If no tenant_id but node is running, show 1 (current tenant)
-                if total_nodes > 0 { 1 } else { 0 }
+                if total_nodes > 0 {
+                    1
+                } else {
+                    0
+                }
             } else {
                 1
             }
         } else {
             // No tenant_id specified, but if node is running, show 1
-            if total_nodes > 0 { 1 } else { 0 }
+            if total_nodes > 0 {
+                1
+            } else {
+                0
+            }
         };
 
         // Count applications (filtered by tenant if auth)
-        let app_manager = self.service_locator.application_manager().await
-            .ok_or_else(|| Status::internal("ApplicationManager not available in ServiceLocator"))?;
+        let app_manager = self
+            .service_locator
+            .application_manager()
+            .await
+            .ok_or_else(|| {
+                Status::internal("ApplicationManager not available in ServiceLocator")
+            })?;
         let app_names = app_manager.list_applications().await;
         let total_applications = app_names.len() as u32;
 
         // Aggregate actors by type from ActorRegistry using actor_type_index
         let mut actors_by_type: HashMap<String, u32> = HashMap::new();
-        
+
         // Get ActorRegistry using helper method
         let actor_registry = self.service_locator.actor_registry().await;
-        
+
         if let Some(actor_registry) = actor_registry {
             // Use actor_type_index to get counts by type
             let index = actor_registry.actor_type_index().read().await;
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("get_summary: actor_type_index has {} entries", index.len());
+                tracing::debug!("get_summary: actor_type_index has {} entries", index.len());
             }
             for ((_tenant, _namespace, actor_type), actor_ids) in index.iter() {
                 *actors_by_type.entry(actor_type.clone()).or_insert(0) += actor_ids.len() as u32;
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!("get_summary: aggregated actor_type={}, count={}", actor_type, actor_ids.len());
+                    tracing::debug!(
+                        "get_summary: aggregated actor_type={}, count={}",
+                        actor_type,
+                        actor_ids.len()
+                    );
                 }
             }
-            
+
             // Also count actors without type (registered but not in index)
             let registered_ids = actor_registry.registered_actor_ids().read().await;
             let mut typed_actors = HashSet::new();
@@ -620,11 +679,21 @@ impl DashboardService for DashboardServiceImpl {
         request: Request<GetNodesRequest>,
     ) -> Result<Response<GetNodesResponse>, Status> {
         let req = request.into_inner();
-        let tenant_id = if req.tenant_id.is_empty() { None } else { Some(req.tenant_id.clone()) };
-        let cluster_id = if req.cluster_id.is_empty() { None } else { Some(req.cluster_id.clone()) };
+        let tenant_id = if req.tenant_id.is_empty() {
+            None
+        } else {
+            Some(req.tenant_id.clone())
+        };
+        let cluster_id = if req.cluster_id.is_empty() {
+            None
+        } else {
+            Some(req.cluster_id.clone())
+        };
         let page_request = req.page;
 
-        let local_nodes = self.get_nodes_internal(tenant_id.clone(), cluster_id.clone(), page_request.clone()).await?;
+        let local_nodes = self
+            .get_nodes_internal(tenant_id.clone(), cluster_id.clone(), page_request.clone())
+            .await?;
         let remote_nodes = self.query_remote_nodes(tenant_id, cluster_id).await?;
         let all_nodes = [local_nodes, remote_nodes].concat();
 
@@ -654,8 +723,13 @@ impl DashboardService for DashboardServiceImpl {
         let ctx = self.request_context_for_dashboard(tenant_id, None).await;
 
         // Get local node ID from metrics
-        let metrics_accessor = self.service_locator.get_node_metrics_accessor().await
-            .ok_or_else(|| Status::internal("NodeMetricsAccessor not registered in ServiceLocator"))?;
+        let metrics_accessor = self
+            .service_locator
+            .get_node_metrics_accessor()
+            .await
+            .ok_or_else(|| {
+                Status::internal("NodeMetricsAccessor not registered in ServiceLocator")
+            })?;
         let local_metrics = metrics_accessor.get_metrics().await;
         let local_node_id = local_metrics.node_id;
 
@@ -691,24 +765,29 @@ impl DashboardService for DashboardServiceImpl {
         });
 
         // Get applications count
-        let app_manager = self.service_locator.application_manager().await
-            .ok_or_else(|| Status::internal("ApplicationManager not available in ServiceLocator"))?;
+        let app_manager = self
+            .service_locator
+            .application_manager()
+            .await
+            .ok_or_else(|| {
+                Status::internal("ApplicationManager not available in ServiceLocator")
+            })?;
         let app_names = app_manager.list_applications().await;
         let total_applications = app_names.len() as u32;
 
         // Get actors by type with proper type detection using actor_type_index
         let mut actors_by_type: HashMap<String, u32> = HashMap::new();
-        
+
         // Get ActorRegistry using helper method
         let actor_registry = self.service_locator.actor_registry().await;
-        
+
         if let Some(actor_registry) = actor_registry {
             // Use actor_type_index to get counts by type
             let index = actor_registry.actor_type_index().read().await;
             for ((_tenant, _namespace, actor_type), actor_ids) in index.iter() {
                 *actors_by_type.entry(actor_type.clone()).or_insert(0) += actor_ids.len() as u32;
             }
-            
+
             // Also count actors without type (registered but not in index)
             let registered_ids = actor_registry.registered_actor_ids().read().await;
             let mut typed_actors = HashSet::new();
@@ -766,7 +845,7 @@ impl DashboardService for DashboardServiceImpl {
         // Create a new Request with the metadata for context methods
         let mut request_for_context = Request::new(());
         *request_for_context.metadata_mut() = metadata;
-        
+
         // Get tenant_id from request context if not provided
         let tenant_id = if req.tenant_id.is_empty() {
             self.get_tenant_id_from_context(&request_for_context)
@@ -776,38 +855,52 @@ impl DashboardService for DashboardServiceImpl {
         let is_admin = self.is_admin(&request_for_context);
 
         // Get local node ID from metrics
-        let metrics_accessor = self.service_locator.get_node_metrics_accessor().await
-            .ok_or_else(|| Status::internal("NodeMetricsAccessor not registered in ServiceLocator"))?;
+        let metrics_accessor = self
+            .service_locator
+            .get_node_metrics_accessor()
+            .await
+            .ok_or_else(|| {
+                Status::internal("NodeMetricsAccessor not registered in ServiceLocator")
+            })?;
         let local_metrics = metrics_accessor.get_metrics().await;
         let local_node_id = local_metrics.node_id;
-        
+
         // Filter by node_id if provided
         if !req.node_id.is_empty() {
             if &req.node_id != &local_node_id {
                 // Remote node - query via ApplicationService
-                return self.query_remote_applications(&req.node_id, &req, tenant_id, is_admin).await;
+                return self
+                    .query_remote_applications(&req.node_id, &req, tenant_id, is_admin)
+                    .await;
             }
         }
 
         // Get applications from ApplicationManager
-        let app_manager = self.service_locator.application_manager().await
-            .ok_or_else(|| Status::internal("ApplicationManager not available in ServiceLocator"))?;
+        let app_manager = self
+            .service_locator
+            .application_manager()
+            .await
+            .ok_or_else(|| {
+                Status::internal("ApplicationManager not available in ServiceLocator")
+            })?;
         let app_names = app_manager.list_applications().await;
-        
+
         let mut applications = Vec::new();
         for name in app_names {
             if let Some(info) = app_manager.get_application_info(&name).await {
                 // Apply filters
                 if !req.name_pattern.is_empty() {
-                    if !info.name.contains(&req.name_pattern) && !info.application_id.contains(&req.name_pattern) {
+                    if !info.name.contains(&req.name_pattern)
+                        && !info.application_id.contains(&req.name_pattern)
+                    {
                         continue;
                     }
                 }
-                
+
                 // Note: ApplicationInfo doesn't currently include namespace/tenant_id metadata
                 // Filtering by these would require extending ApplicationInfo proto
                 // For now, all applications are returned (filtering by name_pattern works)
-                
+
                 applications.push(info);
             }
         }
@@ -826,9 +919,12 @@ impl DashboardService for DashboardServiceImpl {
         request: Request<GetActorsRequest>,
     ) -> Result<Response<GetActorsResponse>, Status> {
         let req = request.into_inner();
-        
+
         // Get ActorRegistry
-        let actor_registry: Arc<ActorRegistry> = self.service_locator.actor_registry().await
+        let actor_registry: Arc<ActorRegistry> = self
+            .service_locator
+            .actor_registry()
+            .await
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
 
         // Get registered actor IDs
@@ -843,7 +939,7 @@ impl DashboardService for DashboardServiceImpl {
                     continue;
                 }
             }
-            
+
             if !req.node_id.is_empty() {
                 // Parse actor_id to extract node_id (format: "actor@node")
                 let parts: Vec<&str> = actor_id.split('@').collect();
@@ -874,7 +970,7 @@ impl DashboardService for DashboardServiceImpl {
                 }
                 found_type.unwrap_or_else(|| "unknown".to_string())
             };
-            
+
             if !req.actor_type.is_empty() {
                 if &actor_type != &req.actor_type {
                     continue;
@@ -911,7 +1007,8 @@ impl DashboardService for DashboardServiceImpl {
             }
 
             // Get journal metrics for durable actors
-            let (journal_size_bytes, last_checkpoint) = self.get_durable_actor_metrics(actor_id).await;
+            let (journal_size_bytes, last_checkpoint) =
+                self.get_durable_actor_metrics(actor_id).await;
 
             // Get actor metrics
             let metrics = self.get_actor_metrics(actor_id).await;
@@ -934,7 +1031,8 @@ impl DashboardService for DashboardServiceImpl {
                         parts[1].to_string()
                     } else {
                         // Get local node ID from metrics
-                        let metrics_accessor = self.service_locator.get_node_metrics_accessor().await;
+                        let metrics_accessor =
+                            self.service_locator.get_node_metrics_accessor().await;
                         if let Some(getter) = metrics_accessor {
                             let metrics = getter.get_metrics().await;
                             metrics.node_id
@@ -968,9 +1066,11 @@ impl DashboardService for DashboardServiceImpl {
     ) -> Result<Response<GetDependencyHealthResponse>, Status> {
         let req = request.into_inner();
         let include_non_critical = req.include_non_critical;
-        
-        let health_check = self.get_dependency_health_internal(include_non_critical).await;
-        
+
+        let health_check = self
+            .get_dependency_health_internal(include_non_critical)
+            .await;
+
         Ok(Response::new(GetDependencyHealthResponse {
             health_check: Some(health_check),
             node_id: req.node_id,
@@ -982,7 +1082,7 @@ impl DashboardService for DashboardServiceImpl {
         _request: Request<GetWorkflowsRequest>,
     ) -> Result<Response<GetWorkflowsResponse>, Status> {
         let _req = _request.into_inner();
-        
+
         // Try to get WorkflowService from ServiceLocator
         // WorkflowService might not be registered, so handle gracefully
         // Note: WorkflowServiceImpl might not implement Service trait, so we can't query it this way
@@ -1024,16 +1124,23 @@ impl DashboardServiceImpl {
 
     /// Query remote node via NodeRegistry (which internally uses ObjectRegistry with caching).
     /// Uses request-scoped context (no admin).
-    async fn query_remote_node(&self, ctx: &RequestContext, node_id: &str) -> Result<ProtoNode, Status> {
-        let node_registry = self.service_locator.get_node_registry().await
+    async fn query_remote_node(
+        &self,
+        ctx: &RequestContext,
+        node_id: &str,
+    ) -> Result<ProtoNode, Status> {
+        let node_registry = self
+            .service_locator
+            .get_node_registry()
+            .await
             .ok_or_else(|| Status::internal("NodeRegistry not found in ServiceLocator"))?;
-        
+
         let reg = node_registry
             .lookup_node(&ctx, node_id)
             .await
             .map_err(|e| Status::internal(format!("Failed to lookup node: {}", e)))?
             .ok_or_else(|| Status::not_found(format!("Node not found: {}", node_id)))?;
-        
+
         Ok(ProtoNode {
             id: reg.node_id.clone(),
             node_type: NodeType::NodeTypeProcess as i32,
@@ -1060,11 +1167,16 @@ impl DashboardServiceImpl {
         _is_admin: bool,
     ) -> Result<Response<GetApplicationsResponse>, Status> {
         // Get node address from ObjectRegistry
-        let object_registry = self.service_locator.get_object_registry().await
+        let object_registry = self
+            .service_locator
+            .get_object_registry()
+            .await
             .ok_or_else(|| Status::internal("ObjectRegistry not found in ServiceLocator"))?;
 
         // Use request-scoped context (tenant from request or default; no admin)
-        let ctx = self.request_context_for_dashboard(_tenant_id.clone(), None).await;
+        let ctx = self
+            .request_context_for_dashboard(_tenant_id.clone(), None)
+            .await;
 
         // Lookup node registration (nodes are registered with object_id = node_id using ObjectTypeNode)
         use plexspaces_proto::object_registry::v1::ObjectType;
@@ -1073,12 +1185,12 @@ impl DashboardServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("Failed to lookup node: {}", e)))?
             .ok_or_else(|| Status::not_found(format!("Node not found: {}", node_id)))?;
-        
+
         let node_address = registration.grpc_address.clone();
 
         // Create gRPC client for remote node
         use tonic::transport::Channel;
-        
+
         let endpoint = Channel::from_shared(format!("http://{}", node_address))
             .map_err(|e| Status::internal(format!("Invalid endpoint: {}", e)))?;
         let channel = endpoint
@@ -1096,23 +1208,28 @@ impl DashboardServiceImpl {
         match client.list_applications(TonicRequest::new(list_req)).await {
             Ok(response) => {
                 let mut applications = response.into_inner().applications;
-                
+
                 // Apply filters
                 if !req.name_pattern.is_empty() {
                     applications.retain(|app| {
-                        app.name.contains(&req.name_pattern) || app.application_id.contains(&req.name_pattern)
+                        app.name.contains(&req.name_pattern)
+                            || app.application_id.contains(&req.name_pattern)
                     });
                 }
-                
+
                 // Apply pagination
-                let (paginated_apps, page_response) = Self::apply_pagination(applications, req.page.clone());
+                let (paginated_apps, page_response) =
+                    Self::apply_pagination(applications, req.page.clone());
 
                 Ok(Response::new(GetApplicationsResponse {
                     applications: paginated_apps,
                     page: Some(page_response),
                 }))
             }
-            Err(e) => Err(Status::internal(format!("Failed to get remote applications: {}", e))),
+            Err(e) => Err(Status::internal(format!(
+                "Failed to get remote applications: {}",
+                e
+            ))),
         }
     }
 }
@@ -1123,10 +1240,10 @@ mod tests {
     // Node types only needed in tests - can be conditionally compiled if needed
     // For now, tests are disabled since dashboard doesn't depend on node
     // use plexspaces_node::{Node, NodeBuilder};
+    use chrono::{DateTime, Utc};
     use plexspaces_core::ServiceLocator;
     use std::sync::Arc;
     use tonic::Request;
-    use chrono::{DateTime, Utc};
 
     // Tests disabled - dashboard no longer depends on node to break cyclic dependency
     // Tests can be re-enabled by making node a dev-dependency if needed
@@ -1149,7 +1266,7 @@ mod tests {
     async fn test_get_summary() {
         let node = create_test_node().await;
         let service = create_test_service(node).await;
-        
+
         let request = Request::new(GetSummaryRequest {
             tenant_id: None,
             node_id: None,
@@ -1159,7 +1276,7 @@ mod tests {
 
         let response = service.get_summary(request).await;
         assert!(response.is_ok());
-        
+
         let summary = response.unwrap().into_inner();
         assert_eq!(summary.total_nodes, 1);
         assert!(summary.since.is_some());
@@ -1170,7 +1287,7 @@ mod tests {
     async fn test_get_nodes() {
         let node = create_test_node().await;
         let service = create_test_service(node).await;
-        
+
         let request = Request::new(GetNodesRequest {
             tenant_id: None,
             cluster_id: None,
@@ -1179,7 +1296,7 @@ mod tests {
 
         let response = service.get_nodes(request).await;
         assert!(response.is_ok());
-        
+
         let nodes_response = response.unwrap().into_inner();
         assert_eq!(nodes_response.nodes.len(), 1);
         assert_eq!(nodes_response.nodes[0].id, "test-node");
@@ -1189,7 +1306,7 @@ mod tests {
     async fn test_get_node_dashboard() {
         let node = create_test_node().await;
         let service = create_test_service(node).await;
-        
+
         let request = Request::new(GetNodeDashboardRequest {
             node_id: "test-node".to_string(),
             since: None,
@@ -1197,7 +1314,7 @@ mod tests {
 
         let response = service.get_node_dashboard(request).await;
         assert!(response.is_ok());
-        
+
         let dashboard = response.unwrap().into_inner();
         assert!(dashboard.node.is_some());
         assert_eq!(dashboard.node.as_ref().unwrap().id, "test-node");
@@ -1209,7 +1326,7 @@ mod tests {
     async fn test_get_node_dashboard_invalid_node_id() {
         let node = create_test_node().await;
         let service = create_test_service(node).await;
-        
+
         let request = Request::new(GetNodeDashboardRequest {
             node_id: String::new(),
             since: None,
@@ -1224,7 +1341,7 @@ mod tests {
     async fn test_get_applications() {
         let node = create_test_node().await;
         let service = create_test_service(node).await;
-        
+
         let request = Request::new(GetApplicationsRequest {
             node_id: None,
             tenant_id: None,
@@ -1235,7 +1352,7 @@ mod tests {
 
         let response = service.get_applications(request).await;
         assert!(response.is_ok());
-        
+
         let apps_response = response.unwrap().into_inner();
         assert!(apps_response.page.is_some());
     }
@@ -1244,7 +1361,7 @@ mod tests {
     async fn test_get_actors() {
         let node = create_test_node().await;
         let service = create_test_service(node).await;
-        
+
         let request = Request::new(GetActorsRequest {
             node_id: None,
             tenant_id: None,
@@ -1259,7 +1376,7 @@ mod tests {
 
         let response = service.get_actors(request).await;
         assert!(response.is_ok());
-        
+
         let actors_response = response.unwrap().into_inner();
         assert!(actors_response.page.is_some());
     }
@@ -1268,7 +1385,7 @@ mod tests {
     async fn test_get_workflows() {
         let node = create_test_node().await;
         let service = create_test_service(node).await;
-        
+
         let request = Request::new(GetWorkflowsRequest {
             node_id: None,
             tenant_id: None,
@@ -1279,7 +1396,7 @@ mod tests {
 
         let response = service.get_workflows(request).await;
         assert!(response.is_ok());
-        
+
         let workflows_response = response.unwrap().into_inner();
         // WorkflowService might not be available, so empty list is valid
         assert!(workflows_response.page.is_some() || workflows_response.page.is_none());
@@ -1296,8 +1413,9 @@ mod tests {
             order_by: String::new(),
         });
 
-        let (paginated, page_response) = DashboardServiceImpl::apply_pagination(items, page_request);
-        
+        let (paginated, page_response) =
+            DashboardServiceImpl::apply_pagination(items, page_request);
+
         assert_eq!(paginated.len(), 10);
         assert_eq!(paginated[0], 0);
         assert_eq!(paginated[9], 9);
@@ -1317,8 +1435,9 @@ mod tests {
             order_by: String::new(),
         });
 
-        let (paginated, page_response) = DashboardServiceImpl::apply_pagination(items, page_request);
-        
+        let (paginated, page_response) =
+            DashboardServiceImpl::apply_pagination(items, page_request);
+
         assert_eq!(paginated.len(), 5);
         assert_eq!(paginated[0], 10);
         assert_eq!(page_response.total_size, 15);
@@ -1333,12 +1452,12 @@ mod tests {
     async fn test_parse_actor_id() {
         let node = create_test_node().await;
         let service = create_test_service(node).await;
-        
+
         let actor_id = ActorId::from("namespace/actor@node");
         let (namespace, tenant) = service.parse_actor_id(&actor_id);
         assert_eq!(namespace, "namespace");
         assert_eq!(tenant, "default");
-        
+
         let actor_id2 = ActorId::from("actor@node");
         let (namespace2, tenant2) = service.parse_actor_id(&actor_id2);
         assert_eq!(namespace2, "default");
@@ -1350,9 +1469,8 @@ mod tests {
     async fn test_default_since() {
         let since = DashboardServiceImpl::default_since();
         let now = Utc::now();
-        let since_dt = DateTime::<Utc>::from_timestamp(since.seconds, since.nanos as u32)
-            .unwrap();
-        
+        let since_dt = DateTime::<Utc>::from_timestamp(since.seconds, since.nanos as u32).unwrap();
+
         // Should be approximately 24 hours ago
         let diff = now.signed_duration_since(since_dt);
         let hours = diff.num_hours();

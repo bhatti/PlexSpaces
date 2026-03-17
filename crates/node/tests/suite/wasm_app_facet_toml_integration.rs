@@ -3,19 +3,19 @@
 //
 // Integration test for WASM application deployment with facets from TOML config
 
-use plexspaces_node::{Node, NodeBuilder};
+use super::test_helpers::app_request_with_tenant;
 use plexspaces_core::ApplicationManager;
-use plexspaces_services::application_service::ApplicationServiceImpl;
+use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::application_service_server::ApplicationService;
 use plexspaces_proto::application::v1::DeployApplicationRequest;
 use plexspaces_proto::wasm::v1::WasmModule;
+use plexspaces_services::application_service::ApplicationServiceImpl;
 use std::sync::Arc;
-use super::test_helpers::app_request_with_tenant;
 use tokio::time::{sleep, Duration};
 use tonic::Request;
 
 /// Test: Deploy WASM application with facets from TOML config
-/// 
+///
 /// Verifies:
 /// 1. TOML config with facets is parsed correctly
 /// 2. Facets are created from proto and attached to actors
@@ -27,18 +27,20 @@ use tonic::Request;
 async fn test_wasm_deployment_with_facets_from_toml() {
     // ARRANGE: Create node
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    node.initialize_services().await.expect("Failed to initialize services");
-    
+    node.initialize_services()
+        .await
+        .expect("Failed to initialize services");
+
     // Start node
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
         node_clone.start().await.expect("Node start failed");
     });
     sleep(Duration::from_millis(500)).await;
-    
+
     // Create minimal WASM module (just magic number)
     let wasm_bytes = b"\0asm\x01\x00\x00\x00";
-    
+
     // TOML config with facets
     let toml_config = r#"
 [supervisor]
@@ -55,10 +57,10 @@ facets = [
   { type = "locks", priority = 50, config = {} }
 ]
 "#;
-    
+
     // ACT: Deploy application with TOML config containing facets
-    let service = ApplicationServiceImpl::new(node.service_locator().clone());
-    
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+
     let wasm_module = WasmModule {
         name: "test-app".to_string(),
         version: "1.0.0".to_string(),
@@ -66,7 +68,7 @@ facets = [
         module_hash: String::new(),
         ..Default::default()
     };
-    
+
     let request = DeployApplicationRequest {
         application_id: "test-app-facets".to_string(),
         name: "test-app".to_string(),
@@ -75,27 +77,27 @@ facets = [
         config: None, // Will be parsed from TOML
         initial_state: vec![],
     };
-    
+
     // Parse TOML and add to request
     use plexspaces_node::wasm_apps_loader::parse_app_config_toml;
-    let app_spec = parse_app_config_toml(toml_config, "test-app")
-        .expect("Failed to parse TOML config");
-    
+    let app_spec =
+        parse_app_config_toml(toml_config, "test-app").expect("Failed to parse TOML config");
+
     let mut request_with_config = request;
     request_with_config.config = Some(app_spec);
-    
+
     // Deploy
     let response = service
         .deploy_application(app_request_with_tenant(request_with_config))
         .await;
-    
+
     assert!(response.is_ok(), "Deployment should succeed");
     let res = response.unwrap().into_inner();
     assert!(res.success, "Deployment should be successful");
-    
+
     // Wait for application to start and actors to spawn
     sleep(Duration::from_millis(1000)).await;
-    
+
     // ASSERT: Verify application is running (ApplicationManager stores by application_id from deploy)
     let app_manager = node.application_manager();
     let app_state = app_manager.get_state("test-app-facets").await;
@@ -105,7 +107,7 @@ facets = [
         plexspaces_proto::v1::application::ApplicationState::ApplicationStateRunning,
         "Application should be running"
     );
-    
+
     // Verify actor was spawned (facets should be attached during spawn)
     use plexspaces_core::ActorRegistry;
     let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
@@ -113,18 +115,21 @@ facets = [
         .actor_registry()
         .await
         .expect("ActorRegistry should be available");
-    
+
     let registered_ids = actor_registry.registered_actor_ids().read().await;
     let task_queue_actors: Vec<_> = registered_ids
         .iter()
         .filter(|id| id.contains("task-queue"))
         .collect();
-    
-    assert!(!task_queue_actors.is_empty(), "task-queue actor should be spawned");
-    
+
+    assert!(
+        !task_queue_actors.is_empty(),
+        "task-queue actor should be spawned"
+    );
+
     eprintln!("✅ WASM application deployed with facets from TOML config");
     eprintln!("✅ Actor spawned: {:?}", task_queue_actors);
-    
+
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();

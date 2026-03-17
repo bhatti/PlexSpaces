@@ -44,7 +44,8 @@ async fn test_05_facet_storage_access() {
     use plexspaces_core::ActorId;
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let actor_id = ActorId::from("test-actor@local");
-    let facets: Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>> = node.get_facets(&actor_id).await;
+    let facets: Option<Arc<tokio::sync::RwLock<plexspaces_facet::FacetContainer>>> =
+        node.get_facets(&actor_id).await;
     assert!(facets.is_none()); // No facets stored yet
 }
 
@@ -52,11 +53,11 @@ async fn test_05_facet_storage_access() {
 #[tokio::test]
 async fn test_06_spawn_actor_no_facets() {
     use plexspaces_actor::ActorBuilder;
-    use plexspaces_core::{Actor, ActorContext, ActorId};
     use plexspaces_core::Message;
-    
+    use plexspaces_core::{Actor, ActorContext, ActorId};
+
     struct TestBehavior;
-    
+
     #[async_trait::async_trait]
     impl Actor for TestBehavior {
         async fn handle_message(
@@ -66,12 +67,12 @@ async fn test_06_spawn_actor_no_facets() {
         ) -> Result<(), plexspaces_core::BehaviorError> {
             Ok(())
         }
-        
+
         fn behavior_type(&self) -> plexspaces_core::BehaviorType {
             plexspaces_core::BehaviorType::GenServer
         }
     }
-    
+
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let behavior = Box::new(TestBehavior);
     let actor = ActorBuilder::new(behavior)
@@ -79,12 +80,20 @@ async fn test_06_spawn_actor_no_facets() {
         .build()
         .await
         .unwrap();
-    
+
     // This is where the hang might occur
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     // spawn_actor_helper normalizes the actor ID to include the node ID
-    assert!(actor_ref.id().as_str().contains("test-actor"), "Actor ID should contain 'test-actor'");
-    assert!(actor_ref.id().as_str().contains("@"), "Actor ID should contain '@'");
-    assert!(actor_ref.id().as_str().contains("test-node"), "Actor ID should contain node ID 'test-node'");
+    assert!(
+        actor_ref.id().as_str().contains("test-actor"),
+        "Actor ID should contain 'test-actor'"
+    );
+    assert!(
+        actor_ref.id().as_str().contains("@"),
+        "Actor ID should contain '@'"
+    );
+    assert!(
+        actor_ref.id().as_str().contains("test-node"),
+        "Actor ID should contain node ID 'test-node'"
+    );
 }
-

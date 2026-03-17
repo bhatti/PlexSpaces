@@ -53,13 +53,7 @@ pub async fn generate_presigned_url(
         .ok_or_else(|| BlobError::ConfigError("Secret access key is required".to_string()))?;
 
     // Create credentials
-    let credentials = Credentials::new(
-        &access_key_id,
-        &secret_access_key,
-        None,
-        None,
-        "static",
-    );
+    let credentials = Credentials::new(&access_key_id, &secret_access_key, None, None, "static");
 
     // Build S3 config
     let mut builder = Builder::new()
@@ -104,32 +98,34 @@ pub async fn generate_presigned_url(
     let presigning_config = PresigningConfig::builder()
         .expires_in(expires_in)
         .build()
-        .map_err(|e| BlobError::InternalError(format!("Failed to create presigning config: {}", e)))?;
+        .map_err(|e| {
+            BlobError::InternalError(format!("Failed to create presigning config: {}", e))
+        })?;
 
     // Generate presigned URL based on operation
     let presigned_url = match operation.as_str() {
-        "GET" => {
-            client
-                .get_object()
-                .bucket(&config.bucket)
-                .key(blob_path)
-                .presigned(presigning_config)
-                .await
-                .map_err(|e| BlobError::InternalError(format!("Failed to generate presigned URL: {}", e)))?
-                .uri()
-                .to_string()
-        }
-        "PUT" => {
-            client
-                .put_object()
-                .bucket(&config.bucket)
-                .key(blob_path)
-                .presigned(presigning_config)
-                .await
-                .map_err(|e| BlobError::InternalError(format!("Failed to generate presigned URL: {}", e)))?
-                .uri()
-                .to_string()
-        }
+        "GET" => client
+            .get_object()
+            .bucket(&config.bucket)
+            .key(blob_path)
+            .presigned(presigning_config)
+            .await
+            .map_err(|e| {
+                BlobError::InternalError(format!("Failed to generate presigned URL: {}", e))
+            })?
+            .uri()
+            .to_string(),
+        "PUT" => client
+            .put_object()
+            .bucket(&config.bucket)
+            .key(blob_path)
+            .presigned(presigning_config)
+            .await
+            .map_err(|e| {
+                BlobError::InternalError(format!("Failed to generate presigned URL: {}", e))
+            })?
+            .uri()
+            .to_string(),
         _ => unreachable!(), // Already validated above
     };
 
@@ -144,6 +140,6 @@ pub async fn generate_presigned_url(
     _expires_after: Duration,
 ) -> BlobResult<String> {
     Err(BlobError::InternalError(
-        "Presigned URLs require the 'presigned-urls' feature to be enabled".to_string()
+        "Presigned URLs require the 'presigned-urls' feature to be enabled".to_string(),
     ))
 }

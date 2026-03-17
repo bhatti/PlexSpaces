@@ -59,9 +59,7 @@ use aws_sdk_sqs::{
 };
 use futures::stream::BoxStream;
 use plexspaces_common::AWSConfig;
-use plexspaces_proto::channel::v1::{
-    channel_config, ChannelProvider, ChannelConfig, ChannelStats,
-};
+use plexspaces_proto::channel::v1::{channel_config, ChannelConfig, ChannelProvider, ChannelStats};
 use plexspaces_proto::common::v1::Message as ChannelMessage;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -241,13 +239,15 @@ impl SQSChannel {
             None
         };
 
-        let queue_url = Self::ensure_queue_exists(&client, &queue_name, redrive_policy.as_deref()).await?;
+        let queue_url =
+            Self::ensure_queue_exists(&client, &queue_name, redrive_policy.as_deref()).await?;
 
         let duration = start_time.elapsed();
         metrics::histogram!(
             "plexspaces_channel_sqs_init_duration_seconds",
             "backend" => "sqs"
-        ).record(duration.as_secs_f64());
+        )
+        .record(duration.as_secs_f64());
 
         debug!(
             channel_name = %config.name,
@@ -284,12 +284,7 @@ impl SQSChannel {
         redrive_policy: Option<&str>,
     ) -> ChannelResult<String> {
         // Try to get queue URL (check if exists)
-        match client
-            .get_queue_url()
-            .queue_name(queue_name)
-            .send()
-            .await
-        {
+        match client.get_queue_url().queue_name(queue_name).send().await {
             Ok(result) => {
                 if let Some(url) = result.queue_url() {
                     debug!(queue_name = %queue_name, "SQS queue already exists");
@@ -301,16 +296,17 @@ impl SQSChannel {
                 let error_msg = format!("{}", e);
                 let error_code = e.code().unwrap_or("unknown");
                 let error_message = e.message().unwrap_or(&error_msg);
-                
+
                 debug!(
                     queue_name = %queue_name,
                     error_code = %error_code,
                     error_message = %error_message,
                     "SQS get_queue_url result"
                 );
-                
-                if !error_msg.contains("AWS.SimpleQueueService.NonExistentQueue") 
-                    && error_code != "AWS.SimpleQueueService.NonExistentQueue" {
+
+                if !error_msg.contains("AWS.SimpleQueueService.NonExistentQueue")
+                    && error_code != "AWS.SimpleQueueService.NonExistentQueue"
+                {
                     error!(
                         queue_name = %queue_name,
                         error_code = %error_code,
@@ -347,10 +343,7 @@ impl SQSChannel {
 
         // Add redrive policy if provided
         if let Some(policy) = redrive_policy {
-            create_request = create_request.attributes(
-                QueueAttributeName::RedrivePolicy,
-                policy,
-            );
+            create_request = create_request.attributes(QueueAttributeName::RedrivePolicy, policy);
         }
 
         let create_result = create_request.send().await;
@@ -370,12 +363,7 @@ impl SQSChannel {
                 // Check if queue was created concurrently
                 if e.to_string().contains("QueueAlreadyExists") {
                     // Try to get URL again
-                    match client
-                        .get_queue_url()
-                        .queue_name(queue_name)
-                        .send()
-                        .await
-                    {
+                    match client.get_queue_url().queue_name(queue_name).send().await {
                         Ok(result) => {
                             if let Some(url) = result.queue_url() {
                                 Ok(url.to_string())
@@ -409,9 +397,7 @@ impl SQSChannel {
             .attribute_names(QueueAttributeName::QueueArn)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::BackendError(format!("Failed to get queue ARN: {}", e))
-            })?;
+            .map_err(|e| ChannelError::BackendError(format!("Failed to get queue ARN: {}", e)))?;
 
         attributes
             .attributes()
@@ -431,21 +417,25 @@ impl SQSChannel {
         // Parse message body (JSON-encoded ChannelMessage)
         // ChannelMessage needs serde derives - for now, parse manually or use prost
         // TODO: Add serde derives to ChannelMessage or use prost encoding
-        let channel_msg = serde_json::from_str::<serde_json::Value>(body)
-            .map_err(|e| ChannelError::SerializationError(format!("Failed to parse message JSON: {}", e)))?;
-        
+        let channel_msg = serde_json::from_str::<serde_json::Value>(body).map_err(|e| {
+            ChannelError::SerializationError(format!("Failed to parse message JSON: {}", e))
+        })?;
+
         // Reconstruct ChannelMessage from JSON
         // This is a workaround until ChannelMessage has serde derives
         let channel_msg = ChannelMessage {
-            id: channel_msg.get("id")
+            id: channel_msg
+                .get("id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
-            channel: channel_msg.get("channel")
+            channel: channel_msg
+                .get("channel")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string(),
-            payload: channel_msg.get("payload")
+            payload: channel_msg
+                .get("payload")
                 .and_then(|v| v.as_str())
                 .and_then(|s| general_purpose::STANDARD.decode(s).ok())
                 .unwrap_or_default(),
@@ -507,12 +497,14 @@ impl Channel for SQSChannel {
                 metrics::histogram!(
                     "plexspaces_channel_sqs_send_duration_seconds",
                     "backend" => "sqs"
-                ).record(duration.as_secs_f64());
+                )
+                .record(duration.as_secs_f64());
                 metrics::counter!(
                     "plexspaces_channel_sqs_send_total",
                     "backend" => "sqs",
                     "result" => "success"
-                ).increment(1);
+                )
+                .increment(1);
                 self.stats.messages_sent.fetch_add(1, Ordering::Relaxed);
 
                 debug!(
@@ -536,9 +528,13 @@ impl Channel for SQSChannel {
                     "plexspaces_channel_sqs_send_errors_total",
                     "backend" => "sqs",
                     "error_type" => "send_failed"
-                ).increment(1);
+                )
+                .increment(1);
                 self.stats.errors.fetch_add(1, Ordering::Relaxed);
-                Err(ChannelError::BackendError(format!("SQS send_message failed: {}", e)))
+                Err(ChannelError::BackendError(format!(
+                    "SQS send_message failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -578,7 +574,8 @@ impl Channel for SQSChannel {
                             match Self::sqs_message_to_channel_message(sqs_msg) {
                                 Ok(channel_msg) => {
                                     // Store receipt handle for ACK/NACK
-                                    handles.insert(channel_msg.id.clone(), receipt_handle.to_string());
+                                    handles
+                                        .insert(channel_msg.id.clone(), receipt_handle.to_string());
                                     messages.push(channel_msg);
                                 }
                                 Err(e) => {
@@ -605,14 +602,18 @@ impl Channel for SQSChannel {
                 metrics::histogram!(
                     "plexspaces_channel_sqs_receive_duration_seconds",
                     "backend" => "sqs"
-                ).record(duration.as_secs_f64());
+                )
+                .record(duration.as_secs_f64());
                 metrics::counter!(
                     "plexspaces_channel_sqs_receive_total",
                     "backend" => "sqs",
                     "result" => "success",
                     "message_count" => messages.len().to_string()
-                ).increment(1);
-                self.stats.messages_received.fetch_add(messages.len() as u64, Ordering::Relaxed);
+                )
+                .increment(1);
+                self.stats
+                    .messages_received
+                    .fetch_add(messages.len() as u64, Ordering::Relaxed);
 
                 debug!(
                     channel_name = %self.config.name,
@@ -633,9 +634,13 @@ impl Channel for SQSChannel {
                     "plexspaces_channel_sqs_receive_errors_total",
                     "backend" => "sqs",
                     "error_type" => "receive_failed"
-                ).increment(1);
+                )
+                .increment(1);
                 self.stats.errors.fetch_add(1, Ordering::Relaxed);
-                Err(ChannelError::BackendError(format!("SQS receive_message failed: {}", e)))
+                Err(ChannelError::BackendError(format!(
+                    "SQS receive_message failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -669,7 +674,10 @@ impl Channel for SQSChannel {
                 }
                 Ok(messages)
             }
-            Err(e) => Err(ChannelError::BackendError(format!("SQS receive_message failed: {}", e))),
+            Err(e) => Err(ChannelError::BackendError(format!(
+                "SQS receive_message failed: {}",
+                e
+            ))),
         }
     }
 
@@ -761,12 +769,14 @@ impl Channel for SQSChannel {
                     metrics::histogram!(
                         "plexspaces_channel_sqs_ack_duration_seconds",
                         "backend" => "sqs"
-                    ).record(duration.as_secs_f64());
+                    )
+                    .record(duration.as_secs_f64());
                     metrics::counter!(
                         "plexspaces_channel_sqs_ack_total",
                         "backend" => "sqs",
                         "result" => "success"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     self.stats.messages_acked.fetch_add(1, Ordering::Relaxed);
 
                     debug!(
@@ -788,9 +798,13 @@ impl Channel for SQSChannel {
                         "plexspaces_channel_sqs_ack_errors_total",
                         "backend" => "sqs",
                         "error_type" => "delete_failed"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     self.stats.errors.fetch_add(1, Ordering::Relaxed);
-                    Err(ChannelError::BackendError(format!("SQS delete_message failed: {}", e)))
+                    Err(ChannelError::BackendError(format!(
+                        "SQS delete_message failed: {}",
+                        e
+                    )))
                 }
             }
         } else {
@@ -798,7 +812,8 @@ impl Channel for SQSChannel {
                 "plexspaces_channel_sqs_ack_errors_total",
                 "backend" => "sqs",
                 "error_type" => "message_not_found"
-            ).increment(1);
+            )
+            .increment(1);
             Err(ChannelError::MessageNotFound(message_id.to_string()))
         }
     }
@@ -833,12 +848,14 @@ impl Channel for SQSChannel {
                         metrics::histogram!(
                             "plexspaces_channel_sqs_nack_duration_seconds",
                             "backend" => "sqs"
-                        ).record(duration.as_secs_f64());
+                        )
+                        .record(duration.as_secs_f64());
                         metrics::counter!(
                             "plexspaces_channel_sqs_nack_total",
                             "backend" => "sqs",
                             "requeue" => "true"
-                        ).increment(1);
+                        )
+                        .increment(1);
                         self.stats.messages_nacked.fetch_add(1, Ordering::Relaxed);
 
                         debug!(
@@ -860,7 +877,8 @@ impl Channel for SQSChannel {
                             "plexspaces_channel_sqs_nack_errors_total",
                             "backend" => "sqs",
                             "error_type" => "change_visibility_failed"
-                        ).increment(1);
+                        )
+                        .increment(1);
                         self.stats.errors.fetch_add(1, Ordering::Relaxed);
                         Err(ChannelError::BackendError(format!(
                             "SQS change_message_visibility failed: {}",
@@ -878,12 +896,14 @@ impl Channel for SQSChannel {
                 metrics::histogram!(
                     "plexspaces_channel_sqs_nack_duration_seconds",
                     "backend" => "sqs"
-                ).record(duration.as_secs_f64());
+                )
+                .record(duration.as_secs_f64());
                 metrics::counter!(
                     "plexspaces_channel_sqs_nack_total",
                     "backend" => "sqs",
                     "requeue" => "false"
-                ).increment(1);
+                )
+                .increment(1);
                 self.stats.messages_nacked.fetch_add(1, Ordering::Relaxed);
                 self.stats.messages_dlq.fetch_add(1, Ordering::Relaxed);
 
@@ -900,7 +920,8 @@ impl Channel for SQSChannel {
                 "plexspaces_channel_sqs_nack_errors_total",
                 "backend" => "sqs",
                 "error_type" => "message_not_found"
-            ).increment(1);
+            )
+            .increment(1);
             Err(ChannelError::MessageNotFound(message_id.to_string()))
         }
     }
@@ -912,7 +933,7 @@ impl Channel for SQSChannel {
             messages_sent: self.stats.messages_sent.load(Ordering::Relaxed),
             messages_received: self.stats.messages_received.load(Ordering::Relaxed),
             messages_pending: 0, // Would need to query queue attributes
-            avg_latency_us: 0, // Would need to track latency
+            avg_latency_us: 0,   // Would need to track latency
             messages_failed: self.stats.messages_nacked.load(Ordering::Relaxed),
             throughput: 0.0, // Would need to calculate
             backend_stats: Default::default(),
@@ -933,4 +954,3 @@ impl Channel for SQSChannel {
         &self.config
     }
 }
-

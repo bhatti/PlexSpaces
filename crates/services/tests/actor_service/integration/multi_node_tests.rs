@@ -7,24 +7,22 @@
 //! These tests use a single local node with actors registered with remote-looking IDs
 //! to simulate multi-node scenarios without spawning real processes.
 
-use plexspaces_services::actor_service::ActorServiceImpl;
-use plexspaces_services::ServiceLocatorImpl;
-use plexspaces_actor::{ActorBuilder, actor_factory_impl::ActorFactoryImpl};
+use async_trait::async_trait;
+use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{
-    ActorRegistry, ReplyWaiterRegistry, Actor as ActorTrait,
-    ActorContext, BehaviorError, BehaviorType, FacetManager, VirtualActorManager, RequestContext,
-    MessageSender, Message,
+    Actor as ActorTrait, ActorContext, ActorRegistry, BehaviorError, BehaviorType, FacetManager,
+    Message, MessageSender, ReplyWaiterRegistry, RequestContext, VirtualActorManager,
 };
-use plexspaces_object_registry::SqliteObjectRegistryRepository;
 use plexspaces_object_registry::ObjectRegistry;
+use plexspaces_object_registry::SqliteObjectRegistryRepository;
 use plexspaces_proto::actor::v1::{
-    actor_service_server::ActorService as ActorServiceTrait,
-    SendMessageRequest,
+    actor_service_server::ActorService as ActorServiceTrait, SendMessageRequest,
 };
+use plexspaces_services::actor_service::ActorServiceImpl;
+use plexspaces_services::ServiceLocatorImpl;
 use std::sync::Arc;
 use tonic::Request;
-use async_trait::async_trait;
 
 // Echo actor that receives messages and stores them
 struct EchoActor {
@@ -78,7 +76,11 @@ async fn create_test_registry_with_remote_actors(
     use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
     use plexspaces_proto::object_registry::v1::ObjectRegistration;
 
-    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
 
     struct ObjectRegistryAdapter {
@@ -93,14 +95,17 @@ async fn create_test_registry_with_remote_actors(
             object_id: &str,
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            let obj_type = object_type
-                .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+            let obj_type = object_type.unwrap_or(
+                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified,
+            );
             self.inner
                 .lookup(ctx, obj_type, object_id)
                 .await
                 .map_err(|e| {
-                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                        as Box<dyn std::error::Error + Send + Sync>
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
                 })
         }
 
@@ -114,8 +119,10 @@ async fn create_test_registry_with_remote_actors(
                 .lookup_full(ctx, object_type, object_id)
                 .await
                 .map_err(|e| {
-                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                        as Box<dyn std::error::Error + Send + Sync>
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
                 })
         }
 
@@ -124,13 +131,12 @@ async fn create_test_registry_with_remote_actors(
             ctx: &RequestContext,
             registration: ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            self.inner
-                .register(ctx, registration)
-                .await
-                .map_err(|e| {
-                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                        as Box<dyn std::error::Error + Send + Sync>
-                })
+            self.inner.register(ctx, registration).await.map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
         }
 
         async fn discover(
@@ -153,8 +159,15 @@ async fn create_test_registry_with_remote_actors(
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            self.inner.unregister(ctx, object_type, object_id).await
-                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            self.inner
+                .unregister(ctx, object_type, object_id)
+                .await
+                .map_err(|e| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })
         }
 
         async fn heartbeat(
@@ -163,8 +176,15 @@ async fn create_test_registry_with_remote_actors(
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            self.inner.heartbeat(ctx, object_type, object_id).await
-                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            self.inner
+                .heartbeat(ctx, object_type, object_id)
+                .await
+                .map_err(|e| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })
         }
     }
 
@@ -179,7 +199,9 @@ async fn create_test_registry_with_remote_actors(
     use plexspaces_node::create_default_service_locator;
     let service_locator =
         create_default_service_locator(Some(local_node_id.to_string()), None, None).await;
-    service_locator.register_service(actor_registry.clone()).await;
+    service_locator
+        .register_service(actor_registry.clone())
+        .await;
     // ActorFactory is already registered by create_default_service_locator
 
     // Register NodeConfig
@@ -202,12 +224,18 @@ async fn create_test_registry_with_remote_actors(
     // Create ActorFactory and required services
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     use plexspaces_core::FacetManagerServiceWrapper;
-    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(FacetManager::new())));
-    service_locator.register_service(virtual_actor_manager).await;
+    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
+        FacetManager::new(),
+    )));
+    service_locator
+        .register_service(virtual_actor_manager)
+        .await;
     service_locator.register_service(facet_manager).await;
 
     let actor_factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    service_locator.register_service(actor_factory.clone()).await;
+    service_locator
+        .register_service(actor_factory.clone())
+        .await;
 
     // Register actors with local node ID to ensure local routing works
     // Extract actor name from "actor@node" format and register as "actor@local_node_id"
@@ -220,10 +248,10 @@ async fn create_test_registry_with_remote_actors(
         } else {
             actor_id_with_node
         };
-        
+
         // Register with local node ID to ensure local routing
         let local_actor_id = format!("{}@{}", actor_name, local_node_id);
-        
+
         // Create actor using ActorBuilder
         let echo_actor = EchoActor::new();
         let actor_ref = ActorBuilder::new(Box::new(echo_actor) as Box<dyn ActorTrait>)
@@ -235,7 +263,7 @@ async fn create_test_registry_with_remote_actors(
 
         // ActorRef implements MessageSender, so we can use it directly
         let sender: Arc<dyn MessageSender> = Arc::new(actor_ref);
-        
+
         // Register with ActorRegistry using local actor ID
         // Clone sender before moving it, as we may need it again for the second registration
         let sender_clone = sender.clone();
@@ -248,7 +276,15 @@ async fn create_test_registry_with_remote_actors(
         // We create a mapping by registering the same sender under both IDs
         if actor_id_with_node != &local_actor_id {
             actor_registry
-                .register_actor(&ctx, actor_id_with_node.to_string(), sender_clone, None, None, None, None)
+                .register_actor(
+                    &ctx,
+                    actor_id_with_node.to_string(),
+                    sender_clone,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
                 .await;
         }
     }
@@ -262,7 +298,9 @@ async fn create_test_actor_service(
     node_id: String,
 ) -> ActorServiceImpl {
     let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());
-    service_locator.register_service(reply_waiter_registry).await;
+    service_locator
+        .register_service(reply_waiter_registry)
+        .await;
 
     ActorServiceImpl::new(service_locator, node_id)
 }
@@ -276,16 +314,16 @@ async fn create_test_actor_service(
 /// 4. Verify message delivered successfully
 #[tokio::test]
 async fn test_remote_message_delivery() {
-    let (actor_registry, service_locator) = create_test_registry_with_remote_actors(
-        "node1",
-        "node2",
-        &["receiver@node2"],
-    )
-    .await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+    let (actor_registry, service_locator) =
+        create_test_registry_with_remote_actors("node1", "node2", &["receiver@node2"]).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     // Create message
-    let mut message = Message { payload: b"hello from node1".to_vec(), ..Default::default() };
+    let mut message = Message {
+        payload: b"hello from node1".to_vec(),
+        ..Default::default()
+    };
     message.receiver_id = "receiver@node2".to_string();
 
     // Send via ActorService (using gRPC trait method)
@@ -314,27 +352,38 @@ async fn test_bidirectional_communication() {
         &["actor1@node1", "actor2@node2"],
     )
     .await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     // node1 -> node2
-    let mut message1 = Message { payload: b"hello node2".to_vec(), ..Default::default() };
+    let mut message1 = Message {
+        payload: b"hello node2".to_vec(),
+        ..Default::default()
+    };
     message1.receiver_id = "actor2@node2".to_string();
     let request1 = Request::new(SendMessageRequest {
         message: Some(message1.clone()),
         wait_for_response: false,
         timeout: None,
     });
-    assert!(ActorServiceTrait::send_message(&service, request1).await.is_ok());
+    assert!(ActorServiceTrait::send_message(&service, request1)
+        .await
+        .is_ok());
 
     // node2 -> node1 (simulated - both actors are on local node)
-    let mut message2 = Message { payload: b"hello node1".to_vec(), ..Default::default() };
+    let mut message2 = Message {
+        payload: b"hello node1".to_vec(),
+        ..Default::default()
+    };
     message2.receiver_id = "actor1@node1".to_string();
     let request2 = Request::new(SendMessageRequest {
         message: Some(message2.clone()),
         wait_for_response: false,
         timeout: None,
     });
-    assert!(ActorServiceTrait::send_message(&service, request2).await.is_ok());
+    assert!(ActorServiceTrait::send_message(&service, request2)
+        .await
+        .is_ok());
 }
 
 /// Test actor not found on remote node (simulated)
@@ -347,10 +396,14 @@ async fn test_bidirectional_communication() {
 async fn test_actor_not_found_remote() {
     let (actor_registry, service_locator) =
         create_test_registry_with_remote_actors("node1", "node2", &[]).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     // Try to send to non-existent actor
-    let mut message = Message { payload: b"test".to_vec(), ..Default::default() };
+    let mut message = Message {
+        payload: b"test".to_vec(),
+        ..Default::default()
+    };
     message.receiver_id = "nonexistent@node2".to_string();
     let request = Request::new(SendMessageRequest {
         message: Some(message.clone()),
@@ -359,7 +412,10 @@ async fn test_actor_not_found_remote() {
     });
 
     let result = ActorServiceTrait::send_message(&service, request).await;
-    assert!(result.is_err(), "Should return error for non-existent actor");
+    assert!(
+        result.is_err(),
+        "Should return error for non-existent actor"
+    );
     let status = result.unwrap_err();
     assert_eq!(status.code(), tonic::Code::NotFound);
 }
@@ -375,19 +431,29 @@ async fn test_actor_not_found_remote() {
 async fn test_connection_pooling() {
     let (actor_registry, service_locator) =
         create_test_registry_with_remote_actors("node1", "node2", &["echo@node2"]).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     // Send multiple messages
     for i in 0..10 {
         let payload = format!("message_{}", i);
-        let mut message = Message { payload: payload.as_bytes().to_vec(), ..Default::default() };
+        let mut message = Message {
+            payload: payload.as_bytes().to_vec(),
+            ..Default::default()
+        };
         message.receiver_id = "echo@node2".to_string();
         let request = Request::new(SendMessageRequest {
             message: Some(message.clone()),
             wait_for_response: false,
             timeout: None,
         });
-        assert!(ActorServiceTrait::send_message(&service, request).await.is_ok(), "Message {} should succeed", i);
+        assert!(
+            ActorServiceTrait::send_message(&service, request)
+                .await
+                .is_ok(),
+            "Message {} should succeed",
+            i
+        );
     }
 }
 
@@ -400,33 +466,41 @@ async fn test_connection_pooling() {
 /// 4. Verify both succeed
 #[tokio::test]
 async fn test_multiple_target_nodes() {
-    let (actor_registry, service_locator) = create_test_registry_with_remote_actors(
-        "node1",
-        "node2",
-        &["actor@node2", "actor@node3"],
-    )
-    .await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+    let (actor_registry, service_locator) =
+        create_test_registry_with_remote_actors("node1", "node2", &["actor@node2", "actor@node3"])
+            .await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     // Send to node2
-    let mut message1 = Message { payload: b"to node2".to_vec(), ..Default::default() };
+    let mut message1 = Message {
+        payload: b"to node2".to_vec(),
+        ..Default::default()
+    };
     message1.receiver_id = "actor@node2".to_string();
     let request1 = Request::new(SendMessageRequest {
         message: Some(message1.clone()),
         wait_for_response: false,
         timeout: None,
     });
-    assert!(ActorServiceTrait::send_message(&service, request1).await.is_ok());
+    assert!(ActorServiceTrait::send_message(&service, request1)
+        .await
+        .is_ok());
 
     // Send to node3
-    let mut message2 = Message { payload: b"to node3".to_vec(), ..Default::default() };
+    let mut message2 = Message {
+        payload: b"to node3".to_vec(),
+        ..Default::default()
+    };
     message2.receiver_id = "actor@node3".to_string();
     let request2 = Request::new(SendMessageRequest {
         message: Some(message2.clone()),
         wait_for_response: false,
         timeout: None,
     });
-    assert!(ActorServiceTrait::send_message(&service, request2).await.is_ok());
+    assert!(ActorServiceTrait::send_message(&service, request2)
+        .await
+        .is_ok());
 }
 
 /// Test node not in registry (simulated)
@@ -439,10 +513,14 @@ async fn test_multiple_target_nodes() {
 async fn test_node_not_found() {
     let (actor_registry, service_locator) =
         create_test_registry_with_remote_actors("node1", "node2", &[]).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     // Try to send to non-existent node (actor ID doesn't match any registered actor)
-    let mut message = Message { payload: b"test".to_vec(), ..Default::default() };
+    let mut message = Message {
+        payload: b"test".to_vec(),
+        ..Default::default()
+    };
     message.receiver_id = "actor@nonexistent_node".to_string();
     let request = Request::new(SendMessageRequest {
         message: Some(message.clone()),
@@ -451,7 +529,10 @@ async fn test_node_not_found() {
     });
 
     let result = ActorServiceTrait::send_message(&service, request).await;
-    assert!(result.is_err(), "Should return error for non-existent node/actor");
+    assert!(
+        result.is_err(),
+        "Should return error for non-existent node/actor"
+    );
     let status = result.unwrap_err();
     // Should be NotFound or Internal (depending on routing logic)
     assert!(

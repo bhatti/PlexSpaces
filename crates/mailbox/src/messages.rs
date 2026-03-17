@@ -56,7 +56,7 @@ pub enum ActorMessage {
         /// Callback data (if any)
         callback_data: Vec<u8>,
     },
-    
+
     /// Reminder fired event (from ReminderFacet)
     ReminderFired {
         /// Reminder name
@@ -66,7 +66,7 @@ pub enum ActorMessage {
         /// Reminder data
         reminder_data: Vec<u8>,
     },
-    
+
     /// User-defined message
     User {
         /// Message payload
@@ -74,7 +74,7 @@ pub enum ActorMessage {
         /// Message type (for routing)
         message_type: String,
     },
-    
+
     /// System message (internal framework messages)
     System {
         /// System message kind
@@ -101,14 +101,18 @@ pub enum SystemMessageKind {
 
 impl ActorMessage {
     /// Create a TimerFired message
-    pub fn timer_fired(timer_name: String, fired_at: Option<SystemTime>, callback_data: Vec<u8>) -> Self {
+    pub fn timer_fired(
+        timer_name: String,
+        fired_at: Option<SystemTime>,
+        callback_data: Vec<u8>,
+    ) -> Self {
         Self::TimerFired {
             timer_name,
             fired_at,
             callback_data,
         }
     }
-    
+
     /// Create a User message
     pub fn user(payload: Vec<u8>, message_type: String) -> Self {
         Self::User {
@@ -116,15 +120,11 @@ impl ActorMessage {
             message_type,
         }
     }
-    
+
     /// Create a System message
     pub fn system(kind: SystemMessageKind, payload: Vec<u8>) -> Self {
-        Self::System {
-            kind,
-            payload,
-        }
+        Self::System { kind, payload }
     }
 }
 
 // Conversion helpers will be added to Message impl in mod.rs
-

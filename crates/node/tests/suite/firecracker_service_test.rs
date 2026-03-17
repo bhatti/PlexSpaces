@@ -5,14 +5,13 @@
 
 #[cfg(feature = "firecracker")]
 mod firecracker_service_tests {
-    use plexspaces_node::{Node, NodeId, default_node_config, NodeBuilder};
-    use plexspaces_services::firecracker_service::FirecrackerVmServiceImpl;
+    use plexspaces_node::{default_node_config, Node, NodeBuilder, NodeId};
     use plexspaces_proto::firecracker::v1::{
-        firecracker_vm_service_server::FirecrackerVmService,
-        CreateVmRequest, BootVmRequest, GetVmStateRequest, ListVmsRequest,
-        DeployApplicationRequest, UndeployApplicationRequest, StopVmRequest,
-        VmConfig as ProtoVmConfig, VmState as ProtoVmState,
+        firecracker_vm_service_server::FirecrackerVmService, BootVmRequest, CreateVmRequest,
+        DeployApplicationRequest, GetVmStateRequest, ListVmsRequest, StopVmRequest,
+        UndeployApplicationRequest, VmConfig as ProtoVmConfig, VmState as ProtoVmState,
     };
+    use plexspaces_services::firecracker_service::FirecrackerVmServiceImpl;
     use std::sync::Arc;
     use tonic::Request;
 
@@ -30,17 +29,19 @@ mod firecracker_service_tests {
     fn check_firecracker_available() -> bool {
         use std::path::Path;
         use std::process::Command;
-        
+
         let firecracker_exists = Path::new("/usr/bin/firecracker").exists()
             || Path::new("/usr/local/bin/firecracker").exists();
-        
+
         let firecracker_runnable = Command::new("firecracker")
             .arg("--version")
             .output()
             .is_ok();
-        
+
         if !firecracker_exists && !firecracker_runnable {
-            eprintln!("⚠️  WARNING: Firecracker binary is not available. Skipping Firecracker test.");
+            eprintln!(
+                "⚠️  WARNING: Firecracker binary is not available. Skipping Firecracker test."
+            );
             eprintln!("   To run Firecracker tests, install Firecracker: https://github.com/firecracker-microvm/firecracker/releases");
             return false;
         }
@@ -86,9 +87,7 @@ mod firecracker_service_tests {
         let node = create_test_node().await;
         let service = create_service(node);
 
-        let request = Request::new(CreateVmRequest {
-            config: None,
-        });
+        let request = Request::new(CreateVmRequest { config: None });
 
         let response = FirecrackerVmService::create_vm(&service, request).await;
 
@@ -283,7 +282,10 @@ mod firecracker_service_tests {
         assert!(list_response.is_ok(), "Should list VMs");
         let list_response = list_response.unwrap().into_inner();
         // Should find the VM in Created state
-        assert!(list_response.vms.len() >= 1, "Should find VM in Created state");
+        assert!(
+            list_response.vms.len() >= 1,
+            "Should find VM in Created state"
+        );
     }
 
     /// Test: Deploy application to nonexistent VM (should create VM)
@@ -350,7 +352,8 @@ mod firecracker_service_tests {
             application_config_json: String::new(),
         });
 
-        let deploy_response = FirecrackerVmService::deploy_application(&service, deploy_request).await;
+        let deploy_response =
+            FirecrackerVmService::deploy_application(&service, deploy_request).await;
         assert!(deploy_response.is_ok(), "Should deploy to existing VM");
         let deploy_response = deploy_response.unwrap().into_inner();
         assert!(deploy_response.success);

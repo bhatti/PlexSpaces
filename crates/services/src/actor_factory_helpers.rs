@@ -28,4 +28,3 @@
 
 // This module is kept for backwards compatibility documentation only.
 // All functionality is available through ServiceLocator trait methods.
-

@@ -43,19 +43,20 @@ impl ApplicationManagerExt for Arc<ApplicationManager> {
     async fn get_application_spec(&self, name: &str) -> Option<ApplicationSpec> {
         use crate::application_impl::SpecApplication;
         use crate::wasm_application::WasmApplication;
-        
+
         self.with_application(name, |app_any| {
             // Try to downcast to SpecApplication
             if let Some(spec_app) = app_any.downcast_ref::<SpecApplication>() {
                 return Some(spec_app.spec().clone());
             }
-            
+
             // Try to downcast to WasmApplication
             if let Some(wasm_app) = app_any.downcast_ref::<WasmApplication>() {
                 return wasm_app.spec().cloned();
             }
-            
+
             None
-        }).await
+        })
+        .await
     }
 }

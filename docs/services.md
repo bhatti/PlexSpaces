@@ -167,6 +167,25 @@ Node management, cluster operations, and health monitoring.
 | `DisconnectNodes` | Disconnect from nodes | `DisconnectNodesRequest` | `DisconnectNodesResponse` |
 | `Ping` | SWIM protocol ping for failure detection | `PingRequest` | `PingResponse` |
 
+#### Node connectivity and seed nodes
+
+**Where it lives**: Node connectivity is implemented and owned by **NodeServiceImpl**, not by ServiceLocator. The node creates `NodeServiceImpl`, registers itself as the connectivity instance via `register_node_connectivity(self)`, and passes it into **ApplicationServiceImpl** at construction so that application deploy can connect to `ApplicationSpec.seed_nodes`.
+
+**Automatic connection**:
+
+- **Node startup**: When the node starts, it connects to all addresses in `ReleaseSpec.node.cluster_seed_nodes` using `NodeServiceImpl::connect_to_node_addresses`. This runs after the gRPC server is up.
+- **Application deploy**: When an application is deployed with `ApplicationSpec.seed_nodes` set, the deploy path uses the injected `NodeConnectivity` (the same NodeServiceImpl) to call `connect_to_node_addresses(seed_nodes)` so the node registry is populated before the app runs.
+- **Seed-node registration model**: `connect_to_node_addresses` registers seed addresses synchronously in the node registry. SWIM direct ping then reconciles placeholder node IDs to the remote node's reported identity and updates the heartbeat timestamp. Cluster mismatches are removed during that reconciliation step.
+- **Source of truth**: when shared DB mode is enabled, `NodeRegistry` treats `ObjectRegistry` as authoritative and only returns nodes from the same cluster whose `last_heartbeat` or `updated_at` is within the configured active-node window (default: 24 hours). SWIM supplements this with faster liveness updates but does not replace the backing-store view.
+- **Context ownership**: node-registry uses system-owned request context for membership reads and writes so user tenant/namespace context cannot leak into cluster membership state.
+- **Cluster labels**: node registrations persist cluster and placement labels in object metadata, and node-registry reconstructs `NodeRegistration.capabilities` from those metadata labels when it reads membership back from object-registry.
+
+**Connect timeout**: For `connect_to_node_addresses` (and when the trait method is called with no timeout), the timeout is **1 second per address**, with a **minimum of 5 seconds** and **maximum of 5 minutes**. Explicit timeout on the gRPC `ConnectNodes` request is unchanged.
+
+**Cluster matching**: NodeServiceImpl is constructed with a **local cluster name** (`local_cluster`): from `ReleaseSpec.node.cluster_name` when using `with_release_spec`, or empty when using `new()`. When connecting to an address by ping, the node is **registered only if** the remote node’s cluster (from the ping response) matches the effective local cluster (from release spec or `local_cluster`). If both are non-empty and different, the connection is rejected and not added to the registry.
+
+**Already-registered check**: Before pinging, the node service checks whether an address or node ID is already registered (by node_id via `NodeRegistry::lookup_node`, or by exact address match via listing and comparing `node_address`). Already-registered entries are skipped. Address matching is **exact** (no scheme normalization).
+
 #### Health-Aware Connection
 
 The SDK provides `NodeClient` with production-grade health-aware connection:

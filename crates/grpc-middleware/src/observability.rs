@@ -31,15 +31,15 @@
 //! 3. **Production-Ready**: Follows industry best practices
 //! 4. **Comprehensive**: Metrics for all operations
 
+use opentelemetry::{
+    trace::{Span, SpanKind, TraceContextExt, Tracer},
+    Context, KeyValue,
+};
+use prometheus::{Encoder, Registry, TextEncoder};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
-use prometheus::{Encoder, Registry, TextEncoder};
-use opentelemetry::{
-    trace::{Span, SpanKind, Tracer, TraceContextExt},
-    Context, KeyValue,
-};
-use tracing::{info, warn, error, debug};
+use tracing::{debug, error, info, warn};
 
 /// Observability errors
 #[derive(Debug, Error)]
@@ -75,11 +75,12 @@ impl ObservabilityManager {
         let encoder = TextEncoder::new();
         let metric_families = self.registry.gather();
         let mut buffer = Vec::new();
-        encoder
-            .encode(&metric_families, &mut buffer)
-            .map_err(|e| ObservabilityError::MetricsExportFailed(format!("Failed to encode metrics: {}", e)))?;
-        String::from_utf8(buffer)
-            .map_err(|e| ObservabilityError::MetricsExportFailed(format!("Failed to convert metrics: {}", e)))
+        encoder.encode(&metric_families, &mut buffer).map_err(|e| {
+            ObservabilityError::MetricsExportFailed(format!("Failed to encode metrics: {}", e))
+        })?;
+        String::from_utf8(buffer).map_err(|e| {
+            ObservabilityError::MetricsExportFailed(format!("Failed to convert metrics: {}", e))
+        })
     }
 
     /// Create a span with tenant context using global tracer
@@ -196,7 +197,7 @@ mod tests {
     fn test_export_metrics() {
         let manager = ObservabilityManager::new();
         let metrics = manager.export_metrics().unwrap();
-        
+
         // Should return valid Prometheus format (even if empty)
         assert!(metrics.contains("# TYPE") || metrics.is_empty());
     }
@@ -206,7 +207,7 @@ mod tests {
         let manager = ObservabilityManager::new();
         let mut fields = HashMap::new();
         fields.insert("key1".to_string(), "value1".to_string());
-        
+
         // Should not panic
         manager.log_with_context(LogLevel::Info, "test message", "tenant-123", fields);
     }
@@ -215,9 +216,8 @@ mod tests {
     fn test_create_span() {
         let manager = ObservabilityManager::new();
         let _span = manager.create_span("test-span", "tenant-123", vec![]);
-        
+
         // Should create span context
         // Note: This uses global tracer, so it may not work in all test environments
     }
 }
-

@@ -64,8 +64,8 @@
 //! }
 //! ```
 
-use async_trait::async_trait;
 use crate::JournalResult;
+use async_trait::async_trait;
 use serde_json::Value;
 
 /// Trait for automatic checkpoint state loading

@@ -31,17 +31,16 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
+use futures::stream::BoxStream;
 use plexspaces_core::actor_context::{
     ActorService, ChannelService, ProcessGroupService, TupleSpaceProvider,
 };
 use plexspaces_core::Service;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
-use futures::stream::BoxStream;
 use std::time::Duration;
 
 use futures::StreamExt;
-
 
 // NodeOperationsWrapper removed - ActorFactory uses ActorRegistry and VirtualActorManager directly
 
@@ -100,7 +99,11 @@ impl TupleSpaceProvider for TupleSpaceProviderWrapper {
 pub struct ChannelServiceWrapper {
     // For now, we'll use a simple in-memory channel registry
     // In production, Node should provide a proper channel manager
-    channels: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<dyn plexspaces_channel::Channel>>>>,
+    channels: Arc<
+        tokio::sync::RwLock<
+            std::collections::HashMap<String, Arc<dyn plexspaces_channel::Channel>>,
+        >,
+    >,
 }
 
 impl ChannelServiceWrapper {
@@ -116,16 +119,22 @@ impl ChannelServiceWrapper {
     /// ## Note
     /// This method creates channels directly. In the future, this should use
     /// ServiceLocator::create_default_channel() to respect channel_provider configuration.
-    pub async fn get_or_create_channel(&self, name: &str) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_or_create_channel(
+        &self,
+        name: &str,
+    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>>
+    {
         let mut channels = self.channels.write().await;
-        
+
         if let Some(channel) = channels.get(name) {
             return Ok(channel.clone());
         }
 
         // Create a new in-memory channel (default)
         // TODO: Use ServiceLocator::create_default_channel() when ServiceLocator is available
-        use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
+        use plexspaces_proto::channel::v1::{
+            ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
+        };
         let config = ChannelConfig {
             name: name.to_string(),
             provider: ChannelProvider::ChannelProviderInMemory as i32,
@@ -134,11 +143,12 @@ impl ChannelServiceWrapper {
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
             ..Default::default()
         };
-        
+
         let channel_result = plexspaces_channel::InMemoryChannel::new(config).await;
-        let channel = Arc::new(channel_result
-            .map_err(|e| format!("Failed to create channel {}: {}", name, e))?);
-        
+        let channel = Arc::new(
+            channel_result.map_err(|e| format!("Failed to create channel {}: {}", name, e))?,
+        );
+
         channels.insert(name.to_string(), channel.clone());
         Ok(channel)
     }
@@ -164,7 +174,7 @@ impl ChannelService for ChannelServiceWrapper {
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(queue_name).await?;
-        
+
         // Message is already proto Message (unified type) - set channel name
         let mut channel_msg = message.clone();
         channel_msg.channel = queue_name.to_string();
@@ -174,8 +184,10 @@ impl ChannelService for ChannelServiceWrapper {
                 nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
             });
         }
-        
-        channel.send(channel_msg).await
+
+        channel
+            .send(channel_msg)
+            .await
             .map_err(|e| format!("Failed to send to queue {}: {}", queue_name, e).into())
     }
 
@@ -185,7 +197,7 @@ impl ChannelService for ChannelServiceWrapper {
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(topic_name).await?;
-        
+
         // Message is already proto Message (unified type) - set channel name
         let mut channel_msg = message.clone();
         channel_msg.channel = topic_name.to_string();
@@ -195,8 +207,10 @@ impl ChannelService for ChannelServiceWrapper {
                 nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
             });
         }
-        
-        channel.publish(channel_msg).await
+
+        channel
+            .publish(channel_msg)
+            .await
             .map(|_| message.id.clone())
             .map_err(|e| format!("Failed to publish to topic {}: {}", topic_name, e).into())
     }
@@ -206,11 +220,13 @@ impl ChannelService for ChannelServiceWrapper {
         topic_name: &str,
     ) -> Result<BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(topic_name).await?;
-        
+
         // Channel already returns proto Message stream - return directly
-        let stream = channel.subscribe(None).await
+        let stream = channel
+            .subscribe(None)
+            .await
             .map_err(|e| format!("Failed to subscribe to topic {}: {}", topic_name, e))?;
-        
+
         Ok(stream)
     }
 
@@ -220,19 +236,23 @@ impl ChannelService for ChannelServiceWrapper {
         timeout: Option<std::time::Duration>,
     ) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(queue_name).await?;
-        
+
         // Use try_receive for non-blocking, or receive with timeout
         let messages = if timeout.is_some() {
             // For timeout, we'd need to implement timeout logic
             // For now, use try_receive
-            channel.try_receive(1).await
+            channel
+                .try_receive(1)
+                .await
                 .map_err(|e| format!("Failed to receive from queue {}: {}", queue_name, e))?
         } else {
             // Blocking receive
-            channel.receive(1).await
+            channel
+                .receive(1)
+                .await
                 .map_err(|e| format!("Failed to receive from queue {}: {}", queue_name, e))?
         };
-        
+
         // Channel already returns proto Message - return first message directly
         Ok(messages.into_iter().next())
     }
@@ -250,7 +270,10 @@ impl ChannelService for StubChannelService {
         _queue_name: &str,
         _message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        Err("StubChannelService: send_to_queue not implemented. Use real ChannelServiceWrapper.".into())
+        Err(
+            "StubChannelService: send_to_queue not implemented. Use real ChannelServiceWrapper."
+                .into(),
+        )
     }
 
     async fn publish_to_topic(
@@ -258,7 +281,10 @@ impl ChannelService for StubChannelService {
         _topic_name: &str,
         _message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        Err("StubChannelService: publish_to_topic not implemented. Use real ChannelServiceWrapper.".into())
+        Err(
+            "StubChannelService: publish_to_topic not implemented. Use real ChannelServiceWrapper."
+                .into(),
+        )
     }
 
     async fn subscribe_to_topic(
@@ -338,11 +364,11 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         // ProcessGroupRegistry requires group to exist first, so we create it if needed
         // This is a convenience - in production, groups should be created explicitly
         let _ = self.registry.create_group(ctx, group_name).await;
-        
+
         // Convert actor_id string to ActorId
         use plexspaces_core::ActorId;
         let actor_id = ActorId::from(actor_id.to_string());
-        
+
         self.registry
             .join_group(ctx, group_name, &actor_id, topics)
             .await
@@ -357,7 +383,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use plexspaces_core::ActorId;
         let actor_id = ActorId::from(actor_id.to_string());
-        
+
         self.registry
             .leave_group(ctx, group_name, &actor_id)
             .await
@@ -369,11 +395,12 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         ctx: &plexspaces_core::RequestContext,
         group_name: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        let actor_ids = self.registry
+        let actor_ids = self
+            .registry
             .get_members(ctx, group_name)
             .await
             .map_err(|e| format!("Failed to get members of group {}: {}", group_name, e))?;
-        
+
         // Convert ActorId to String
         Ok(actor_ids.iter().map(|id| id.to_string()).collect())
     }
@@ -383,11 +410,12 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         ctx: &plexspaces_core::RequestContext,
         group_name: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        let actor_ids = self.registry
+        let actor_ids = self
+            .registry
             .get_local_members(ctx, group_name)
             .await
             .map_err(|e| format!("Failed to get local members of group {}: {}", group_name, e))?;
-        
+
         // Convert ActorId to String
         Ok(actor_ids.iter().map(|id| id.to_string()).collect())
     }
@@ -411,14 +439,13 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
     ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
         // Convert Message to Vec<u8> for ProcessGroupRegistry
         let payload = message.payload.clone();
-        
-        let actor_ids = self.registry
+
+        let actor_ids = self
+            .registry
             .publish_to_group(ctx, group_name, topic, payload)
             .await
             .map_err(|e| format!("Failed to publish to group {}: {}", group_name, e))?;
-        
+
         Ok(actor_ids.len() as u32)
     }
 }
-
-

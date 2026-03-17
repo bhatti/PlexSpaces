@@ -135,4 +135,3 @@ pub struct ApiKeyToml {
     #[serde(default)]
     pub metadata: HashMap<String, String>,
 }
-

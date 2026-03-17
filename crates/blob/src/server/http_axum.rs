@@ -22,15 +22,15 @@
 //! - POST /api/v1/blobs/upload - Upload a file (multipart/form-data)
 //! - GET /api/v1/blobs/{blob_id}/download/raw - Download raw file data
 
-use crate::{BlobService, BlobError};
-use plexspaces_core::RequestContext;
+use crate::{BlobError, BlobService};
 use axum::{
     extract::{Multipart, Path, Request},
-    http::{header, StatusCode, HeaderMap},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
+use plexspaces_core::RequestContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -38,32 +38,40 @@ use std::sync::Arc;
 pub fn create_blob_router(blob_service: Arc<BlobService>) -> Router {
     Router::new()
         .route("/api/v1/blobs/upload", post(handle_upload))
-        .route("/api/v1/blobs/:blob_id/download/raw", get(handle_download_raw))
+        .route(
+            "/api/v1/blobs/:blob_id/download/raw",
+            get(handle_download_raw),
+        )
         .with_state(blob_service)
 }
 
 /// Extract RequestContext from HTTP headers
 fn extract_context_from_headers(headers: &HeaderMap) -> Result<RequestContext, BlobError> {
     // Extract tenant_id from headers (set by JWT middleware)
-    let tenant_id = headers.get("x-tenant-id")
+    let tenant_id = headers
+        .get("x-tenant-id")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| BlobError::InvalidInput("Missing x-tenant-id header. JWT authentication required.".to_string()))?;
-    
+        .ok_or_else(|| {
+            BlobError::InvalidInput(
+                "Missing x-tenant-id header. JWT authentication required.".to_string(),
+            )
+        })?;
+
     // namespace is REQUIRED - must be provided in header or use default from config
-    let namespace = headers.get("x-namespace")
+    let namespace = headers
+        .get("x-namespace")
         .and_then(|v| v.to_str().ok())
         .filter(|s| !s.is_empty())
         .unwrap_or(""); // Default namespace (can be empty)
-    
-    let user_id = headers.get("x-user-id")
-        .and_then(|v| v.to_str().ok());
-    
+
+    let user_id = headers.get("x-user-id").and_then(|v| v.to_str().ok());
+
     let mut ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
-    
+
     if let Some(uid) = user_id {
         ctx = ctx.with_user_id(uid.to_string());
     }
-    
+
     Ok(ctx)
 }
 
@@ -85,11 +93,13 @@ async fn handle_upload(
     let mut kind: Option<String> = None;
 
     // Parse multipart form
-    while let Some(field) = multipart.next_field().await
+    while let Some(field) = multipart
+        .next_field()
+        .await
         .map_err(|e| BlobError::InternalError(format!("Failed to parse multipart: {}", e)))?
     {
         let field_name = field.name().unwrap_or("").to_string();
-        
+
         match field_name.as_str() {
             "file" => {
                 // Get file name and content type from field
@@ -101,36 +111,43 @@ async fn handle_upload(
                         content_type = Some(ct.to_string());
                     }
                 }
-                
+
                 // Read file data
-                let data = field.bytes().await
-                    .map_err(|e| BlobError::InternalError(format!("Failed to read file data: {}", e)))?;
+                let data = field.bytes().await.map_err(|e| {
+                    BlobError::InternalError(format!("Failed to read file data: {}", e))
+                })?;
                 file_data = Some(data.to_vec());
             }
             "tenant_id" => {
-                let value = field.text().await
-                    .map_err(|e| BlobError::InternalError(format!("Failed to read tenant_id: {}", e)))?;
+                let value = field.text().await.map_err(|e| {
+                    BlobError::InternalError(format!("Failed to read tenant_id: {}", e))
+                })?;
                 tenant_id = Some(value);
             }
             "namespace" => {
-                let value = field.text().await
-                    .map_err(|e| BlobError::InternalError(format!("Failed to read namespace: {}", e)))?;
+                let value = field.text().await.map_err(|e| {
+                    BlobError::InternalError(format!("Failed to read namespace: {}", e))
+                })?;
                 namespace = Some(value);
             }
             "content_type" => {
-                let value = field.text().await
-                    .map_err(|e| BlobError::InternalError(format!("Failed to read content_type: {}", e)))?;
+                let value = field.text().await.map_err(|e| {
+                    BlobError::InternalError(format!("Failed to read content_type: {}", e))
+                })?;
                 if content_type.is_none() {
                     content_type = Some(value);
                 }
             }
             "blob_group" => {
-                let value = field.text().await
-                    .map_err(|e| BlobError::InternalError(format!("Failed to read blob_group: {}", e)))?;
+                let value = field.text().await.map_err(|e| {
+                    BlobError::InternalError(format!("Failed to read blob_group: {}", e))
+                })?;
                 blob_group = Some(value);
             }
             "kind" => {
-                let value = field.text().await
+                let value = field
+                    .text()
+                    .await
                     .map_err(|e| BlobError::InternalError(format!("Failed to read kind: {}", e)))?;
                 kind = Some(value);
             }
@@ -141,18 +158,25 @@ async fn handle_upload(
     }
 
     // Validate required fields
-    let file_data = file_data.ok_or_else(|| BlobError::InvalidInput("Missing file field".to_string()))?;
+    let file_data =
+        file_data.ok_or_else(|| BlobError::InvalidInput("Missing file field".to_string()))?;
     let file_name = file_name.unwrap_or_else(|| "uploaded_file".to_string());
-    
+
     // Use context from headers if available, otherwise create from form fields
     let ctx = if let Some(ctx) = ctx_opt {
         ctx
     } else {
         // Fallback: extract from form fields (for backward compatibility)
-        let tenant_id = tenant_id.ok_or_else(|| BlobError::InvalidInput("Missing tenant_id (either in x-tenant-id header or form field)".to_string()))?;
+        let tenant_id = tenant_id.ok_or_else(|| {
+            BlobError::InvalidInput(
+                "Missing tenant_id (either in x-tenant-id header or form field)".to_string(),
+            )
+        })?;
         let namespace = namespace.ok_or_else(|| {
             // TODO: Get default_namespace from config
-            BlobError::InvalidInput("Missing namespace (either in x-namespace header or form field)".to_string())
+            BlobError::InvalidInput(
+                "Missing namespace (either in x-namespace header or form field)".to_string(),
+            )
         })?;
         RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string())
     };
@@ -189,8 +213,9 @@ async fn handle_upload(
     Ok((
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/json")],
-        serde_json::to_string(&response)
-            .map_err(|e| BlobError::InternalError(format!("Failed to serialize response: {}", e)))?
+        serde_json::to_string(&response).map_err(|e| {
+            BlobError::InternalError(format!("Failed to serialize response: {}", e))
+        })?,
     ))
 }
 
@@ -204,14 +229,10 @@ async fn handle_download_raw(
     let ctx = extract_context_from_headers(&headers)?;
 
     // Get metadata (automatically filtered by tenant_id)
-    let metadata = blob_service
-        .get_metadata(&ctx, &blob_id)
-        .await?;
+    let metadata = blob_service.get_metadata(&ctx, &blob_id).await?;
 
     // Download blob data (automatically filtered by tenant_id)
-    let data = blob_service
-        .download_blob(&ctx, &blob_id)
-        .await?;
+    let data = blob_service.download_blob(&ctx, &blob_id).await?;
 
     // Build response with appropriate headers
     let content_type = if metadata.content_type.is_empty() {
@@ -219,10 +240,14 @@ async fn handle_download_raw(
     } else {
         metadata.content_type.clone()
     };
-    
+
     let content_disposition = format!(
         "attachment; filename=\"{}\"",
-        if metadata.name.is_empty() { "file" } else { &metadata.name }
+        if metadata.name.is_empty() {
+            "file"
+        } else {
+            &metadata.name
+        }
     );
 
     Ok((
@@ -249,7 +274,9 @@ impl IntoResponse for BlobError {
             BlobError::SqlError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             BlobError::IoError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             BlobError::ObjectStoreError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
-            BlobError::SerializationError(_) => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            BlobError::SerializationError(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
+            }
         };
 
         let body = serde_json::json!({
@@ -259,7 +286,8 @@ impl IntoResponse for BlobError {
         (
             status,
             [(header::CONTENT_TYPE, "application/json")],
-            serde_json::to_string(&body).unwrap_or_else(|_| "{\"error\":\"Internal error\"}".to_string()),
+            serde_json::to_string(&body)
+                .unwrap_or_else(|_| "{\"error\":\"Internal error\"}".to_string()),
         )
             .into_response()
     }

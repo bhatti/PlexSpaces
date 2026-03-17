@@ -24,7 +24,7 @@
 
 #[cfg(test)]
 mod tests {
-    use plexspaces_wasm_runtime::{WasmRuntime, WasmConfig, ResourceLimits, WasmInstance};
+    use plexspaces_wasm_runtime::{ResourceLimits, WasmConfig, WasmInstance, WasmRuntime};
     use wasmtime::StoreLimitsBuilder;
 
     // Simple WASM module: (module (func (export "test") (result i32) i32.const 42))
@@ -45,7 +45,7 @@ mod tests {
     #[tokio::test]
     async fn test_fuel_limit_from_config_applied() {
         let custom_fuel = 5_000_000_000u64; // 5 billion units
-        
+
         let config = WasmConfig {
             limits: ResourceLimits {
                 max_memory_bytes: 16 * 1024 * 1024,
@@ -100,7 +100,7 @@ mod tests {
     #[tokio::test]
     async fn test_default_fuel_limit_used() {
         let config = WasmConfig::default();
-        
+
         // Default max_fuel should be 10 billion
         assert_eq!(config.limits.max_fuel, 10_000_000_000);
 
@@ -119,7 +119,15 @@ mod tests {
                 "test-actor".to_string(),
                 &[],
                 config,
-                None, None, None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 None, // elastic_pool_service
             )
             .await
@@ -164,7 +172,15 @@ mod tests {
                 "test-actor".to_string(),
                 &[],
                 config,
-                None, None, None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 None, // elastic_pool_service
             )
             .await
@@ -181,7 +197,7 @@ mod tests {
     #[tokio::test]
     async fn test_large_fuel_limit_supported() {
         let large_fuel = u64::MAX / 2;
-        
+
         let config = WasmConfig {
             limits: ResourceLimits {
                 max_memory_bytes: 64 * 1024 * 1024, // 64MB
@@ -209,7 +225,15 @@ mod tests {
                 "test-actor".to_string(),
                 &[],
                 config,
-                None, None, None, None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 None, // elastic_pool_service
             )
             .await

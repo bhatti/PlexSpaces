@@ -217,7 +217,9 @@ pub use types::*;
 pub use workflow_actor::{WorkflowActor, WorkflowMessage, WorkflowResponse};
 
 // Re-export WorkflowRef from actor crate (canonical location for all typed refs)
-pub use plexspaces_actor::{WorkflowRef, WorkflowRefError, DEFAULT_OPERATION_TIMEOUT, DEFAULT_RUN_TIMEOUT};
+pub use plexspaces_actor::{
+    WorkflowRef, WorkflowRefError, DEFAULT_OPERATION_TIMEOUT, DEFAULT_RUN_TIMEOUT,
+};
 
 // Keep spawn_workflow here as it has workflow-specific logic
 pub use workflow_ref::spawn_workflow;

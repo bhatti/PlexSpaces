@@ -43,13 +43,13 @@ use toml;
 pub enum ConfigError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
-    
+
     #[error("TOML parse error: {0}")]
     Toml(#[from] toml::de::Error),
-    
+
     #[error("Environment variable error: {0}")]
     Env(String),
-    
+
     /// Configuration not found
     ///
     /// ## Context
@@ -96,16 +96,16 @@ impl ConfigBootstrap {
         if let Ok(config) = Self::load_from_env::<T>() {
             return Ok(config);
         }
-        
+
         // Try release.toml
         if let Ok(config) = Self::load_from_release_toml::<T>() {
             return Ok(config);
         }
-        
+
         // Fallback to defaults
         Ok(T::default())
     }
-    
+
     /// Load configuration from release.toml
     ///
     /// ## File Locations (checked in order)
@@ -117,26 +117,24 @@ impl ConfigBootstrap {
     /// Config or error if file not found or invalid
     pub fn load_from_release_toml<T: DeserializeOwned>() -> Result<T, ConfigError> {
         // Check APP_CONFIG_PATH first
-        let config_path = env::var("APP_CONFIG_PATH")
-            .ok()
-            .or_else(|| {
-                // Try current directory
-                if Path::new("release.toml").exists() {
-                    Some("release.toml".to_string())
-                } else if Path::new("../release.toml").exists() {
-                    Some("../release.toml".to_string())
-                } else {
-                    None
-                }
-            });
-        
+        let config_path = env::var("APP_CONFIG_PATH").ok().or_else(|| {
+            // Try current directory
+            if Path::new("release.toml").exists() {
+                Some("release.toml".to_string())
+            } else if Path::new("../release.toml").exists() {
+                Some("../release.toml".to_string())
+            } else {
+                None
+            }
+        });
+
         if let Some(path) = config_path {
             Self::load_from_file::<T>(&path)
         } else {
             Err(ConfigError::NotFound("release.toml not found".to_string()))
         }
     }
-    
+
     /// Load configuration from specific file
     ///
     /// ## Arguments
@@ -149,7 +147,7 @@ impl ConfigBootstrap {
         let config: T = toml::from_str(&content)?;
         Ok(config)
     }
-    
+
     /// Load configuration from environment variables
     ///
     /// ## How It Works
@@ -169,22 +167,24 @@ impl ConfigBootstrap {
     /// Config or error if required env vars missing
     pub fn load_from_env<T: DeserializeOwned>() -> Result<T, ConfigError> {
         use config::{Config, Environment};
-        
+
         // Build config from environment variables
         // Environment variables are automatically converted to config keys
         let config = Config::builder()
-            .add_source(Environment::with_prefix("")
-                .separator("__")  // Use __ for literal underscores
-                .try_parsing(true)  // Try to parse values (numbers, booleans, etc.)
-                .list_separator(",")  // Comma-separated lists
+            .add_source(
+                Environment::with_prefix("")
+                    .separator("__") // Use __ for literal underscores
+                    .try_parsing(true) // Try to parse values (numbers, booleans, etc.)
+                    .list_separator(","), // Comma-separated lists
             )
             .build()
             .map_err(|e| ConfigError::Env(format!("Failed to load from environment: {}", e)))?;
-        
-        config.try_deserialize::<T>()
+
+        config
+            .try_deserialize::<T>()
             .map_err(|e| ConfigError::Env(format!("Failed to deserialize config: {}", e)))
     }
-    
+
     /// Load configuration with environment variable prefix
     ///
     /// ## Arguments
@@ -197,20 +197,27 @@ impl ConfigBootstrap {
     /// ```
     pub fn load_from_env_with_prefix<T: DeserializeOwned>(prefix: &str) -> Result<T, ConfigError> {
         use config::{Config, Environment};
-        
+
         let config = Config::builder()
-            .add_source(Environment::with_prefix(prefix)
-                .separator("__")
-                .try_parsing(true)
-                .list_separator(",")
+            .add_source(
+                Environment::with_prefix(prefix)
+                    .separator("__")
+                    .try_parsing(true)
+                    .list_separator(","),
             )
             .build()
-            .map_err(|e| ConfigError::Env(format!("Failed to load from environment with prefix {}: {}", prefix, e)))?;
-        
-        config.try_deserialize::<T>()
+            .map_err(|e| {
+                ConfigError::Env(format!(
+                    "Failed to load from environment with prefix {}: {}",
+                    prefix, e
+                ))
+            })?;
+
+        config
+            .try_deserialize::<T>()
             .map_err(|e| ConfigError::Env(format!("Failed to deserialize config: {}", e)))
     }
-    
+
     /// Load configuration with explicit precedence
     ///
     /// ## Arguments
@@ -231,24 +238,26 @@ impl ConfigBootstrap {
                 return Ok(config);
             }
         }
-        
+
         // 2. Try environment if enabled
         if use_env {
             if let Ok(config) = Self::load_from_env::<T>() {
                 return Ok(config);
             }
         }
-        
+
         // 3. Try release.toml
         if let Ok(config) = Self::load_from_release_toml::<T>() {
             return Ok(config);
         }
-        
+
         // 4. Use defaults if enabled
         if use_defaults {
             Ok(T::default())
         } else {
-            Err(ConfigError::NotFound("No config found and defaults disabled".to_string()))
+            Err(ConfigError::NotFound(
+                "No config found and defaults disabled".to_string(),
+            ))
         }
     }
 }
@@ -275,16 +284,14 @@ mod tests {
         // Create temporary config file
         let temp_file = std::env::temp_dir().join("test_config.toml");
         fs::write(&temp_file, "port = 8080\nhost = \"localhost\"").unwrap();
-        
-        let config: TestConfig = ConfigBootstrap::load_from_file(
-            temp_file.to_str().unwrap()
-        ).unwrap();
-        
+
+        let config: TestConfig =
+            ConfigBootstrap::load_from_file(temp_file.to_str().unwrap()).unwrap();
+
         assert_eq!(config.port, 8080);
         assert_eq!(config.host, "localhost");
-        
+
         // Cleanup
         fs::remove_file(&temp_file).ok();
     }
 }
-

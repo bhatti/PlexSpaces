@@ -126,7 +126,12 @@ pub trait BehaviorFactory: Send + Sync {
 }
 
 /// Type alias for asynchronous behavior constructor functions
-pub type BehaviorConstructor = dyn Fn(&[u8]) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Box<dyn Actor>, BehaviorFactoryError>> + Send>> + Send + Sync;
+pub type BehaviorConstructor = dyn Fn(
+        &[u8],
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Box<dyn Actor>, BehaviorFactoryError>> + Send>,
+    > + Send
+    + Sync;
 
 /// Default implementation of BehaviorFactory using a HashMap registry
 ///
@@ -182,12 +187,13 @@ impl BehaviorRegistry {
     pub async fn register<F, Fut>(&self, module: impl Into<String>, constructor: F)
     where
         F: Fn(&[u8]) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = Result<Box<dyn Actor>, BehaviorFactoryError>> + Send + 'static,
+        Fut: std::future::Future<Output = Result<Box<dyn Actor>, BehaviorFactoryError>>
+            + Send
+            + 'static,
     {
         let module_name = module.into();
-        let constructor_box: Box<BehaviorConstructor> = Box::new(move |args: &[u8]| {
-            Box::pin(constructor(args))
-        });
+        let constructor_box: Box<BehaviorConstructor> =
+            Box::new(move |args: &[u8]| Box::pin(constructor(args)));
         let mut constructors = self.constructors.write().await;
         constructors.insert(module_name, constructor_box);
     }
@@ -209,7 +215,9 @@ impl BehaviorRegistry {
     pub async fn register_simple<F, Fut>(&self, module: impl Into<String>, constructor: F)
     where
         F: Fn() -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = Result<Box<dyn Actor>, BehaviorFactoryError>> + Send + 'static,
+        Fut: std::future::Future<Output = Result<Box<dyn Actor>, BehaviorFactoryError>>
+            + Send
+            + 'static,
     {
         self.register(module, move |_| constructor()).await;
     }
@@ -246,9 +254,9 @@ impl BehaviorFactory for BehaviorRegistry {
             .get(module)
             .ok_or_else(|| BehaviorFactoryError::UnknownModule(module.to_string()))?;
 
-        constructor(args).await.map_err(|e| {
-            BehaviorFactoryError::CreationFailed(module.to_string(), e.to_string())
-        })
+        constructor(args)
+            .await
+            .map_err(|e| BehaviorFactoryError::CreationFailed(module.to_string(), e.to_string()))
     }
 
     async fn is_registered(&self, module: &str) -> bool {
@@ -269,7 +277,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Actor for TestBehavior {
-        async fn handle_message(&mut self, _ctx: &crate::ActorContext, _msg: Message) -> Result<(), crate::BehaviorError> {
+        async fn handle_message(
+            &mut self,
+            _ctx: &crate::ActorContext,
+            _msg: Message,
+        ) -> Result<(), crate::BehaviorError> {
             Ok(())
         }
 
@@ -281,13 +293,15 @@ mod tests {
     #[tokio::test]
     async fn test_register_and_create() {
         let registry = BehaviorRegistry::new();
-        registry.register_simple("test::Worker", || {
-            Box::pin(async move {
-                Ok(Box::new(TestBehavior {
-                    id: "worker-1".to_string(),
-                }) as Box<dyn Actor>)
+        registry
+            .register_simple("test::Worker", || {
+                Box::pin(async move {
+                    Ok(Box::new(TestBehavior {
+                        id: "worker-1".to_string(),
+                    }) as Box<dyn Actor>)
+                })
             })
-        }).await;
+            .await;
 
         let behavior = registry.create("test::Worker", &[]).await.unwrap();
         assert!(registry.is_registered("test::Worker").await);
@@ -298,26 +312,33 @@ mod tests {
     async fn test_unknown_module() {
         let registry = BehaviorRegistry::new();
         let result = registry.create("test::Unknown", &[]).await;
-        assert!(matches!(result, Err(BehaviorFactoryError::UnknownModule(_))));
+        assert!(matches!(
+            result,
+            Err(BehaviorFactoryError::UnknownModule(_))
+        ));
     }
 
     #[tokio::test]
     async fn test_registered_modules() {
         let registry = BehaviorRegistry::new();
-        registry.register_simple("test::Worker1", || {
-            Box::pin(async move {
-                Ok(Box::new(TestBehavior {
-                    id: "1".to_string(),
-                }) as Box<dyn Actor>)
+        registry
+            .register_simple("test::Worker1", || {
+                Box::pin(async move {
+                    Ok(Box::new(TestBehavior {
+                        id: "1".to_string(),
+                    }) as Box<dyn Actor>)
+                })
             })
-        }).await;
-        registry.register_simple("test::Worker2", || {
-            Box::pin(async move {
-                Ok(Box::new(TestBehavior {
-                    id: "2".to_string(),
-                }) as Box<dyn Actor>)
+            .await;
+        registry
+            .register_simple("test::Worker2", || {
+                Box::pin(async move {
+                    Ok(Box::new(TestBehavior {
+                        id: "2".to_string(),
+                    }) as Box<dyn Actor>)
+                })
             })
-        }).await;
+            .await;
 
         let modules = registry.registered_modules().await;
         assert_eq!(modules.len(), 2);

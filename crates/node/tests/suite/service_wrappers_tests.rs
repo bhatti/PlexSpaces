@@ -21,19 +21,16 @@
 //! These tests verify that service wrappers correctly adapt Node's services
 //! to the traits defined in plexspaces_core::actor_context.
 
-use plexspaces_node::service_wrappers::{
-    TupleSpaceProviderWrapper,
-};
-use plexspaces_node::NodeBuilder;
-use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_core::actor_context::{ActorService, ObjectRegistry, TupleSpaceProvider};
 use plexspaces_core::actor_registry::ActorRegistry;
 use plexspaces_core::Message;
+use plexspaces_node::service_wrappers::TupleSpaceProviderWrapper;
+use plexspaces_node::NodeBuilder;
+use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_tuplespace::{Pattern, PatternField, Tuple, TupleField};
 use std::sync::Arc;
 
-
-use super::test_helpers::{spawn_actor_helper, find_actor_helper};
+use super::test_helpers::{find_actor_helper, spawn_actor_helper};
 
 /// Helper to create a test message
 fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
@@ -44,13 +41,13 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
     }
 }
 
-
 #[tokio::test]
 async fn test_node_operations_wrapper() {
     let node: Arc<plexspaces_node::Node> = Arc::new(
         NodeBuilder::new("test-node")
             .with_listen_addr("127.0.0.1:8000")
-            .build().await
+            .build()
+            .await,
     );
     // NodeOperationsWrapper has been removed - NodeOperations trait is no longer needed
     // Node operations are now accessed directly via Node or through ActorRegistry/ActorFactory
@@ -77,7 +74,10 @@ async fn test_tuplespace_provider_wrapper() {
     ]);
     let results = wrapper.read(&pattern).await.unwrap();
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].fields()[0], TupleField::String("test".to_string()));
+    assert_eq!(
+        results[0].fields()[0],
+        TupleField::String("test".to_string())
+    );
 
     // Test take
     let taken = wrapper.take(&pattern).await.unwrap();
@@ -98,21 +98,29 @@ async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
     let node: Arc<plexspaces_node::Node> = Arc::new(
         NodeBuilder::new("test-node")
             .with_listen_addr("127.0.0.1:8000")
-            .build().await
+            .build()
+            .await,
     );
 
     use plexspaces_services::actor_service::ActorServiceImpl;
-    let actor_service = Arc::new(ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string()));
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        node.service_locator(),
+        node.id().as_str().to_string(),
+    ));
 
     // Try to send to remote actor (will fail because actor doesn't exist or remote not implemented)
     let message = create_test_message(b"hello".to_vec());
-    let result = actor_service.send("remote-actor@remote-node", message, false, None).await;
+    let result = actor_service
+        .send("remote-actor@remote-node", message, false, None)
+        .await;
 
     // Should fail - either "Actor not found", "Node not found", or "not yet implemented"
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
     assert!(
-        error_msg.contains("not yet implemented") || error_msg.contains("Actor not found") || error_msg.contains("Node not found"),
+        error_msg.contains("not yet implemented")
+            || error_msg.contains("Actor not found")
+            || error_msg.contains("Node not found"),
         "Expected error about remote messaging, actor not found, or node not found, got: {}",
         error_msg
     );
@@ -124,11 +132,14 @@ async fn test_object_registry_wrapper() {
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
     use std::sync::Arc;
 
-
     // Create ObjectRegistry with SQLite :memory: backend
-    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let registry = Arc::new(ObjectRegistry::new(object_repo));
-    
+
     // Register an actor
     use plexspaces_core::RequestContext;
     let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
@@ -144,7 +155,9 @@ async fn test_object_registry_wrapper() {
     registry.register(&ctx, registration).await.unwrap();
 
     // Test lookup using trait method signature: lookup(ctx, object_type, object_id)
-    let result = registry.lookup(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1").await;
+    let result = registry
+        .lookup(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
+        .await;
     assert!(result.is_ok());
     let found = result.unwrap();
     assert!(found.is_some());
@@ -152,4 +165,3 @@ async fn test_object_registry_wrapper() {
     assert_eq!(reg.object_id, "test-actor@node1");
     assert_eq!(reg.grpc_address, "http://node1:8000");
 }
-

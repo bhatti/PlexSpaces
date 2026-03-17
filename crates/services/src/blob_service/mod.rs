@@ -21,24 +21,20 @@
 use bytes::Bytes;
 use chrono::{Duration, Utc};
 use object_store::{
-    aws::AmazonS3Builder,
-    azure::MicrosoftAzureBuilder,
-    gcp::GoogleCloudStorageBuilder,
-    local::LocalFileSystem,
-    path::Path as ObjectPath,
-    ObjectStore,
+    aws::AmazonS3Builder, azure::MicrosoftAzureBuilder, gcp::GoogleCloudStorageBuilder,
+    local::LocalFileSystem, path::Path as ObjectPath, ObjectStore,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use ulid::Ulid;
 
 use plexspaces_blob::{
-    BlobConfigExt, BlobError, BlobResult, BlobRepository,
-    repository::ListFilters,
     helpers::{datetime_to_timestamp, get_storage_path},
+    repository::ListFilters,
+    BlobConfigExt, BlobError, BlobRepository, BlobResult,
 };
-use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 use plexspaces_core::RequestContext;
+use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 
 /// Blob storage service
 pub struct BlobService {
@@ -61,7 +57,7 @@ impl BlobService {
         };
         let mut config_with_prefix = config;
         config_with_prefix.prefix = prefix;
-        
+
         Self {
             config: config_with_prefix,
             object_store,
@@ -70,12 +66,9 @@ impl BlobService {
     }
 
     /// Create new blob service
-    pub async fn new(
-        config: BlobConfig,
-        repository: Arc<dyn BlobRepository>,
-    ) -> BlobResult<Self> {
+    pub async fn new(config: BlobConfig, repository: Arc<dyn BlobRepository>) -> BlobResult<Self> {
         config.validate()?;
-        
+
         // Set default prefix if empty
         let prefix = if config.prefix.is_empty() {
             "/plexspaces".to_string()
@@ -85,8 +78,7 @@ impl BlobService {
 
         let object_store: Arc<dyn ObjectStore> = match config.backend.as_str() {
             "s3" => {
-                let mut builder = AmazonS3Builder::new()
-                    .with_bucket_name(&config.bucket);
+                let mut builder = AmazonS3Builder::new().with_bucket_name(&config.bucket);
 
                 if !config.region.is_empty() {
                     builder = builder.with_region(&config.region);
@@ -100,11 +92,15 @@ impl BlobService {
                     builder = builder.with_secret_access_key(&secret_access_key);
                 }
 
-                Arc::new(builder.build().map_err(|e| BlobError::ConfigError(format!("Failed to build S3 store: {}", e)))?)
+                Arc::new(builder.build().map_err(|e| {
+                    BlobError::ConfigError(format!("Failed to build S3 store: {}", e))
+                })?)
             }
             "minio" => {
                 if config.endpoint.is_empty() {
-                    return Err(BlobError::ConfigError("endpoint required for MinIO".to_string()));
+                    return Err(BlobError::ConfigError(
+                        "endpoint required for MinIO".to_string(),
+                    ));
                 }
 
                 let mut builder = AmazonS3Builder::new()
@@ -120,21 +116,26 @@ impl BlobService {
                     builder = builder.with_secret_access_key(&secret_access_key);
                 }
 
-                Arc::new(builder.build().map_err(|e| BlobError::ConfigError(format!("Failed to build MinIO store: {}", e)))?)
+                Arc::new(builder.build().map_err(|e| {
+                    BlobError::ConfigError(format!("Failed to build MinIO store: {}", e))
+                })?)
             }
             "gcp" => {
-                let mut builder = GoogleCloudStorageBuilder::new()
-                    .with_bucket_name(&config.bucket);
+                let mut builder = GoogleCloudStorageBuilder::new().with_bucket_name(&config.bucket);
 
                 if !config.gcp_service_account_json.is_empty() {
                     builder = builder.with_service_account_path(&config.gcp_service_account_json);
                 }
 
-                Arc::new(builder.build().map_err(|e| BlobError::ConfigError(format!("Failed to build GCP store: {}", e)))?)
+                Arc::new(builder.build().map_err(|e| {
+                    BlobError::ConfigError(format!("Failed to build GCP store: {}", e))
+                })?)
             }
             "azure" => {
                 if config.azure_account_name.is_empty() {
-                    return Err(BlobError::ConfigError("azure_account_name required".to_string()));
+                    return Err(BlobError::ConfigError(
+                        "azure_account_name required".to_string(),
+                    ));
                 }
 
                 let mut builder = MicrosoftAzureBuilder::new()
@@ -145,21 +146,30 @@ impl BlobService {
                     builder = builder.with_access_key(&config.azure_account_key);
                 }
 
-                Arc::new(builder.build().map_err(|e| BlobError::ConfigError(format!("Failed to build Azure store: {}", e)))?)
+                Arc::new(builder.build().map_err(|e| {
+                    BlobError::ConfigError(format!("Failed to build Azure store: {}", e))
+                })?)
             }
             "local" => {
                 // Local filesystem for testing
-                Arc::new(
-                    LocalFileSystem::new_with_prefix("/")
-                        .map_err(|e| BlobError::ConfigError(format!("Failed to create local filesystem store: {}", e)))?
-                )
+                Arc::new(LocalFileSystem::new_with_prefix("/").map_err(|e| {
+                    BlobError::ConfigError(format!(
+                        "Failed to create local filesystem store: {}",
+                        e
+                    ))
+                })?)
             }
-            _ => return Err(BlobError::ConfigError(format!("Unsupported backend: {}", config.backend))),
+            _ => {
+                return Err(BlobError::ConfigError(format!(
+                    "Unsupported backend: {}",
+                    config.backend
+                )))
+            }
         };
 
         let mut config_with_prefix = config;
         config_with_prefix.prefix = prefix;
-        
+
         Ok(Self {
             config: config_with_prefix,
             object_store,
@@ -212,7 +222,7 @@ impl BlobService {
         // Create metadata using proto type
         let now = Utc::now();
         let expires_at = expires_after.map(|d| datetime_to_timestamp(now + d));
-        
+
         let blob_metadata = BlobMetadata {
             blob_id: blob_id.clone(),
             tenant_id: ctx.tenant_id().to_string(),
@@ -237,7 +247,9 @@ impl BlobService {
 
         // Upload to object store
         let bytes = Bytes::from(data);
-        self.object_store.put(&path, bytes.into()).await
+        self.object_store
+            .put(&path, bytes.into())
+            .await
             .map_err(|e| BlobError::StorageError(format!("Failed to upload blob: {}", e)))?;
 
         // Get ETag from object store (if available)
@@ -255,13 +267,12 @@ impl BlobService {
     /// ## Arguments
     /// * `ctx` - Request context (required for tenant isolation)
     /// * `blob_id` - Blob identifier
-    pub async fn download_blob(
-        &self,
-        ctx: &RequestContext,
-        blob_id: &str,
-    ) -> BlobResult<Vec<u8>> {
+    pub async fn download_blob(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<Vec<u8>> {
         // Get metadata (automatically filtered by tenant_id and namespace)
-        let metadata = self.repository.get(ctx, blob_id).await?
+        let metadata = self
+            .repository
+            .get(ctx, blob_id)
+            .await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))?;
 
         // Get storage path
@@ -269,9 +280,14 @@ impl BlobService {
         let path = ObjectPath::from(storage_path);
 
         // Download from object store
-        let result = self.object_store.get(&path).await
+        let result = self
+            .object_store
+            .get(&path)
+            .await
             .map_err(|e| BlobError::StorageError(format!("Failed to download blob: {}", e)))?;
-        let bytes = result.bytes().await
+        let bytes = result
+            .bytes()
+            .await
             .map_err(|e| BlobError::StorageError(format!("Failed to read blob bytes: {}", e)))?;
 
         Ok(bytes.to_vec())
@@ -287,7 +303,9 @@ impl BlobService {
         ctx: &RequestContext,
         blob_id: &str,
     ) -> BlobResult<BlobMetadata> {
-        self.repository.get(ctx, blob_id).await?
+        self.repository
+            .get(ctx, blob_id)
+            .await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))
     }
 
@@ -314,19 +332,20 @@ impl BlobService {
     /// ## Arguments
     /// * `ctx` - Request context (required for tenant isolation)
     /// * `blob_id` - Blob identifier
-    pub async fn delete_blob(
-        &self,
-        ctx: &RequestContext,
-        blob_id: &str,
-    ) -> BlobResult<()> {
+    pub async fn delete_blob(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<()> {
         // Get metadata (automatically filtered by tenant_id and namespace)
-        let metadata = self.repository.get(ctx, blob_id).await?
+        let metadata = self
+            .repository
+            .get(ctx, blob_id)
+            .await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))?;
 
         // Delete from object store
         let storage_path = get_storage_path(&metadata, &self.config.prefix);
         let path = ObjectPath::from(storage_path);
-        self.object_store.delete(&path).await
+        self.object_store
+            .delete(&path)
+            .await
             .map_err(|e| BlobError::StorageError(format!("Failed to delete blob: {}", e)))?;
 
         // Delete metadata
@@ -352,12 +371,16 @@ impl BlobService {
         expires_after: Duration,
     ) -> BlobResult<String> {
         // Get metadata (automatically filtered by tenant_id and namespace)
-        let metadata = self.repository.get(ctx, blob_id).await?
+        let metadata = self
+            .repository
+            .get(ctx, blob_id)
+            .await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))?;
 
         // Get storage path
-        let storage_path = plexspaces_blob::helpers::get_storage_path(&metadata, &self.config.prefix);
-        
+        let storage_path =
+            plexspaces_blob::helpers::get_storage_path(&metadata, &self.config.prefix);
+
         // Generate presigned URL
         #[cfg(feature = "presigned-urls")]
         {
@@ -366,11 +389,14 @@ impl BlobService {
                 &storage_path,
                 operation,
                 expires_after,
-            ).await
+            )
+            .await
         }
         #[cfg(not(feature = "presigned-urls"))]
         {
-            Err(BlobError::InvalidInput("Presigned URLs require presigned-urls feature".to_string()))
+            Err(BlobError::InvalidInput(
+                "Presigned URLs require presigned-urls feature".to_string(),
+            ))
         }
     }
 

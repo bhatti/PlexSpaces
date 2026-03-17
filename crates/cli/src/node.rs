@@ -26,9 +26,7 @@ use plexspaces_proto::node::v1::{
     ListConnectedNodesRequest,
 };
 use plexspaces_proto::prost_types;
-use plexspaces_proto::system::v1::{
-    system_service_client::SystemServiceClient, GetHealthRequest,
-};
+use plexspaces_proto::system::v1::{system_service_client::SystemServiceClient, GetHealthRequest};
 use std::sync::Arc;
 use tokio::signal;
 use tonic::transport::Channel;
@@ -47,9 +45,7 @@ pub async fn status(node_addr: &str) -> Result<()> {
 
     println!("📊 Node Status: {}", node_addr);
 
-    let request = GetHealthRequest {
-        components: vec![],
-    };
+    let request = GetHealthRequest { components: vec![] };
     let response = client
         .get_health(tonic::Request::new(request))
         .await
@@ -88,9 +84,9 @@ pub async fn start(node_id: &str, listen_addr: &str, release_config: Option<&str
     register_fatal_error_channel(fatal_error_tx);
 
     // Load release config if provided
-    let mut builder = NodeBuilder::new(node_id.to_string())
-        .with_listen_addr(listen_addr.to_string());
-    
+    let mut builder =
+        NodeBuilder::new(node_id.to_string()).with_listen_addr(listen_addr.to_string());
+
     let mut spec = if let Some(release_config_path) = release_config {
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!("Loading release config from: {}", release_config_path);
@@ -104,7 +100,10 @@ pub async fn start(node_id: &str, listen_addr: &str, release_config: Option<&str
                 // the hardcoded value in release.yaml (e.g., my-node)
                 if let Some(ref mut node_config) = spec.node {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                        debug!("Overriding node.id from '{}' to '{}' (from CLI --node-id)", node_config.id, node_id);
+                        debug!(
+                            "Overriding node.id from '{}' to '{}' (from CLI --node-id)",
+                            node_config.id, node_id
+                        );
                     }
                     node_config.id = node_id.to_string();
                 } else {
@@ -116,12 +115,17 @@ pub async fn start(node_id: &str, listen_addr: &str, release_config: Option<&str
                     });
                 }
                 spec
-            },
+            }
             Err(e) => {
                 // FATAL: If release config path was explicitly provided, fail startup
-                eprintln!("FATAL: Failed to load release config from '{}': {}", release_config_path, e);
+                eprintln!(
+                    "FATAL: Failed to load release config from '{}': {}",
+                    release_config_path, e
+                );
                 eprintln!("       Release config loading is mandatory when --release-config is specified.");
-                eprintln!("       Fix the configuration file or remove --release-config to use defaults.");
+                eprintln!(
+                    "       Fix the configuration file or remove --release-config to use defaults."
+                );
                 std::process::exit(1);
             }
         }
@@ -133,23 +137,24 @@ pub async fn start(node_id: &str, listen_addr: &str, release_config: Option<&str
             "1.0.0".to_string(),
             node_id.to_string(),
             listen_addr.to_string(),
-        ).await
+        )
+        .await
     };
-    
+
     // CRITICAL: Set PLEXSPACES_NODE_ID env var so config_manager::initialize() can use it
     // This ensures consistent node-id usage across all components (ActorRegistry, etc.)
     std::env::set_var("PLEXSPACES_NODE_ID", node_id);
-    
+
     // Initialize config: apply env overrides, set defaults, validate, and log
     use plexspaces_common::config_manager::initialize;
     initialize(&mut spec);
-    
+
     builder = builder.with_release_spec(spec);
-    
+
     // Create node using NodeBuilder (this may call fatal_exit() if security validation fails)
     // Note: build() returns Node directly, not Result - fatal errors are handled via fatal_exit()
     let node = Arc::new(builder.build().await);
-    
+
     // Start node in spawned task
     let node_for_start = node.clone();
     tokio::spawn(async move {
@@ -292,7 +297,10 @@ pub async fn list_connected_nodes(
         page_token: String::new(),
         include_health,
     });
-    let res = client.list_connected_nodes(req).await.context("ListConnectedNodes failed")?;
+    let res = client
+        .list_connected_nodes(req)
+        .await
+        .context("ListConnectedNodes failed")?;
     let inner = res.into_inner();
 
     println!("📋 Connected nodes ({} total):", inner.nodes.len());
@@ -333,7 +341,10 @@ pub async fn connect_nodes(
             nanos: 0,
         }),
     });
-    let res = client.connect_nodes(req).await.context("ConnectNodes failed")?;
+    let res = client
+        .connect_nodes(req)
+        .await
+        .context("ConnectNodes failed")?;
     let inner = res.into_inner();
 
     if !inner.connected.is_empty() {
@@ -371,7 +382,10 @@ pub async fn disconnect_nodes(
         node_ids: node_ids.to_vec(),
         notify_remote,
     });
-    let res = client.disconnect_nodes(req).await.context("DisconnectNodes failed")?;
+    let res = client
+        .disconnect_nodes(req)
+        .await
+        .context("DisconnectNodes failed")?;
     let inner = res.into_inner();
 
     if !inner.disconnected.is_empty() {

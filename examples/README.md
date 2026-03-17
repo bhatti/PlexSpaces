@@ -20,6 +20,7 @@ Every example must be evaluated to ensure it uses the **correct abstractions and
 - **Correct ABI**: WASM apps implement the **plexspaces:simple-actor** ABI expected by the node: `init`, `handle`, `get-state`, `set-state` (and `cabi_realloc` / `cabi_post_*` as required). Export names must match the WIT (e.g. `plexspaces:simple-actor/actor@0.1.0#handle`).
 - **GenServer-style ops**: Messages use an `op` (or `message_type`) field; handler dispatches on op (e.g. `run`, `query`, `signal`, `get_status`). State is serializable (e.g. JSON) for get/set-state and durability.
 - **Config**: `app-config.toml` declares the actor as a GenServer child with the correct `id`/`type`; test script uses the same actor type and instance id when calling the HTTP API.
+- **Framework services via WIT**: Use simple-actor host functions for tuple space, pools, and shard-group scatter-gather (`create-shard-group`, `bulk-update-shard-group`, `scatter-gather`) instead of direct gRPC clients in examples.
 - **No host-only code in WASM**: WASM crate does not depend on tokio, plexspaces-node, or other host-only crates; only serde/serde_json (or language equivalents) and the export surface. Host provides the runtime.
 
 ### Checklist before marking an example done
@@ -47,7 +48,7 @@ For **realistic benchmarks**, examples may support **multi-node** execution: run
 - **Leader** (coordinator on that node): Receives the single run, **splits the workload** (e.g. by chunk, shard, or partition), **spawns or uses workers** on the same node and/or on **other** nodes, sends sub-tasks to them (via routing to `actor_id@node_id`), and **aggregates** results.
 - **Workers** on other nodes: Receive sub-tasks from the leader, do the work, reply. Messaging uses existing **location-transparent** routing (`actor_id@node_id` → gRPC to that node).
 
-APIs involved: **ConnectNodes** (so the leader node knows peer nodes), **NodeRegistry** / list nodes, **remote spawn** (call `ActorService.SpawnActor` on another node’s gRPC channel via `get_actor_service_client(node_id)`), and **message routing** (send to `worker_id@node_id`). ShardGroup / elastic pool can be extended so shards or pool workers are **placed on different nodes**; today ShardGroup spawns all shards on the same node.
+APIs involved: **ConnectNodes** (so the leader node knows peer nodes), **NodeRegistry** / list nodes, **remote spawn** (call `ActorService.SpawnActor` on another node’s gRPC channel via `get_actor_service_client(node_id)`), and **message routing** (send to `worker_id@node_id`). ShardGroup placement uses the same proto `NodePlacement` model as the rest of the framework, so examples can rely on registry-based placement without inventing SDK-specific placement types.
 
 **Leader = first node.** The node that receives the single run is the **leader**; it splits work and coordinates workers.
 

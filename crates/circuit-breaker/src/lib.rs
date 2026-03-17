@@ -244,7 +244,7 @@ pub use circuit_breaker::*;
 
 // Re-export proto types for convenience
 pub use plexspaces_proto::circuitbreaker::prv::{
-    CircuitBreakerConfig,
-    CircuitBreakerEvent, CircuitBreakerInfo, CircuitBreakerMetrics, CircuitOpenError, CircuitState,
-    FailureStrategy, HalfOpenConfig, RequestResult, SlidingWindowConfig, SlidingWindowMetrics,
+    CircuitBreakerConfig, CircuitBreakerEvent, CircuitBreakerInfo, CircuitBreakerMetrics,
+    CircuitOpenError, CircuitState, FailureStrategy, HalfOpenConfig, RequestResult,
+    SlidingWindowConfig, SlidingWindowMetrics,
 };

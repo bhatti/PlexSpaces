@@ -22,8 +22,8 @@
 //! Provides Service trait implementations for facet types to break circular dependencies.
 //! Facet types are defined in plexspaces-facet but need to implement Service from core.
 
-use std::sync::Arc;
 use crate::Service;
+use std::sync::Arc;
 
 /// Wrapper for FacetRegistry to implement Service trait
 ///
@@ -96,6 +96,3 @@ impl Service for FacetRegistryServiceWrapper {
         crate::service_names::FACET_REGISTRY.to_string()
     }
 }
-
-
-

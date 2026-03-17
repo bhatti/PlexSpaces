@@ -548,10 +548,16 @@ impl TupleSpace {
         let watchers_clone = watchers.clone();
         let namespace_str_clone = namespace_str.clone();
         tokio::spawn(async move {
-            match storage_clone.subscribe_watch_events(&namespace_str_clone).await {
+            match storage_clone
+                .subscribe_watch_events(&namespace_str_clone)
+                .await
+            {
                 Ok(mut receiver) => {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("Subscribed to watch events for namespace: {}", namespace_str_clone);
+                        tracing::debug!(
+                            "Subscribed to watch events for namespace: {}",
+                            namespace_str_clone
+                        );
                     }
                     // Forward distributed events to local watchers
                     while let Some(event) = receiver.recv().await {
@@ -576,7 +582,10 @@ impl TupleSpace {
                                     }
                                 }
                                 _ => {
-                                    tracing::warn!("Unknown watch event type: {}", event.event_type);
+                                    tracing::warn!(
+                                        "Unknown watch event type: {}",
+                                        event.event_type
+                                    );
                                 }
                             }
                         }
@@ -585,7 +594,9 @@ impl TupleSpace {
                 Err(TupleSpaceError::NotSupported(_)) => {
                     // Storage backend doesn't support subscriptions (e.g., SQLite, or PostgreSQL not yet implemented)
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!("Watch event subscription not supported for this storage backend");
+                        tracing::debug!(
+                            "Watch event subscription not supported for this storage backend"
+                        );
                     }
                 }
                 Err(e) => {

@@ -36,44 +36,50 @@ pub mod behavior_factory;
 pub use behavior_factory::{BehaviorFactory, BehaviorFactoryError, BehaviorRegistry};
 // registry module removed - replaced by object-registry
 pub mod actor_context;
-pub use actor_context::{LinkProvider, ActivationProvider};
+pub use actor_context::{ActivationProvider, LinkProvider};
 pub mod actor_registry;
-pub mod service_wrappers;
 pub mod service_trait;
-pub use service_trait::{Service, service_names};
+pub mod service_wrappers;
+pub use service_trait::{service_names, Service};
 pub mod service_locator_trait;
-pub use service_locator_trait::{ServiceLocator, ApplicationManager, WasmRuntimeTrait, BlobServiceTrait, NodeRegistryTrait};
-pub mod service_locator;
+pub use service_locator_trait::{
+    ApplicationManager, BlobServiceTrait, NodeRegistryTrait, ServiceLocator, WasmRuntimeTrait,
+};
+pub mod node_connectivity;
+pub use node_connectivity::{ConnectNodesResult, NodeConnectivity};
 pub mod keyvalue_store;
+pub mod service_locator;
 pub use keyvalue_store::{KeyValueStore, KeyValueStoreError, KeyValueStoreResult};
 // LockManager trait is in plexspaces-locks crate - re-export for convenience
-pub use plexspaces_locks::{LockManager, LockError, LockResult};
-pub use plexspaces_proto::locks::prv::{Lock, AcquireLockOptions, RenewLockOptions, ReleaseLockOptions};
+pub use plexspaces_locks::{LockError, LockManager, LockResult};
+pub use plexspaces_proto::locks::prv::{
+    AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions,
+};
 pub use service_locator::request_context_from_grpc_request;
 pub mod application_node_trait;
 pub use application_node_trait::ApplicationNode;
 pub mod grpc_connection_manager;
 pub use grpc_connection_manager::{GrpcConnectionManager, ServiceType};
-pub mod object_registry_helpers;
 pub mod elastic_pool_service;
+pub mod object_registry_helpers;
 pub use elastic_pool_service::{ElasticPoolService, PoolServiceError};
 pub mod actor_trait;
 pub mod exit_reason;
-pub mod virtual_actor_manager;
 pub mod virtual_actor_lifecycle_facet;
+pub mod virtual_actor_manager;
 pub mod virtual_actor_registration;
 pub use virtual_actor_lifecycle_facet::{VirtualActorLifecycleFacet, VirtualActorLifecycleState};
 pub mod actor_state_checker;
 pub use actor_state_checker::ActorStateFetcher;
 pub mod facet_service_wrapper;
-pub use facet_service_wrapper::{FacetRegistryServiceWrapper, FacetManagerServiceWrapper};
-pub mod monitoring;
+pub use facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 pub mod message_metrics;
+pub mod monitoring;
 pub mod reply_waiter;
-pub use monitoring::{NodeMetricsAccessor, NodeConnectionInfo};
-pub use message_metrics::{ActorMetrics, ActorMetricsHandle, ActorMetricsExt, new_actor_metrics};
+pub use message_metrics::{new_actor_metrics, ActorMetrics, ActorMetricsExt, ActorMetricsHandle};
+pub use monitoring::{NodeConnectionInfo, NodeMetricsAccessor};
 pub mod journal_storage;
-pub use journal_storage::{JournalStorage, JournalError, JournalResult};
+pub use journal_storage::{JournalError, JournalResult, JournalStorage};
 /// Health module - consolidated health checking, reporting, and service functionality.
 ///
 /// This module provides:
@@ -81,48 +87,50 @@ pub use journal_storage::{JournalStorage, JournalError, JournalResult};
 /// - `HealthReporter`: Report health status
 /// - `PlexSpacesHealthReporter`: Tonic-integrated health service
 pub mod health;
+pub use health::checker::{
+    run_health_check, HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker,
+};
 pub use health::reporter::HealthReporter;
-pub use health::checker::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult, run_health_check};
 pub use health::service::PlexSpacesHealthReporter;
 // Health sub-modules re-exported for direct access
-pub use health::reporter as health_reporter;
 pub use health::checker as health_checker;
+pub use health::reporter as health_reporter;
 pub use health::service as health_service;
 pub mod secret_masker;
-pub use secret_masker::{SecretMasker, mask_release_spec, mask_map_secrets, DEFAULT_MASK};
+pub use secret_masker::{mask_map_secrets, mask_release_spec, SecretMasker, DEFAULT_MASK};
 pub mod actor_factory;
 pub use actor_factory::ActorFactory;
 pub mod constants;
 pub use constants::TEMP_SENDER_PREFIX;
 pub mod actor_id;
-pub use actor_id::{build_actor_id, parse_actor_id, ParsedActorId, ActorIdError, extract_actor_type, extract_namespace, extract_base_id};
+pub use actor_id::{
+    build_actor_id, extract_actor_type, extract_base_id, extract_namespace, parse_actor_id,
+    ActorIdError, ParsedActorId,
+};
 pub mod facet_helpers;
 pub use facet_helpers::{create_facet_from_proto, create_facets_from_proto};
 pub mod facet_factories;
 pub use facet_factories::{
-    LockFacetFactory,
+    CachingFacetFactory, EventEmitterFacetFactory, HttpClientFacetFactory, KeyValueFacetFactory,
+    LockFacetFactory, LoggingFacetFactory, MetricsFacetFactory, ProcessGroupFacetFactory,
     RegistryFacetFactory,
-    ProcessGroupFacetFactory,
-    KeyValueFacetFactory,
-    HttpClientFacetFactory,
-    EventEmitterFacetFactory,
-    LoggingFacetFactory,
-    CachingFacetFactory,
-    MetricsFacetFactory,
 };
 
 // Re-export enhanced ActorContext
 pub use actor_context::{
-    ActorContext, ActorService, ChannelService, FacetService, ObjectRegistry, ProcessGroupService, TupleSpaceProvider,
+    ActorContext, ActorService, ChannelService, FacetService, ObjectRegistry, ProcessGroupService,
+    TupleSpaceProvider,
 };
 // Re-export ExitReason and ExitAction
 pub use exit_reason::{ExitAction, ExitReason};
 // ObjectRegistration is re-exported from proto via actor_context module
 pub use actor_context::ObjectRegistration;
 // Re-export ActorRegistry and related types
-pub use actor_registry::{ActorRegistry, ActorRegistryError, ActorRoutingInfo, MonitorLink, TemporarySenderEntry};
+pub use actor_registry::{
+    ActorRegistry, ActorRegistryError, ActorRoutingInfo, MonitorLink, TemporarySenderEntry,
+};
 // Re-export VirtualActorManager and VirtualActorMetadata (source of truth for virtual actors)
-pub use virtual_actor_manager::{VirtualActorManager, VirtualActorError, VirtualActorMetadata};
+pub use virtual_actor_manager::{VirtualActorError, VirtualActorManager, VirtualActorMetadata};
 // Re-export virtual actor registration helper
 pub use virtual_actor_registration::register_virtual_actor_type_consistent;
 // FacetManager re-exported from plexspaces-facet crate for convenience
@@ -130,7 +138,7 @@ pub use plexspaces_facet::FacetManager;
 // Re-export MessageSender trait (for sending messages to actors)
 pub use actor_trait::MessageSender;
 // Re-export ReplyWaiter and related types
-pub use reply_waiter::{ReplyWaiter, ReplyWaiterRegistry, ReplyWaiterError};
+pub use reply_waiter::{ReplyWaiter, ReplyWaiterError, ReplyWaiterRegistry};
 // Re-export RequestContext from common crate
 pub use plexspaces_common::{RequestContext, RequestContextError};
 
@@ -139,7 +147,6 @@ pub type ActorId = String;
 
 // ActorContext is now in actor_context module with full service access
 // See actor_context.rs for the enhanced version with ActorService, ObjectRegistry, etc.
-
 
 /// Lightweight actor reference - pure data, no methods, no service dependencies
 ///
@@ -248,7 +255,7 @@ impl ActorRef {
     pub fn is_remote(&self, current_node_id: &str) -> bool {
         self.node_id != current_node_id
     }
-    
+
     /// Get actor ID
     pub fn id(&self) -> &ActorId {
         &self.id
@@ -434,7 +441,11 @@ pub trait Actor: Send + Sync {
     ///
     /// ## Default
     /// Returns Ok(()) - most behaviors don't need pre-facet-detachment cleanup
-    async fn on_facets_detaching(&mut self, _ctx: &ActorContext, _reason: &ExitReason) -> Result<(), ActorError> {
+    async fn on_facets_detaching(
+        &mut self,
+        _ctx: &ActorContext,
+        _reason: &ExitReason,
+    ) -> Result<(), ActorError> {
         Ok(())
     }
 

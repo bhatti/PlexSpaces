@@ -3,8 +3,8 @@
 //
 // Tests for BehaviorContext and related types
 
-use plexspaces_core::{ActorContext, BehaviorContext, BehaviorType, BehaviorError};
 use plexspaces_core::Message;
+use plexspaces_core::{ActorContext, BehaviorContext, BehaviorError, BehaviorType};
 use std::sync::Arc;
 use ulid::Ulid;
 
@@ -26,8 +26,8 @@ async fn test_behavior_context_creation() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
-        "test-tenant".to_string(),  // tenant_id
-        "default".to_string(),       // namespace
+        "test-tenant".to_string(), // tenant_id
+        "default".to_string(),     // namespace
         service_locator,
         None,
     );
@@ -59,8 +59,8 @@ async fn test_behavior_context_with_sender() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
-        "test-tenant".to_string(),  // tenant_id
-        "default".to_string(),       // namespace
+        "test-tenant".to_string(), // tenant_id
+        "default".to_string(),     // namespace
         service_locator,
         None,
     );
@@ -97,7 +97,9 @@ async fn test_behavior_type_variants() {
         match behavior_type {
             BehaviorType::GenServer => assert_eq!(behavior_type, BehaviorType::GenServer),
             BehaviorType::GenEvent => assert_eq!(behavior_type, BehaviorType::GenEvent),
-            BehaviorType::GenStateMachine => assert_eq!(behavior_type, BehaviorType::GenStateMachine),
+            BehaviorType::GenStateMachine => {
+                assert_eq!(behavior_type, BehaviorType::GenStateMachine)
+            }
             BehaviorType::Workflow => assert_eq!(behavior_type, BehaviorType::Workflow),
             BehaviorType::Custom(ref s) => assert_eq!(s, "custom-behavior"),
         }
@@ -155,4 +157,3 @@ async fn test_behavior_error_processing_error() {
     let error = BehaviorError::ProcessingError("error1".to_string());
     assert!(error.to_string().contains("error1"));
 }
-

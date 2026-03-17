@@ -41,14 +41,22 @@ pub use actor_ref::{ActorRef, ActorRefError};
 // High-level typed actor references (WorkflowRef, GenServerRef, FsmRef, EventRef)
 pub mod typed_refs;
 pub use typed_refs::{
-    // Workflow
-    WorkflowRef, WorkflowRefError, DEFAULT_OPERATION_TIMEOUT, DEFAULT_RUN_TIMEOUT,
-    // GenServer
-    GenServerRef, GenServerError, DEFAULT_CALL_TIMEOUT,
-    // FSM
-    FsmRef, FsmError, DEFAULT_FSM_TIMEOUT,
+    EventError,
     // Event
-    EventRef, EventError,
+    EventRef,
+    FsmError,
+    // FSM
+    FsmRef,
+    GenServerError,
+    // GenServer
+    GenServerRef,
+    // Workflow
+    WorkflowRef,
+    WorkflowRefError,
+    DEFAULT_CALL_TIMEOUT,
+    DEFAULT_FSM_TIMEOUT,
+    DEFAULT_OPERATION_TIMEOUT,
+    DEFAULT_RUN_TIMEOUT,
 };
 
 // TTL tests
@@ -63,8 +71,8 @@ pub use builder::ActorBuilder;
 pub mod actor_factory;
 pub mod actor_factory_impl;
 // regular_actor_wrapper removed - ActorRef now implements MessageSender directly
-pub mod virtual_actor_wrapper;
 pub mod service_locator_helpers;
+pub mod virtual_actor_wrapper;
 pub use actor_factory::ActorFactory;
 pub use actor_factory_impl::ActorFactoryImpl;
 pub use virtual_actor_wrapper::VirtualActorWrapper;
@@ -88,14 +96,14 @@ pub use supervisor_builder_proto::ProtoSupervisorBuilder;
 
 // Child specification module
 pub mod child_spec;
-pub use child_spec::{ChildSpec, StartedChild, StartFn, ShutdownSpec};
+pub use child_spec::{ChildSpec, ShutdownSpec, StartFn, StartedChild};
 
 pub use plexspaces_core::facet_helpers::{create_facet_from_proto, create_facets_from_proto};
 
 // Unified routing module
 pub mod routing;
 pub use routing::{
-    extract_node_id, is_actor_local, ask_helper, route_local, route_remote, route_message,
+    ask_helper, extract_node_id, is_actor_local, route_local, route_message, route_remote,
 };
 
 // Re-export SupervisorStats from proto (for public API)

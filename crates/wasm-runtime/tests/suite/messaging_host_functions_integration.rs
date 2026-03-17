@@ -10,14 +10,14 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_wasm_runtime::component_host::MessagingImpl;
+    use async_trait::async_trait;
+    use plexspaces_core::ActorId;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::messaging::Host;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::types as actor_types;
-    use plexspaces_core::ActorId;
+    use plexspaces_wasm_runtime::component_host::MessagingImpl;
     use plexspaces_wasm_runtime::HostFunctions;
-    use std::sync::Arc;
-    use async_trait::async_trait;
     use plexspaces_wasm_runtime::MessageSender;
+    use std::sync::Arc;
 
     /// Mock MessageSender for testing
     struct MockMessageSender {
@@ -40,7 +40,13 @@ mod tests {
 
     #[async_trait]
     impl MessageSender for MockMessageSender {
-        async fn send_message(&self, _from: &str, _to: &str, _message_type: &str, _message: &str) -> Result<(), String> {
+        async fn send_message(
+            &self,
+            _from: &str,
+            _to: &str,
+            _message_type: &str,
+            _message: &str,
+        ) -> Result<(), String> {
             Ok(())
         }
 
@@ -83,7 +89,11 @@ mod tests {
             linked_actor_id: &str,
         ) -> Result<(), String> {
             let mut calls = self.link_calls.lock().await;
-            calls.push((from.to_string(), actor_id.to_string(), linked_actor_id.to_string()));
+            calls.push((
+                from.to_string(),
+                actor_id.to_string(),
+                linked_actor_id.to_string(),
+            ));
             Ok(())
         }
 
@@ -94,22 +104,22 @@ mod tests {
             linked_actor_id: &str,
         ) -> Result<(), String> {
             let mut calls = self.unlink_calls.lock().await;
-            calls.push((from.to_string(), actor_id.to_string(), linked_actor_id.to_string()));
+            calls.push((
+                from.to_string(),
+                actor_id.to_string(),
+                linked_actor_id.to_string(),
+            ));
             Ok(())
         }
 
-        async fn monitor_actor(
-            &self,
-            from: &str,
-            actor_id: &str,
-        ) -> Result<u64, String> {
+        async fn monitor_actor(&self, from: &str, actor_id: &str) -> Result<u64, String> {
             let mut calls = self.monitor_calls.lock().await;
             calls.push((from.to_string(), actor_id.to_string()));
-            
+
             let monitor_ref = (calls.len() as u64) * 1000;
             let mut refs = self.monitor_refs.lock().await;
             refs.insert((from.to_string(), actor_id.to_string()), monitor_ref);
-            
+
             Ok(monitor_ref)
         }
 
@@ -120,10 +130,12 @@ mod tests {
             _monitor_ref: u64,
         ) -> Result<(), String> {
             // Mock implementation - returns error as documented
-            Err("demonitor_actor requires monitor_ref string mapping - not yet fully implemented".to_string())
+            Err(
+                "demonitor_actor requires monitor_ref string mapping - not yet fully implemented"
+                    .to_string(),
+            )
         }
     }
-
 
     #[tokio::test]
     async fn test_messaging_impl_link() {
@@ -131,7 +143,7 @@ mod tests {
         let actor_id = ActorId::from("test-actor".to_string());
         let mock_sender = Arc::new(MockMessageSender::new());
         let host_functions = Arc::new(HostFunctions::with_message_sender(mock_sender.clone()));
-        
+
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Link two actors
@@ -139,7 +151,7 @@ mod tests {
 
         // ASSERT
         assert!(result.is_ok(), "link should succeed");
-        
+
         // Verify that link_actor was called
         let calls = mock_sender.link_calls.lock().await;
         assert_eq!(calls.len(), 1);
@@ -154,7 +166,7 @@ mod tests {
         let actor_id = ActorId::from("test-actor".to_string());
         let mock_sender = Arc::new(MockMessageSender::new());
         let host_functions = Arc::new(HostFunctions::with_message_sender(mock_sender.clone()));
-        
+
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Unlink two actors
@@ -162,7 +174,7 @@ mod tests {
 
         // ASSERT
         assert!(result.is_ok(), "unlink should succeed");
-        
+
         // Verify that unlink_actor was called
         let calls = mock_sender.unlink_calls.lock().await;
         assert_eq!(calls.len(), 1);
@@ -177,7 +189,7 @@ mod tests {
         let actor_id = ActorId::from("test-actor".to_string());
         let mock_sender = Arc::new(MockMessageSender::new());
         let host_functions = Arc::new(HostFunctions::with_message_sender(mock_sender.clone()));
-        
+
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Monitor an actor
@@ -187,7 +199,7 @@ mod tests {
         assert!(result.is_ok(), "monitor should succeed");
         let monitor_ref = result.unwrap();
         assert!(monitor_ref > 0, "monitor_ref should be non-zero");
-        
+
         // Verify that monitor_actor was called
         let calls = mock_sender.monitor_calls.lock().await;
         assert_eq!(calls.len(), 1);
@@ -201,19 +213,23 @@ mod tests {
         let actor_id = ActorId::from("test-actor".to_string());
         let mock_sender = Arc::new(MockMessageSender::new());
         let host_functions = Arc::new(HostFunctions::with_message_sender(mock_sender.clone()));
-        
+
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Demonitor with non-existent monitor_ref (should return ActorNotFound error)
         let result = messaging.demonitor(12345).await;
 
         // ASSERT
-        assert!(result.is_err(), "demonitor should return error for non-existent monitor_ref");
+        assert!(
+            result.is_err(),
+            "demonitor should return error for non-existent monitor_ref"
+        );
         let error = result.unwrap_err();
         // actor-error is now a string (JSON), not a record
         assert!(
             error.contains("actor-not-found") || error.contains("not found"),
-            "Error should indicate actor not found, got: {}", error
+            "Error should indicate actor not found, got: {}",
+            error
         );
     }
 
@@ -222,24 +238,28 @@ mod tests {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
         let host_functions = Arc::new(HostFunctions::new()); // No message sender
-        
+
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Try to link (should fail)
         let result = messaging.link("target-actor".to_string()).await;
 
         // ASSERT
-        assert!(result.is_err(), "link should fail when message sender not configured");
+        assert!(
+            result.is_err(),
+            "link should fail when message sender not configured"
+        );
         let error = result.unwrap_err();
         // actor-error is now a string (JSON), not a record
         assert!(
             error.contains("internal") || error.contains("Internal"),
-            "Error should indicate internal error, got: {}", error
+            "Error should indicate internal error, got: {}",
+            error
         );
         assert!(
             error.contains("not configured"),
-            "Error should mention not configured, got: {}", error
+            "Error should mention not configured, got: {}",
+            error
         );
     }
 }
-

@@ -21,8 +21,8 @@
 #[cfg(test)]
 mod tests {
     use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig, SecurityConfig};
-    use plexspaces_proto::security::v1::{ServiceIdentity, MtlsConfig, JwtConfig, ApiKey};
     use plexspaces_proto::prost_types;
+    use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
 
     #[test]
     fn test_security_config_creation() {
@@ -128,7 +128,12 @@ mod tests {
         };
 
         assert!(runtime_config.security.is_some());
-        assert!(runtime_config.security.as_ref().unwrap().service_identity.is_some());
+        assert!(runtime_config
+            .security
+            .as_ref()
+            .unwrap()
+            .service_identity
+            .is_some());
     }
 
     #[test]
@@ -177,4 +182,3 @@ mod tests {
         assert!(release_spec.runtime.as_ref().unwrap().security.is_some());
     }
 }
-

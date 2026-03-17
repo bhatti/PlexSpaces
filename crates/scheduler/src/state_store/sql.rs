@@ -20,10 +20,10 @@
 
 use crate::state_store::SchedulingStateStore;
 use async_trait::async_trait;
-use base64::{Engine as _, engine::general_purpose};
+use base64::{engine::general_purpose, Engine as _};
 use plexspaces_core::RequestContext;
-use plexspaces_proto::v1::actor::ActorResourceRequirements;
 use plexspaces_proto::scheduling::v1::{SchedulingRequest, SchedulingStatus};
+use plexspaces_proto::v1::actor::ActorResourceRequirements;
 use prost::Message;
 use sqlx::{Pool, Sqlite};
 use std::error::Error;
@@ -41,13 +41,13 @@ impl SqliteSchedulingStateStore {
     /// - `path`: Database file path (use ":memory:" for in-memory database)
     pub async fn new(path: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let connection_string = format!("sqlite:{}", path);
-        
+
         tracing::debug!(
             db_path = %path,
             connection_string = %connection_string,
             "Creating SQLite scheduler state store"
         );
-        
+
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(5)
             .connect(&connection_string)
@@ -56,7 +56,10 @@ impl SqliteSchedulingStateStore {
         // For SQLite, use manual CREATE TABLE to avoid migration conflicts when sharing database
         // with other crates (keyvalue, blob, etc.). PostgreSQL uses sqlx::migrate!().
         let mut conn = pool.acquire().await.map_err(|e| {
-            format!("Failed to acquire connection for scheduler migration: {}", e)
+            format!(
+                "Failed to acquire connection for scheduler migration: {}",
+                e
+            )
         })?;
 
         tracing::debug!(
@@ -331,7 +334,9 @@ impl SchedulingStateStore for SqliteSchedulingStateStore {
 }
 
 // Helper to convert SQL row to SchedulingRequest
-fn row_to_scheduling_request(row: sqlx::sqlite::SqliteRow) -> Result<SchedulingRequest, Box<dyn Error + Send + Sync>> {
+fn row_to_scheduling_request(
+    row: sqlx::sqlite::SqliteRow,
+) -> Result<SchedulingRequest, Box<dyn Error + Send + Sync>> {
     use sqlx::Row;
 
     let request_id: String = row.get("request_id");
@@ -354,9 +359,7 @@ fn row_to_scheduling_request(row: sqlx::sqlite::SqliteRow) -> Result<SchedulingR
 
     // Parse requirements (proto message - decode from base64)
     let requirements_bytes = general_purpose::STANDARD.decode(&requirements_json)?;
-    let requirements = ActorResourceRequirements::decode(
-        requirements_bytes.as_slice()
-    )?;
+    let requirements = ActorResourceRequirements::decode(requirements_bytes.as_slice())?;
 
     // Parse timestamps from row
     let created_at: Option<i64> = row.try_get("created_at").ok();
@@ -381,16 +384,16 @@ fn row_to_scheduling_request(row: sqlx::sqlite::SqliteRow) -> Result<SchedulingR
     let namespace = namespace.ok_or_else(|| {
         Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "namespace is required in SchedulingRequest but was NULL in database"
+            "namespace is required in SchedulingRequest but was NULL in database",
         )) as Box<dyn Error + Send + Sync>
     })?;
     let tenant_id = tenant_id.ok_or_else(|| {
         Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "tenant_id is required in SchedulingRequest but was NULL in database"
+            "tenant_id is required in SchedulingRequest but was NULL in database",
         )) as Box<dyn Error + Send + Sync>
     })?;
-    
+
     Ok(SchedulingRequest {
         request_id,
         requirements: Some(requirements),
@@ -405,4 +408,3 @@ fn row_to_scheduling_request(row: sqlx::sqlite::SqliteRow) -> Result<SchedulingR
         completed_at: completed_at_ts,
     })
 }
-

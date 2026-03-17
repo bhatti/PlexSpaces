@@ -147,7 +147,7 @@ impl NodeBuilder {
         self.config.clustering_enabled = enabled;
         self
     }
-    
+
     /// Set the cluster name for cluster isolation
     ///
     /// ## Purpose
@@ -203,14 +203,14 @@ impl NodeBuilder {
     pub fn with_in_memory_backends(mut self) -> Self {
         use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig};
         use plexspaces_proto::storage::v1::SharedDbConfig;
-        
+
         // Create or update release_spec with in-memory database configuration
         let release_spec = self.release_spec.take().unwrap_or_else(|| ReleaseSpec {
             name: "test".to_string(),
             version: "0.0.0".to_string(),
             ..Default::default()
         });
-        
+
         // Create RuntimeConfig with in-memory database
         let runtime = RuntimeConfig {
             db: Some(SharedDbConfig {
@@ -221,17 +221,25 @@ impl NodeBuilder {
             }),
             ..release_spec.runtime.unwrap_or_default()
         };
-        
+
         self.release_spec = Some(ReleaseSpec {
             runtime: Some(runtime),
             ..release_spec
         });
-        
+
         // Also set metadata for components that read it directly
-        self.config.metadata.insert("backend.channel".to_string(), "in-memory".to_string());
-        self.config.metadata.insert("backend.tuplespace".to_string(), "in-memory".to_string());
-        self.config.metadata.insert("backend.journaling".to_string(), "in-memory".to_string());
-        self.config.metadata.insert("backend.keyvalue".to_string(), "in-memory".to_string());
+        self.config
+            .metadata
+            .insert("backend.channel".to_string(), "in-memory".to_string());
+        self.config
+            .metadata
+            .insert("backend.tuplespace".to_string(), "in-memory".to_string());
+        self.config
+            .metadata
+            .insert("backend.journaling".to_string(), "in-memory".to_string());
+        self.config
+            .metadata
+            .insert("backend.keyvalue".to_string(), "in-memory".to_string());
         self
     }
 
@@ -253,10 +261,18 @@ impl NodeBuilder {
     ///     .build();
     /// ```
     pub fn with_redis_backends(mut self) -> Self {
-        self.config.metadata.insert("backend.channel".to_string(), "redis".to_string());
-        self.config.metadata.insert("backend.tuplespace".to_string(), "redis".to_string());
-        self.config.metadata.insert("backend.journaling".to_string(), "sqlite".to_string());
-        self.config.metadata.insert("backend.keyvalue".to_string(), "redis".to_string());
+        self.config
+            .metadata
+            .insert("backend.channel".to_string(), "redis".to_string());
+        self.config
+            .metadata
+            .insert("backend.tuplespace".to_string(), "redis".to_string());
+        self.config
+            .metadata
+            .insert("backend.journaling".to_string(), "sqlite".to_string());
+        self.config
+            .metadata
+            .insert("backend.keyvalue".to_string(), "redis".to_string());
         self
     }
 
@@ -277,10 +293,18 @@ impl NodeBuilder {
     ///     .build();
     /// ```
     pub fn with_postgres_backends(mut self) -> Self {
-        self.config.metadata.insert("backend.channel".to_string(), "postgres".to_string());
-        self.config.metadata.insert("backend.tuplespace".to_string(), "postgres".to_string());
-        self.config.metadata.insert("backend.journaling".to_string(), "postgres".to_string());
-        self.config.metadata.insert("backend.keyvalue".to_string(), "postgres".to_string());
+        self.config
+            .metadata
+            .insert("backend.channel".to_string(), "postgres".to_string());
+        self.config
+            .metadata
+            .insert("backend.tuplespace".to_string(), "postgres".to_string());
+        self.config
+            .metadata
+            .insert("backend.journaling".to_string(), "postgres".to_string());
+        self.config
+            .metadata
+            .insert("backend.keyvalue".to_string(), "postgres".to_string());
         self
     }
 
@@ -297,7 +321,9 @@ impl NodeBuilder {
     ///     .build();
     /// ```
     pub fn with_sqlite_journaling(mut self) -> Self {
-        self.config.metadata.insert("backend.journaling".to_string(), "sqlite".to_string());
+        self.config
+            .metadata
+            .insert("backend.journaling".to_string(), "sqlite".to_string());
         self
     }
 
@@ -357,18 +383,19 @@ impl NodeBuilder {
         // This must be called before using VirtualActorManager::is_active() which checks actor state
         use plexspaces_actor::register_state_fetcher_callback;
         register_state_fetcher_callback();
-        
+
         let node = Node::new(self.node_id, self.config);
-        
+
         // Set release_spec if provided
         if let Some(release_spec) = self.release_spec {
             node.set_release_spec(release_spec).await;
         }
-        
+
         // Initialize all services immediately
-        node.initialize_services().await
+        node.initialize_services()
+            .await
             .expect("Failed to initialize services in NodeBuilder::build()");
-        
+
         node
     }
 }
@@ -394,7 +421,8 @@ mod tests {
     async fn test_node_builder_with_listen_addr() {
         let node = NodeBuilder::new("test-node")
             .with_listen_addr("127.0.0.1:8080")
-            .build().await;
+            .build()
+            .await;
 
         assert_eq!(node.config().listen_addr, "127.0.0.1:8080");
     }
@@ -403,7 +431,8 @@ mod tests {
     async fn test_node_builder_with_max_connections() {
         let node = NodeBuilder::new("test-node")
             .with_max_connections(200)
-            .build().await;
+            .build()
+            .await;
 
         assert_eq!(node.config().max_connections, 200);
     }
@@ -412,7 +441,8 @@ mod tests {
     async fn test_node_builder_with_heartbeat_interval() {
         let node = NodeBuilder::new("test-node")
             .with_heartbeat_interval_ms(10000)
-            .build().await;
+            .build()
+            .await;
 
         assert_eq!(node.config().heartbeat_interval_ms, 10000);
     }
@@ -421,7 +451,8 @@ mod tests {
     async fn test_node_builder_with_clustering() {
         let node = NodeBuilder::new("test-node")
             .with_clustering_enabled(false)
-            .build().await;
+            .build()
+            .await;
 
         assert!(!node.config().clustering_enabled);
     }
@@ -431,7 +462,8 @@ mod tests {
         let node = NodeBuilder::new("test-node")
             .with_metadata("environment", "production")
             .with_metadata("region", "us-east-1")
-            .build().await;
+            .build()
+            .await;
 
         let metadata = &node.config().metadata;
         assert_eq!(metadata.get("environment"), Some(&"production".to_string()));
@@ -446,7 +478,8 @@ mod tests {
             .with_heartbeat_interval_ms(7500)
             .with_clustering_enabled(true)
             .with_metadata("env", "test")
-            .build().await;
+            .build()
+            .await;
 
         assert_eq!(node.id().as_str(), "test-node");
         assert_eq!(node.config().listen_addr, "0.0.0.0:8000");
@@ -468,25 +501,45 @@ mod tests {
     async fn test_node_builder_with_in_memory_backends() {
         let node = NodeBuilder::new("test-node")
             .with_in_memory_backends()
-            .build().await;
+            .build()
+            .await;
 
         let metadata = &node.config().metadata;
-        assert_eq!(metadata.get("backend.channel"), Some(&"in-memory".to_string()));
-        assert_eq!(metadata.get("backend.tuplespace"), Some(&"in-memory".to_string()));
-        assert_eq!(metadata.get("backend.journaling"), Some(&"in-memory".to_string()));
-        assert_eq!(metadata.get("backend.keyvalue"), Some(&"in-memory".to_string()));
+        assert_eq!(
+            metadata.get("backend.channel"),
+            Some(&"in-memory".to_string())
+        );
+        assert_eq!(
+            metadata.get("backend.tuplespace"),
+            Some(&"in-memory".to_string())
+        );
+        assert_eq!(
+            metadata.get("backend.journaling"),
+            Some(&"in-memory".to_string())
+        );
+        assert_eq!(
+            metadata.get("backend.keyvalue"),
+            Some(&"in-memory".to_string())
+        );
     }
 
     #[tokio::test]
     async fn test_node_builder_with_redis_backends() {
         let node = NodeBuilder::new("test-node")
             .with_redis_backends()
-            .build().await;
+            .build()
+            .await;
 
         let metadata = &node.config().metadata;
         assert_eq!(metadata.get("backend.channel"), Some(&"redis".to_string()));
-        assert_eq!(metadata.get("backend.tuplespace"), Some(&"redis".to_string()));
-        assert_eq!(metadata.get("backend.journaling"), Some(&"sqlite".to_string()));
+        assert_eq!(
+            metadata.get("backend.tuplespace"),
+            Some(&"redis".to_string())
+        );
+        assert_eq!(
+            metadata.get("backend.journaling"),
+            Some(&"sqlite".to_string())
+        );
         assert_eq!(metadata.get("backend.keyvalue"), Some(&"redis".to_string()));
     }
 
@@ -494,23 +547,39 @@ mod tests {
     async fn test_node_builder_with_postgres_backends() {
         let node = NodeBuilder::new("test-node")
             .with_postgres_backends()
-            .build().await;
+            .build()
+            .await;
 
         let metadata = &node.config().metadata;
-        assert_eq!(metadata.get("backend.channel"), Some(&"postgres".to_string()));
-        assert_eq!(metadata.get("backend.tuplespace"), Some(&"postgres".to_string()));
-        assert_eq!(metadata.get("backend.journaling"), Some(&"postgres".to_string()));
-        assert_eq!(metadata.get("backend.keyvalue"), Some(&"postgres".to_string()));
+        assert_eq!(
+            metadata.get("backend.channel"),
+            Some(&"postgres".to_string())
+        );
+        assert_eq!(
+            metadata.get("backend.tuplespace"),
+            Some(&"postgres".to_string())
+        );
+        assert_eq!(
+            metadata.get("backend.journaling"),
+            Some(&"postgres".to_string())
+        );
+        assert_eq!(
+            metadata.get("backend.keyvalue"),
+            Some(&"postgres".to_string())
+        );
     }
 
     #[tokio::test]
     async fn test_node_builder_with_sqlite_journaling() {
         let node = NodeBuilder::new("test-node")
             .with_sqlite_journaling()
-            .build().await;
+            .build()
+            .await;
 
         let metadata = &node.config().metadata;
-        assert_eq!(metadata.get("backend.journaling"), Some(&"sqlite".to_string()));
+        assert_eq!(
+            metadata.get("backend.journaling"),
+            Some(&"sqlite".to_string())
+        );
     }
 }
-

@@ -42,8 +42,8 @@
 //! # }
 //! ```
 
-use crate::{FirecrackerVm, VmConfig};
 use crate::error::{FirecrackerError, FirecrackerResult};
+use crate::{FirecrackerVm, VmConfig};
 
 /// Builder for deploying applications to Firecracker VMs
 ///
@@ -158,8 +158,7 @@ mod tests {
             ..Default::default()
         };
 
-        let deployment = ApplicationDeployment::new("test-app")
-            .with_vm_config(config);
+        let deployment = ApplicationDeployment::new("test-app").with_vm_config(config);
 
         assert!(deployment.vm_config.is_some());
     }
@@ -176,4 +175,3 @@ mod tests {
         ));
     }
 }
-

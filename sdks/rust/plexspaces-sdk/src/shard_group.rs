@@ -6,9 +6,9 @@
 
 use anyhow::{Context, Result};
 use plexspaces_proto::actor::v1::{
-    BulkUpdateShardGroupRequest, ConsistencyLevel, CreateShardGroupRequest,
-    DataParallelConfig, MapShardGroupRequest, PartitionStrategy, RebalancePolicy,
-    ScatterGatherRequest, ShardGroupAggregationStrategy,
+    BulkUpdateShardGroupRequest, ConsistencyLevel, CreateShardGroupRequest, DataParallelConfig,
+    MapShardGroupRequest, NodePlacement, PartitionStrategy, RebalancePolicy, ScatterGatherRequest,
+    ShardGroupAggregationStrategy,
 };
 use plexspaces_proto::common::v1::Message as ProtoMessage;
 use prost_types::Duration;
@@ -18,6 +18,117 @@ use std::time::SystemTime;
 
 #[cfg(feature = "grpc")]
 use tonic::Request;
+
+fn create_shard_group_request(
+    group_id: String,
+    actor_type: String,
+    shard_count: u32,
+    partition_strategy: PartitionStrategy,
+    placement: Option<NodePlacement>,
+) -> CreateShardGroupRequest {
+    CreateShardGroupRequest {
+        config: Some(DataParallelConfig {
+            group_id,
+            shard_count,
+            partition_strategy: partition_strategy as i32,
+            rebalance_policy: RebalancePolicy::RebalancePolicyNone as i32,
+            placement,
+        }),
+        actor_type,
+        shard_config: None,
+        initial_state: Vec::new(),
+        metadata: HashMap::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_shard_group_request;
+    use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy, PartitionStrategy};
+    use std::collections::HashMap;
+
+    #[test]
+    fn create_shard_group_request_preserves_node_id_placement() {
+        let placement = NodePlacement {
+            strategy: NodePlacementStrategy::NodePlacementStrategyNodeIds as i32,
+            cluster: String::new(),
+            node_ids: vec!["node-a".to_string(), "node-b".to_string()],
+            required_labels: HashMap::new(),
+            avoid_node_ids: vec![],
+            resource_requirements: None,
+            affinity_labels: HashMap::new(),
+        };
+        let request = create_shard_group_request(
+            "group".to_string(),
+            "worker".to_string(),
+            2,
+            PartitionStrategy::PartitionStrategyHash,
+            Some(placement),
+        );
+        let placement = request
+            .config
+            .expect("config")
+            .placement
+            .expect("placement");
+
+        assert_eq!(
+            placement.strategy,
+            NodePlacementStrategy::NodePlacementStrategyNodeIds as i32
+        );
+        assert_eq!(
+            placement.node_ids,
+            vec!["node-a".to_string(), "node-b".to_string()]
+        );
+        assert!(placement.required_labels.is_empty());
+    }
+
+    #[test]
+    fn create_shard_group_request_preserves_registry_placement() {
+        let mut labels = HashMap::new();
+        labels.insert("role".to_string(), "worker".to_string());
+        let placement = NodePlacement {
+            strategy: NodePlacementStrategy::NodePlacementStrategyFromRegistry as i32,
+            cluster: "heat-cluster".to_string(),
+            node_ids: vec![],
+            required_labels: labels.clone(),
+            avoid_node_ids: vec![],
+            resource_requirements: None,
+            affinity_labels: HashMap::new(),
+        };
+        let request = create_shard_group_request(
+            "group".to_string(),
+            "worker".to_string(),
+            4,
+            PartitionStrategy::PartitionStrategyHash,
+            Some(placement),
+        );
+        let placement = request
+            .config
+            .expect("config")
+            .placement
+            .expect("placement");
+
+        assert_eq!(
+            placement.strategy,
+            NodePlacementStrategy::NodePlacementStrategyFromRegistry as i32
+        );
+        assert_eq!(placement.required_labels, labels);
+        assert_eq!(placement.cluster, "heat-cluster");
+    }
+
+    #[test]
+    fn create_shard_group_request_allows_no_placement() {
+        let request = create_shard_group_request(
+            "group".to_string(),
+            "worker".to_string(),
+            1,
+            PartitionStrategy::PartitionStrategyHash,
+            None,
+        );
+
+        assert!(request.config.expect("config").placement.is_none());
+    }
+}
 
 /// ShardGroup client trait - unified interface for WASM and gRPC
 #[async_trait::async_trait]
@@ -29,7 +140,7 @@ pub trait ShardGroupClientTrait: Send + Sync {
         actor_type: String,
         shard_count: u32,
         partition_strategy: PartitionStrategy,
-        labels: HashMap<String, String>,
+        placement: Option<NodePlacement>,
     ) -> Result<plexspaces_proto::actor::v1::ShardGroup>;
 
     /// Bulk update shard group (DPA UpdateFunction)
@@ -86,9 +197,8 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         actor_type: String,
         shard_count: u32,
         partition_strategy: PartitionStrategy,
-        labels: HashMap<String, String>,
+        placement: Option<NodePlacement>,
     ) -> Result<plexspaces_proto::actor::v1::ShardGroup> {
-        
         // Create request context (use system context for internal operations)
         // Clone service_locator to avoid Send bound issues
         let service_locator = self.service_locator.clone();
@@ -96,33 +206,13 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             .request_context_for_system_operations()
             .await;
 
-        let req = CreateShardGroupRequest {
-            config: Some(DataParallelConfig {
-                group_id,
-                shard_count,
-                partition_strategy: partition_strategy as i32,
-                rebalance_policy: RebalancePolicy::RebalancePolicyNone as i32,
-                placement: if labels.is_empty() {
-                    None
-                } else {
-                    Some(plexspaces_proto::actor::v1::NodePlacement {
-                        strategy: plexspaces_proto::actor::v1::NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
-                        cluster: String::new(),
-                        node_ids: vec![],
-                        required_labels: labels,
-                        preferred_node_ids: vec![],
-                        avoid_node_ids: vec![],
-                        resource_requirements: None,
-                        affinity_labels: std::collections::HashMap::new(),
-                        preferred_node_id: String::new(),
-                    })
-                },
-            }),
+        let req = create_shard_group_request(
+            group_id,
             actor_type,
-            shard_config: None,
-            initial_state: Vec::new(),
-            metadata: HashMap::new(),
-        };
+            shard_count,
+            partition_strategy,
+            placement,
+        );
 
         // Call ActorService directly (no gRPC)
         // Clone actor_service to avoid Send bound issues
@@ -143,7 +233,6 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         consistency_level: ConsistencyLevel,
         wait_for_responses: bool,
     ) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse> {
-        
         let service_locator = self.service_locator.clone();
         let ctx = service_locator
             .request_context_for_system_operations()
@@ -198,7 +287,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         query: serde_json::Value,
     ) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse> {
         let group_id_for_logging = group_id.clone();
-        
+
         let service_locator = self.service_locator.clone();
         let ctx = service_locator
             .request_context_for_system_operations()
@@ -235,21 +324,29 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         };
 
         let actor_service = self.actor_service.clone();
-        let result = actor_service
-            .map_shard_group(&ctx, req)
-            .await;
-        
+        let result = actor_service.map_shard_group(&ctx, req).await;
+
         match result {
             Ok(resp) => {
                 // Check if we got any successful responses
                 if resp.shard_results.is_empty() {
                     tracing::error!(group_id = %group_id_for_logging, "Map ShardGroup returned no results - all shards may have failed");
-                    return Err(anyhow::anyhow!("Map ShardGroup returned no results - all shards may have failed"));
+                    return Err(anyhow::anyhow!(
+                        "Map ShardGroup returned no results - all shards may have failed"
+                    ));
                 }
                 let successful = resp.shard_results.iter().filter(|r| r.success).count();
                 if successful == 0 {
-                    let errors: Vec<String> = resp.shard_results.iter()
-                        .filter_map(|r| if !r.success { Some(r.error.clone()) } else { None })
+                    let errors: Vec<String> = resp
+                        .shard_results
+                        .iter()
+                        .filter_map(|r| {
+                            if !r.success {
+                                Some(r.error.clone())
+                            } else {
+                                None
+                            }
+                        })
                         .collect();
                     tracing::error!(
                         group_id = %group_id_for_logging,
@@ -258,7 +355,11 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
                         "Map ShardGroup failed: all {} shards failed",
                         resp.shard_results.len()
                     );
-                    return Err(anyhow::anyhow!("Map ShardGroup failed: all {} shards failed. Errors: {:?}", resp.shard_results.len(), errors));
+                    return Err(anyhow::anyhow!(
+                        "Map ShardGroup failed: all {} shards failed. Errors: {:?}",
+                        resp.shard_results.len(),
+                        errors
+                    ));
                 }
                 tracing::info!(
                     group_id = %group_id_for_logging,
@@ -277,7 +378,11 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
                     "Failed to map ShardGroup: {}",
                     e
                 );
-                Err(anyhow::anyhow!("Failed to map ShardGroup {}: {}", group_id_for_logging, e))
+                Err(anyhow::anyhow!(
+                    "Failed to map ShardGroup {}: {}",
+                    group_id_for_logging,
+                    e
+                ))
             }
         }
     }
@@ -289,7 +394,6 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         aggregation: ShardGroupAggregationStrategy,
         min_responses: u32,
     ) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse> {
-        
         let service_locator = self.service_locator.clone();
         let ctx = service_locator
             .request_context_for_system_operations()
@@ -337,7 +441,9 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
 /// ShardGroup client for gRPC (remote nodes)
 #[cfg(feature = "grpc")]
 pub struct ShardGroupClientGrpc {
-    client: plexspaces_proto::actor::v1::actor_service_client::ActorServiceClient<tonic::transport::Channel>,
+    client: plexspaces_proto::actor::v1::actor_service_client::ActorServiceClient<
+        tonic::transport::Channel,
+    >,
 }
 
 #[cfg(feature = "grpc")]
@@ -345,7 +451,10 @@ impl ShardGroupClientGrpc {
     /// Create a new ShardGroupClientGrpc connected to the specified node
     pub async fn connect(node_addr: impl Into<String>) -> Result<Self> {
         let addr = node_addr.into();
-        let client = plexspaces_proto::actor::v1::actor_service_client::ActorServiceClient::connect(addr.clone())
+        let client =
+            plexspaces_proto::actor::v1::actor_service_client::ActorServiceClient::connect(
+                addr.clone(),
+            )
             .await
             .with_context(|| format!("Failed to connect to node: {}", addr))?;
         Ok(Self { client })
@@ -361,35 +470,15 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         actor_type: String,
         shard_count: u32,
         partition_strategy: PartitionStrategy,
-        labels: HashMap<String, String>,
+        placement: Option<NodePlacement>,
     ) -> Result<plexspaces_proto::actor::v1::ShardGroup> {
-        let req = CreateShardGroupRequest {
-            config: Some(DataParallelConfig {
-                group_id: group_id.clone(),
-                shard_count,
-                partition_strategy: partition_strategy as i32,
-                rebalance_policy: RebalancePolicy::RebalancePolicyNone as i32,
-                placement: if labels.is_empty() {
-                    None
-                } else {
-                    Some(plexspaces_proto::actor::v1::NodePlacement {
-                        strategy: plexspaces_proto::actor::v1::NodePlacementStrategy::NodePlacementStrategyUnspecified as i32,
-                        cluster: String::new(),
-                        node_ids: vec![],
-                        required_labels: labels,
-                        preferred_node_ids: vec![],
-                        avoid_node_ids: vec![],
-                        resource_requirements: None,
-                        affinity_labels: std::collections::HashMap::new(),
-                        preferred_node_id: String::new(),
-                    })
-                },
-            }),
+        let req = create_shard_group_request(
+            group_id,
             actor_type,
-            shard_config: None,
-            initial_state: Vec::new(),
-            metadata: HashMap::new(),
-        };
+            shard_count,
+            partition_strategy,
+            placement,
+        );
 
         let resp = self
             .client
@@ -398,8 +487,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
             .context("Failed to create ShardGroup")?
             .into_inner();
 
-        resp.group
-            .context("No group in response")
+        resp.group.context("No group in response")
     }
 
     async fn bulk_update(
@@ -559,7 +647,9 @@ pub type ShardGroupClient = ShardGroupClientLocal;
 // Convenience constructors
 impl ShardGroupClientLocal {
     /// Connect using ServiceLocator (for WASM/internal apps)
-    pub async fn connect(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Result<Self> {
+    pub async fn connect(
+        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    ) -> Result<Self> {
         Self::new(service_locator).await
     }
 }
@@ -581,8 +671,12 @@ pub enum UnifiedShardGroupClient {
 
 impl UnifiedShardGroupClient {
     /// Create client from ServiceLocator (WASM/internal)
-    pub async fn from_service_locator(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Result<Self> {
-        Ok(Self::Local(ShardGroupClientLocal::new(service_locator).await?))
+    pub async fn from_service_locator(
+        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    ) -> Result<Self> {
+        Ok(Self::Local(
+            ShardGroupClientLocal::new(service_locator).await?,
+        ))
     }
 
     /// Create client from node address (gRPC)
@@ -600,12 +694,32 @@ impl ShardGroupClientTrait for UnifiedShardGroupClient {
         actor_type: String,
         shard_count: u32,
         partition_strategy: PartitionStrategy,
-        labels: HashMap<String, String>,
+        placement: Option<NodePlacement>,
     ) -> Result<plexspaces_proto::actor::v1::ShardGroup> {
         match self {
-            Self::Local(client) => client.create_shard_group(group_id, actor_type, shard_count, partition_strategy, labels).await,
+            Self::Local(client) => {
+                client
+                    .create_shard_group(
+                        group_id,
+                        actor_type,
+                        shard_count,
+                        partition_strategy,
+                        placement,
+                    )
+                    .await
+            }
             #[cfg(feature = "grpc")]
-            Self::Grpc(client) => client.create_shard_group(group_id, actor_type, shard_count, partition_strategy, labels).await,
+            Self::Grpc(client) => {
+                client
+                    .create_shard_group(
+                        group_id,
+                        actor_type,
+                        shard_count,
+                        partition_strategy,
+                        placement,
+                    )
+                    .await
+            }
         }
     }
 
@@ -617,9 +731,17 @@ impl ShardGroupClientTrait for UnifiedShardGroupClient {
         wait_for_responses: bool,
     ) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse> {
         match self {
-            Self::Local(client) => client.bulk_update(group_id, updates, consistency_level, wait_for_responses).await,
+            Self::Local(client) => {
+                client
+                    .bulk_update(group_id, updates, consistency_level, wait_for_responses)
+                    .await
+            }
             #[cfg(feature = "grpc")]
-            Self::Grpc(client) => client.bulk_update(group_id, updates, consistency_level, wait_for_responses).await,
+            Self::Grpc(client) => {
+                client
+                    .bulk_update(group_id, updates, consistency_level, wait_for_responses)
+                    .await
+            }
         }
     }
 
@@ -643,9 +765,17 @@ impl ShardGroupClientTrait for UnifiedShardGroupClient {
         min_responses: u32,
     ) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse> {
         match self {
-            Self::Local(client) => client.scatter_gather(group_id, query, aggregation, min_responses).await,
+            Self::Local(client) => {
+                client
+                    .scatter_gather(group_id, query, aggregation, min_responses)
+                    .await
+            }
             #[cfg(feature = "grpc")]
-            Self::Grpc(client) => client.scatter_gather(group_id, query, aggregation, min_responses).await,
+            Self::Grpc(client) => {
+                client
+                    .scatter_gather(group_id, query, aggregation, min_responses)
+                    .await
+            }
         }
     }
 }

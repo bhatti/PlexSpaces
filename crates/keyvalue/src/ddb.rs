@@ -181,12 +181,7 @@ impl DynamoDBKVStore {
     #[instrument(skip(client), fields(table_name = %table_name))]
     async fn ensure_table_exists(client: &DynamoDbClient, table_name: &str) -> KVResult<()> {
         // Check if table exists
-        match client
-            .describe_table()
-            .table_name(table_name)
-            .send()
-            .await
-        {
+        match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
                 debug!(table_name = %table_name, "DynamoDB table already exists");
                 return Ok(());
@@ -194,10 +189,18 @@ impl DynamoDBKVStore {
             Err(e) => {
                 // Table doesn't exist, create it
                 let error_msg = format!("{}", e);
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_msg.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_msg.clone());
 
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         error = %e,
                         error_code = %error_code,
@@ -231,25 +234,33 @@ impl DynamoDBKVStore {
             .attribute_name("pk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| KVError::BackendError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                KVError::BackendError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let sk_attr = AttributeDefinition::builder()
             .attribute_name("sk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| KVError::BackendError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                KVError::BackendError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let tenant_namespace_attr = AttributeDefinition::builder()
             .attribute_name("tenant_namespace")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| KVError::BackendError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                KVError::BackendError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let prefix_key_attr = AttributeDefinition::builder()
             .attribute_name("prefix_key")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| KVError::BackendError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                KVError::BackendError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let gsi_pk_schema = KeySchemaElement::builder()
             .attribute_name("tenant_namespace")
@@ -449,7 +460,9 @@ impl DynamoDBKVStore {
             if let Ok(bytes) = value_attr.as_b() {
                 Ok(Some(bytes.as_ref().to_vec()))
             } else {
-                Err(KVError::BackendError("Invalid value attribute type".to_string()))
+                Err(KVError::BackendError(
+                    "Invalid value attribute type".to_string(),
+                ))
             }
         } else {
             Ok(None)
@@ -459,10 +472,16 @@ impl DynamoDBKVStore {
     /// Convert DynamoDB item to TTL Duration.
     fn item_to_ttl(item: &HashMap<String, AttributeValue>) -> KVResult<Option<Duration>> {
         if let Some(expires_at_attr) = item.get("expires_at") {
-            if let Some(expires_at_secs) = expires_at_attr.as_n().ok().and_then(|s| s.parse::<i64>().ok()) {
+            if let Some(expires_at_secs) = expires_at_attr
+                .as_n()
+                .ok()
+                .and_then(|s| s.parse::<i64>().ok())
+            {
                 let now_secs = Utc::now().timestamp();
                 if expires_at_secs > now_secs {
-                    Ok(Some(Duration::from_secs((expires_at_secs - now_secs) as u64)))
+                    Ok(Some(Duration::from_secs(
+                        (expires_at_secs - now_secs) as u64,
+                    )))
                 } else {
                     Ok(Some(Duration::from_secs(0))) // Expired
                 }
@@ -500,19 +519,34 @@ impl DynamoDBKVStore {
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S("KV".to_string()));
         item.insert("key".to_string(), AttributeValue::S(key.to_string()));
-        item.insert("value".to_string(), AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(value)));
-        item.insert("tenant_namespace".to_string(), AttributeValue::S(tenant_namespace));
+        item.insert(
+            "value".to_string(),
+            AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(value)),
+        );
+        item.insert(
+            "tenant_namespace".to_string(),
+            AttributeValue::S(tenant_namespace),
+        );
         item.insert("prefix_key".to_string(), AttributeValue::S(prefix_key));
         item.insert("prefix".to_string(), AttributeValue::S(prefix));
-        item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
-        item.insert("updated_at".to_string(), AttributeValue::N(now_secs.to_string()));
+        item.insert(
+            "created_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
+        item.insert(
+            "updated_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
         item.insert(
             "schema_version".to_string(),
             AttributeValue::N(self.schema_version.to_string()),
         );
 
         if let Some(expires_at) = expires_at_secs {
-            item.insert("expires_at".to_string(), AttributeValue::N(expires_at.to_string()));
+            item.insert(
+                "expires_at".to_string(),
+                AttributeValue::N(expires_at.to_string()),
+            );
         }
 
         if let Some(ttl) = ttl_secs {
@@ -557,7 +591,11 @@ impl KeyValueStore for DynamoDBKVStore {
                 if let Some(item) = result.item().cloned() {
                     // Check if expired
                     if let Some(expires_at_attr) = item.get("expires_at") {
-                        if let Some(expires_at_secs) = expires_at_attr.as_n().ok().and_then(|s| s.parse::<i64>().ok()) {
+                        if let Some(expires_at_secs) = expires_at_attr
+                            .as_n()
+                            .ok()
+                            .and_then(|s| s.parse::<i64>().ok())
+                        {
                             let now_secs = Utc::now().timestamp();
                             if expires_at_secs <= now_secs {
                                 // Expired - return None
@@ -602,7 +640,10 @@ impl KeyValueStore for DynamoDBKVStore {
                     "error_type" => "get_item_failed"
                 )
                 .increment(1);
-                Err(KVError::BackendError(format!("DynamoDB get_item failed: {}", e)))
+                Err(KVError::BackendError(format!(
+                    "DynamoDB get_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -662,7 +703,10 @@ impl KeyValueStore for DynamoDBKVStore {
                     "error_type" => "put_item_failed"
                 )
                 .increment(1);
-                Err(KVError::BackendError(format!("DynamoDB put_item failed: {}", e)))
+                Err(KVError::BackendError(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -721,7 +765,10 @@ impl KeyValueStore for DynamoDBKVStore {
                     "error_type" => "delete_item_failed"
                 )
                 .increment(1);
-                Err(KVError::BackendError(format!("DynamoDB delete_item failed: {}", e)))
+                Err(KVError::BackendError(format!(
+                    "DynamoDB delete_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -768,7 +815,10 @@ impl KeyValueStore for DynamoDBKVStore {
                 // Query all keys for tenant/namespace (no sort key condition)
                 query = query
                     .key_condition_expression("tenant_namespace = :tn")
-                    .expression_attribute_values(":tn", AttributeValue::S(tenant_namespace.clone()));
+                    .expression_attribute_values(
+                        ":tn",
+                        AttributeValue::S(tenant_namespace.clone()),
+                    );
             } else {
                 // For prefix queries, we need to match keys that start with the prefix
                 // prefix_key format is "{extracted_prefix}#{key}" where extracted_prefix comes from extract_prefix(key)
@@ -778,7 +828,10 @@ impl KeyValueStore for DynamoDBKVStore {
                 // For now, let's query all and filter in code (more reliable)
                 query = query
                     .key_condition_expression("tenant_namespace = :tn")
-                    .expression_attribute_values(":tn", AttributeValue::S(tenant_namespace.clone()));
+                    .expression_attribute_values(
+                        ":tn",
+                        AttributeValue::S(tenant_namespace.clone()),
+                    );
             }
 
             if let Some(lek) = last_evaluated_key {
@@ -815,7 +868,10 @@ impl KeyValueStore for DynamoDBKVStore {
                         "error_type" => "query_failed"
                     )
                     .increment(1);
-                    return Err(KVError::BackendError(format!("DynamoDB query failed: {}", e)));
+                    return Err(KVError::BackendError(format!(
+                        "DynamoDB query failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -837,7 +893,11 @@ impl KeyValueStore for DynamoDBKVStore {
         Ok(keys)
     }
 
-    async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>> {
+    async fn multi_get(
+        &self,
+        ctx: &RequestContext,
+        keys: &[&str],
+    ) -> KVResult<Vec<Option<Vec<u8>>>> {
         let mut results = Vec::new();
         for key in keys {
             results.push(self.get(ctx, key).await?);
@@ -857,12 +917,14 @@ impl KeyValueStore for DynamoDBKVStore {
                 let put_request = aws_sdk_dynamodb::types::PutRequest::builder()
                     .set_item(Some(item))
                     .build()
-                    .map_err(|e| KVError::BackendError(format!("Failed to build put request: {}", e)))?;
-                
+                    .map_err(|e| {
+                        KVError::BackendError(format!("Failed to build put request: {}", e))
+                    })?;
+
                 let write_request = aws_sdk_dynamodb::types::WriteRequest::builder()
                     .put_request(put_request)
                     .build();
-                
+
                 write_requests.push(write_request);
             }
 
@@ -939,7 +1001,10 @@ impl KeyValueStore for DynamoDBKVStore {
                     "error_type" => "put_item_failed"
                 )
                 .increment(1);
-                Err(KVError::BackendError(format!("DynamoDB put_item failed: {}", e)))
+                Err(KVError::BackendError(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -952,7 +1017,8 @@ impl KeyValueStore for DynamoDBKVStore {
         }
 
         // Update with new TTL
-        self.put_with_ttl(ctx, key, existing_value.unwrap(), ttl).await
+        self.put_with_ttl(ctx, key, existing_value.unwrap(), ttl)
+            .await
     }
 
     async fn get_ttl(&self, ctx: &RequestContext, key: &str) -> KVResult<Option<Duration>> {
@@ -974,7 +1040,10 @@ impl KeyValueStore for DynamoDBKVStore {
                     Ok(None)
                 }
             }
-            Err(e) => Err(KVError::BackendError(format!("DynamoDB get_item failed: {}", e))),
+            Err(e) => Err(KVError::BackendError(format!(
+                "DynamoDB get_item failed: {}",
+                e
+            ))),
         }
     }
 
@@ -1018,17 +1087,24 @@ impl KeyValueStore for DynamoDBKVStore {
                     }
                     Err(e) => {
                         let error_str = e.to_string();
-                        let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                        let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_str.clone());
-                        
+                        let error_code = e
+                            .code()
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        let error_message = e
+                            .message()
+                            .map(|m| m.to_string())
+                            .unwrap_or_else(|| error_str.clone());
+
                         // Check for conditional check failures
                         // DynamoDB Local may return "service error" for conditional failures
                         // So we check both the error code and the error string
-                        if error_code == "ConditionalCheckFailedException" 
+                        if error_code == "ConditionalCheckFailedException"
                             || error_str.contains("ConditionalCheckFailedException")
                             || error_str.contains("conditional")
                             || error_str.contains("condition")
-                            || (error_str.contains("service error") && expected.is_none()) {
+                            || (error_str.contains("service error") && expected.is_none())
+                        {
                             // For None expected, service error likely means key already exists
                             debug!(
                                 key = %key,
@@ -1051,7 +1127,10 @@ impl KeyValueStore for DynamoDBKVStore {
                                 key = %key,
                                 "DynamoDB put_item failed in CAS"
                             );
-                            Err(KVError::BackendError(format!("DynamoDB put_item failed: {} (code: {})", error_message, error_code)))
+                            Err(KVError::BackendError(format!(
+                                "DynamoDB put_item failed: {} (code: {})",
+                                error_message, error_code
+                            )))
                         }
                     }
                 }
@@ -1061,10 +1140,10 @@ impl KeyValueStore for DynamoDBKVStore {
                 // Note: DynamoDB Local has limitations with binary comparisons in condition expressions
                 // So we verify the value matches first, then update with existence check
                 // This is not fully atomic but works reliably with DynamoDB Local
-                
+
                 // Get current value to verify it matches expected
                 let current = self.get(ctx, key).await?;
-                
+
                 // Check if current value matches expected
                 match &current {
                     Some(current_val) if current_val == expected_val => {
@@ -1096,14 +1175,21 @@ impl KeyValueStore for DynamoDBKVStore {
                             }
                             Err(e) => {
                                 let error_str = e.to_string();
-                                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_str.clone());
-                                
+                                let error_code = e
+                                    .code()
+                                    .map(|c| c.to_string())
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                let error_message = e
+                                    .message()
+                                    .map(|m| m.to_string())
+                                    .unwrap_or_else(|| error_str.clone());
+
                                 // Check for conditional check failures
-                                if error_code == "ConditionalCheckFailedException" 
+                                if error_code == "ConditionalCheckFailedException"
                                     || error_str.contains("ConditionalCheckFailedException")
                                     || error_str.contains("conditional")
-                                    || error_str.contains("condition") {
+                                    || error_str.contains("condition")
+                                {
                                     debug!(
                                         key = %key,
                                         error_code = %error_code,
@@ -1124,7 +1210,10 @@ impl KeyValueStore for DynamoDBKVStore {
                                         key = %key,
                                         "DynamoDB put_item failed in CAS"
                                     );
-                                    Err(KVError::BackendError(format!("DynamoDB put_item failed: {} (code: {})", error_message, error_code)))
+                                    Err(KVError::BackendError(format!(
+                                        "DynamoDB put_item failed: {} (code: {})",
+                                        error_message, error_code
+                                    )))
                                 }
                             }
                         }
@@ -1153,7 +1242,7 @@ impl KeyValueStore for DynamoDBKVStore {
         // 1. Use a numeric attribute (numeric_value) for atomic ADD
         // 2. Update the binary value attribute after the ADD succeeds
         // 3. If key doesn't exist or doesn't have numeric_value, initialize it
-        
+
         // First, check if key exists and initialize numeric_value if needed
         let current = self.get(ctx, key).await?;
         let current_numeric = current
@@ -1185,7 +1274,7 @@ impl KeyValueStore for DynamoDBKVStore {
                         if !attrs.contains_key("numeric_value") {
                             // Initialize numeric_value from current value using update_item
                             let update_expr = "SET numeric_value = :nv, updated_at = :now";
-                            
+
                             let _ = self
                                 .client
                                 .update_item()
@@ -1193,8 +1282,14 @@ impl KeyValueStore for DynamoDBKVStore {
                                 .key("pk", AttributeValue::S(pk.clone()))
                                 .key("sk", AttributeValue::S("KV".to_string()))
                                 .update_expression(update_expr)
-                                .expression_attribute_values(":nv", AttributeValue::N(current_numeric.to_string()))
-                                .expression_attribute_values(":now", AttributeValue::N(Utc::now().timestamp().to_string()))
+                                .expression_attribute_values(
+                                    ":nv",
+                                    AttributeValue::N(current_numeric.to_string()),
+                                )
+                                .expression_attribute_values(
+                                    ":now",
+                                    AttributeValue::N(Utc::now().timestamp().to_string()),
+                                )
                                 .send()
                                 .await;
                         }
@@ -1209,8 +1304,12 @@ impl KeyValueStore for DynamoDBKVStore {
         // Now try to atomically increment the numeric_value attribute
         let update_expression = "ADD numeric_value :delta SET updated_at = :updated_at";
         let mut expression_attribute_values = HashMap::new();
-        expression_attribute_values.insert(":delta".to_string(), AttributeValue::N(delta.to_string()));
-        expression_attribute_values.insert(":updated_at".to_string(), AttributeValue::N(Utc::now().timestamp().to_string()));
+        expression_attribute_values
+            .insert(":delta".to_string(), AttributeValue::N(delta.to_string()));
+        expression_attribute_values.insert(
+            ":updated_at".to_string(),
+            AttributeValue::N(Utc::now().timestamp().to_string()),
+        );
 
         match self
             .client
@@ -1236,7 +1335,7 @@ impl KeyValueStore for DynamoDBKVStore {
                 // Update the binary value attribute to match
                 let new_value_bytes = new_value.to_be_bytes().to_vec();
                 let item = self.kv_to_item(ctx, key, &new_value_bytes, None);
-                
+
                 // Update the value attribute (this is idempotent, so no condition needed)
                 let _ = self
                     .client
@@ -1293,8 +1392,14 @@ impl KeyValueStore for DynamoDBKVStore {
                     .key("pk", AttributeValue::S(pk.clone()))
                     .key("sk", AttributeValue::S("KV".to_string()))
                     .update_expression(update_expr)
-                    .expression_attribute_values(":nv", AttributeValue::N(current_numeric.to_string()))
-                    .expression_attribute_values(":now", AttributeValue::N(Utc::now().timestamp().to_string()))
+                    .expression_attribute_values(
+                        ":nv",
+                        AttributeValue::N(current_numeric.to_string()),
+                    )
+                    .expression_attribute_values(
+                        ":now",
+                        AttributeValue::N(Utc::now().timestamp().to_string()),
+                    )
                     .send()
                     .await
                 {
@@ -1306,14 +1411,17 @@ impl KeyValueStore for DynamoDBKVStore {
                         // Key might not exist, create it
                         let zero_bytes = 0i64.to_be_bytes().to_vec();
                         let item = self.kv_to_item(ctx, key, &zero_bytes, None);
-                        
+
                         // Add numeric_value attribute for atomic operations
                         let mut item_map = HashMap::new();
                         for (k, v) in item {
                             item_map.insert(k, v);
                         }
-                        item_map.insert("numeric_value".to_string(), AttributeValue::N("0".to_string()));
-                        
+                        item_map.insert(
+                            "numeric_value".to_string(),
+                            AttributeValue::N("0".to_string()),
+                        );
+
                         match self
                             .client
                             .put_item()
@@ -1329,7 +1437,10 @@ impl KeyValueStore for DynamoDBKVStore {
                             }
                             Err(put_err) => {
                                 // Key might have been created by another operation
-                                if put_err.to_string().contains("ConditionalCheckFailedException") {
+                                if put_err
+                                    .to_string()
+                                    .contains("ConditionalCheckFailedException")
+                                {
                                     // Retry increment
                                     return self.increment(ctx, key, delta).await;
                                 } else {
@@ -1338,7 +1449,10 @@ impl KeyValueStore for DynamoDBKVStore {
                                         key = %key,
                                         "Failed to initialize key for increment"
                                     );
-                                    return Err(KVError::BackendError(format!("DynamoDB put_item failed: {}", put_err)));
+                                    return Err(KVError::BackendError(format!(
+                                        "DynamoDB put_item failed: {}",
+                                        put_err
+                                    )));
                                 }
                             }
                         }
@@ -1359,7 +1473,11 @@ impl KeyValueStore for DynamoDBKVStore {
         Ok(rx)
     }
 
-    async fn watch_prefix(&self, _ctx: &RequestContext, _prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch_prefix(
+        &self,
+        _ctx: &RequestContext,
+        _prefix: &str,
+    ) -> KVResult<mpsc::Receiver<KVEvent>> {
         // DynamoDB doesn't have native pub/sub, so we return an empty channel
         let (_tx, rx) = mpsc::channel(100);
         Ok(rx)
@@ -1434,4 +1552,3 @@ impl KeyValueStore for DynamoDBKVStore {
 // Bridge plexspaces_keyvalue::KeyValueStore → plexspaces_common::KeyValueStore
 // for the DynamoDB backend using the shared macro.
 crate::impl_common_keyvalue_store!(DynamoDBKVStore);
-

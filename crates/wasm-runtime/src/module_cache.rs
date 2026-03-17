@@ -13,7 +13,7 @@ use crate::WasmModule;
 // Metrics are recorded via the metrics crate macros (no import needed)
 
 /// Module cache for WASM modules (content-addressed by SHA-256 hash)
-/// 
+///
 /// ## Design
 /// - Content-addressed by SHA-256 hash (same module = same hash)
 /// - LRU eviction when capacity exceeded
@@ -50,18 +50,18 @@ impl ModuleCache {
         if let Some((module, _)) = self.modules.get(hash) {
             // Clone the module reference first (before mutable borrow)
             let module_clone = Arc::clone(module);
-            
+
             // Update LRU order: move to back
             if let Some(pos) = self.access_order.iter().position(|h| h == hash) {
                 self.access_order.remove(pos);
             }
             self.access_order.push_back(hash.to_string());
-            
+
             // Update index in map
             if let Some((_, idx)) = self.modules.get_mut(hash) {
                 *idx = self.access_order.len() - 1;
             }
-            
+
             metrics::counter!("plexspaces_wasm_module_cache_hits_total").increment(1);
             Some(module_clone)
         } else {
@@ -93,7 +93,8 @@ impl ModuleCache {
             if let Some(lru_hash) = self.access_order.pop_front() {
                 if let Some((evicted_module, _)) = self.modules.remove(&lru_hash) {
                     metrics::counter!("plexspaces_wasm_module_cache_evictions_total").increment(1);
-                    metrics::histogram!("plexspaces_wasm_module_cache_evicted_size_bytes").record(evicted_module.size_bytes as f64);
+                    metrics::histogram!("plexspaces_wasm_module_cache_evicted_size_bytes")
+                        .record(evicted_module.size_bytes as f64);
                 }
             }
         }
@@ -102,7 +103,7 @@ impl ModuleCache {
         let idx = self.access_order.len();
         self.access_order.push_back(hash.clone());
         self.modules.insert(hash, (module, idx));
-        
+
         metrics::gauge!("plexspaces_wasm_module_cache_size").set(self.modules.len() as f64);
     }
 
@@ -113,7 +114,8 @@ impl ModuleCache {
                 self.access_order.remove(pos);
             }
             metrics::counter!("plexspaces_wasm_module_cache_evictions_total").increment(1);
-                    metrics::histogram!("plexspaces_wasm_module_cache_evicted_size_bytes").record(evicted_module.size_bytes as f64);
+            metrics::histogram!("plexspaces_wasm_module_cache_evicted_size_bytes")
+                .record(evicted_module.size_bytes as f64);
             metrics::gauge!("plexspaces_wasm_module_cache_size").set(self.modules.len() as f64);
             true
         } else {
@@ -146,7 +148,11 @@ impl ModuleCache {
         self.modules
             .values()
             .map(|(module, _)| {
-                (module.name.clone(), module.version.clone(), module.hash.clone())
+                (
+                    module.name.clone(),
+                    module.version.clone(),
+                    module.hash.clone(),
+                )
             })
             .collect()
     }
@@ -178,13 +184,13 @@ mod tests {
     #[test]
     fn test_insert_and_get() {
         let mut cache = ModuleCache::new(10);
-        
+
         // Create a dummy module (we can't easily create real WasmModule in tests)
         // For now, test the structure
         let _hash1 = "hash1".to_string();
         // Note: In real usage, we'd need actual WasmModule, but for structure test this is fine
         // The actual WasmModule creation is tested in integration tests
-        
+
         assert!(cache.get("hash1").is_none());
         assert_eq!(cache.len(), 0);
     }
@@ -192,12 +198,12 @@ mod tests {
     #[test]
     fn test_lru_eviction() {
         let _cache = ModuleCache::new(2);
-        
+
         // Insert 2 modules
         let _hash1 = "hash1".to_string();
         let _hash2 = "hash2".to_string();
         // Note: Would need actual WasmModule instances here
-        
+
         // Insert 3rd module should evict first
         let _hash3 = "hash3".to_string();
         // cache.insert(hash3, module3);

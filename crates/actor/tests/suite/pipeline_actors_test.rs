@@ -7,7 +7,9 @@
 
 use plexspaces_actor::ActorBuilder;
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, RequestContext, ServiceLocator, Message};
+use plexspaces_core::{
+    Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContext, ServiceLocator,
+};
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -98,21 +100,29 @@ impl GenServer for InputWorkerActor {
                     let reply = PipelineMessage::Processed {
                         events: events.clone(),
                     };
-                    let reply_msg = create_message(serde_json::to_vec(&reply)
-                        .map_err(|e| BehaviorError::ProcessingError(format!("Failed to serialize: {}", e)))?);
+                    let reply_msg = create_message(serde_json::to_vec(&reply).map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to serialize: {}", e))
+                    })?);
                     ctx.send_reply(
-                        if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) },
+                        if msg.correlation_id.is_empty() {
+                            None
+                        } else {
+                            Some(msg.correlation_id.as_str())
+                        },
                         sender_id,
                         msg.receiver_id.clone(),
                         reply_msg,
-                    ).await
-                        .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+                    )
+                    .await
+                    .map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
+                    })?;
                 }
             }
             _ => {
-                return Err(BehaviorError::ProcessingError(
-                    format!("InputWorkerActor received unexpected message")
-                ));
+                return Err(BehaviorError::ProcessingError(format!(
+                    "InputWorkerActor received unexpected message"
+                )));
             }
         }
 
@@ -161,33 +171,37 @@ impl GenServer for ProcessorWorkerActor {
         match pipeline_msg {
             PipelineMessage::Process { events } => {
                 // Simple processing: filter out empty events
-                let processed: Vec<String> = events.into_iter()
-                    .filter(|e| !e.is_empty())
-                    .collect();
+                let processed: Vec<String> = events.into_iter().filter(|e| !e.is_empty()).collect();
 
                 self.events_processed += processed.len() as u64;
 
                 // Reply with processed events
                 if !msg.sender_id.is_empty() {
                     let sender_id = &msg.sender_id;
-                    let reply = PipelineMessage::Processed {
-                        events: processed,
-                    };
-                    let reply_msg = create_message(serde_json::to_vec(&reply)
-                        .map_err(|e| BehaviorError::ProcessingError(format!("Failed to serialize: {}", e)))?);
+                    let reply = PipelineMessage::Processed { events: processed };
+                    let reply_msg = create_message(serde_json::to_vec(&reply).map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to serialize: {}", e))
+                    })?);
                     ctx.send_reply(
-                        if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) },
+                        if msg.correlation_id.is_empty() {
+                            None
+                        } else {
+                            Some(msg.correlation_id.as_str())
+                        },
                         sender_id,
                         msg.receiver_id.clone(),
                         reply_msg,
-                    ).await
-                        .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+                    )
+                    .await
+                    .map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
+                    })?;
                 }
             }
             _ => {
-                return Err(BehaviorError::ProcessingError(
-                    format!("ProcessorWorkerActor received unexpected message")
-                ));
+                return Err(BehaviorError::ProcessingError(format!(
+                    "ProcessorWorkerActor received unexpected message"
+                )));
             }
         }
 
@@ -202,9 +216,7 @@ struct OutputWorkerActor {
 
 impl OutputWorkerActor {
     fn new() -> Self {
-        Self {
-            events_sent: 0,
-        }
+        Self { events_sent: 0 }
     }
 }
 
@@ -243,21 +255,29 @@ impl GenServer for OutputWorkerActor {
                     let reply = PipelineMessage::SendToDestinationResponse {
                         events_sent: events.len() as u64,
                     };
-                    let reply_msg = create_message(serde_json::to_vec(&reply)
-                        .map_err(|e| BehaviorError::ProcessingError(format!("Failed to serialize: {}", e)))?);
+                    let reply_msg = create_message(serde_json::to_vec(&reply).map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to serialize: {}", e))
+                    })?);
                     ctx.send_reply(
-                        if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) },
+                        if msg.correlation_id.is_empty() {
+                            None
+                        } else {
+                            Some(msg.correlation_id.as_str())
+                        },
                         sender_id,
                         msg.receiver_id.clone(),
                         reply_msg,
-                    ).await
-                        .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+                    )
+                    .await
+                    .map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
+                    })?;
                 }
             }
             _ => {
-                return Err(BehaviorError::ProcessingError(
-                    format!("OutputWorkerActor received unexpected message")
-                ));
+                return Err(BehaviorError::ProcessingError(format!(
+                    "OutputWorkerActor received unexpected message"
+                )));
             }
         }
 
@@ -284,10 +304,14 @@ async fn test_input_actor_processes_messages() {
     let ingest_msg = PipelineMessage::Ingest {
         events: vec!["event1".to_string(), "event2".to_string()],
     };
-    let request = create_request_message(serde_json::to_vec(&ingest_msg).unwrap(), input_ref.id().as_str());
+    let request = create_request_message(
+        serde_json::to_vec(&ingest_msg).unwrap(),
+        input_ref.id().as_str(),
+    );
 
     // Ask for response
-    let response = input_ref.ask(request, Duration::from_secs(5))
+    let response = input_ref
+        .ask(request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -322,10 +346,14 @@ async fn test_processor_actor_filters_events() {
     let process_msg = PipelineMessage::Process {
         events: vec!["event1".to_string(), "".to_string(), "event2".to_string()],
     };
-    let request = create_request_message(serde_json::to_vec(&process_msg).unwrap(), processor_ref.id().as_str());
+    let request = create_request_message(
+        serde_json::to_vec(&process_msg).unwrap(),
+        processor_ref.id().as_str(),
+    );
 
     // Ask for response
-    let response = processor_ref.ask(request, Duration::from_secs(5))
+    let response = processor_ref
+        .ask(request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -358,12 +386,20 @@ async fn test_output_actor_sends_events() {
 
     // Send destination message
     let dest_msg = PipelineMessage::SendToDestination {
-        events: vec!["event1".to_string(), "event2".to_string(), "event3".to_string()],
+        events: vec![
+            "event1".to_string(),
+            "event2".to_string(),
+            "event3".to_string(),
+        ],
     };
-    let request = create_request_message(serde_json::to_vec(&dest_msg).unwrap(), output_ref.id().as_str());
+    let request = create_request_message(
+        serde_json::to_vec(&dest_msg).unwrap(),
+        output_ref.id().as_str(),
+    );
 
     // Ask for response
-    let response = output_ref.ask(request, Duration::from_secs(5))
+    let response = output_ref
+        .ask(request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -412,9 +448,13 @@ async fn test_full_pipeline() {
     let ingest_msg = PipelineMessage::Ingest {
         events: vec!["event1".to_string(), "event2".to_string()],
     };
-    let input_request = create_request_message(serde_json::to_vec(&ingest_msg).unwrap(), input_ref.id().as_str());
+    let input_request = create_request_message(
+        serde_json::to_vec(&ingest_msg).unwrap(),
+        input_ref.id().as_str(),
+    );
 
-    let input_response = input_ref.ask(input_request, Duration::from_secs(5))
+    let input_response = input_ref
+        .ask(input_request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -428,13 +468,18 @@ async fn test_full_pipeline() {
     let process_msg = PipelineMessage::Process {
         events: processed_events,
     };
-    let processor_request = create_request_message(serde_json::to_vec(&process_msg).unwrap(), processor_ref.id().as_str());
+    let processor_request = create_request_message(
+        serde_json::to_vec(&process_msg).unwrap(),
+        processor_ref.id().as_str(),
+    );
 
-    let processor_response = processor_ref.ask(processor_request, Duration::from_secs(5))
+    let processor_response = processor_ref
+        .ask(processor_request, Duration::from_secs(5))
         .await
         .unwrap();
 
-    let processor_result: PipelineMessage = serde_json::from_slice(&processor_response.payload).unwrap();
+    let processor_result: PipelineMessage =
+        serde_json::from_slice(&processor_response.payload).unwrap();
     let final_events = match processor_result {
         PipelineMessage::Processed { events } => events,
         _ => panic!("Expected Processed message from processor"),
@@ -444,9 +489,13 @@ async fn test_full_pipeline() {
     let output_msg = PipelineMessage::SendToDestination {
         events: final_events,
     };
-    let output_request = create_request_message(serde_json::to_vec(&output_msg).unwrap(), output_ref.id().as_str());
+    let output_request = create_request_message(
+        serde_json::to_vec(&output_msg).unwrap(),
+        output_ref.id().as_str(),
+    );
 
-    let output_response = output_ref.ask(output_request, Duration::from_secs(5))
+    let output_response = output_ref
+        .ask(output_request, Duration::from_secs(5))
         .await
         .unwrap();
 
@@ -509,7 +558,9 @@ async fn test_concurrent_pipeline_processing() {
                 ..Default::default()
             };
 
-            let input_response = input_ref_clone.ask(input_request, Duration::from_secs(5)).await
+            let input_response = input_ref_clone
+                .ask(input_request, Duration::from_secs(5))
+                .await
                 .map_err(|e| format!("Input actor ask failed: {}", e))?;
             let input_result: PipelineMessage = serde_json::from_slice(&input_response.payload)
                 .map_err(|e| format!("Failed to deserialize input response: {}", e))?;
@@ -530,10 +581,13 @@ async fn test_concurrent_pipeline_processing() {
                 ..Default::default()
             };
 
-            let processor_response = processor_ref_clone.ask(processor_request, Duration::from_secs(5)).await
+            let processor_response = processor_ref_clone
+                .ask(processor_request, Duration::from_secs(5))
+                .await
                 .map_err(|e| format!("Processor actor ask failed: {}", e))?;
-            let processor_result: PipelineMessage = serde_json::from_slice(&processor_response.payload)
-                .map_err(|e| format!("Failed to deserialize processor response: {}", e))?;
+            let processor_result: PipelineMessage =
+                serde_json::from_slice(&processor_response.payload)
+                    .map_err(|e| format!("Failed to deserialize processor response: {}", e))?;
             let final_events = match processor_result {
                 PipelineMessage::Processed { events } => events,
                 _ => return Err("Expected Processed message".to_string()),
@@ -551,10 +605,13 @@ async fn test_concurrent_pipeline_processing() {
                 ..Default::default()
             };
 
-            let output_response = output_ref_clone.ask(output_request, Duration::from_secs(5)).await
+            let output_response = output_ref_clone
+                .ask(output_request, Duration::from_secs(5))
+                .await
                 .map_err(|e| format!("Output actor ask failed: {}", e))?;
-            let output_result: PipelineMessage = serde_json::from_slice(&output_response.payload)
-                .map_err(|e| format!("Failed to deserialize output response: {}", e))?;
+            let output_result: PipelineMessage =
+                serde_json::from_slice(&output_response.payload)
+                    .map_err(|e| format!("Failed to deserialize output response: {}", e))?;
             match output_result {
                 PipelineMessage::SendToDestinationResponse { events_sent } => {
                     if events_sent != 2 {
@@ -571,8 +628,14 @@ async fn test_concurrent_pipeline_processing() {
 
     // Wait for all tasks
     for task in tasks {
-        let result = timeout(Duration::from_secs(10), task).await.unwrap().unwrap();
-        assert!(result.is_ok(), "Pipeline should process successfully: {:?}", result);
+        let result = timeout(Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            result.is_ok(),
+            "Pipeline should process successfully: {:?}",
+            result
+        );
     }
 }
-

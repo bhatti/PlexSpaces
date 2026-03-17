@@ -73,7 +73,7 @@ async fn test_vm_lifecycle_simplified() {
     };
 
     let mut vm = FirecrackerVm::create(config).await.unwrap();
-    
+
     // Should be in Created state
     assert_eq!(vm.state(), VmState::Created);
 
@@ -85,7 +85,7 @@ async fn test_vm_lifecycle_simplified() {
     if boot_result.is_ok() {
         // If boot succeeded, verify state
         assert_eq!(vm.state(), VmState::Running);
-        
+
         // Stop VM
         let stop_result = vm.stop().await;
         assert!(stop_result.is_ok(), "Should stop VM successfully");
@@ -109,10 +109,10 @@ async fn test_vm_list_and_status() {
     };
 
     let vm = FirecrackerVm::create(config).await.unwrap();
-    
+
     // Verify VM exists (via state)
     assert_eq!(vm.state(), VmState::Created);
-    
+
     // TODO: Test gRPC ListVms and GetVmState calls
     // This would require a running node with Firecracker service
 }
@@ -132,7 +132,7 @@ async fn test_deploy_app_to_vm() {
     };
 
     let mut vm = FirecrackerVm::create(config).await.unwrap();
-    
+
     // Boot VM
     let boot_result = vm.boot().await;
     if boot_result.is_ok() {
@@ -142,4 +142,3 @@ async fn test_deploy_app_to_vm() {
         assert_eq!(vm.state(), VmState::Running);
     }
 }
-

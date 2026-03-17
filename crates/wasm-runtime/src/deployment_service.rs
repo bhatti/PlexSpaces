@@ -548,7 +548,10 @@ mod tests {
             .instantiate_actor("nonexistent@1.0.0", "actor-001", &[], None)
             .await;
 
-        assert!(result.is_err(), "Instantiate nonexistent module should fail");
+        assert!(
+            result.is_err(),
+            "Instantiate nonexistent module should fail"
+        );
 
         match result {
             Err(WasmError::ModuleNotFound(_)) => { /* Expected */ }

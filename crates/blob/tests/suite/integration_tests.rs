@@ -21,9 +21,9 @@
 //! These tests require MinIO to be running. If MinIO is not available,
 //! tests will print a warning and skip.
 
-use plexspaces_blob::{BlobService, repository::sql::SqlBlobRepository, repository::ListFilters};
-use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
+use plexspaces_blob::{repository::sql::SqlBlobRepository, repository::ListFilters, BlobService};
 use plexspaces_core::RequestContext;
+use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -38,14 +38,14 @@ static MINIO_ENDPOINT: OnceLock<tokio::sync::Mutex<Option<String>>> = OnceLock::
 async fn get_minio_endpoint() -> Option<String> {
     let cache = MINIO_ENDPOINT.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut cached = cache.lock().await;
-    
+
     if let Some(ref endpoint) = *cached {
         return Some(endpoint.clone());
     }
-    
+
     // Check service health
     use reqwest::Client;
-    
+
     let client = match Client::builder()
         .timeout(Duration::from_secs(1)) // Reduced timeout for faster skipping
         .build()
@@ -56,7 +56,7 @@ async fn get_minio_endpoint() -> Option<String> {
             return None;
         }
     };
-    
+
     // Try port 9001 first, then 9000
     let ports = ["9001", "9000"];
     for port in &ports {
@@ -70,7 +70,7 @@ async fn get_minio_endpoint() -> Option<String> {
             _ => continue,
         }
     }
-    
+
     *cached = None;
     None
 }
@@ -90,21 +90,21 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
     // This is required for AnyPool to work with sqlite
     // Note: install_default_drivers is idempotent and safe to call multiple times
     sqlx::any::install_default_drivers();
-    
+
     // Use in-memory SQLite database for tests (fast, isolated, no file cleanup needed)
     // Not recovery-related, so memory is appropriate
     // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
-    use sqlx::AnyPool;
     use sqlx::any::AnyPoolOptions;
-    
+    use sqlx::AnyPool;
+
     let db_url = "sqlite::memory:";
-    
+
     let any_pool = AnyPoolOptions::new()
         .max_connections(1)
         .connect(db_url)
         .await
         .ok()?;
-    
+
     // Migrations are auto-applied in new()
     let repository = Arc::new(SqlBlobRepository::new(any_pool).await.ok()?);
 
@@ -124,7 +124,10 @@ async fn create_test_service() -> Option<Arc<BlobService>> {
     };
 
     eprintln!("Using MinIO endpoint: {}", endpoint);
-    BlobService::new(config, repository).await.ok().map(Arc::new)
+    BlobService::new(config, repository)
+        .await
+        .ok()
+        .map(Arc::new)
 }
 
 fn create_test_context(tenant_id: &str, namespace: &str) -> RequestContext {
@@ -164,7 +167,10 @@ async fn test_upload_and_download_blob() {
     assert_eq!(metadata.content_length, data.len() as i64);
 
     // Download
-    let downloaded = service.download_blob(&ctx, &metadata.blob_id).await.unwrap();
+    let downloaded = service
+        .download_blob(&ctx, &metadata.blob_id)
+        .await
+        .unwrap();
     assert_eq!(downloaded, data);
 }
 
@@ -249,10 +255,7 @@ async fn test_list_and_delete() {
 
     // List blobs
     let filters = ListFilters::default();
-    let (blobs, total) = service
-        .list_blobs(&ctx, &filters, 10, 1)
-        .await
-        .unwrap();
+    let (blobs, total) = service.list_blobs(&ctx, &filters, 10, 1).await.unwrap();
 
     assert!(total >= 3);
     assert!(!blobs.is_empty());
@@ -360,13 +363,13 @@ async fn test_presigned_url_get() {
     // Verify URL is not empty and contains expected components
     assert!(!presigned_url.is_empty());
     assert!(presigned_url.contains("http://") || presigned_url.contains("https://"));
-    
+
     // Try to download using presigned URL
     use reqwest::Client;
     let client = Client::new();
     let response = client.get(&presigned_url).send().await.unwrap();
     assert!(response.status().is_success());
-    
+
     let downloaded_data = response.bytes().await.unwrap();
     assert_eq!(downloaded_data.as_ref(), data.as_slice());
 }
@@ -410,7 +413,7 @@ async fn test_presigned_url_put() {
     // Verify URL is not empty
     assert!(!presigned_url.is_empty());
     assert!(presigned_url.contains("http://") || presigned_url.contains("https://"));
-    
+
     // Try to upload using presigned URL
     use reqwest::Client;
     let client = Client::new();
@@ -421,9 +424,13 @@ async fn test_presigned_url_put() {
         .send()
         .await
         .unwrap();
-    
+
     // PUT should succeed (200 or 204)
-    assert!(response.status().is_success() || response.status().as_u16() == 200 || response.status().as_u16() == 204);
+    assert!(
+        response.status().is_success()
+            || response.status().as_u16() == 200
+            || response.status().as_u16() == 204
+    );
 }
 
 #[cfg(feature = "presigned-urls")]

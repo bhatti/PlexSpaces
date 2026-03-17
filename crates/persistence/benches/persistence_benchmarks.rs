@@ -42,8 +42,8 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use plexspaces_mailbox::Message;
 use plexspaces_persistence::{
     execution_context::{ExecutionContext, ExecutionMode},
-    Journal, MemoryJournal, PromiseMetadata, PromiseResult, RetentionConfig, SideEffect, Snapshot,
-    CompressionType, EncryptionType,
+    CompressionType, EncryptionType, Journal, MemoryJournal, PromiseMetadata, PromiseResult,
+    RetentionConfig, SideEffect, Snapshot,
 };
 use tokio::runtime::Runtime;
 

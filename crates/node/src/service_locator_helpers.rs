@@ -18,8 +18,8 @@
 
 //! ServiceLocator helper functions for tests and examples
 
-use std::sync::Arc;
 use plexspaces_core::ServiceLocator;
+use std::sync::Arc;
 
 /// Create a ServiceLocator with all default services registered
 /// Create default ServiceLocator with all essential services initialized
@@ -37,19 +37,21 @@ pub async fn create_default_service_locator(
     node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
     release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
 ) -> Arc<plexspaces_services::ServiceLocatorImpl> {
-    use plexspaces_services::ServiceLocatorImpl;
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
     use plexspaces_core::service_names;
-    
+    use plexspaces_services::ServiceLocatorImpl;
+
     let service_locator_impl = Arc::new(ServiceLocatorImpl::new());
     let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = service_locator_impl.clone();
-    
+
     // Initialize services using ServiceLocator trait
     // ServiceLocator now creates all default services including facet factories, ActorFactoryImpl, ActorServiceImpl, and TupleSpaceProvider
-    service_locator_impl.initialize_services(node_id, node_config, release_config).await;
-    
+    service_locator_impl
+        .initialize_services(node_id, node_config, release_config)
+        .await;
+
     // Note: ActorFactoryImpl, facet factories, ActorServiceImpl, and TupleSpaceProvider are now
     // created automatically by ServiceLocator::initialize_services() since services crate depends on actor crate.
-    
+
     service_locator_impl
 }

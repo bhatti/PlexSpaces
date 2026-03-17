@@ -250,7 +250,7 @@ impl PooledInstance {
                 // Traditional instances: return to pool
                 let mut instances = self.pool.lock().await;
                 instances.push(instance);
-                
+
                 // Update stats
                 let mut stats = self.stats.lock().await;
                 stats.available += 1;
@@ -334,7 +334,7 @@ mod tests {
 
         // Instance is usable
         assert!(!instance.instance().actor_id().is_empty());
-        
+
         // Explicitly return to pool
         instance.checkin().await;
 
@@ -345,19 +345,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_pool_exhaustion_and_expansion() {
-        let pool = match tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            create_test_pool(2),
-        )
-        .await
-        {
-            Ok(Ok(p)) => p,
-            Ok(Err(e)) => panic!("create_test_pool failed: {}", e),
-            Err(_) => {
-                eprintln!("test_pool_exhaustion_and_expansion: timeout (skipping)");
-                return;
-            }
-        };
+        let pool =
+            match tokio::time::timeout(std::time::Duration::from_secs(10), create_test_pool(2))
+                .await
+            {
+                Ok(Ok(p)) => p,
+                Ok(Err(e)) => panic!("create_test_pool failed: {}", e),
+                Err(_) => {
+                    eprintln!("test_pool_exhaustion_and_expansion: timeout (skipping)");
+                    return;
+                }
+            };
 
         // Checkout all instances
         let _inst1 = pool.checkout().await.unwrap();
@@ -377,19 +375,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_pool_concurrent_checkout() {
-        let pool = match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            create_test_pool(10),
-        )
-        .await
-        {
-            Ok(Ok(p)) => Arc::new(p),
-            Ok(Err(e)) => panic!("create_test_pool failed: {}", e),
-            Err(_) => {
-                eprintln!("test_pool_concurrent_checkout: timeout creating pool (skipping)");
-                return;
-            }
-        };
+        let pool =
+            match tokio::time::timeout(std::time::Duration::from_secs(5), create_test_pool(10))
+                .await
+            {
+                Ok(Ok(p)) => Arc::new(p),
+                Ok(Err(e)) => panic!("create_test_pool failed: {}", e),
+                Err(_) => {
+                    eprintln!("test_pool_concurrent_checkout: timeout creating pool (skipping)");
+                    return;
+                }
+            };
 
         // Spawn 20 concurrent checkouts (pool has 10 capacity) with overall timeout to avoid hanging
         let run = async {
@@ -430,8 +426,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result =
-            InstancePool::new(runtime.engine(), module, 0, WasmConfig::default()).await;
+        let result = InstancePool::new(runtime.engine(), module, 0, WasmConfig::default()).await;
 
         assert!(result.is_err());
         assert!(matches!(result, Err(WasmError::ConfigurationError(_))));

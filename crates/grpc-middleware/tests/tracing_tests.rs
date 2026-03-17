@@ -24,9 +24,7 @@ async fn test_tracing_interceptor_creates_span() {
             middleware_type: MiddlewareType::MiddlewareTypeTracing as i32,
             enabled: true,
             priority: 20,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(config)),
         }],
     };
 
@@ -62,9 +60,7 @@ async fn test_tracing_interceptor_propagates_trace_context() {
             middleware_type: MiddlewareType::MiddlewareTypeTracing as i32,
             enabled: true,
             priority: 20,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(config)),
         }],
     };
 
@@ -106,9 +102,7 @@ async fn test_tracing_interceptor_records_duration() {
             middleware_type: MiddlewareType::MiddlewareTypeTracing as i32,
             enabled: true,
             priority: 20,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(config)),
         }],
     };
 
@@ -157,9 +151,7 @@ async fn test_tracing_interceptor_respects_sampling_rate() {
             middleware_type: MiddlewareType::MiddlewareTypeTracing as i32,
             enabled: true,
             priority: 20,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::Tracing(config)),
         }],
     };
 
@@ -179,4 +171,3 @@ async fn test_tracing_interceptor_respects_sampling_rate() {
     let result = chain.before_request(&context).await;
     assert!(result.is_ok(), "Sampling rate should not block requests");
 }
-

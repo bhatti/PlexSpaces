@@ -33,8 +33,8 @@
 
 use crate::ApplicationError;
 use crate::{Application, ApplicationNode};
-use plexspaces_proto::application::v1::{ApplicationRuntimeState, ApplicationStatus};
 use plexspaces_proto::application::v1::ApplicationSpec;
+use plexspaces_proto::application::v1::{ApplicationRuntimeState, ApplicationStatus};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -171,10 +171,14 @@ impl ApplicationController {
         // Get ApplicationNode
         let node = {
             let node_guard = self.node.read().await;
-            node_guard.as_ref()
-                .ok_or_else(|| ApplicationError::StartupFailed(
-                    "ApplicationNode not set. Call set_node() before starting applications.".to_string()
-                ))?
+            node_guard
+                .as_ref()
+                .ok_or_else(|| {
+                    ApplicationError::StartupFailed(
+                        "ApplicationNode not set. Call set_node() before starting applications."
+                            .to_string(),
+                    )
+                })?
                 .clone()
         };
 
@@ -285,7 +289,12 @@ impl ApplicationController {
         let (graph, reverse_graph) = self.build_dependency_graph().await?;
 
         // Check for circular dependencies using DFS
-        if self.has_cycle(name, &graph, &mut std::collections::HashSet::new(), &mut std::collections::HashSet::new()) {
+        if self.has_cycle(
+            name,
+            &graph,
+            &mut std::collections::HashSet::new(),
+            &mut std::collections::HashSet::new(),
+        ) {
             return Err(ApplicationError::StartupFailed(format!(
                 "Circular dependency detected involving application: {}",
                 name
@@ -328,7 +337,7 @@ impl ApplicationController {
         // Filter to only include applications in the dependency chain of `name`
         let mut filtered_result = Vec::new();
         let mut to_include: std::collections::HashSet<String> = std::collections::HashSet::new();
-        
+
         // Collect all dependencies of `name` (including transitive)
         self.collect_dependencies(name, &graph, &mut to_include);
         to_include.insert(name.to_string());
@@ -359,7 +368,8 @@ impl ApplicationController {
     /// Tuple of (graph: app -> dependencies, reverse_graph: app -> dependents)
     async fn build_dependency_graph(
         &self,
-    ) -> Result<(HashMap<String, Vec<String>>, HashMap<String, Vec<String>>), ApplicationError> {
+    ) -> Result<(HashMap<String, Vec<String>>, HashMap<String, Vec<String>>), ApplicationError>
+    {
         let configs = self.configs.read().await;
         let mut graph: HashMap<String, Vec<String>> = HashMap::new();
         let mut reverse_graph: HashMap<String, Vec<String>> = HashMap::new();
@@ -473,13 +483,10 @@ impl ApplicationController {
         // Stop with timeout if specified (requires &mut self, so we need write lock)
         let stop_result = if timeout_secs > 0 {
             let app_clone = app.clone();
-            timeout(
-                Duration::from_secs(timeout_secs),
-                async move {
-                    let mut app_guard = app_clone.write().await;
-                    app_guard.stop().await
-                }
-            )
+            timeout(Duration::from_secs(timeout_secs), async move {
+                let mut app_guard = app_clone.write().await;
+                app_guard.stop().await
+            })
             .await
             .map_err(|_| {
                 ApplicationError::ShutdownFailed(format!(
@@ -492,8 +499,9 @@ impl ApplicationController {
             app_guard.stop().await
         };
 
-        stop_result
-            .map_err(|e| ApplicationError::ShutdownFailed(format!("Failed to stop {}: {}", name, e)))?;
+        stop_result.map_err(|e| {
+            ApplicationError::ShutdownFailed(format!("Failed to stop {}: {}", name, e))
+        })?;
 
         // Update state to stopped
         {
@@ -556,7 +564,8 @@ impl ApplicationController {
             .get(name)
             .ok_or_else(|| ApplicationError::NotFound(name.to_string()))?;
 
-        Ok(ApplicationStatus::try_from(state.status).unwrap_or(ApplicationStatus::ApplicationStatusUnspecified))
+        Ok(ApplicationStatus::try_from(state.status)
+            .unwrap_or(ApplicationStatus::ApplicationStatusUnspecified))
     }
 
     /// List all loaded applications
@@ -595,7 +604,7 @@ mod dependency_ordering_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Application, ApplicationNode, ApplicationError as CoreApplicationError};
+    use crate::{Application, ApplicationError as CoreApplicationError, ApplicationNode};
     use async_trait::async_trait;
     use std::sync::Arc;
     use tokio::sync::RwLock;
@@ -615,7 +624,6 @@ mod tests {
         fn listen_addr(&self) -> &str {
             &self.addr
         }
-
     }
 
     /// Mock application for testing
@@ -669,7 +677,10 @@ mod tests {
             &self.version
         }
 
-        async fn start(&mut self, _node: Arc<dyn ApplicationNode>) -> Result<(), CoreApplicationError> {
+        async fn start(
+            &mut self,
+            _node: Arc<dyn ApplicationNode>,
+        ) -> Result<(), CoreApplicationError> {
             let mut started = self.start_called.write().await;
             *started = true;
 
@@ -876,7 +887,10 @@ mod tests {
                 &self.version
             }
 
-            async fn start(&mut self, _node: Arc<dyn ApplicationNode>) -> Result<(), CoreApplicationError> {
+            async fn start(
+                &mut self,
+                _node: Arc<dyn ApplicationNode>,
+            ) -> Result<(), CoreApplicationError> {
                 Ok(())
             }
 

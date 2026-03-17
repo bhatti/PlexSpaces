@@ -8,9 +8,8 @@
 mod firecracker_integration_tests {
     use plexspaces_common::test_helpers::docker_available;
     use plexspaces_proto::firecracker::v1::{
-        firecracker_vm_service_client::FirecrackerVmServiceClient,
-        CreateVmRequest, BootVmRequest, GetVmStateRequest, ListVmsRequest,
-        DeployApplicationRequest, StopVmRequest,
+        firecracker_vm_service_client::FirecrackerVmServiceClient, BootVmRequest, CreateVmRequest,
+        DeployApplicationRequest, GetVmStateRequest, ListVmsRequest, StopVmRequest,
         VmConfig as ProtoVmConfig, VmState as ProtoVmState,
     };
     use std::process::Command;
@@ -51,7 +50,12 @@ mod firecracker_integration_tests {
         // and go up to workspace root
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         // crates/node -> workspace root
-        manifest_dir.parent().unwrap().parent().unwrap().to_path_buf()
+        manifest_dir
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf()
     }
 
     /// Helper to build Docker image (using docker-compose)
@@ -62,11 +66,19 @@ mod firecracker_integration_tests {
 
         let project_root = get_project_root();
         let compose_cmd = docker_compose_cmd();
-        println!("Building Docker image via {}: {}", compose_cmd, DOCKER_IMAGE);
-        
+        println!(
+            "Building Docker image via {}: {}",
+            compose_cmd, DOCKER_IMAGE
+        );
+
         let mut cmd = if compose_cmd == "docker compose" {
             let mut c = Command::new("docker");
-            c.args(&["compose", "-f", "docker-compose.firecracker-test.yml", "build"]);
+            c.args(&[
+                "compose",
+                "-f",
+                "docker-compose.firecracker-test.yml",
+                "build",
+            ]);
             c.current_dir(&project_root);
             c
         } else {
@@ -75,7 +87,7 @@ mod firecracker_integration_tests {
             c.current_dir(&project_root);
             c
         };
-        
+
         let output = cmd.output()?;
 
         if !output.status.success() {
@@ -91,11 +103,16 @@ mod firecracker_integration_tests {
     fn start_docker_container() -> Result<(), Box<dyn std::error::Error>> {
         let project_root = get_project_root();
         let compose_cmd = docker_compose_cmd();
-        
+
         // Stop and remove existing containers
         if compose_cmd == "docker compose" {
             let _ = Command::new("docker")
-                .args(&["compose", "-f", "docker-compose.firecracker-test.yml", "down"])
+                .args(&[
+                    "compose",
+                    "-f",
+                    "docker-compose.firecracker-test.yml",
+                    "down",
+                ])
                 .current_dir(&project_root)
                 .output();
         } else {
@@ -105,11 +122,20 @@ mod firecracker_integration_tests {
                 .output();
         }
 
-        println!("Starting Docker container via {}: {}", compose_cmd, CONTAINER_NAME);
-        
+        println!(
+            "Starting Docker container via {}: {}",
+            compose_cmd, CONTAINER_NAME
+        );
+
         let mut cmd = if compose_cmd == "docker compose" {
             let mut c = Command::new("docker");
-            c.args(&["compose", "-f", "docker-compose.firecracker-test.yml", "up", "-d"]);
+            c.args(&[
+                "compose",
+                "-f",
+                "docker-compose.firecracker-test.yml",
+                "up",
+                "-d",
+            ]);
             c.current_dir(&project_root);
             c
         } else {
@@ -118,7 +144,7 @@ mod firecracker_integration_tests {
             c.current_dir(&project_root);
             c
         };
-        
+
         let output = cmd.output()?;
 
         if !output.status.success() {
@@ -133,10 +159,15 @@ mod firecracker_integration_tests {
     /// Helper to stop Docker container
     fn stop_docker_container() {
         let compose_cmd = docker_compose_cmd();
-        
+
         if compose_cmd == "docker compose" {
             let _ = Command::new("docker")
-                .args(&["compose", "-f", "docker-compose.firecracker-test.yml", "down"])
+                .args(&[
+                    "compose",
+                    "-f",
+                    "docker-compose.firecracker-test.yml",
+                    "down",
+                ])
                 .output();
         } else {
             let _ = Command::new("docker-compose")
@@ -147,7 +178,9 @@ mod firecracker_integration_tests {
     }
 
     /// Helper to wait for gRPC service to be ready
-    async fn wait_for_service(max_wait: Duration) -> Result<Channel, Box<dyn std::error::Error + Send + Sync>> {
+    async fn wait_for_service(
+        max_wait: Duration,
+    ) -> Result<Channel, Box<dyn std::error::Error + Send + Sync>> {
         let start = std::time::Instant::now();
         let mut last_error: Option<String> = None;
         let mut attempt = 0;
@@ -157,13 +190,16 @@ mod firecracker_integration_tests {
             if attempt % 10 == 0 {
                 println!("Waiting for gRPC service... (attempt {})", attempt);
             }
-            
+
             match Channel::from_shared(GRPC_ADDR.to_string()) {
                 Ok(channel) => {
                     match channel.connect().await {
                         Ok(connected) => {
                             // Try a simple health check by attempting to create a client
-                            println!("gRPC service is ready (connected after {} attempts)", attempt);
+                            println!(
+                                "gRPC service is ready (connected after {} attempts)",
+                                attempt
+                            );
                             return Ok(connected);
                         }
                         Err(e) => {
@@ -181,15 +217,14 @@ mod firecracker_integration_tests {
 
         Err(format!(
             "Service not ready after {:?} ({} attempts): {:?}",
-            max_wait,
-            attempt,
-            last_error
+            max_wait, attempt, last_error
         )
         .into())
     }
 
     /// Helper to create gRPC client
-    async fn create_client() -> Result<FirecrackerVmServiceClient<Channel>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn create_client(
+    ) -> Result<FirecrackerVmServiceClient<Channel>, Box<dyn std::error::Error + Send + Sync>> {
         // Wait up to 60 seconds for service to be ready (Docker container startup time)
         let channel = wait_for_service(Duration::from_secs(60)).await?;
         Ok(FirecrackerVmServiceClient::new(channel))
@@ -454,7 +489,10 @@ mod firecracker_integration_tests {
         let list_response = client.list_vms(list_request).await;
         assert!(list_response.is_ok(), "Should list VMs");
         let list_response = list_response.unwrap().into_inner();
-        assert!(list_response.vms.iter().any(|vm| vm.vm_id == "test-vm-lifecycle-1"));
+        assert!(list_response
+            .vms
+            .iter()
+            .any(|vm| vm.vm_id == "test-vm-lifecycle-1"));
 
         // 4. Stop VM
         let stop_request = Request::new(StopVmRequest {

@@ -21,17 +21,18 @@
 //! Tests the HTTP multipart endpoint for deploying and undeploying WASM applications.
 //! Uses both the calculator_actor.wasm (large Python-based) and hello.wasm (small C-based) examples.
 
-use plexspaces_node::NodeBuilder;
 use plexspaces_core::ApplicationManager;
-use std::path::PathBuf;
+use plexspaces_node::NodeBuilder;
+use plexspaces_proto::v1::application::ApplicationState;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use wat;
-use plexspaces_proto::v1::application::ApplicationState;
 
 /// Shared WASM bytes cache (loaded once, reused for all tests)
-static SHARED_WASM_BYTES: std::sync::OnceLock<tokio::sync::Mutex<Option<Vec<u8>>>> = std::sync::OnceLock::new();
+static SHARED_WASM_BYTES: std::sync::OnceLock<tokio::sync::Mutex<Option<Vec<u8>>>> =
+    std::sync::OnceLock::new();
 static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Get the path to calculator_actor.wasm (Python-based WASM, large size)
@@ -46,7 +47,7 @@ fn get_calculator_wasm_path() -> PathBuf {
     if path.exists() {
         return path;
     }
-    
+
     // Second try: examples directory (fallback)
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("../../examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm");
@@ -57,7 +58,7 @@ fn get_calculator_wasm_path() -> PathBuf {
 /// Loads the 40MB WASM file once and caches it for all tests
 async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
     let cache = SHARED_WASM_BYTES.get_or_init(|| tokio::sync::Mutex::new(None));
-    
+
     // Fast path: already loaded
     {
         let guard = cache.lock().await;
@@ -65,10 +66,10 @@ async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
             return Some(bytes.clone());
         }
     }
-    
+
     // Slow path: need to load (use lock to ensure only one thread loads)
     let _guard = INIT_LOCK.lock().unwrap();
-    
+
     // Double-check after acquiring lock
     {
         let guard = cache.lock().await;
@@ -76,28 +77,31 @@ async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
             return Some(bytes.clone());
         }
     }
-    
+
     // Load WASM file (first time only)
     let wasm_path = get_calculator_wasm_path();
     if !wasm_path.exists() {
         return None;
     }
-    
-    eprintln!("📦 Loading WASM file (first time, ~40MB): {} (this may take a moment)", wasm_path.display());
-    
+
+    eprintln!(
+        "📦 Loading WASM file (first time, ~40MB): {} (this may take a moment)",
+        wasm_path.display()
+    );
+
     let bytes = tokio::task::spawn_blocking(move || fs::read(&wasm_path))
         .await
         .ok()
         .and_then(|r| r.ok())?;
-    
+
     eprintln!("✅ WASM file loaded: {} bytes", bytes.len());
-    
+
     // Cache the bytes
     {
         let mut guard = cache.lock().await;
         *guard = Some(bytes.clone());
     }
-    
+
     Some(bytes)
 }
 
@@ -105,7 +109,6 @@ async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
 fn calculator_wasm_exists() -> bool {
     get_calculator_wasm_path().exists()
 }
-
 
 /// Wait for HTTP server to be ready by checking if port is listening
 async fn wait_for_http_server(http_url: &str, max_retries: u32) -> bool {
@@ -116,11 +119,16 @@ async fn wait_for_http_server(http_url: &str, max_retries: u32) -> bool {
         Ok(c) => c,
         Err(_) => return false,
     };
-    
+
     for i in 0..max_retries {
         // Try to connect to the HTTP server
-        if let Ok(response) = client.get(&format!("{}/api/v1/applications", http_url)).send().await {
-            if response.status().is_success() || response.status() == reqwest::StatusCode::NOT_FOUND {
+        if let Ok(response) = client
+            .get(&format!("{}/api/v1/applications", http_url))
+            .send()
+            .await
+        {
+            if response.status().is_success() || response.status() == reqwest::StatusCode::NOT_FOUND
+            {
                 eprintln!("✅ HTTP server is ready (attempt {})", i + 1);
                 return true;
             }
@@ -138,10 +146,12 @@ async fn test_http_deploy_wasm_application_small() {
     // Following the pattern from examples/simple/wasm_calculator/src/main.rs
 
     // Start node on a fixed port for testing (avoid permission issues with port < 1024)
-    let node = Arc::new(NodeBuilder::new("test-node-http-wasm-small".to_string())
-        .with_listen_addr("127.0.0.1:8000".to_string())
-        .build()
-        .await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-http-wasm-small".to_string())
+            .with_listen_addr("127.0.0.1:8000".to_string())
+            .build()
+            .await,
+    );
 
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
@@ -152,11 +162,11 @@ async fn test_http_deploy_wasm_application_small() {
 
     // Wait for node to start and HTTP server to be ready
     sleep(Duration::from_millis(2000)).await;
-    
+
     // Use fixed HTTP port (gRPC port + 1)
     let http_port = 8001;
     let http_url = format!("http://127.0.0.1:{}", http_port);
-    
+
     // Wait for HTTP server to be ready
     if !wait_for_http_server(&http_url, 10).await {
         eprintln!("❌ HTTP server did not become ready in time");
@@ -187,11 +197,18 @@ async fn test_http_deploy_wasm_application_small() {
 )
 "#;
     let wasm_bytes = wat::parse_str(wat).expect("Failed to parse WAT");
-    eprintln!("📦 Deploying minimal WASM module ({} bytes) as PlexSpaces application", wasm_bytes.len());
-    
+    eprintln!(
+        "📦 Deploying minimal WASM module ({} bytes) as PlexSpaces application",
+        wasm_bytes.len()
+    );
+
     // Verify WASM magic number
     assert!(wasm_bytes.len() >= 4, "WASM file too small");
-    assert_eq!(&wasm_bytes[0..4], b"\0asm", "WASM file missing magic number");
+    assert_eq!(
+        &wasm_bytes[0..4],
+        b"\0asm",
+        "WASM file missing magic number"
+    );
 
     // Create multipart form data - deploying a PlexSpaces application (not arbitrary WASM)
     // The HTTP handler creates ApplicationSpec with name and version
@@ -203,11 +220,12 @@ async fn test_http_deploy_wasm_application_small() {
         .text("application_id", app_id)
         .text("name", app_name)
         .text("version", "1.0.0")
-        .part("wasm_file", 
+        .part(
+            "wasm_file",
             reqwest::multipart::Part::bytes(wasm_bytes)
                 .file_name("test_app.wasm")
                 .mime_str("application/wasm")
-                .expect("Failed to set MIME type")
+                .expect("Failed to set MIME type"),
         );
 
     // Deploy via HTTP
@@ -215,7 +233,7 @@ async fn test_http_deploy_wasm_application_small() {
         .timeout(Duration::from_secs(120)) // 2 minute timeout for large uploads
         .build()
         .expect("Failed to create HTTP client");
-    
+
     eprintln!("📤 Sending deployment request to {}", http_url);
     let response = client
         .post(&format!("{}/api/v1/applications/deploy", http_url))
@@ -225,59 +243,92 @@ async fn test_http_deploy_wasm_application_small() {
         .expect("Failed to send HTTP request");
 
     let status = response.status();
-    let response_text = response.text().await.unwrap_or_else(|_| "No response body".to_string());
-    
+    let response_text = response
+        .text()
+        .await
+        .unwrap_or_else(|_| "No response body".to_string());
+
     eprintln!("📥 Response status: {}", status);
     eprintln!("📥 Response body: {}", response_text);
 
-    assert!(status.is_success(), 
-        "Deployment should succeed. Status: {}, Response: {}", status, response_text);
+    assert!(
+        status.is_success(),
+        "Deployment should succeed. Status: {}, Response: {}",
+        status,
+        response_text
+    );
 
     let json: serde_json::Value = serde_json::from_str(&response_text)
         .unwrap_or_else(|_| serde_json::json!({"error": "Failed to parse JSON"}));
-    
-    assert_eq!(json["success"], true, "Deployment should be successful. Response: {}", response_text);
+
+    assert_eq!(
+        json["success"], true,
+        "Deployment should be successful. Response: {}",
+        response_text
+    );
     assert_eq!(json["application_id"], app_id);
 
     eprintln!("✅ Deployment successful: {:?}", json);
-    
+
     // Wait a bit for application to fully start
     sleep(Duration::from_millis(1000)).await;
-    
+
     // Verify application is registered by checking ApplicationManager
     // ApplicationManager stores by name, not application_id
     let app_manager = node.application_manager();
     let app_state = app_manager.get_state(app_name).await;
-    assert!(app_state.is_some(), "Application should be registered with name '{}'", app_name);
-    eprintln!("✅ Application registered and running - state: {:?}", app_state);
-    
+    assert!(
+        app_state.is_some(),
+        "Application should be registered with name '{}'",
+        app_name
+    );
+    eprintln!(
+        "✅ Application registered and running - state: {:?}",
+        app_state
+    );
+
     // Undeploy via HTTP DELETE (following Erlang application model)
     // Note: ApplicationManager stores by name, but HTTP handler uses application_id from path
     // The ApplicationService should handle the lookup, but for now we'll use the name
     // since that's what ApplicationManager uses
-    eprintln!("🛑 Undeploying application: {} (name: {})", app_id, app_name);
+    eprintln!(
+        "🛑 Undeploying application: {} (name: {})",
+        app_id, app_name
+    );
     let undeploy_response = client
         .delete(&format!("{}/api/v1/applications/{}", http_url, app_name))
         .send()
         .await
         .expect("Failed to undeploy application");
 
-    assert_eq!(undeploy_response.status(), reqwest::StatusCode::OK, 
-        "Undeployment should succeed. Status: {}, Response: {:?}", 
-        undeploy_response.status(), undeploy_response.text().await);
-    
-    let undeploy_json: serde_json::Value = undeploy_response.json().await.expect("Failed to parse undeploy response");
+    assert_eq!(
+        undeploy_response.status(),
+        reqwest::StatusCode::OK,
+        "Undeployment should succeed. Status: {}, Response: {:?}",
+        undeploy_response.status(),
+        undeploy_response.text().await
+    );
+
+    let undeploy_json: serde_json::Value = undeploy_response
+        .json()
+        .await
+        .expect("Failed to parse undeploy response");
     eprintln!("🛑 Undeployment successful: {:?}", undeploy_json);
-    assert_eq!(undeploy_json["success"], true, "Undeployment should succeed");
-    
+    assert_eq!(
+        undeploy_json["success"], true,
+        "Undeployment should succeed"
+    );
+
     // Verify application is stopped and unregistered
     sleep(Duration::from_millis(500)).await;
     let app_state_after = app_manager.get_state(app_name).await;
-    assert!(app_state_after.is_none() || 
-            matches!(app_state_after, Some(state) if state == ApplicationState::ApplicationStateStopped),
-            "Application should be stopped or unregistered after undeployment");
+    assert!(
+        app_state_after.is_none()
+            || matches!(app_state_after, Some(state) if state == ApplicationState::ApplicationStateStopped),
+        "Application should be stopped or unregistered after undeployment"
+    );
     eprintln!("✅ Application undeployed successfully");
-    
+
     // Verify the application follows Erlang application model:
     // - Application is the unit of deployment (entire application, not individual actors)
     // - Application::start() is called during deployment (spawns actors/supervisors)
@@ -298,10 +349,12 @@ async fn test_http_deploy_wasm_application() {
     }
 
     // Start node on a fixed port for testing (avoid permission issues with port < 1024)
-    let node = Arc::new(NodeBuilder::new("test-node-http-wasm".to_string())
-        .with_listen_addr("127.0.0.1:8002".to_string()) // Use different port to avoid conflicts
-        .build()
-        .await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-http-wasm".to_string())
+            .with_listen_addr("127.0.0.1:8002".to_string()) // Use different port to avoid conflicts
+            .build()
+            .await,
+    );
 
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
@@ -314,12 +367,16 @@ async fn test_http_deploy_wasm_application() {
     sleep(Duration::from_millis(2000)).await;
 
     // Get HTTP port (gRPC port + 1)
-    let grpc_port = node.config().listen_addr.split(':').last()
+    let grpc_port = node
+        .config()
+        .listen_addr
+        .split(':')
+        .last()
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(8002);
     let http_port = grpc_port + 1;
     let http_url = format!("http://127.0.0.1:{}", http_port);
-    
+
     // Wait for HTTP server to be ready
     if !wait_for_http_server(&http_url, 10).await {
         eprintln!("❌ HTTP server did not become ready in time");
@@ -329,24 +386,30 @@ async fn test_http_deploy_wasm_application() {
     }
 
     // Read WASM file (use shared module for performance)
-    let wasm_bytes = get_shared_wasm_bytes().await
+    let wasm_bytes = get_shared_wasm_bytes()
+        .await
         .expect("WASM file not found. Please ensure calculator_actor.wasm is available.");
     eprintln!("📦 Deploying WASM file: {} bytes", wasm_bytes.len());
-    
+
     // Verify WASM magic number
     assert!(wasm_bytes.len() >= 4, "WASM file too small");
-    assert_eq!(&wasm_bytes[0..4], b"\0asm", "WASM file missing magic number");
+    assert_eq!(
+        &wasm_bytes[0..4],
+        b"\0asm",
+        "WASM file missing magic number"
+    );
 
     // Create multipart form data
     let form = reqwest::multipart::Form::new()
         .text("application_id", "test-calculator-app")
         .text("name", "calculator")
         .text("version", "1.0.0")
-        .part("wasm_file", 
+        .part(
+            "wasm_file",
             reqwest::multipart::Part::bytes(wasm_bytes)
                 .file_name("calculator_actor.wasm")
                 .mime_str("application/wasm")
-                .expect("Failed to set MIME type")
+                .expect("Failed to set MIME type"),
         );
 
     // Deploy via HTTP
@@ -354,7 +417,7 @@ async fn test_http_deploy_wasm_application() {
         .timeout(Duration::from_secs(120)) // 2 minute timeout for large uploads
         .build()
         .expect("Failed to create HTTP client");
-    
+
     eprintln!("📤 Sending deployment request to {}", http_url);
     let response = client
         .post(&format!("{}/api/v1/applications/deploy", http_url))
@@ -364,18 +427,29 @@ async fn test_http_deploy_wasm_application() {
         .expect("Failed to send HTTP request");
 
     let status = response.status();
-    let response_text = response.text().await.unwrap_or_else(|_| "No response body".to_string());
-    
+    let response_text = response
+        .text()
+        .await
+        .unwrap_or_else(|_| "No response body".to_string());
+
     eprintln!("📥 Response status: {}", status);
     eprintln!("📥 Response body: {}", response_text);
 
-    assert!(status.is_success(), 
-        "Deployment should succeed. Status: {}, Response: {}", status, response_text);
+    assert!(
+        status.is_success(),
+        "Deployment should succeed. Status: {}, Response: {}",
+        status,
+        response_text
+    );
 
     let json: serde_json::Value = serde_json::from_str(&response_text)
         .unwrap_or_else(|_| serde_json::json!({"error": "Failed to parse JSON"}));
-    
-    assert_eq!(json["success"], true, "Deployment should be successful. Response: {}", response_text);
+
+    assert_eq!(
+        json["success"], true,
+        "Deployment should be successful. Response: {}",
+        response_text
+    );
     assert_eq!(json["application_id"], "test-calculator-app");
 
     eprintln!("✅ Deployment successful: {:?}", json);
@@ -391,18 +465,27 @@ async fn test_http_deploy_wasm_application() {
         .expect("Failed to list applications");
 
     assert_eq!(list_response.status(), reqwest::StatusCode::OK);
-    let list_json: serde_json::Value = list_response.json().await.expect("Failed to parse list response");
+    let list_json: serde_json::Value = list_response
+        .json()
+        .await
+        .expect("Failed to parse list response");
     eprintln!("📋 Applications: {:?}", list_json);
 
     // Undeploy via HTTP DELETE
     let undeploy_response = client
-        .delete(&format!("{}/api/v1/applications/test-calculator-app", http_url))
+        .delete(&format!(
+            "{}/api/v1/applications/test-calculator-app",
+            http_url
+        ))
         .send()
         .await
         .expect("Failed to undeploy application");
 
     assert_eq!(undeploy_response.status(), reqwest::StatusCode::OK);
-    let undeploy_json: serde_json::Value = undeploy_response.json().await.expect("Failed to parse undeploy response");
+    let undeploy_json: serde_json::Value = undeploy_response
+        .json()
+        .await
+        .expect("Failed to parse undeploy response");
     eprintln!("🛑 Undeployment successful: {:?}", undeploy_json);
 
     // Shutdown node
@@ -413,10 +496,12 @@ async fn test_http_deploy_wasm_application() {
 #[tokio::test]
 async fn test_http_deploy_wasm_size_limit() {
     // Start node
-    let node = Arc::new(NodeBuilder::new("test-node-http-wasm-size".to_string())
-        .with_listen_addr("127.0.0.1:9005".to_string()) // Use different port
-        .build()
-        .await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node-http-wasm-size".to_string())
+            .with_listen_addr("127.0.0.1:9005".to_string()) // Use different port
+            .build()
+            .await,
+    );
 
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
@@ -427,12 +512,16 @@ async fn test_http_deploy_wasm_size_limit() {
 
     sleep(Duration::from_millis(2000)).await;
 
-    let grpc_port = node.config().listen_addr.split(':').last()
+    let grpc_port = node
+        .config()
+        .listen_addr
+        .split(':')
+        .last()
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(9005);
     let http_port = grpc_port + 1;
     let http_url = format!("http://127.0.0.1:{}", http_port);
-    
+
     // Wait for HTTP server to be ready
     if !wait_for_http_server(&http_url, 10).await {
         eprintln!("❌ HTTP server did not become ready in time");
@@ -448,18 +537,19 @@ async fn test_http_deploy_wasm_size_limit() {
         .text("application_id", "test-large-app")
         .text("name", "large")
         .text("version", "1.0.0")
-        .part("wasm_file",
+        .part(
+            "wasm_file",
             reqwest::multipart::Part::bytes(large_file)
                 .file_name("large.wasm")
                 .mime_str("application/wasm")
-                .expect("Failed to set MIME type")
+                .expect("Failed to set MIME type"),
         );
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
         .expect("Failed to create HTTP client");
-    
+
     let response = client
         .post(&format!("{}/api/v1/applications/deploy", http_url))
         .multipart(form)
@@ -468,10 +558,12 @@ async fn test_http_deploy_wasm_size_limit() {
         .expect("Failed to send HTTP request");
 
     // Should reject file larger than 100MB
-    assert_eq!(response.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE,
-        "Should reject file larger than 100MB");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::PAYLOAD_TOO_LARGE,
+        "Should reject file larger than 100MB"
+    );
 
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
 }
-

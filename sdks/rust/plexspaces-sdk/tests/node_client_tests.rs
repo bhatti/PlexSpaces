@@ -38,15 +38,15 @@ mod tests {
         // Test exponential backoff calculation indirectly
         // The algorithm: min(initial * 2^attempt, max) + jitter
         // We verify the config values are reasonable and the formula would work correctly
-        
+
         let config = HealthCheckConfig::default();
-        
+
         // Verify config values are reasonable
         assert!(config.initial_delay < config.max_delay);
         assert!(config.health_check_timeout > Duration::ZERO);
         assert!(config.readiness_timeout > Duration::ZERO);
         assert!(config.readiness_poll_interval > Duration::ZERO);
-        
+
         // Verify exponential backoff properties:
         // - Initial delay should be small (500ms default)
         // - Max delay should cap exponential growth (10s default)
@@ -54,7 +54,7 @@ mod tests {
         assert_eq!(config.initial_delay, Duration::from_millis(500));
         assert_eq!(config.max_delay, Duration::from_secs(10));
         assert_eq!(config.health_check_timeout, Duration::from_secs(5));
-        
+
         // Verify jitter range: 0-25% of delay
         // For attempt 0: base = 500ms, max jitter = 125ms, so max delay = 625ms
         // For attempt 1: base = 1000ms, max jitter = 250ms, so max delay = 1250ms

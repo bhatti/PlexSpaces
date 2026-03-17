@@ -17,14 +17,16 @@
 // - Let the actor process a message and complete
 // - Verify no panic occurs when the actor task completes
 
+use async_trait::async_trait;
 use plexspaces_actor::Actor;
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, Message, RequestContext};
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, Message, RequestContext,
+};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use async_trait::async_trait;
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use ulid::Ulid;
 
@@ -68,7 +70,7 @@ impl GenServer for TestActor {
 }
 
 /// Test that reproduces the span cloning panic
-/// 
+///
 /// This test creates a span (simulating a gRPC handler span), spawns an actor
 /// from within that span, lets the actor process a message and complete, then
 /// verifies no panic occurs when the actor task completes.
@@ -88,7 +90,8 @@ async fn test_span_cloning_panic_reproduction() {
     // CRITICAL: Create a span (simulating gRPC handler span)
     // This span will be dropped when the function returns, but the actor task
     // will still be running with this span in its tracing context
-    let span = tracing::info_span!("test_grpc_handler", 
+    let span = tracing::info_span!(
+        "test_grpc_handler",
         tenant_id = "test-tenant",
         namespace = "test-namespace",
         actor_type = "test-actor"
@@ -96,11 +99,10 @@ async fn test_span_cloning_panic_reproduction() {
     let _guard = span.enter();
 
     // Spawn actor from within the span (simulating actor spawned from gRPC handler)
-    let mailbox = Mailbox::new(
-        MailboxConfig::default(),
-        format!("mailbox-{}", Ulid::new())
-    ).await.unwrap();
-    
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
+
     let mut actor = Actor::new(
         format!("test-actor-{}@test-node", Ulid::new()),
         Box::new(actor_impl),
@@ -114,10 +116,15 @@ async fn test_span_cloning_panic_reproduction() {
     let handle = actor.start().await.expect("Actor should start");
 
     // Send a message to the actor
-    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+    let ctx =
+        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
     let actor_ref = node.get_actor_ref(&actor.id().clone(), &ctx).await.unwrap();
-    
-    let message = Message::new(serde_json::json!({ "action": "test" }).to_string().into_bytes());
+
+    let message = Message::new(
+        serde_json::json!({ "action": "test" })
+            .to_string()
+            .into_bytes(),
+    );
     actor_ref.tell(message).await.unwrap();
 
     // Wait for message to be processed
@@ -128,7 +135,10 @@ async fn test_span_cloning_panic_reproduction() {
         sleep(Duration::from_millis(10)).await;
     }
 
-    assert!(processed.load(Ordering::SeqCst), "Actor should have processed message");
+    assert!(
+        processed.load(Ordering::SeqCst),
+        "Actor should have processed message"
+    );
 
     // Drop the span guard (simulating gRPC handler returning)
     // At this point, the span is closed, but the actor task is still running
@@ -140,11 +150,11 @@ async fn test_span_cloning_panic_reproduction() {
     // CRITICAL: When the actor task completes, it will try to log, and tracing
     // will try to clone the span from the context. But the span is already closed,
     // which should cause a panic. However, with our fixes, it should not panic.
-    
+
     // Wait for the actor task to complete
     // This is where the panic would occur if not fixed
     let result = tokio::time::timeout(Duration::from_secs(5), handle).await;
-    
+
     match result {
         Ok(_) => {
             // Actor completed successfully - no panic occurred
@@ -157,7 +167,7 @@ async fn test_span_cloning_panic_reproduction() {
 }
 
 /// Test that reproduces the panic with multiple concurrent actors
-/// 
+///
 /// This test spawns multiple actors concurrently from within a span,
 /// simulating multiple concurrent gRPC requests.
 #[tokio::test]
@@ -173,7 +183,8 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
     let mut handles = Vec::new();
 
     // Create a span (simulating gRPC handler span)
-    let span = tracing::info_span!("test_grpc_handler_concurrent",
+    let span = tracing::info_span!(
+        "test_grpc_handler_concurrent",
         tenant_id = "test-tenant",
         namespace = "test-namespace"
     );
@@ -186,9 +197,11 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
 
         let mailbox = Mailbox::new(
             MailboxConfig::default(),
-            format!("mailbox-{}-{}", i, Ulid::new())
-        ).await.unwrap();
-        
+            format!("mailbox-{}-{}", i, Ulid::new()),
+        )
+        .await
+        .unwrap();
+
         let mut actor = Actor::new(
             format!("test-actor-{}-{}@test-node", i, Ulid::new()),
             Box::new(actor_impl),
@@ -199,11 +212,18 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
         );
 
         let handle = actor.start().await.expect("Actor should start");
-        
+
         // Send a message
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
         let actor_ref = node.get_actor_ref(&actor.id().clone(), &ctx).await.unwrap();
-        let message = Message::new(serde_json::json!({ "action": "test" }).to_string().into_bytes());
+        let message = Message::new(
+            serde_json::json!({ "action": "test" })
+                .to_string()
+                .into_bytes(),
+        );
         actor_ref.tell(message).await.unwrap();
 
         handles.push((handle, actor));
@@ -215,7 +235,7 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
     // Stop all actors and wait for them to complete
     for (handle, mut actor) in handles {
         actor.stop().await.unwrap();
-        
+
         // Wait for actor task to complete - this is where the panic would occur
         let result = tokio::time::timeout(Duration::from_secs(5), handle).await;
         match result {
@@ -228,5 +248,8 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
         }
     }
 
-    println!("✅ All {} actors completed successfully without panic", num_actors);
+    println!(
+        "✅ All {} actors completed successfully without panic",
+        num_actors
+    );
 }

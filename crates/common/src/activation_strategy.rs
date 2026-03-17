@@ -87,7 +87,9 @@ mod tests {
             "lazy"
         );
         assert_eq!(
-            from_config_str(to_config_str(&ProtoActivationStrategy::ActivationStrategyLazy)),
+            from_config_str(to_config_str(
+                &ProtoActivationStrategy::ActivationStrategyLazy
+            )),
             ProtoActivationStrategy::ActivationStrategyLazy
         );
     }

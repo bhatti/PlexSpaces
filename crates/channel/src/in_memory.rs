@@ -21,9 +21,7 @@
 use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use plexspaces_proto::channel::v1::{
-    channel_config, ChannelProvider, ChannelConfig, ChannelStats,
-};
+use plexspaces_proto::channel::v1::{channel_config, ChannelConfig, ChannelProvider, ChannelStats};
 use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -43,10 +41,7 @@ enum ChannelReceiver {
 }
 
 impl ChannelSender {
-    async fn send(
-        &self,
-        msg: Message,
-    ) -> Result<(), mpsc::error::SendError<Message>> {
+    async fn send(&self, msg: Message) -> Result<(), mpsc::error::SendError<Message>> {
         match self {
             ChannelSender::Bounded(tx) => tx.send(msg).await,
             ChannelSender::Unbounded(tx) => tx.send(msg).map_err(|e| {
@@ -421,7 +416,8 @@ mod tests {
             delivery: DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
             backend_config: Some(channel_config::BackendConfig::InMemory(InMemoryConfig {
-                backpressure: in_memory_config::BackpressureStrategy::BackpressureStrategyBlock as i32,
+                backpressure: in_memory_config::BackpressureStrategy::BackpressureStrategyBlock
+                    as i32,
                 send_timeout: Some(ProtoDuration {
                     seconds: 1,
                     nanos: 0,

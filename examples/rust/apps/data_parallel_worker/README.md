@@ -34,16 +34,16 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 Once deployed, create a ShardGroup that uses the worker behavior:
 
 ```rust
-use plexspaces_sdk::ParallelClient;
+use plexspaces_sdk::{ShardGroupClient, ShardGroupClientTrait};
 
-let mut client = ParallelClient::connect("http://localhost:8000").await?;
+let mut client = ShardGroupClient::connect_grpc("http://localhost:8000").await?;
 
-// Create ShardGroup with worker behavior
 client.create_shard_group(
     "worker-pool-1".to_string(),
-    "worker".to_string(),  // Behavior type registered by this app
-    4,  // 4 workers
-    // ... other params
+    "worker".to_string(),
+    4,
+    PartitionStrategy::PartitionStrategyHash,
+    None,
 ).await?;
 ```
 

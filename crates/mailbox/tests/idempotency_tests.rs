@@ -28,16 +28,12 @@ fn create_test_message_with_idempotency(payload: Vec<u8>, idempotency_key: Strin
     proto_msg.into()
 }
 
-
 #[tokio::test]
 async fn test_idempotency_key_deduplication() {
     // Test: Messages with same idempotency key are deduplicated
-    let mailbox = Mailbox::new(
-        mailbox_config_default(),
-        "test-mailbox".to_string(),
-    )
-    .await
-    .unwrap();
+    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox".to_string())
+        .await
+        .unwrap();
 
     let idempotency_key = "test-key-123".to_string();
 
@@ -62,12 +58,9 @@ async fn test_idempotency_key_deduplication() {
 #[tokio::test]
 async fn test_idempotency_key_different_keys() {
     // Test: Messages with different idempotency keys are not deduplicated
-    let mailbox = Mailbox::new(
-        mailbox_config_default(),
-        "test-mailbox-2".to_string(),
-    )
-    .await
-    .unwrap();
+    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox-2".to_string())
+        .await
+        .unwrap();
 
     // Send messages with different idempotency keys
     let msg1 = create_test_message_with_idempotency(b"first".to_vec(), "key-1".to_string());
@@ -87,12 +80,9 @@ async fn test_idempotency_key_different_keys() {
 #[tokio::test]
 async fn test_idempotency_key_without_key() {
     // Test: Messages without idempotency key are not deduplicated
-    let mailbox = Mailbox::new(
-        mailbox_config_default(),
-        "test-mailbox-3".to_string(),
-    )
-    .await
-    .unwrap();
+    let mailbox = Mailbox::new(mailbox_config_default(), "test-mailbox-3".to_string())
+        .await
+        .unwrap();
 
     // Send messages without idempotency key
     let msg1 = create_test_message(b"first".to_vec());
@@ -134,7 +124,8 @@ async fn test_idempotency_key_lru_eviction() {
     let _ = mailbox.dequeue().await; // Process to add to cache
 
     // Now key-1 should be evicted, so we can send it again
-    let msg1_again = create_test_message_with_idempotency(b"first-again".to_vec(), "key-1".to_string());
+    let msg1_again =
+        create_test_message_with_idempotency(b"first-again".to_vec(), "key-1".to_string());
     mailbox.enqueue(msg1_again).await.unwrap();
 
     // Should be able to dequeue (not deduplicated because evicted)

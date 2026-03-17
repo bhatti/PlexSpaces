@@ -18,9 +18,9 @@
 
 //! Extension traits for proto-generated config types
 
-use std::env;
 use crate::BlobError;
 use plexspaces_proto::storage::v1::BlobConfig;
+use std::env;
 
 /// Extension trait for BlobConfig to add helper methods
 pub trait BlobConfigExt {
@@ -38,7 +38,12 @@ impl BlobConfigExt for BlobConfig {
     fn validate(&self) -> Result<(), BlobError> {
         match self.backend.as_str() {
             "s3" | "minio" | "gcp" | "azure" | "local" => {}
-            _ => return Err(BlobError::ConfigError(format!("Invalid backend: {}", self.backend))),
+            _ => {
+                return Err(BlobError::ConfigError(format!(
+                    "Invalid backend: {}",
+                    self.backend
+                )))
+            }
         }
 
         if self.bucket.is_empty() && self.backend != "local" {
@@ -46,11 +51,15 @@ impl BlobConfigExt for BlobConfig {
         }
 
         if self.backend == "minio" && self.endpoint.is_empty() {
-            return Err(BlobError::ConfigError("endpoint is required for MinIO backend".to_string()));
+            return Err(BlobError::ConfigError(
+                "endpoint is required for MinIO backend".to_string(),
+            ));
         }
 
         if self.backend == "s3" && self.region.is_empty() {
-            return Err(BlobError::ConfigError("region is required for S3 backend".to_string()));
+            return Err(BlobError::ConfigError(
+                "region is required for S3 backend".to_string(),
+            ));
         }
 
         Ok(())

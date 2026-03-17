@@ -26,14 +26,17 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock};
 
-use crate::{ActorId, ActorRef, MessageSender, RequestContext, ActorMetricsHandle, ActorMetricsExt, ExitReason, actor_state_checker};
 use crate::actor_context::ObjectRegistry;
-use crate::Service;
 use crate::ActorFactory;
+use crate::Service;
+use crate::{
+    actor_state_checker, ActorId, ActorMetricsExt, ActorMetricsHandle, ActorRef, ExitReason,
+    MessageSender, RequestContext,
+};
+use plexspaces_facet::{ExitReason as FacetExitReason, FacetManager};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::ObjectType;
 use plexspaces_proto::ActorLifecycleEvent;
-use plexspaces_facet::{FacetManager, ExitReason as FacetExitReason};
 
 // Observability
 use metrics;
@@ -46,7 +49,7 @@ fn create_exit_message(from: String, reason_str: &str) -> Message {
     headers.insert("type".to_string(), "__EXIT__".to_string());
     headers.insert("exit_from".to_string(), from.clone());
     headers.insert("exit_reason".to_string(), reason_str.to_string());
-    
+
     Message {
         id: ulid::Ulid::new().to_string(),
         sender_id: from,
@@ -137,7 +140,7 @@ pub struct ActorRegistry {
     node_cache_ttl: Duration,
     /// Current node ID
     local_node_id: String,
-    
+
     /// Actor instances (for all actors - virtual and regular)
     /// Stores the Actor instance after it's started (for both virtual and regular actors)
     /// Used by ask() to check if an actor is activated and to get the mailbox directly
@@ -176,7 +179,7 @@ pub struct ActorRegistry {
     /// Maintained in sync with actors map for O(1) lookup
     /// Key: (tenant_id, namespace, actor_type), Value: List of actor IDs of that type
     actor_type_index: Arc<RwLock<HashMap<(String, String, String), Vec<ActorId>>>>,
-    
+
     /// Actor metadata: actor_id -> (tenant_id, namespace)
     /// Stores tenant/namespace for each actor for proper isolation during operations like stop()
     /// This avoids needing to access actor instance just to get context
@@ -185,14 +188,13 @@ pub struct ActorRegistry {
     /// Stores actor_type for each actor to enable rebuilding suspended actors
     /// Used when reactivating suspended virtual actors that need to be rebuilt
     actor_types: Arc<RwLock<HashMap<ActorId, String>>>,
-    
+
     // === Parent-Child Relationships (Phase 3) ===
-    
     /// Parent-to-children mapping: parent_id -> Vec<child_id>
     /// Tracks supervision hierarchy for graceful shutdown and subtree operations
     /// Used by supervisors to track their children (actors or nested supervisors)
     parent_to_children: Arc<RwLock<HashMap<ActorId, Vec<ActorId>>>>,
-    
+
     /// Child-to-parent mapping: child_id -> parent_id
     /// Enables quick parent lookup for child actors
     /// Used for cascading shutdown and parent notification
@@ -247,10 +249,7 @@ impl ActorRegistry {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(
-        object_registry: Arc<dyn ObjectRegistry>,
-        local_node_id: String,
-    ) -> Self {
+    pub fn new(object_registry: Arc<dyn ObjectRegistry>, local_node_id: String) -> Self {
         Self::new_with_ttl(object_registry, local_node_id, Duration::from_secs(60))
     }
 
@@ -310,7 +309,7 @@ impl ActorRegistry {
             actor_factory: Arc::new(RwLock::new(None)),
         }
     }
-    
+
     /// Set ActorFactory for virtual actor activation
     ///
     /// ## Purpose
@@ -326,15 +325,15 @@ impl ActorRegistry {
     pub async fn set_actor_factory(&self, actor_factory: Arc<dyn ActorFactory>) {
         *self.actor_factory.write().await = Some(actor_factory);
     }
-    
+
     // === Accessor methods for actor-related data ===
-    
+
     /// Check if actor instance exists (for ask() to determine if actor is activated)
-    /// 
+    ///
     /// ## Purpose
     /// Internal method to check if an actor instance is stored (indicating the actor is activated).
     /// Used by ask() to determine if it should use the actor instance directly or activate a lazy virtual actor.
-    /// 
+    ///
     /// ## Note
     /// This is kept private to maintain encapsulation. External code should use lookup_actor() to get MessageSender.
     pub(crate) fn has_actor_instance(&self, actor_id: &ActorId) -> bool {
@@ -346,19 +345,19 @@ impl ActorRegistry {
             false
         }
     }
-    
+
     /// Get actor instance (for lazy virtual actor activation and test helpers)
-    /// 
+    ///
     /// ## Purpose
     /// Gets the actor instance for:
     /// 1. Lazy virtual actor activation (ActorFactory needs Actor before unregistering)
     /// 2. Test helpers (need mailbox to create ActorRef for testing)
-    /// 
+    ///
     /// ## Design Principles
     /// - **Encapsulation**: `actor_instances` map is private, accessed only via this method
     /// - **Simple**: Single method to get instance, use `unregister_with_cleanup()` to remove
     /// - **Consistent**: All instance management goes through `register_actor()` and `unregister_with_cleanup()`
-    /// 
+    ///
     /// ## Usage Pattern for Lazy Activation
     /// ```rust,ignore
     /// // 1. Get instance
@@ -368,15 +367,18 @@ impl ActorRegistry {
     /// // 3. Spawn (re-registers with ActorRef)
     /// spawn_actor(instance).await?;
     /// ```
-    /// 
+    ///
     /// ## Note
     /// Production code should use `lookup_actor()` to get MessageSender.
     /// Only ActorFactory (for lazy activation) and test helpers should use this method.
-    pub async fn get_actor_instance(&self, actor_id: &ActorId) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
+    pub async fn get_actor_instance(
+        &self,
+        actor_id: &ActorId,
+    ) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
         let instances = self.actor_instances.read().await;
         instances.get(actor_id).cloned()
     }
-    
+
     /// Get actor state
     ///
     /// ## Purpose
@@ -401,7 +403,7 @@ impl ActorRegistry {
             None
         }
     }
-    
+
     /// Check if actor state is Active
     ///
     /// ## Purpose
@@ -424,7 +426,7 @@ impl ActorRegistry {
     /// (not just registered, but actually running with state = Active).
     pub async fn is_actor_state_active(&self, actor_id: &ActorId) -> bool {
         use plexspaces_proto::v1::actor::ActorState as ProtoActorState;
-        
+
         if let Some(state_value) = self.get_actor_state(actor_id).await {
             // Check if state is Active (proto enum value)
             let is_active = state_value == ProtoActorState::ActorStateActive as i32;
@@ -440,43 +442,48 @@ impl ActorRegistry {
             false
         }
     }
-    
+
     /// Get actor metadata (tenant_id, namespace)
-    /// 
+    ///
     /// ## Purpose
     /// Gets tenant/namespace for an actor without needing to access the actor instance.
     /// Used for proper tenant isolation during operations like stop().
-    /// 
+    ///
     /// ## Note
     /// This is for internal use by ActorFactory. External code should not need this.
     pub async fn get_actor_metadata(&self, actor_id: &ActorId) -> Option<(String, String)> {
         let metadata = self.actor_metadata.read().await;
         metadata.get(actor_id).cloned()
     }
-    
+
     /// Get actor type for an actor_id
-    /// 
+    ///
     /// ## Purpose
     /// Gets actor_type for an actor to enable rebuilding suspended actors.
     /// Used when reactivating suspended virtual actors that need to be rebuilt.
-    /// 
+    ///
     /// ## Returns
     /// Some(actor_type) if found, None otherwise
     pub async fn get_actor_type(&self, actor_id: &ActorId) -> Option<String> {
         let actor_types = self.actor_types.read().await;
         let result = actor_types.get(actor_id).cloned();
         if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("[ACTOR_REGISTRY] get_actor_type: actor_id={}, result={:?}, total_types={}", actor_id, result, actor_types.len());
+            tracing::debug!(
+                "[ACTOR_REGISTRY] get_actor_type: actor_id={}, result={:?}, total_types={}",
+                actor_id,
+                result,
+                actor_types.len()
+            );
         }
         result
     }
-    
+
     /// Suspend a virtual actor (remove instance and ActorRef, but preserve actor_type, metadata, config)
-    /// 
+    ///
     /// ## Purpose
     /// Suspends a virtual actor by removing its instance and ActorRef, but preserves
     /// actor_type, metadata, and config so the actor can be rebuilt later.
-    /// 
+    ///
     /// ## Design
     /// Unlike `unregister_with_cleanup()`, this method:
     /// - Removes actor instance (so actor is not active, Arc will be dropped and actor will stop)
@@ -485,7 +492,7 @@ impl ActorRegistry {
     /// - Preserves actor_metadata (needed for context)
     /// - Preserves actor_config (needed for resource tracking)
     /// - Does NOT remove from registered_actor_ids (actor is still registered as virtual)
-    /// 
+    ///
     /// ## Note
     /// This is specifically for virtual actor suspension. After calling this,
     /// the caller should re-register VirtualActorWrapper to keep the actor addressable.
@@ -497,31 +504,39 @@ impl ActorRegistry {
             actor_types.get(actor_id).cloned()
         };
         if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("[ACTOR_REGISTRY] suspend_virtual_actor: actor_id={}, actor_type_before={:?}", actor_id, actor_type_before);
+            tracing::debug!(
+                "[ACTOR_REGISTRY] suspend_virtual_actor: actor_id={}, actor_type_before={:?}",
+                actor_id,
+                actor_type_before
+            );
         }
-        
+
         // Remove instance (preserves actor_type, metadata, config for rebuilding)
         // When the Arc is dropped (removed from map), the actor will be stopped
         {
             let mut actor_instances = self.actor_instances.write().await;
             actor_instances.remove(actor_id);
         }
-        
+
         // Remove ActorRef from actors map (will be replaced by VirtualActorWrapper)
         {
             let mut actors = self.actors.write().await;
             actors.remove(actor_id);
         }
-        
+
         // Verify actor_type is still there after suspension
         let actor_type_after = {
             let actor_types = self.actor_types.read().await;
             actor_types.get(actor_id).cloned()
         };
         if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("[ACTOR_REGISTRY] suspend_virtual_actor: actor_id={}, actor_type_after={:?}", actor_id, actor_type_after);
+            tracing::debug!(
+                "[ACTOR_REGISTRY] suspend_virtual_actor: actor_id={}, actor_type_after={:?}",
+                actor_id,
+                actor_type_after
+            );
         }
-        
+
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 actor_id = %actor_id,
@@ -529,77 +544,82 @@ impl ActorRegistry {
             );
         }
     }
-    
-    // 
+
+    //
     // Design: Simple and encapsulated
     // - actor_instances map is private (encapsulation)
     // - get_actor_instance() - only way to read instances
     // - register_actor() - only way to store instances (via instance parameter)
     // - unregister_with_cleanup() - only way to remove instances
-    // 
+    //
     // For lazy activation: get_instance() → unregister_with_cleanup() → spawn (re-registers)
     // This uses the proper registry methods instead of managing instances directly
-    
+
     /// Get FacetManager
     pub fn facet_manager(&self) -> &Arc<FacetManager> {
         &self.facet_manager
     }
-    
-    
+
     /// Get monitors map
     pub fn monitors(&self) -> &Arc<RwLock<HashMap<ActorId, Vec<MonitorLink>>>> {
         &self.monitors
     }
-    
+
     /// Get links map
     pub fn links(&self) -> &Arc<RwLock<HashMap<ActorId, Vec<ActorId>>>> {
         &self.links
     }
-    
+
     /// Get lifecycle subscribers
-    pub fn lifecycle_subscribers(&self) -> &Arc<RwLock<Vec<mpsc::UnboundedSender<ActorLifecycleEvent>>>> {
+    pub fn lifecycle_subscribers(
+        &self,
+    ) -> &Arc<RwLock<Vec<mpsc::UnboundedSender<ActorLifecycleEvent>>>> {
         &self.lifecycle_subscribers
     }
-    
+
     /// Get actor configs map
-    pub fn actor_configs(&self) -> &Arc<RwLock<HashMap<ActorId, plexspaces_proto::v1::actor::ActorConfig>>> {
+    pub fn actor_configs(
+        &self,
+    ) -> &Arc<RwLock<HashMap<ActorId, plexspaces_proto::v1::actor::ActorConfig>>> {
         &self.actor_configs
     }
-    
+
     pub fn actor_types(&self) -> &Arc<RwLock<HashMap<ActorId, String>>> {
         &self.actor_types
     }
-    
+
     pub fn actor_metadata(&self) -> &Arc<RwLock<HashMap<ActorId, (String, String)>>> {
         &self.actor_metadata
     }
-    
+
     /// Get registered actor IDs set
     pub fn registered_actor_ids(&self) -> &Arc<RwLock<HashSet<ActorId>>> {
         &self.registered_actor_ids
     }
-    
+
     /// Get local node ID
     pub fn local_node_id(&self) -> &str {
         &self.local_node_id
     }
-    
+
     /// Get actor metrics handle
     pub fn actor_metrics(&self) -> &ActorMetricsHandle {
         &self.actor_metrics
     }
-    
+
     /// Get actor type index (for efficient type-based lookups)
-    pub fn actor_type_index(&self) -> &Arc<RwLock<HashMap<(String, String, String), Vec<ActorId>>>> {
+    pub fn actor_type_index(
+        &self,
+    ) -> &Arc<RwLock<HashMap<(String, String, String), Vec<ActorId>>>> {
         &self.actor_type_index
     }
-    
+
     /// Register an actor (consolidated method for all actor types)
     ///
     /// ## Purpose
     /// Unified registration method for all actors (virtual and regular, lazy and eager).
     /// Per Orleans design: virtual actors are always registered (even when not active).
-    /// 
+    ///
     /// ## Arguments
     /// * `ctx` - Request context for tenant/namespace isolation
     /// * `actor_id` - Actor ID
@@ -635,27 +655,30 @@ impl ActorRegistry {
         let mut actors = self.actors.write().await;
         let was_new = actors.insert(actor_id.clone(), sender).is_none();
         drop(actors);
-        
+
         // CRITICAL: Also add to registered_actor_ids to keep them in sync
         // This ensures tests can check registered_actor_ids reliably
         if was_new {
             let mut registered_ids = self.registered_actor_ids.write().await;
             registered_ids.insert(actor_id.clone());
         }
-        
+
         // Store tenant/namespace metadata (for proper isolation during operations like stop())
         // This avoids needing to access actor instance just to get context
         {
             let mut metadata = self.actor_metadata.write().await;
-            metadata.insert(actor_id.clone(), (ctx.tenant_id().to_string(), ctx.namespace().to_string()));
+            metadata.insert(
+                actor_id.clone(),
+                (ctx.tenant_id().to_string(), ctx.namespace().to_string()),
+            );
         }
-        
+
         // Store actor config if provided (for resource tracking)
         if let Some(config) = config {
             let mut actor_configs = self.actor_configs.write().await;
             actor_configs.insert(actor_id.clone(), config);
         }
-        
+
         // Store actor instance if provided (for activated actors - used by ask() to get mailbox)
         // This is stored for both virtual and regular actors after they're activated
         if let Some(ref instance) = instance {
@@ -668,7 +691,7 @@ impl ActorRegistry {
                 );
             }
         }
-        
+
         // Update actor-type index if type information is provided
         // CRITICAL: Only update actor_type if provided - don't remove existing actor_type if None
         // This preserves actor_type for suspended actors when re-registering with VirtualActorWrapper
@@ -678,11 +701,18 @@ impl ActorRegistry {
                 let mut actor_types = self.actor_types.write().await;
                 actor_types.insert(actor_id.clone(), actor_type.clone());
             }
-            
+
             let mut index = self.actor_type_index.write().await;
-            let key = (ctx.tenant_id().to_string(), ctx.namespace().to_string(), actor_type.clone());
-            index.entry(key).or_insert_with(Vec::new).push(actor_id.clone());
-            
+            let key = (
+                ctx.tenant_id().to_string(),
+                ctx.namespace().to_string(),
+                actor_type.clone(),
+            );
+            let actor_ids = index.entry(key).or_insert_with(Vec::new);
+            if !actor_ids.contains(&actor_id) {
+                actor_ids.push(actor_id.clone());
+            }
+
             // OBSERVABILITY: Log actor registration with type and behavior kind
             if tracing::enabled!(tracing::Level::DEBUG) {
                 let behavior_str = behavior_kind.as_ref().map(|b| match b {
@@ -693,15 +723,15 @@ impl ActorRegistry {
                     crate::BehaviorType::Custom(s) => s.as_str(),
                 });
                 tracing::debug!(
-                actor_id = %actor_id,
-                actor_type = %actor_type,
-                behavior = ?behavior_str,
-                tenant_id = %ctx.tenant_id(),
-                namespace = %ctx.namespace(),
-                was_new = was_new,
-                has_instance = instance.is_some(),
-                "Actor registered with type in actor_type_index"
-            );
+                    actor_id = %actor_id,
+                    actor_type = %actor_type,
+                    behavior = ?behavior_str,
+                    tenant_id = %ctx.tenant_id(),
+                    namespace = %ctx.namespace(),
+                    was_new = was_new,
+                    has_instance = instance.is_some(),
+                    "Actor registered with type in actor_type_index"
+                );
             }
         } else {
             // OBSERVABILITY: Warn if actor_type is missing (but don't remove existing actor_type)
@@ -719,13 +749,13 @@ impl ActorRegistry {
             } else {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
-                    actor_id = %actor_id,
-                    "Actor registered without actor_type, but existing actor_type preserved (suspended actor?)"
-                );
+                        actor_id = %actor_id,
+                        "Actor registered without actor_type, but existing actor_type preserved (suspended actor?)"
+                    );
                 }
             }
         }
-        
+
         // Update metrics if this is a new actor
         if was_new {
             let mut metrics = self.actor_metrics.write().await;
@@ -733,7 +763,7 @@ impl ActorRegistry {
             metrics.increment_active();
         }
     }
-    
+
     /// Lookup MessageSender trait object
     ///
     /// ## Purpose
@@ -752,11 +782,15 @@ impl ActorRegistry {
 
     /// Look up node address with caching
     /// Uses cache first (TTL: 30-60 seconds), then falls back to ObjectRegistry
-    /// 
+    ///
     /// ## Note
     /// Uses the provided RequestContext for the lookup. Nodes should be registered
     /// with the same tenant/namespace that will be used for lookups.
-    pub async fn lookup_node_address(&self, ctx: &RequestContext, node_id: &str) -> Result<Option<String>, ActorRegistryError> {
+    pub async fn lookup_node_address(
+        &self,
+        ctx: &RequestContext,
+        node_id: &str,
+    ) -> Result<Option<String>, ActorRegistryError> {
         // Check cache first
         {
             let cache = self.node_cache.read().await;
@@ -771,7 +805,8 @@ impl ActorRegistry {
         // Cache miss or expired - lookup in ObjectRegistry
         // Use the provided RequestContext for the lookup
         // Nodes are registered with object_id = node_id using ObjectTypeNode (no "_node@" prefix)
-        let registration = self.object_registry
+        let registration = self
+            .object_registry
             .lookup_full(ctx, ObjectType::ObjectTypeNode, node_id)
             .await
             .map_err(|e| ActorRegistryError::LookupFailed(e.to_string()))?;
@@ -781,8 +816,11 @@ impl ActorRegistry {
         // Update cache if found
         if let Some(ref address) = node_address {
             let mut cache = self.node_cache.write().await;
-            cache.insert(node_id.to_string(), NodeCacheEntry::new(address.clone(), self.node_cache_ttl));
-            
+            cache.insert(
+                node_id.to_string(),
+                NodeCacheEntry::new(address.clone(), self.node_cache_ttl),
+            );
+
             // Clean up expired entries while we have the lock
             cache.retain(|_, entry| !entry.is_expired());
         }
@@ -790,10 +828,13 @@ impl ActorRegistry {
         Ok(node_address)
     }
 
-
     /// Look up actor routing info (for remote actors)
     /// Uses cached node lookups (TTL: 30-60 seconds) to avoid frequent DB queries
-    pub async fn lookup_routing(&self, ctx: &RequestContext, actor_id: &ActorId) -> Result<Option<ActorRoutingInfo>, ActorRegistryError> {
+    pub async fn lookup_routing(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &ActorId,
+    ) -> Result<Option<ActorRoutingInfo>, ActorRegistryError> {
         let (_, node_id) = ActorRef::parse_actor_id(actor_id)
             .map_err(|e| ActorRegistryError::LookupFailed(e.to_string()))?;
 
@@ -819,7 +860,6 @@ impl ActorRegistry {
             }
         }
     }
-
 
     /// Unregister actor
     /// Note: Currently only removes from actors map (MessageSender).
@@ -925,13 +965,16 @@ impl ActorRegistry {
     ///
     /// ## Arguments
     /// * `actor_id` - Actor ID
-    pub async fn unregister_with_cleanup(&self, actor_id: &ActorId) -> Result<(), ActorRegistryError> {
+    pub async fn unregister_with_cleanup(
+        &self,
+        actor_id: &ActorId,
+    ) -> Result<(), ActorRegistryError> {
         // Check if actor existed before removing
         let existed = {
             let actors = self.actors.read().await;
             actors.contains_key(actor_id)
         };
-        
+
         // Remove from actors (MessageSender trait objects)
         {
             let mut actors = self.actors.write().await;
@@ -959,7 +1002,7 @@ impl ActorRegistry {
         actor_instances.remove(actor_id);
         actor_metadata.remove(actor_id);
         actor_types.remove(actor_id);
-        
+
         // Clean up parent-child relationships (Phase 3)
         {
             // Remove from parent's children list
@@ -969,7 +1012,7 @@ impl ActorRegistry {
                 !children.is_empty() // Remove empty entries
             });
         }
-        
+
         // Remove from child-to-parent mapping
         {
             let mut child_to_parent = self.child_to_parent.write().await;
@@ -978,20 +1021,20 @@ impl ActorRegistry {
         self.facet_manager.remove_facets(actor_id).await;
         registered_ids.remove(actor_id);
         actor_configs.remove(actor_id);
-        
+
         // Update metrics if actor existed
         if existed {
             let mut metrics = self.actor_metrics.write().await;
             metrics.decrement_active();
         }
-        
+
         // OBSERVABILITY: Log actor unregistration (TRACE to reduce log noise)
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
-            actor_id = %actor_id,
-            existed = existed,
-            "Actor unregistered with cleanup"
-        );
+                actor_id = %actor_id,
+                existed = existed,
+                "Actor unregistered with cleanup"
+            );
         }
 
         Ok(())
@@ -1006,9 +1049,9 @@ impl ActorRegistry {
     /// ## Arguments
     /// * `actor_id` - The actor that terminated
     /// * `reason` - Reason for termination (e.g., "normal", "panic: ...", "killed")
-    
+
     // === Temporary Sender Management ===
-    
+
     /// Register a temporary sender ActorRef for ask() pattern
     ///
     /// ## Purpose
@@ -1042,21 +1085,25 @@ impl ActorRegistry {
             temporary_sender_id.clone(),
             temporary_sender_ref,
             Some("TemporarySender".to_string()), // Actor type for observability
-            None, // No config for temporary senders
+            None,                                // No config for temporary senders
             None, // No instance for temporary senders (they're just ActorRefs)
             None, // No behavior_kind for temporary senders
-        ).await;
-        
+        )
+        .await;
+
         // Also store in temporary_senders map for correlation_id lookup and cleanup
         let mut temp_senders = self.temporary_senders.write().await;
-        temp_senders.insert(temporary_sender_id.clone(), TemporarySenderEntry {
-            actor_ref_id: temporary_sender_id.clone(), // Temporary sender ID is its own actor_ref_id
-            correlation_id: correlation_id_clone,
-            expires_at,
-        });
+        temp_senders.insert(
+            temporary_sender_id.clone(),
+            TemporarySenderEntry {
+                actor_ref_id: temporary_sender_id.clone(), // Temporary sender ID is its own actor_ref_id
+                correlation_id: correlation_id_clone,
+                expires_at,
+            },
+        );
         let count = temp_senders.len();
         drop(temp_senders);
-        
+
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
             "ActorRegistry: Registered temporary sender ActorRef: temporary_sender_id={}, correlation_id={}, expires_at={:?}, total_temp_senders={}",
@@ -1067,7 +1114,7 @@ impl ActorRegistry {
         );
         }
     }
-    
+
     /// Lookup temporary sender entry
     ///
     /// ## Arguments
@@ -1082,7 +1129,7 @@ impl ActorRegistry {
         let temp_senders = self.temporary_senders.read().await;
         temp_senders.get(temporary_sender_id).cloned()
     }
-    
+
     /// Remove a temporary sender mapping
     ///
     /// ## Purpose
@@ -1100,7 +1147,7 @@ impl ActorRegistry {
                 temporary_sender_id, e
             );
         }
-        
+
         // Also remove from temporary_senders map
         let mut temp_senders = self.temporary_senders.write().await;
         if temp_senders.remove(temporary_sender_id).is_some() {
@@ -1113,7 +1160,7 @@ impl ActorRegistry {
             }
         }
     }
-    
+
     /// Cleanup expired temporary senders
     ///
     /// ## Purpose
@@ -1126,14 +1173,15 @@ impl ActorRegistry {
         let now = Instant::now();
         let expired_ids: Vec<String> = {
             let temp_senders = self.temporary_senders.read().await;
-            temp_senders.iter()
+            temp_senders
+                .iter()
                 .filter(|(_id, entry)| entry.expires_at <= now)
                 .map(|(id, _)| id.clone())
                 .collect()
         };
-        
+
         let expired_count = expired_ids.len();
-        
+
         // Unregister each expired temporary sender from the actors map
         for temp_sender_id in &expired_ids {
             let actor_id = ActorId::from(temp_sender_id.clone());
@@ -1144,7 +1192,7 @@ impl ActorRegistry {
                 );
             }
         }
-        
+
         // Remove from temporary_senders map
         if expired_count > 0 {
             let mut temp_senders = self.temporary_senders.write().await;
@@ -1152,7 +1200,7 @@ impl ActorRegistry {
                 temp_senders.remove(temp_sender_id);
             }
             let after_count = temp_senders.len();
-            
+
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                 "ActorRegistry: Cleaned up {} expired temporary senders (before: {}, after: {})",
@@ -1161,22 +1209,24 @@ impl ActorRegistry {
                 after_count
             );
             }
-            
+
             // OBSERVABILITY: Track expired temporary sender cleanup
             #[cfg(feature = "metrics")]
             {
                 metrics::counter!("plexspaces_actor_registry_temporary_sender_expired_total",
                     "node_id" => self.local_node_id.clone()
-                ).increment(expired_count as u64);
+                )
+                .increment(expired_count as u64);
                 metrics::gauge!("plexspaces_actor_registry_temporary_sender_mappings",
                     "node_id" => self.local_node_id.clone()
-                ).set(after_count as f64);
+                )
+                .set(after_count as f64);
             }
         }
-        
+
         expired_count
     }
-    
+
     /// Get count of temporary senders (for metrics/monitoring)
     /// Discover actors by type (efficient O(1) lookup using index)
     ///
@@ -1199,7 +1249,11 @@ impl ActorRegistry {
         actor_type: &str,
     ) -> Vec<ActorId> {
         let index = self.actor_type_index.read().await;
-        let key = (ctx.tenant_id().to_string(), ctx.namespace().to_string(), actor_type.to_string());
+        let key = (
+            ctx.tenant_id().to_string(),
+            ctx.namespace().to_string(),
+            actor_type.to_string(),
+        );
         let actor_ids = index.get(&key).cloned().unwrap_or_default();
         tracing::debug!(
             tenant_id = %key.0,
@@ -1216,11 +1270,11 @@ impl ActorRegistry {
         let temp_senders = self.temporary_senders.read().await;
         temp_senders.len()
     }
-    
+
     // ============================================================================
     // Parent-Child Relationship Tracking (Phase 3)
     // ============================================================================
-    
+
     /// Register parent-child relationship
     ///
     /// ## Purpose
@@ -1246,11 +1300,7 @@ impl ActorRegistry {
     /// let children = registry.get_children("supervisor1").await;
     /// assert_eq!(children.len(), 2);
     /// ```
-    pub async fn register_parent_child(
-        &self,
-        parent_id: &ActorId,
-        child_id: &ActorId,
-    ) {
+    pub async fn register_parent_child(&self, parent_id: &ActorId, child_id: &ActorId) {
         // Remove child from old parent's children list (if any)
         {
             let mut parent_to_children = self.parent_to_children.write().await;
@@ -1281,15 +1331,17 @@ impl ActorRegistry {
         // OBSERVABILITY: Metrics and logging
         metrics::gauge!("plexspaces_actor_children_count",
             "parent_id" => parent_id.clone()
-        ).set({
+        )
+        .set({
             let map = self.parent_to_children.read().await;
             map.get(parent_id).map(|v| v.len() as f64).unwrap_or(0.0)
         });
-        
+
         metrics::counter!("plexspaces_actor_parent_child_registered_total",
             "parent_id" => parent_id.clone(),
             "child_id" => child_id.clone()
-        ).increment(1);
+        )
+        .increment(1);
 
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
@@ -1309,11 +1361,7 @@ impl ActorRegistry {
     /// ## Arguments
     /// * `parent_id` - Parent actor/supervisor ID
     /// * `child_id` - Child actor/supervisor ID
-    pub async fn unregister_parent_child(
-        &self,
-        parent_id: &ActorId,
-        child_id: &ActorId,
-    ) {
+    pub async fn unregister_parent_child(&self, parent_id: &ActorId, child_id: &ActorId) {
         // Remove from parent -> children mapping
         {
             let mut map = self.parent_to_children.write().await;
@@ -1334,22 +1382,24 @@ impl ActorRegistry {
         // OBSERVABILITY: Metrics and logging
         metrics::gauge!("plexspaces_actor_children_count",
             "parent_id" => parent_id.clone()
-        ).set({
+        )
+        .set({
             let map = self.parent_to_children.read().await;
             map.get(parent_id).map(|v| v.len() as f64).unwrap_or(0.0)
         });
-        
+
         metrics::counter!("plexspaces_actor_parent_child_unregistered_total",
             "parent_id" => parent_id.clone(),
             "child_id" => child_id.clone()
-        ).increment(1);
+        )
+        .increment(1);
 
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
-            parent = %parent_id,
-            child = %child_id,
-            "Unregistered parent-child relationship"
-        );
+                parent = %parent_id,
+                child = %child_id,
+                "Unregistered parent-child relationship"
+            );
         }
     }
 
@@ -1374,9 +1424,7 @@ impl ActorRegistry {
     /// ```
     pub async fn get_children(&self, parent_id: &ActorId) -> Vec<ActorId> {
         let map = self.parent_to_children.read().await;
-        map.get(parent_id)
-            .cloned()
-            .unwrap_or_default()
+        map.get(parent_id).cloned().unwrap_or_default()
     }
 
     /// Get parent of a child
@@ -1424,7 +1472,7 @@ impl ActorRegistry {
     /// ```
     pub async fn get_subtree(&self, root_id: &ActorId) -> Vec<ActorId> {
         use std::collections::VecDeque;
-        
+
         let mut result = Vec::new();
         let mut queue = VecDeque::new();
         queue.push_back(root_id.clone());
@@ -1440,7 +1488,8 @@ impl ActorRegistry {
         // OBSERVABILITY: Track subtree size
         metrics::gauge!("plexspaces_actor_subtree_size",
             "root_id" => root_id.clone()
-        ).set(result.len() as f64);
+        )
+        .set(result.len() as f64);
 
         result
     }
@@ -1458,11 +1507,9 @@ impl ActorRegistry {
     /// Number of direct children
     pub async fn children_count(&self, parent_id: &ActorId) -> usize {
         let map = self.parent_to_children.read().await;
-        map.get(parent_id)
-            .map(|v| v.len())
-            .unwrap_or(0)
+        map.get(parent_id).map(|v| v.len()).unwrap_or(0)
     }
-    
+
     /// Start background cleanup task for expired temporary senders
     ///
     /// ## Purpose
@@ -1477,22 +1524,22 @@ impl ActorRegistry {
     /// * `registry` - Arc<ActorRegistry> to use for cleanup (must be Arc to share across tasks)
     pub fn start_temporary_sender_cleanup(registry: Arc<Self>) {
         let local_node_id = registry.local_node_id.clone();
-        
+
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(30));
-            
+
             loop {
                 interval.tick().await;
-                
+
                 // Cleanup expired temporary senders
                 let expired_count = registry.cleanup_expired_temporary_senders().await;
                 if expired_count > 0 {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
-                        "ActorRegistry: Cleaned up {} expired temporary senders (node_id={})",
-                        expired_count,
-                        local_node_id
-                    );
+                            "ActorRegistry: Cleaned up {} expired temporary senders (node_id={})",
+                            expired_count,
+                            local_node_id
+                        );
                     }
                 }
             }
@@ -1554,10 +1601,10 @@ impl ActorRegistry {
         // OBSERVABILITY: Log link creation
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
-            actor1 = %actor1_id,
-            actor2 = %actor2_id,
-            "Linked actors (bidirectional death propagation)"
-        );
+                actor1 = %actor1_id,
+                actor2 = %actor2_id,
+                "Linked actors (bidirectional death propagation)"
+            );
         }
 
         Ok(())
@@ -1603,10 +1650,10 @@ impl ActorRegistry {
         // OBSERVABILITY: Log link removal
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
-            actor1 = %actor1_id,
-            actor2 = %actor2_id,
-            "Unlinked actors"
-        );
+                actor1 = %actor1_id,
+                actor2 = %actor2_id,
+                "Unlinked actors"
+            );
         }
 
         Ok(())
@@ -1671,11 +1718,11 @@ impl ActorRegistry {
         // OBSERVABILITY: Log monitor creation
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
-            target = %target_id,
-            monitor = %monitor_id,
-            monitor_ref = %monitor_ref,
-            "Registered monitor (one-way notification)"
-        );
+                target = %target_id,
+                monitor = %monitor_id,
+                monitor_ref = %monitor_ref,
+                "Registered monitor (one-way notification)"
+            );
         }
 
         Ok(())
@@ -1714,11 +1761,11 @@ impl ActorRegistry {
         // OBSERVABILITY: Log demonitor
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
-            target = %target_id,
-            monitor = %monitor_id,
-            monitor_ref = %monitor_ref,
-            "Removed monitor"
-        );
+                target = %target_id,
+                monitor = %monitor_id,
+                monitor_ref = %monitor_ref,
+                "Removed monitor"
+            );
         }
 
         Ok(())
@@ -1749,11 +1796,7 @@ impl ActorRegistry {
     /// - Error/Killed: Sends DOWN to monitors AND propagates EXIT to links
     /// - Linked actors with trap_exit=true receive EXIT as message
     /// - Linked actors with trap_exit=false terminate immediately
-    pub async fn handle_actor_termination(
-        &self,
-        actor_id: &ActorId,
-        reason: ExitReason,
-    ) {
+    pub async fn handle_actor_termination(&self, actor_id: &ActorId, reason: ExitReason) {
         tracing::info!(
             actor_id = %actor_id,
             reason = ?reason,
@@ -1818,14 +1861,21 @@ impl ActorRegistry {
             ExitReason::Shutdown => "shutdown".to_string(),
             ExitReason::Killed => "killed".to_string(),
             ExitReason::Error(msg) => msg.clone(),
-            ExitReason::Linked { actor_id: linked_id, reason: linked_reason } => {
-                format!("linked:{}:{}", linked_id, match linked_reason.as_ref() {
-                    ExitReason::Normal => "normal",
-                    ExitReason::Shutdown => "shutdown",
-                    ExitReason::Killed => "killed",
-                    ExitReason::Error(msg) => msg,
-                    ExitReason::Linked { .. } => "linked",
-                })
+            ExitReason::Linked {
+                actor_id: linked_id,
+                reason: linked_reason,
+            } => {
+                format!(
+                    "linked:{}:{}",
+                    linked_id,
+                    match linked_reason.as_ref() {
+                        ExitReason::Normal => "normal",
+                        ExitReason::Shutdown => "shutdown",
+                        ExitReason::Killed => "killed",
+                        ExitReason::Error(msg) => msg,
+                        ExitReason::Linked { .. } => "linked",
+                    }
+                )
             }
         };
 
@@ -1845,7 +1895,7 @@ impl ActorRegistry {
             // We use FacetManager to call facet.on_down() for all facets on the monitoring actor
             // This avoids circular dependencies (plexspaces-core doesn't depend on plexspaces-facet)
             let monitoring_actor_id = ActorId::from(monitor_link.monitor_ref.clone());
-            
+
             // Use FacetManager to call facet.on_down() for all facets on the monitoring actor
             // Convert core::ExitReason to facet::ExitReason
             let facet_exit_reason = match &reason {
@@ -1853,7 +1903,10 @@ impl ActorRegistry {
                 ExitReason::Shutdown => FacetExitReason::Shutdown,
                 ExitReason::Killed => FacetExitReason::Killed,
                 ExitReason::Error(msg) => FacetExitReason::Error(msg.clone()),
-                ExitReason::Linked { actor_id: linked_id, reason: linked_reason } => {
+                ExitReason::Linked {
+                    actor_id: linked_id,
+                    reason: linked_reason,
+                } => {
                     let linked_reason_str = match linked_reason.as_ref() {
                         ExitReason::Normal => "normal",
                         ExitReason::Shutdown => "shutdown",
@@ -1861,17 +1914,23 @@ impl ActorRegistry {
                         ExitReason::Error(msg) => msg,
                         ExitReason::Linked { .. } => "linked",
                     };
-                    FacetExitReason::Error(format!("Linked: {} -> {}", linked_id, linked_reason_str))
+                    FacetExitReason::Error(format!(
+                        "Linked: {} -> {}",
+                        linked_id, linked_reason_str
+                    ))
                 }
             };
-            
+
             let facet_down_start = std::time::Instant::now();
-            let facet_down_result = self.facet_manager.call_on_down(
-                monitoring_actor_id.to_string(),
-                actor_id.to_string(),
-                &facet_exit_reason,
-            ).await;
-            
+            let facet_down_result = self
+                .facet_manager
+                .call_on_down(
+                    monitoring_actor_id.to_string(),
+                    actor_id.to_string(),
+                    &facet_exit_reason,
+                )
+                .await;
+
             let facet_down_duration = facet_down_start.elapsed();
             match facet_down_result {
                 Ok(errors) if !errors.is_empty() => {
@@ -1879,7 +1938,8 @@ impl ActorRegistry {
                         "monitoring_actor_id" => monitor_link.monitor_ref.clone(),
                         "monitored_actor_id" => actor_id.clone(),
                         "error_count" => errors.len().to_string()
-                    ).increment(errors.len() as u64);
+                    )
+                    .increment(errors.len() as u64);
                     tracing::warn!(
                         monitoring_actor_id = %monitor_link.monitor_ref,
                         monitored_actor_id = %actor_id,
@@ -1910,15 +1970,17 @@ impl ActorRegistry {
                     }
                 }
             }
-            
+
             metrics::histogram!("plexspaces_facet_down_duration_seconds",
                 "monitoring_actor_id" => monitor_link.monitor_ref.clone(),
                 "monitored_actor_id" => actor_id.clone()
-            ).record(facet_down_duration.as_secs_f64());
+            )
+            .record(facet_down_duration.as_secs_f64());
             metrics::counter!("plexspaces_facet_down_total",
                 "monitoring_actor_id" => monitor_link.monitor_ref.clone(),
                 "monitored_actor_id" => actor_id.clone()
-            ).increment(1);
+            )
+            .increment(1);
 
             // OBSERVABILITY: Log DOWN message
             if tracing::enabled!(tracing::Level::DEBUG) {
@@ -1935,7 +1997,8 @@ impl ActorRegistry {
         metrics::counter!("plexspaces_actor_exit_handled_total",
             "actor_id" => actor_id.clone(),
             "action" => "down_sent"
-        ).increment(monitors.len() as u64);
+        )
+        .increment(monitors.len() as u64);
     }
 
     /// Propagate EXIT to linked actors (Phase 6)
@@ -1992,20 +2055,27 @@ impl ActorRegistry {
                     ExitReason::Shutdown => "shutdown".to_string(),
                     ExitReason::Killed => "killed".to_string(),
                     ExitReason::Error(msg) => msg.clone(),
-                    ExitReason::Linked { actor_id: linked_actor_id, reason: linked_reason } => {
-                        format!("linked:{}:{}", linked_actor_id, match linked_reason.as_ref() {
-                            ExitReason::Normal => "normal",
-                            ExitReason::Shutdown => "shutdown",
-                            ExitReason::Killed => "killed",
-                            ExitReason::Error(msg) => msg,
-                            ExitReason::Linked { .. } => "linked",
-                        })
+                    ExitReason::Linked {
+                        actor_id: linked_actor_id,
+                        reason: linked_reason,
+                    } => {
+                        format!(
+                            "linked:{}:{}",
+                            linked_actor_id,
+                            match linked_reason.as_ref() {
+                                ExitReason::Normal => "normal",
+                                ExitReason::Shutdown => "shutdown",
+                                ExitReason::Killed => "killed",
+                                ExitReason::Error(msg) => msg,
+                                ExitReason::Linked { .. } => "linked",
+                            }
+                        )
                     }
                 };
 
                 // Create EXIT message
                 let exit_message = create_exit_message(actor_id.to_string(), &reason_str);
-                
+
                 // Send EXIT signal to linked actor's mailbox
                 // The actor's message loop will handle it based on trap_exit setting
                 // Note: tell() takes only the message, no RequestContext
@@ -2053,7 +2123,8 @@ impl ActorRegistry {
         metrics::counter!("plexspaces_actor_exit_propagated_total",
             "actor_id" => actor_id.clone(),
             "linked_count" => linked_count.to_string()
-        ).increment(linked_count as u64);
+        )
+        .increment(linked_count as u64);
     }
 
     /// Clean up link/monitor entries for terminated actor (Phase 6)
@@ -2073,14 +2144,14 @@ impl ActorRegistry {
         // Remove from links (remove actor from all other actors' link lists)
         {
             let mut links = self.links.write().await;
-            
+
             // Remove actor from all other actors' link lists
             for (other_actor_id, other_links) in links.iter_mut() {
                 if other_actor_id != actor_id {
                     other_links.retain(|id| id != actor_id);
                 }
             }
-            
+
             // Remove actor's own link entry
             links.remove(actor_id);
         }
@@ -2092,8 +2163,6 @@ impl ActorRegistry {
             );
         }
     }
-
-
 }
 
 // Implement Service trait for ActorRegistry
@@ -2127,41 +2196,60 @@ impl Service for ActorRegistry {
 /// 3. Delegating to Node for remote actor linking
 #[async_trait::async_trait]
 impl crate::LinkProvider for ActorRegistry {
-    async fn link(&self, actor_id: &ActorId, linked_actor_id: &ActorId, ctx: &crate::RequestContext) -> Result<(), String> {
+    async fn link(
+        &self,
+        actor_id: &ActorId,
+        linked_actor_id: &ActorId,
+        ctx: &crate::RequestContext,
+    ) -> Result<(), String> {
         // TODO: Support remote actor linking
         // For now, only support local actors. Remote linking requires:
         // 1. Checking if actors are local (via lookup_routing)
         // 2. If remote, delegating to Node for gRPC-based linking
         // 3. This is advanced functionality and can be added later
-        
+
         // Verify both actors are local (exist in this registry)
         // Use provided RequestContext for tenant/namespace isolation
-        let routing1 = self.lookup_routing(ctx, actor_id).await
+        let routing1 = self
+            .lookup_routing(ctx, actor_id)
+            .await
             .map_err(|e| format!("Failed to lookup actor {}: {}", actor_id, e))?;
         if routing1.is_none() || !routing1.unwrap().is_local {
             return Err(format!("Actor {} is not local or not found", actor_id));
         }
-        
-        let routing2 = self.lookup_routing(ctx, linked_actor_id).await
+
+        let routing2 = self
+            .lookup_routing(ctx, linked_actor_id)
+            .await
             .map_err(|e| format!("Failed to lookup actor {}: {}", linked_actor_id, e))?;
         if routing2.is_none() || !routing2.unwrap().is_local {
-            return Err(format!("Actor {} is not local or not found", linked_actor_id));
+            return Err(format!(
+                "Actor {} is not local or not found",
+                linked_actor_id
+            ));
         }
-        
+
         // Both actors are local, delegate to ActorRegistry::link
-        self.link(actor_id, linked_actor_id).await
+        self.link(actor_id, linked_actor_id)
+            .await
             .map_err(|e| format!("Link failed: {}", e))
     }
 
-    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId, _ctx: &crate::RequestContext) -> Result<(), String> {
+    async fn unlink(
+        &self,
+        actor_id: &ActorId,
+        linked_actor_id: &ActorId,
+        _ctx: &crate::RequestContext,
+    ) -> Result<(), String> {
         // TODO: Support remote actor unlinking
         // For now, only support local actors. Remote unlinking requires:
         // 1. Checking if actors are local (via lookup_routing)
         // 2. If remote, delegating to Node for gRPC-based unlinking
         // 3. This is advanced functionality and can be added later
-        
+
         // Both actors should be local (unlink is idempotent, so we don't check)
-        self.unlink(actor_id, linked_actor_id).await
+        self.unlink(actor_id, linked_actor_id)
+            .await
             .map_err(|e| format!("Unlink failed: {}", e))
     }
 }
@@ -2187,8 +2275,7 @@ impl crate::ActivationProvider for ActorRegistry {
         // Use empty tenant/namespace for internal operations (auth disabled)
         // Internal path (ReminderFacet): no request; use default tenant/namespace and admin for lookup
         use crate::RequestContext;
-        let ctx = RequestContext::new_without_auth(String::new(), String::new())
-            .with_admin(true);
+        let ctx = RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
         let routing = self.lookup_routing(&ctx, actor_id).await.ok().flatten();
         routing.map(|r| r.is_local).unwrap_or(false)
     }
@@ -2200,22 +2287,28 @@ impl crate::ActivationProvider for ActorRegistry {
             return ActorRef::new(actor_id.clone())
                 .map_err(|e| format!("Failed to create ActorRef: {}", e));
         }
-        
+
         // Actor is not active, need to activate it using ActorFactory
         let actor_factory_opt = self.actor_factory.read().await.clone();
         if let Some(actor_factory) = actor_factory_opt {
             // Use ActorFactory to activate the virtual actor
-            actor_factory.activate_virtual_actor(actor_id).await
+            actor_factory
+                .activate_virtual_actor(actor_id)
+                .await
                 .map_err(|e| format!("Failed to activate virtual actor {}: {}", actor_id, e))?;
-            
+
             // Verify actor is now active
             if !self.is_actor_active(actor_id).await {
                 return Err(format!("Actor {} was not activated successfully", actor_id));
             }
-            
+
             // Return ActorRef for the activated actor
-            ActorRef::new(actor_id.clone())
-                .map_err(|e| format!("Failed to create ActorRef for activated actor {}: {}", actor_id, e))
+            ActorRef::new(actor_id.clone()).map_err(|e| {
+                format!(
+                    "Failed to create ActorRef for activated actor {}: {}",
+                    actor_id, e
+                )
+            })
         } else {
             // ActorFactory not set - return error with helpful message
             Err(format!(
@@ -2226,4 +2319,3 @@ impl crate::ActivationProvider for ActorRegistry {
         }
     }
 }
-

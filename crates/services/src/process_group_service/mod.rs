@@ -60,30 +60,20 @@ use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, trace, warn};
 
-use plexspaces_core::{RequestContext, ServiceLocator as ServiceLocatorTrait};
 use plexspaces_core::actor_context::{ObjectRegistry, ProcessGroupService};
+use plexspaces_core::{RequestContext, ServiceLocator as ServiceLocatorTrait};
 use plexspaces_proto::common::v1::Message;
-use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType, HealthStatus};
+use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 
 // Import proto types and gRPC service trait
+use plexspaces_proto::common::v1::Empty;
 use plexspaces_proto::processgroups::v1::{
     process_group_service_server::ProcessGroupService as ProcessGroupServiceTrait,
-    CreateGroupRequest,
-    CreateGroupResponse,
-    DeleteGroupRequest,
-    GetLocalMembersRequest,
-    GetLocalMembersResponse,
-    GetMembersRequest,
-    GetMembersResponse,
-    JoinGroupRequest,
-    LeaveGroupRequest,
-    ListGroupsRequest,
-    ListGroupsResponse,
-    ProcessGroup,
-    PublishToGroupRequest,
+    CreateGroupRequest, CreateGroupResponse, DeleteGroupRequest, GetLocalMembersRequest,
+    GetLocalMembersResponse, GetMembersRequest, GetMembersResponse, JoinGroupRequest,
+    LeaveGroupRequest, ListGroupsRequest, ListGroupsResponse, ProcessGroup, PublishToGroupRequest,
     PublishToGroupResponse,
 };
-use plexspaces_proto::common::v1::Empty;
 
 use crate::ServiceLocatorImpl;
 
@@ -186,7 +176,9 @@ impl ProcessGroupServiceImpl {
     }
 
     /// Get ObjectRegistry from ServiceLocator
-    async fn get_object_registry(&self) -> Result<Arc<dyn ObjectRegistry>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_object_registry(
+        &self,
+    ) -> Result<Arc<dyn ObjectRegistry>, Box<dyn std::error::Error + Send + Sync>> {
         self.service_locator
             .get_object_registry()
             .await
@@ -217,10 +209,7 @@ impl ProcessGroupServiceImpl {
             node_id: self.local_node_id.clone(),
             grpc_address: String::new(), // Will be set by node registration
             object_category: "pubsub".to_string(),
-            capabilities: vec![
-                "topic-filtering".to_string(),
-                "multiple-joins".to_string(),
-            ],
+            capabilities: vec!["topic-filtering".to_string(), "multiple-joins".to_string()],
             metadata: None,
             health_status: HealthStatus::HealthStatusHealthy as i32,
             labels: vec![],
@@ -318,7 +307,11 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
 
         // Check if group already exists
         let group_id = Self::group_object_id(ctx.tenant_id(), ctx.namespace(), group_name);
-        if object_registry.lookup(ctx, &group_id, Some(ObjectType::ObjectTypeProcessGroup)).await?.is_some() {
+        if object_registry
+            .lookup(ctx, &group_id, Some(ObjectType::ObjectTypeProcessGroup))
+            .await?
+            .is_some()
+        {
             return Err(format!("Group already exists: {}", group_name).into());
         }
 
@@ -359,7 +352,9 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
 
         // Unregister group from ObjectRegistry (idempotent)
         let group_id = Self::group_object_id(ctx.tenant_id(), ctx.namespace(), group_name);
-        let _ = object_registry.unregister(ctx, ObjectType::ObjectTypeProcessGroup, &group_id).await;
+        let _ = object_registry
+            .unregister(ctx, ObjectType::ObjectTypeProcessGroup, &group_id)
+            .await;
 
         // TODO: Also unregister all memberships (would need prefix scan in ObjectRegistry)
         // For now, memberships become orphaned - could be cleaned up by background job
@@ -400,7 +395,11 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
 
         // Verify group exists
         let group_id = Self::group_object_id(ctx.tenant_id(), ctx.namespace(), group_name);
-        if object_registry.lookup(ctx, &group_id, Some(ObjectType::ObjectTypeProcessGroup)).await?.is_none() {
+        if object_registry
+            .lookup(ctx, &group_id, Some(ObjectType::ObjectTypeProcessGroup))
+            .await?
+            .is_none()
+        {
             return Err(format!("Group not found: {}", group_name).into());
         }
 
@@ -409,15 +408,16 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
         let join_count = {
             let mut state = self.local_state.write().await;
             let group_state = state.entry(cache_key.clone()).or_default();
-            
-            let membership = group_state.members.entry(actor_id.to_string()).or_insert_with(|| {
-                LocalMembership {
+
+            let membership = group_state
+                .members
+                .entry(actor_id.to_string())
+                .or_insert_with(|| LocalMembership {
                     _actor_id: actor_id.to_string(),
                     join_count: 0,
                     topics: vec![],
                     _joined_at: chrono::Utc::now().timestamp(),
-                }
-            });
+                });
 
             // Increment join count (Erlang pg2 semantics)
             membership.join_count += 1;
@@ -433,13 +433,8 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
         };
 
         // Sync to ObjectRegistry
-        let registration = self.create_membership_registration(
-            ctx,
-            group_name,
-            actor_id,
-            &topics,
-            join_count,
-        );
+        let registration =
+            self.create_membership_registration(ctx, group_name, actor_id, &topics, join_count);
         object_registry.register(ctx, registration).await?;
 
         metrics::counter!("plexspaces_process_groups_joins_total", "group" => group_name.to_string(), "tenant" => ctx.tenant_id().to_string()).increment(1);
@@ -474,11 +469,11 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
         let cache_key = Self::cache_key(ctx.tenant_id(), ctx.namespace(), group_name);
         let (should_unregister, new_join_count, topics) = {
             let mut state = self.local_state.write().await;
-            
+
             if let Some(group_state) = state.get_mut(&cache_key) {
                 if let Some(membership) = group_state.members.get_mut(actor_id) {
                     membership.join_count = membership.join_count.saturating_sub(1);
-                    
+
                     if membership.join_count == 0 {
                         let topics = membership.topics.clone();
                         group_state.members.remove(actor_id);
@@ -504,7 +499,9 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
         );
 
         if should_unregister {
-            object_registry.unregister(ctx, ObjectType::ObjectTypeProcessGroup, &membership_id).await?;
+            object_registry
+                .unregister(ctx, ObjectType::ObjectTypeProcessGroup, &membership_id)
+                .await?;
         } else {
             // Update with new join count
             let registration = self.create_membership_registration(
@@ -536,7 +533,11 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
 
         // Verify group exists
         let group_id = Self::group_object_id(ctx.tenant_id(), ctx.namespace(), group_name);
-        if object_registry.lookup(ctx, &group_id, Some(ObjectType::ObjectTypeProcessGroup)).await?.is_none() {
+        if object_registry
+            .lookup(ctx, &group_id, Some(ObjectType::ObjectTypeProcessGroup))
+            .await?
+            .is_none()
+        {
             return Err(format!("Group not found: {}", group_name).into());
         }
 
@@ -547,10 +548,10 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
                 ctx,
                 Some(ObjectType::ObjectTypeProcessGroup),
                 Some("membership".to_string()),
-                None, // no capability filter
-                None, // no label filter
-                None, // no health filter
-                0,    // offset
+                None,  // no capability filter
+                None,  // no label filter
+                None,  // no health filter
+                0,     // offset
                 10000, // limit (large enough for all members)
             )
             .await?;
@@ -578,7 +579,11 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
             .collect();
 
         // Deduplicate (same actor might be registered from multiple nodes)
-        let mut unique_members: Vec<String> = members.into_iter().collect::<std::collections::HashSet<_>>().into_iter().collect();
+        let mut unique_members: Vec<String> = members
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
         unique_members.sort();
 
         Ok(unique_members)
@@ -619,11 +624,11 @@ impl ProcessGroupService for ProcessGroupServiceImpl {
                 ctx,
                 Some(ObjectType::ObjectTypeProcessGroup),
                 Some("pubsub".to_string()), // Groups have category "pubsub"
-                None, // no capability filter
-                None, // no label filter
-                None, // no health filter
-                0,    // offset
-                10000, // limit
+                None,                       // no capability filter
+                None,                       // no label filter
+                None,                       // no health filter
+                0,                          // offset
+                10000,                      // limit
             )
             .await?;
 
@@ -738,8 +743,14 @@ pub struct ProcessGroupServiceGrpc {
 
 impl ProcessGroupServiceGrpc {
     /// Create new gRPC service wrapper
-    pub fn new(inner: Arc<ProcessGroupServiceImpl>, service_locator: Arc<ServiceLocatorImpl>) -> Self {
-        ProcessGroupServiceGrpc { inner, service_locator }
+    pub fn new(
+        inner: Arc<ProcessGroupServiceImpl>,
+        service_locator: Arc<ServiceLocatorImpl>,
+    ) -> Self {
+        ProcessGroupServiceGrpc {
+            inner,
+            service_locator,
+        }
     }
 
     /// Extract RequestContext from gRPC request metadata
@@ -748,14 +759,14 @@ impl ProcessGroupServiceGrpc {
     /// - Extracts tenant_id from x-tenant-id header (set by auth middleware)
     /// - Falls back to NodeConfig defaults if auth disabled
     /// - Validates tenant context for multi-tenancy
-    async fn extract_context(&self, metadata: &tonic::metadata::MetadataMap) -> Result<RequestContext, Status> {
+    async fn extract_context(
+        &self,
+        metadata: &tonic::metadata::MetadataMap,
+    ) -> Result<RequestContext, Status> {
         let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
-        crate::request_context_from_grpc_request(
-            metadata,
-            &std::collections::HashMap::new(),
-            &sl,
-        ).await
-        .map_err(|e| Status::unauthenticated(format!("Invalid request context: {}", e)))
+        crate::request_context_from_grpc_request(metadata, &std::collections::HashMap::new(), &sl)
+            .await
+            .map_err(|e| Status::unauthenticated(format!("Invalid request context: {}", e)))
     }
 
     /// Convert error to gRPC Status with appropriate codes
@@ -806,8 +817,10 @@ impl ProcessGroupServiceTrait for ProcessGroupServiceGrpc {
         );
         let _guard = span.enter();
 
-        info!("🟦 [CREATE_GROUP] START: tenant_id={}, namespace={}, group_name={}", 
-              &tenant_id, &namespace, req.group_name);
+        info!(
+            "🟦 [CREATE_GROUP] START: tenant_id={}, namespace={}, group_name={}",
+            &tenant_id, &namespace, req.group_name
+        );
 
         self.inner
             .create_group(&ctx, &req.group_name)
@@ -815,7 +828,8 @@ impl ProcessGroupServiceTrait for ProcessGroupServiceGrpc {
             .map_err(Self::error_to_status)?;
 
         let duration = start_time.elapsed();
-        metrics::histogram!("plexspaces_process_group_service_create_duration_seconds").record(duration.as_secs_f64());
+        metrics::histogram!("plexspaces_process_group_service_create_duration_seconds")
+            .record(duration.as_secs_f64());
 
         // Return created group
         let group = ProcessGroup {

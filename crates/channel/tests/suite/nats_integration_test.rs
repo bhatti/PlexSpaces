@@ -90,14 +90,14 @@ async fn test_nats_send_and_receive_single_message() {
     skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("send_receive");
-    let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
+    let channel = NatsChannel::new(config)
+        .await
+        .expect("Failed to create NATS channel");
 
     // In NATS pub/sub, we need to subscribe BEFORE sending, or the message will be lost
     // Spawn a task to receive, then send the message
     let channel_clone = channel.clone();
-    let receive_handle = tokio::spawn(async move {
-        channel_clone.receive(1).await
-    });
+    let receive_handle = tokio::spawn(async move { channel_clone.receive(1).await });
 
     // Small delay to ensure subscription is active
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -110,7 +110,10 @@ async fn test_nats_send_and_receive_single_message() {
         ..Default::default()
     };
 
-    let msg_id = channel.send(msg.clone()).await.expect("Failed to send message");
+    let msg_id = channel
+        .send(msg.clone())
+        .await
+        .expect("Failed to send message");
     assert_eq!(msg_id, msg.id);
 
     // Wait for receive to complete
@@ -130,13 +133,13 @@ async fn test_nats_send_and_receive_multiple_messages() {
     skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("send_receive_multi");
-    let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
+    let channel = NatsChannel::new(config)
+        .await
+        .expect("Failed to create NATS channel");
 
     // Subscribe first, then send
     let channel_clone = channel.clone();
-    let receive_handle = tokio::spawn(async move {
-        channel_clone.receive(5).await
-    });
+    let receive_handle = tokio::spawn(async move { channel_clone.receive(5).await });
 
     // Small delay to ensure subscription is active
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -162,10 +165,14 @@ async fn test_nats_send_and_receive_multiple_messages() {
 
     let messages = received.expect("Failed to receive messages");
     assert_eq!(messages.len(), 5);
-    
+
     let received_ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
     for sent_id in &sent_ids {
-        assert!(received_ids.contains(sent_id), "Missing message: {}", sent_id);
+        assert!(
+            received_ids.contains(sent_id),
+            "Missing message: {}",
+            sent_id
+        );
     }
 }
 
@@ -174,17 +181,20 @@ async fn test_nats_try_receive_non_blocking() {
     skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("try_receive");
-    let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
+    let channel = NatsChannel::new(config)
+        .await
+        .expect("Failed to create NATS channel");
 
     // Try receive when empty (should return empty)
-    let messages = channel.try_receive(10).await.expect("try_receive should not error");
+    let messages = channel
+        .try_receive(10)
+        .await
+        .expect("try_receive should not error");
     assert!(messages.is_empty());
 
     // Subscribe first (spawn receive task)
     let channel_clone = channel.clone();
-    let receive_handle = tokio::spawn(async move {
-        channel_clone.try_receive(10).await
-    });
+    let receive_handle = tokio::spawn(async move { channel_clone.try_receive(10).await });
 
     // Small delay to ensure subscription is active
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -204,7 +214,10 @@ async fn test_nats_try_receive_non_blocking() {
     // Try receive should get the message (but try_receive uses short timeout, so we check the handle)
     // Actually, try_receive creates a new subscription, so it won't see the message
     // Let's use a different approach - subscribe first, then send
-    let messages = channel.try_receive(10).await.expect("try_receive should not error");
+    let messages = channel
+        .try_receive(10)
+        .await
+        .expect("try_receive should not error");
     // try_receive creates a new subscription, so it won't see messages sent before
     // For this test, we'll just verify it doesn't error
     // The message was already received by the spawned task
@@ -216,7 +229,9 @@ async fn test_nats_publish_subscribe() {
     skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("pubsub");
-    let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
+    let channel = NatsChannel::new(config)
+        .await
+        .expect("Failed to create NATS channel");
 
     // Subscribe
     let mut stream = channel.subscribe(None).await.expect("Failed to subscribe");
@@ -229,7 +244,10 @@ async fn test_nats_publish_subscribe() {
         ..Default::default()
     };
 
-    let subscriber_count = channel.publish(msg.clone()).await.expect("Failed to publish");
+    let subscriber_count = channel
+        .publish(msg.clone())
+        .await
+        .expect("Failed to publish");
     // NATS doesn't provide exact subscriber count, so we just check it doesn't error
     assert!(subscriber_count >= 0);
 
@@ -248,12 +266,22 @@ async fn test_nats_queue_group_load_balancing() {
     skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_queue_config("queue_group");
-    let channel1 = NatsChannel::new(config.clone()).await.expect("Failed to create channel 1");
-    let channel2 = NatsChannel::new(config).await.expect("Failed to create channel 2");
+    let channel1 = NatsChannel::new(config.clone())
+        .await
+        .expect("Failed to create channel 1");
+    let channel2 = NatsChannel::new(config)
+        .await
+        .expect("Failed to create channel 2");
 
     // Both channels subscribe to same queue group
-    let mut stream1 = channel1.subscribe(Some("workers".to_string())).await.expect("Failed to subscribe 1");
-    let mut stream2 = channel2.subscribe(Some("workers".to_string())).await.expect("Failed to subscribe 2");
+    let mut stream1 = channel1
+        .subscribe(Some("workers".to_string()))
+        .await
+        .expect("Failed to subscribe 1");
+    let mut stream2 = channel2
+        .subscribe(Some("workers".to_string()))
+        .await
+        .expect("Failed to subscribe 2");
 
     // Send 4 messages
     for i in 0..4 {
@@ -276,7 +304,7 @@ async fn test_nats_queue_group_load_balancing() {
 
     // Try to receive from both streams with timeout
     let timeout = Duration::from_secs(2);
-    
+
     loop {
         tokio::select! {
             msg1 = stream1.next() => {
@@ -291,15 +319,21 @@ async fn test_nats_queue_group_load_balancing() {
             }
             _ = tokio::time::sleep(timeout) => break,
         }
-        
+
         if received1 + received2 >= 4 {
             break;
         }
     }
 
     // Both should have received at least one message (load balancing)
-    assert!(received1 > 0, "Channel 1 should receive at least one message");
-    assert!(received2 > 0, "Channel 2 should receive at least one message");
+    assert!(
+        received1 > 0,
+        "Channel 1 should receive at least one message"
+    );
+    assert!(
+        received2 > 0,
+        "Channel 2 should receive at least one message"
+    );
     assert_eq!(received1 + received2, 4, "Total messages should be 4");
 }
 
@@ -308,13 +342,13 @@ async fn test_nats_ack_nack() {
     skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("ack_nack");
-    let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
+    let channel = NatsChannel::new(config)
+        .await
+        .expect("Failed to create NATS channel");
 
     // Subscribe first, then send
     let channel_clone = channel.clone();
-    let receive_handle = tokio::spawn(async move {
-        channel_clone.receive(1).await
-    });
+    let receive_handle = tokio::spawn(async move { channel_clone.receive(1).await });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -341,7 +375,10 @@ async fn test_nats_ack_nack() {
     channel.ack(msg_id).await.expect("ACK should succeed");
 
     // NACK should succeed
-    channel.nack(msg_id, true).await.expect("NACK should succeed");
+    channel
+        .nack(msg_id, true)
+        .await
+        .expect("NACK should succeed");
 }
 
 #[tokio::test]
@@ -349,7 +386,9 @@ async fn test_nats_get_stats() {
     skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("stats");
-    let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
+    let channel = NatsChannel::new(config)
+        .await
+        .expect("Failed to create NATS channel");
 
     // Initial stats
     let stats = channel.get_stats().await.expect("Failed to get stats");
@@ -360,9 +399,7 @@ async fn test_nats_get_stats() {
 
     // Subscribe first, then send
     let channel_clone = channel.clone();
-    let receive_handle = tokio::spawn(async move {
-        channel_clone.receive(3).await
-    });
+    let receive_handle = tokio::spawn(async move { channel_clone.receive(3).await });
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -401,7 +438,9 @@ async fn test_nats_channel_close() {
     skip_if_unavailable!(nats_available().await, "NATS");
 
     let config = create_test_config("close");
-    let channel = NatsChannel::new(config).await.expect("Failed to create NATS channel");
+    let channel = NatsChannel::new(config)
+        .await
+        .expect("Failed to create NATS channel");
 
     assert!(!channel.is_closed());
 
@@ -438,9 +477,11 @@ async fn test_nats_channel_creation_with_defaults() {
         ..Default::default()
     };
 
-    let channel = NatsChannel::new(config).await.expect("Failed to create channel");
+    let channel = NatsChannel::new(config)
+        .await
+        .expect("Failed to create channel");
     assert!(!channel.is_closed());
-    
+
     // Verify config
     let channel_config = channel.get_config();
     assert_eq!(channel_config.name, "defaults");
@@ -462,6 +503,8 @@ async fn test_nats_channel_creation_with_queue_group() {
         ..Default::default()
     };
 
-    let channel = NatsChannel::new(config).await.expect("Failed to create channel");
+    let channel = NatsChannel::new(config)
+        .await
+        .expect("Failed to create channel");
     assert!(!channel.is_closed());
 }

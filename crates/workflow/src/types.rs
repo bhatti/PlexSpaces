@@ -73,7 +73,9 @@ impl From<WorkflowError> for WorkflowErrorProto {
             WorkflowError::Storage(_) => WorkflowErrorProto::WorkflowErrorStorage,
             WorkflowError::Serialization(_) => WorkflowErrorProto::WorkflowErrorSerialization,
             WorkflowError::NotFound(_) => WorkflowErrorProto::WorkflowErrorNotFound,
-            WorkflowError::InvalidDefinition(_) => WorkflowErrorProto::WorkflowErrorInvalidDefinition,
+            WorkflowError::InvalidDefinition(_) => {
+                WorkflowErrorProto::WorkflowErrorInvalidDefinition
+            }
             WorkflowError::Execution(_) => WorkflowErrorProto::WorkflowErrorExecution,
             WorkflowError::ConcurrentUpdate(_) => WorkflowErrorProto::WorkflowErrorExecution, // Map to Execution for proto
         }
@@ -83,12 +85,24 @@ impl From<WorkflowError> for WorkflowErrorProto {
 impl From<WorkflowErrorProto> for WorkflowError {
     fn from(proto: WorkflowErrorProto) -> Self {
         match proto {
-            WorkflowErrorProto::WorkflowErrorUnspecified => WorkflowError::Execution("Unspecified error".to_string()),
-            WorkflowErrorProto::WorkflowErrorStorage => WorkflowError::Storage("Storage error".to_string()),
-            WorkflowErrorProto::WorkflowErrorSerialization => WorkflowError::Serialization("Serialization error".to_string()),
-            WorkflowErrorProto::WorkflowErrorNotFound => WorkflowError::NotFound("Not found".to_string()),
-            WorkflowErrorProto::WorkflowErrorInvalidDefinition => WorkflowError::InvalidDefinition("Invalid definition".to_string()),
-            WorkflowErrorProto::WorkflowErrorExecution => WorkflowError::Execution("Execution error".to_string()),
+            WorkflowErrorProto::WorkflowErrorUnspecified => {
+                WorkflowError::Execution("Unspecified error".to_string())
+            }
+            WorkflowErrorProto::WorkflowErrorStorage => {
+                WorkflowError::Storage("Storage error".to_string())
+            }
+            WorkflowErrorProto::WorkflowErrorSerialization => {
+                WorkflowError::Serialization("Serialization error".to_string())
+            }
+            WorkflowErrorProto::WorkflowErrorNotFound => {
+                WorkflowError::NotFound("Not found".to_string())
+            }
+            WorkflowErrorProto::WorkflowErrorInvalidDefinition => {
+                WorkflowError::InvalidDefinition("Invalid definition".to_string())
+            }
+            WorkflowErrorProto::WorkflowErrorExecution => {
+                WorkflowError::Execution("Execution error".to_string())
+            }
         }
     }
 }

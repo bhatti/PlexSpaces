@@ -28,7 +28,10 @@
 //! operations. This keeps the API stable while we incrementally port the
 //! production-grade algorithms from `/workspace/db-locks`.
 
-use crate::{AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions, RenewLockOptions};
+use crate::{
+    AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions,
+    RenewLockOptions,
+};
 use async_trait::async_trait;
 use plexspaces_common::RequestContext;
 
@@ -62,7 +65,7 @@ impl RedisLockManager {
             .get_tokio_connection_manager()
             .await
             .map_err(|e| LockError::BackendError(format!("failed to connect redis: {e}")))?;
-        
+
         // Mask password in URL for logging
         let display_url = redis_url
             .split('@')
@@ -75,7 +78,7 @@ impl RedisLockManager {
             backend = "Redis",
             "Locks storage initialized"
         );
-        
+
         Ok(Self { conn })
     }
 }
@@ -83,19 +86,31 @@ impl RedisLockManager {
 #[cfg(feature = "redis-backend")]
 #[async_trait]
 impl LockManager for RedisLockManager {
-    async fn acquire_lock(&self, _ctx: &RequestContext, _options: AcquireLockOptions) -> LockResult<Lock> {
+    async fn acquire_lock(
+        &self,
+        _ctx: &RequestContext,
+        _options: AcquireLockOptions,
+    ) -> LockResult<Lock> {
         Err(LockError::BackendError(
             "RedisLockManager::acquire_lock not yet implemented".into(),
         ))
     }
 
-    async fn renew_lock(&self, _ctx: &RequestContext, _options: RenewLockOptions) -> LockResult<Lock> {
+    async fn renew_lock(
+        &self,
+        _ctx: &RequestContext,
+        _options: RenewLockOptions,
+    ) -> LockResult<Lock> {
         Err(LockError::BackendError(
             "RedisLockManager::renew_lock not yet implemented".into(),
         ))
     }
 
-    async fn release_lock(&self, _ctx: &RequestContext, _options: ReleaseLockOptions) -> LockResult<()> {
+    async fn release_lock(
+        &self,
+        _ctx: &RequestContext,
+        _options: ReleaseLockOptions,
+    ) -> LockResult<()> {
         Err(LockError::BackendError(
             "RedisLockManager::release_lock not yet implemented".into(),
         ))
@@ -107,5 +122,3 @@ impl LockManager for RedisLockManager {
         ))
     }
 }
-
-

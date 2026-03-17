@@ -41,9 +41,7 @@
 use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use plexspaces_proto::channel::v1::{
-    ChannelProvider, ChannelConfig, ChannelStats,
-};
+use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, ChannelStats};
 use plexspaces_proto::common::v1::Message;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -198,7 +196,9 @@ impl Channel for MockChannel {
             }
         }
 
-        self.stats.messages_received.fetch_add(result.len() as u64, Ordering::Relaxed);
+        self.stats
+            .messages_received
+            .fetch_add(result.len() as u64, Ordering::Relaxed);
         Ok(result)
     }
 
@@ -272,15 +272,15 @@ impl Channel for MockChannel {
             // Reset delivery count on successful ack
             let mut delivery = self.delivery_count.write().await;
             delivery.remove(message_id);
-            
+
             self.stats.messages_acked.fetch_add(1, Ordering::Relaxed);
-            
+
             crate::observability::record_channel_ack(
                 &self.config.name,
                 message_id,
                 crate::observability::backend_name(self.config.provider),
             );
-            
+
             Ok(())
         } else {
             self.stats.errors.fetch_add(1, Ordering::Relaxed);
@@ -308,10 +308,11 @@ impl Channel for MockChannel {
         if let Some(mut msg) = message {
             // Update delivery_count in message
             msg.delivery_count = delivery_count;
-            
+
             // Check if we should requeue or send to DLQ
             let should_requeue = requeue && delivery_count < max_retries && !is_poisonous;
-            let send_to_dlq = (!requeue || delivery_count >= max_retries || is_poisonous) && dlq_enabled;
+            let send_to_dlq =
+                (!requeue || delivery_count >= max_retries || is_poisonous) && dlq_enabled;
 
             if should_requeue {
                 // Requeue message
@@ -330,13 +331,13 @@ impl Channel for MockChannel {
                     let mut dlq = self.dlq.write().await;
                     dlq.push(msg);
                     self.stats.messages_dlq.fetch_add(1, Ordering::Relaxed);
-                    
+
                     let reason = if is_poisonous {
                         "poisonous_message"
                     } else {
                         "max_retries_exceeded"
                     };
-                    
+
                     crate::observability::record_channel_dlq(
                         &self.config.name,
                         message_id,
@@ -382,10 +383,22 @@ impl Channel for MockChannel {
             backend_stats: {
                 let mut map = HashMap::new();
                 map.insert("dlq_size".to_string(), dlq.len().to_string());
-                map.insert("poisonous_count".to_string(), self.poisonous_messages.read().await.len().to_string());
-                map.insert("messages_acked".to_string(), stats.messages_acked.load(Ordering::Relaxed).to_string());
-                map.insert("messages_failed".to_string(), stats.messages_failed.load(Ordering::Relaxed).to_string());
-                map.insert("messages_dlq".to_string(), stats.messages_dlq.load(Ordering::Relaxed).to_string());
+                map.insert(
+                    "poisonous_count".to_string(),
+                    self.poisonous_messages.read().await.len().to_string(),
+                );
+                map.insert(
+                    "messages_acked".to_string(),
+                    stats.messages_acked.load(Ordering::Relaxed).to_string(),
+                );
+                map.insert(
+                    "messages_failed".to_string(),
+                    stats.messages_failed.load(Ordering::Relaxed).to_string(),
+                );
+                map.insert(
+                    "messages_dlq".to_string(),
+                    stats.messages_dlq.load(Ordering::Relaxed).to_string(),
+                );
                 // Note: messages_nacked is tracked as messages_failed in ChannelStats
                 map
             },
@@ -405,10 +418,3 @@ impl Channel for MockChannel {
         &self.config
     }
 }
-
-
-
-
-
-
-

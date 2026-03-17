@@ -74,14 +74,17 @@
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::io::Write;
-use tokio::sync::RwLock;
+use std::sync::Arc;
 use std::sync::OnceLock;
+use tokio::sync::RwLock;
+
+use crate::node_address::{canonical_node_address_key, dialable_node_address};
 
 /// Global fatal error channel sender (Go-style graceful shutdown pattern)
 /// Uses Mutex to allow taking ownership of oneshot::Sender (which can't be cloned)
-static FATAL_ERROR_TX: OnceLock<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<String>>>> = OnceLock::new();
+static FATAL_ERROR_TX: OnceLock<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<String>>>> =
+    OnceLock::new();
 
 /// Register fatal error channel sender (called once by CLI)
 pub fn register_fatal_error_channel(tx: tokio::sync::oneshot::Sender<String>) {
@@ -89,22 +92,22 @@ pub fn register_fatal_error_channel(tx: tokio::sync::oneshot::Sender<String>) {
 }
 
 /// Exit the process immediately with a non-zero code
-/// 
+///
 /// ## Purpose
 /// Forces immediate process termination, flushing all output first.
 /// This is used for fatal configuration errors during initialization.
-/// 
+///
 /// ## Behavior
 /// - Flushes stdout and stderr
 /// - Attempts to signal main thread via global channel (if registered) - Go-style graceful shutdown
 /// - Uses libc::_exit() on Unix for immediate termination (bypasses cleanup)
 /// - Falls back to std::process::exit() on other platforms
 /// - Does not wait for any tasks or cleanup
-/// 
+///
 /// ## Testing
 /// In test mode (detected via `cfg(test)` or `PLEXSPACES_TEST_MODE` env var),
 /// this function panics instead of exiting, allowing tests to verify the error.
-/// 
+///
 /// ## Note
 /// We use libc::_exit() because it terminates the process immediately without
 /// running any cleanup handlers, which ensures spawned tasks don't keep the
@@ -114,18 +117,18 @@ fn fatal_exit(message: &str) -> ! {
     eprintln!("{}", message);
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
-    
+
     // In test mode, panic instead of exiting (allows tests to verify behavior)
     #[cfg(test)]
     {
         panic!("FATAL EXIT (test mode): {}", message);
     }
-    
+
     // Check for test mode environment variable (for integration tests)
     if std::env::var("PLEXSPACES_TEST_MODE").is_ok() {
         panic!("FATAL EXIT (test mode): {}", message);
     }
-    
+
     // Signal main thread via global channel (if registered)
     if let Some(tx_mutex) = FATAL_ERROR_TX.get() {
         if let Ok(mut tx_guard) = tx_mutex.lock() {
@@ -136,11 +139,11 @@ fn fatal_exit(message: &str) -> ! {
             }
         }
     }
-    
+
     // Force flush all output before exiting
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
-    
+
     // Production: Use _exit() for immediate termination - bypasses all cleanup
     // CRITICAL: Must use _exit() not exit() to bypass tokio runtime cleanup
     // This works even when called from within a tokio async context
@@ -167,7 +170,7 @@ async fn create_sqlite_lock_manager(
     node_id_str: &str,
 ) -> Arc<dyn plexspaces_locks::LockManager> {
     use plexspaces_locks::sql::SqliteLockManager;
-    
+
     // Use the shared database URL (same as KeyValue store)
     let lock_db_url = if let Some(ref url) = db_url {
         // Use the shared database URL directly (it already has mode=rwc)
@@ -177,14 +180,14 @@ async fn create_sqlite_lock_manager(
         let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
         format!("sqlite:///tmp/plexspaces-{}.db?mode=rwc", sanitized_node_id)
     };
-    
-        tracing::info!(
-            backend = "SQLite",
-            db_url = %lock_db_url,
-            implementation = "SqliteLockManager",
-            "🔧 Lock manager initialized: SqliteLockManager (shared SQLite database)"
-        );
-    
+
+    tracing::info!(
+        backend = "SQLite",
+        db_url = %lock_db_url,
+        implementation = "SqliteLockManager",
+        "🔧 Lock manager initialized: SqliteLockManager (shared SQLite database)"
+    );
+
     match SqliteLockManager::new(&lock_db_url).await {
         Ok(manager) => Arc::new(manager),
         Err(e) => {
@@ -215,35 +218,39 @@ async fn create_sqlite_lock_manager(
 }
 
 // Import ActorService and TupleSpaceProvider traits for trait object storage
-use plexspaces_core::actor_context::{ActorService, ChannelService, TupleSpaceProvider, ObjectRegistry};
-use plexspaces_core::monitoring::{NodeMetricsAccessor, NodeConnectionInfo};
-use plexspaces_core::RequestContext;
-use plexspaces_core::JournalStorage;
-use plexspaces_core::{ActorRegistry, VirtualActorManager, ReplyWaiterRegistry};
-use plexspaces_core::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
-use plexspaces_core::behavior_factory::BehaviorRegistry;
-use plexspaces_core::ServiceLocator;
 use plexspaces_actor::ActorRef;
+use plexspaces_core::actor_context::{
+    ActorService, ChannelService, ObjectRegistry, TupleSpaceProvider,
+};
+use plexspaces_core::behavior_factory::BehaviorRegistry;
+use plexspaces_core::facet_service_wrapper::{
+    FacetManagerServiceWrapper, FacetRegistryServiceWrapper,
+};
+use plexspaces_core::monitoring::{NodeConnectionInfo, NodeMetricsAccessor};
+use plexspaces_core::JournalStorage;
+use plexspaces_core::RequestContext;
+use plexspaces_core::ServiceLocator;
+use plexspaces_core::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
 
 pub use plexspaces_core::service_names;
 use plexspaces_core::Service;
 
 /// Wrapper to store Arc<T> with type name for TypeId-independent extraction
-/// 
+///
 /// ## Purpose
 /// Stores Arc<T> along with its type name. When extracting, we use type name matching
 /// instead of TypeId, bypassing the cross-crate TypeId mismatch issue.
-/// 
+///
 /// ## TypeId Limitation
 /// Rust's `TypeId` can differ for the same type when accessed through different import paths
 /// (e.g., `crate::T` vs `external_crate::T`). This wrapper stores the type name separately
 /// and uses it for verification before attempting extraction.
-/// 
+///
 /// ## Extraction Strategy
 /// We verify the type name matches first (bypassing TypeId for verification), then use
 /// the standard `downcast` method. This works when TypeIds match (same import path) but
 /// may fail for different import paths. This is a known limitation of Rust's type system.
-/// 
+///
 /// ## Design
 /// We store both `Arc<dyn Any>` (for type erasure) and the original `Arc<T>` (for extraction
 /// when TypeId mismatch occurs). However, we can't store `Arc<T>` generically, so we use
@@ -262,26 +269,26 @@ impl ServiceStorage {
             type_name: std::any::type_name::<T>(),
         }
     }
-    
+
     /// Try to extract Arc<T> if the type name matches
-    /// 
+    ///
     /// ## How it works
     /// 1. Verify type name matches (bypasses TypeId for verification)
     /// 2. Try standard `downcast` method first (uses TypeId internally)
     /// 3. If downcast fails but type name matches, use unsafe extraction as fallback
-    /// 
+    ///
     /// ## TypeId Limitation
     /// The standard `downcast` method uses `TypeId` internally, which can differ for the same
     /// type when accessed through different import paths. This means:
     /// - ✅ Works when TypeIds match (same import path used for registration and retrieval)
     /// - ❌ Fails when TypeIds don't match (different import paths) even though type name matches
-    /// 
+    ///
     /// When `downcast` fails due to TypeId mismatch but type name matches, we use unsafe code
     /// to extract the service. This is safe because:
     /// 1. We verify the type name matches before casting
     /// 2. The storage always contains the correct type (enforced by `new()`)
     /// 3. We properly handle Arc reference counting
-    /// 
+    ///
     /// ## Safety
     /// The unsafe code is safe because:
     /// 1. We verify the type name matches before casting (type_name::<T>() is reliable)
@@ -293,25 +300,25 @@ impl ServiceStorage {
         if self.type_name != std::any::type_name::<T>() {
             return None;
         }
-        
+
         // Try standard downcast first (works when TypeIds match)
         if let Ok(extracted) = self.inner.clone().downcast::<T>() {
             return Some(extracted);
         }
-        
+
         // Type name matches but downcast failed - this indicates TypeId mismatch
         // Use unsafe extraction as fallback (safe because we verified type name matches)
         unsafe {
             // Safety: We've verified that type_name matches, so the stored type is T.
             // We need to extract the data pointer from Arc<dyn Any> and create Arc<T> from it.
-            // 
+            //
             // Arc<dyn Any> is a pointer to a heap-allocated structure containing:
             // - Reference count
             // - vtable pointer (for dyn Any)
             // - Data (of type T)
             //
             // Arc<T> is a pointer to a heap-allocated structure containing:
-            // - Reference count  
+            // - Reference count
             // - Data (of type T)
             //
             // The data is at the same offset in both cases, but the vtable is different.
@@ -333,7 +340,6 @@ impl Service for ServiceStorage {
     }
 }
 
-
 // Service trait moved to plexspaces-core::Service
 
 /// ServiceLocator implementation for centralized service registration and gRPC client caching
@@ -342,59 +348,60 @@ pub struct ServiceLocatorImpl {
     /// Registered services (service_name -> ServiceStorage)
     /// Services are stored with type name information for TypeId-independent extraction
     services: Arc<RwLock<HashMap<String, ServiceStorage>>>,
-    
+
     /// Registered ActorService (stored separately for type-safe access)
     /// This allows ActorContext::get_actor_service() to work without unsafe code
     actor_service: Arc<RwLock<Option<Arc<dyn ActorService>>>>,
-    
+
     /// Registered TupleSpaceProvider (stored separately for type-safe access)
     /// This allows ActorContext::get_tuplespace() to work without unsafe code
     tuplespace_provider: Arc<RwLock<Option<Arc<dyn TupleSpaceProvider>>>>,
-    
+
     /// Registered ChannelService (stored separately for type-safe access)
     /// This allows ActorContext::get_channel_service() to work without unsafe code
     channel_service: Arc<RwLock<Option<Arc<dyn ChannelService>>>>,
-    
+
     /// Registered JournalStorage (stored separately for type-safe access)
     /// This allows components to retrieve JournalStorage as a trait object without knowing the concrete type
     journal_storage: Arc<RwLock<Option<Arc<dyn JournalStorage + Send + Sync>>>>,
-    
+
     /// Registered LockManager (stored separately for type-safe access)
     /// This allows components to retrieve LockManager as a trait object without knowing the concrete type
     lock_manager: Arc<RwLock<Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>>>>,
-    
+
     /// Registered NodeMetricsAccessor (stored separately for type-safe access)
     /// This allows components to read and update NodeMetrics without depending on Node type
     node_metrics_accessor: Arc<RwLock<Option<Arc<dyn NodeMetricsAccessor + Send + Sync>>>>,
     /// Registered NodeConnectionInfo (stored separately for type-safe access)
     /// This allows components to access node connection information without depending on Node type
     node_connection_info: Arc<RwLock<Option<Arc<dyn NodeConnectionInfo + Send + Sync>>>>,
-    
+
     /// Registered ActorFactory (stored as trait object for type-safe access)
     /// ActorFactory trait is in core crate, so we can store it directly without type erasure.
     actor_factory: Arc<RwLock<Option<Arc<dyn plexspaces_core::ActorFactory>>>>,
-    
+
     /// Registered ObjectRegistry (stored separately for type-safe access)
     /// This allows components to retrieve ObjectRegistry as a trait object without knowing the concrete type
     object_registry: Arc<RwLock<Option<Arc<dyn ObjectRegistry>>>>,
-    
+
     /// Registered ApplicationManager (stored separately for type-safe access)
     /// This allows components to retrieve ApplicationManager as a trait object
     application_manager: Arc<RwLock<Option<Arc<dyn plexspaces_core::ApplicationManager>>>>,
-    
+
     /// Registered BehaviorRegistry (stored separately for type-safe access)
     /// This allows components to retrieve BehaviorRegistry for creating actor behaviors
-    behavior_registry: Arc<RwLock<Option<Arc<plexspaces_core::behavior_factory::BehaviorRegistry>>>>,
-    
+    behavior_registry:
+        Arc<RwLock<Option<Arc<plexspaces_core::behavior_factory::BehaviorRegistry>>>>,
+
     /// Registered GrpcConnectionManager (stored separately for type-safe access)
     /// This allows components to retrieve GrpcConnectionManager for connection pooling
     grpc_connection_manager: Arc<RwLock<Option<Arc<plexspaces_core::GrpcConnectionManager>>>>,
-    
+
     /// Registered WASM runtime (stored separately as trait object)
     /// This allows components to retrieve WASM runtime without depending on plexspaces-wasm-runtime crate
     /// Uses WasmRuntimeTrait from plexspaces-core for type-safe access.
     wasm_runtime: Arc<RwLock<Option<Arc<dyn plexspaces_core::WasmRuntimeTrait>>>>,
-    
+
     /// Registered ProcessGroupService (stored separately for type-safe access)
     /// This allows components to retrieve ProcessGroupService for distributed pub/sub
     /// Uses ProcessGroupService trait from plexspaces-core for Erlang pg/pg2-style process groups
@@ -402,11 +409,11 @@ pub struct ServiceLocatorImpl {
 
     /// Registered ElasticPoolService for checkout/checkin and pool metrics (SDK uses via ServiceLocator)
     elastic_pool_service: Arc<RwLock<Option<Arc<dyn plexspaces_core::ElasticPoolService>>>>,
-    
+
     /// Registered BlobService (stored separately for type-safe access)
     /// This allows components to retrieve BlobService for blob storage operations
     blob_service: Arc<RwLock<Option<Arc<dyn plexspaces_core::BlobServiceTrait>>>>,
-    
+
     /// Registered NodeRegistry (stored separately for type-safe access)
     /// This allows components to retrieve NodeRegistry for node discovery with caching
     node_registry: Arc<RwLock<Option<Arc<dyn plexspaces_core::NodeRegistryTrait>>>>,
@@ -422,25 +429,77 @@ pub struct ServiceLocatorImpl {
     /// Registered TaskRouter (stored separately for type-safe access)
     /// This allows components to register shard groups for task routing
     task_router: Arc<RwLock<Option<Arc<plexspaces_scheduler::TaskRouter>>>>,
-    
+
     /// Node configuration (for accessing node_id, cluster_name, auth settings)
     /// Read-only after initialization, uses Mutex for one-time initialization
     node_config: Arc<tokio::sync::Mutex<Option<plexspaces_proto::node::v1::NodeConfig>>>,
-    
+
     /// Security configuration (for accessing disable_auth, service_identity, etc.)
     /// Read-only after initialization, uses Mutex for one-time initialization
     security_config: Arc<tokio::sync::Mutex<Option<plexspaces_proto::node::v1::SecurityConfig>>>,
-    
+
     /// Runtime configuration (for accessing wasm_apps_directory, save_wasm_apps, etc.)
     /// Read-only after initialization, uses Mutex for one-time initialization
     runtime_config: Arc<tokio::sync::Mutex<Option<plexspaces_proto::node::v1::RuntimeConfig>>>,
-    
+
     /// Shutdown flag: when true, node is shutting down gracefully
     /// Components should stop accepting new requests but complete in-progress ones
     shutdown_flag: Arc<RwLock<bool>>,
 }
 
 impl ServiceLocatorImpl {
+    async fn resolve_application_service_target(
+        &self,
+        target: &str,
+    ) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
+        let ctx = self.request_context_for_system_operations().await;
+
+        if target.starts_with("http://") || target.starts_with("https://") || target.contains(':') {
+            let normalized = dialable_node_address(target);
+            return Ok((normalized.clone(), normalized));
+        }
+
+        if let Some(object_registry) = self.get_object_registry().await {
+            use plexspaces_proto::object_registry::v1::ObjectType;
+            if let Ok(Some(registration)) = object_registry
+                .lookup_full(&ctx, ObjectType::ObjectTypeNode, target)
+                .await
+            {
+                let normalized = dialable_node_address(&registration.grpc_address);
+                return Ok((registration.object_id, normalized));
+            }
+        }
+
+        let node_registry = self
+            .get_node_registry()
+            .await
+            .ok_or_else(|| format!("Node not found: {} (no NodeRegistry)", target))?;
+
+        if let Some(registration) = node_registry
+            .lookup_node(&ctx, target)
+            .await
+            .map_err(|e| format!("NodeRegistry lookup failed: {}", e))?
+        {
+            let normalized = dialable_node_address(&registration.node_address);
+            return Ok((registration.node_id, normalized));
+        }
+
+        let target_key = canonical_node_address_key(target);
+        let (registrations, _) = node_registry
+            .list_nodes(&ctx, None, 0, "")
+            .await
+            .map_err(|e| format!("NodeRegistry list failed: {}", e))?;
+        if let Some(registration) = registrations.into_iter().find(|registration| {
+            registration.node_id == target
+                || canonical_node_address_key(&registration.node_address) == target_key
+        }) {
+            let normalized = dialable_node_address(&registration.node_address);
+            return Ok((registration.node_id, normalized));
+        }
+
+        Err(format!("Node not found: {}", target).into())
+    }
+
     /// Create a new ServiceLocator (empty, no services registered)
     ///
     /// ## Note
@@ -475,7 +534,7 @@ impl ServiceLocatorImpl {
             shutdown_flag: Arc::new(RwLock::new(false)),
         }
     }
-    
+
     /// Check if node is shutting down
     ///
     /// ## Purpose
@@ -497,7 +556,7 @@ impl ServiceLocatorImpl {
         // It updates this flag via set_shutdown() when begin_shutdown() is called
         *self.shutdown_flag.read().await
     }
-    
+
     /// Set shutdown flag (called by HealthService during graceful shutdown)
     ///
     /// ## Purpose
@@ -510,23 +569,25 @@ impl ServiceLocatorImpl {
     pub async fn set_shutdown(&self, shutdown: bool) {
         let mut flag = self.shutdown_flag.write().await;
         *flag = shutdown;
-        tracing::info!("ServiceLocator shutdown flag set to: {} (via HealthService)", shutdown);
+        tracing::info!(
+            "ServiceLocator shutdown flag set to: {} (via HealthService)",
+            shutdown
+        );
     }
-    
-    
+
     /// Register NodeConfig for accessing node_id, cluster_name, auth settings
     /// Note: This should be called once during node initialization
     pub async fn register_node_config(&self, config: plexspaces_proto::node::v1::NodeConfig) {
         let mut node_config = self.node_config.lock().await;
         *node_config = Some(config);
     }
-    
+
     /// Get NodeConfig (for accessing node_id, cluster_name, auth settings)
     pub async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig> {
         let node_config = self.node_config.lock().await;
         node_config.clone()
     }
-    
+
     /// Get Node ID from NodeConfig
     pub async fn get_node_id(&self) -> Option<String> {
         let node_config = self.node_config.lock().await;
@@ -540,7 +601,7 @@ impl ServiceLocatorImpl {
     }
 
     /// Check if authentication is disabled (from SecurityConfig or env var)
-    /// 
+    ///
     /// Returns true if auth is disabled via PLEXSPACES_DISABLE_AUTH env var or SecurityConfig.disable_auth.
     /// For security, auth is enabled by default if SecurityConfig is not set.
     /// Can be disabled via PLEXSPACES_DISABLE_AUTH env variable for testing.
@@ -548,11 +609,14 @@ impl ServiceLocatorImpl {
         // Check env variable first (for testing)
         if std::env::var("PLEXSPACES_DISABLE_AUTH").is_ok() {
             let env_value = std::env::var("PLEXSPACES_DISABLE_AUTH").unwrap();
-            if env_value == "1" || env_value.eq_ignore_ascii_case("true") || env_value.eq_ignore_ascii_case("yes") {
+            if env_value == "1"
+                || env_value.eq_ignore_ascii_case("true")
+                || env_value.eq_ignore_ascii_case("yes")
+            {
                 return true;
             }
         }
-        
+
         let security_config = self.security_config.lock().await;
         match security_config.as_ref() {
             Some(config) => config.disable_auth,
@@ -589,7 +653,10 @@ impl ServiceLocatorImpl {
     ///
     /// ## Errors
     /// Exits with code 1 if auth is enabled but keys/secrets are missing (fatal error).
-    pub async fn register_security_config(&self, config: plexspaces_proto::node::v1::SecurityConfig) {
+    pub async fn register_security_config(
+        &self,
+        config: plexspaces_proto::node::v1::SecurityConfig,
+    ) {
         // Validate security configuration (fatal if invalid)
         use plexspaces_common::security_validator::validate_security_config;
         if let Err(e) = validate_security_config(&config).await {
@@ -597,7 +664,7 @@ impl ServiceLocatorImpl {
             tracing::error!(error = %e, "{}", error_msg);
             fatal_exit(&error_msg);
         }
-        
+
         let mut config_guard = self.security_config.lock().await;
         *config_guard = Some(config);
         tracing::info!("Security configuration registered and validated successfully");
@@ -618,7 +685,11 @@ impl ServiceLocatorImpl {
     /// let actor_registry = Arc::new(ActorRegistry::new());
     /// service_locator.register_service_by_name("ActorRegistry", actor_registry).await;
     /// ```
-    pub async fn register_service_by_name<T: Service + 'static>(&self, service_name: impl Into<String>, service: Arc<T>) {
+    pub async fn register_service_by_name<T: Service + 'static>(
+        &self,
+        service_name: impl Into<String>,
+        service: Arc<T>,
+    ) {
         let name = service_name.into();
         let mut services = self.services.write().await;
         // Store with type name information for TypeId-independent extraction
@@ -626,12 +697,12 @@ impl ServiceLocatorImpl {
         let storage = ServiceStorage::new(service);
         services.insert(name, storage);
     }
-    
+
     /// Register a service using its default service name
     ///
     /// ## Arguments
     /// * `service` - Service to register (must implement `Service` trait)
-    /// 
+    ///
     /// ## Note
     /// Uses the service's `service_name()` method to determine the registration name.
     /// For explicit control, use `register_service_by_name()` instead.
@@ -660,27 +731,27 @@ impl ServiceLocatorImpl {
     /// to ensure TypeId consistency. Rust's `TypeId` can differ for the same type when accessed
     /// through different import paths (e.g., `crate::T` vs `external_crate::T`), even though
     /// they resolve to the same concrete type.
-    /// 
+    ///
     /// The ServiceLocator uses string-based registration (bypassing TypeId for lookup) and type
     /// name verification (bypassing TypeId for verification), but the final extraction uses the
     /// standard `downcast` method which requires TypeId matching.
-    /// 
-    /// **Best Practice**: 
+    ///
+    /// **Best Practice**:
     /// - Use the external crate name (e.g., `plexspaces_actor::ActorFactoryImpl`) when possible
     /// - Avoid using `crate::` from within the defining crate when registering/retrieving services
     /// - If you must use `crate::`, ensure the registration also uses `crate::` (only possible within the same crate)
-    /// 
+    ///
     /// **Example**:
     /// ```rust,ignore
     /// // ✅ Correct: Use helper methods for common services
     /// let factory: Arc<dyn ActorFactory> = plexspaces_actor::get_actor_factory(&service_locator).await?;
     /// let registry: Arc<ActorRegistry> = service_locator.actor_registry().await?;
-    /// 
+    ///
     /// // For less common services, use get_service_by_name with service_names constants
     /// use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
     /// service_locator.register_service_by_name(service_names::ACTOR_FACTORY_IMPL, factory).await;
     /// let factory: Arc<ActorFactoryImpl> = service_locator.get_service_by_name(service_names::ACTOR_FACTORY_IMPL).await?;
-    /// 
+    ///
     /// // ⚠️ May fail: Different import paths (TypeId mismatch)
     /// // Registration uses external crate name, retrieval uses crate::
     /// use plexspaces_actor::actor_factory_impl::ActorFactoryImpl; // Registration
@@ -692,20 +763,21 @@ impl ServiceLocatorImpl {
     /// let actor_registry: Arc<ActorRegistry> = service_locator.get_service_by_name("ActorRegistry").await
     ///     .ok_or("ActorRegistry not registered")?;
     /// ```
-    pub async fn get_service_by_name<T: Service + 'static>(&self, service_name: impl Into<String>) -> Option<Arc<T>> {
+    pub async fn get_service_by_name<T: Service + 'static>(
+        &self,
+        service_name: impl Into<String>,
+    ) -> Option<Arc<T>> {
         let name = service_name.into();
         let services = self.services.read().await;
-        services
-            .get(&name)
-            .and_then(|storage| {
-                // Use type name matching first, then standard downcast
-                // The type name check bypasses TypeId for verification, but downcast still uses TypeId
-                // This works when TypeIds match (same import path) but may fail for different import paths
-                // See documentation above for TypeId consistency requirements
-                storage.try_extract::<T>()
-            })
+        services.get(&name).and_then(|storage| {
+            // Use type name matching first, then standard downcast
+            // The type name check bypasses TypeId for verification, but downcast still uses TypeId
+            // This works when TypeIds match (same import path) but may fail for different import paths
+            // See documentation above for TypeId consistency requirements
+            storage.try_extract::<T>()
+        })
     }
-    
+
     /// Get a registered service using its default service name
     ///
     /// ## Arguments
@@ -727,7 +799,7 @@ impl ServiceLocatorImpl {
     /// // Prefer using helper methods for common services
     /// let actor_registry: Arc<ActorRegistry> = service_locator.actor_registry().await
     ///     .ok_or("ActorRegistry not registered")?;
-    /// 
+    ///
     /// // For less common services, use get_service() or get_service_by_name()
     /// let registry: Arc<ReplyWaiterRegistry> = service_locator.get_service().await
     ///     .ok_or("ReplyWaiterRegistry not registered")?;
@@ -875,7 +947,6 @@ impl ServiceLocatorImpl {
         journal_storage.clone()
     }
 
-
     /// Register NodeMetricsAccessor as a trait object
     ///
     /// ## Purpose
@@ -884,7 +955,10 @@ impl ServiceLocatorImpl {
     ///
     /// ## Arguments
     /// * `accessor` - NodeMetricsAccessor as a trait object
-    pub async fn register_node_metrics_accessor(&self, accessor: Arc<dyn NodeMetricsAccessor + Send + Sync>) {
+    pub async fn register_node_metrics_accessor(
+        &self,
+        accessor: Arc<dyn NodeMetricsAccessor + Send + Sync>,
+    ) {
         let mut metrics_accessor = self.node_metrics_accessor.write().await;
         *metrics_accessor = Some(accessor);
     }
@@ -897,7 +971,9 @@ impl ServiceLocatorImpl {
     ///
     /// ## Returns
     /// `Some(Arc<dyn NodeMetricsAccessor>)` if registered, `None` otherwise
-    pub async fn get_node_metrics_accessor(&self) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>> {
+    pub async fn get_node_metrics_accessor(
+        &self,
+    ) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>> {
         let metrics_accessor = self.node_metrics_accessor.read().await;
         metrics_accessor.clone()
     }
@@ -910,7 +986,10 @@ impl ServiceLocatorImpl {
     ///
     /// ## Arguments
     /// * `accessor` - NodeConnectionInfo as a trait object
-    pub async fn register_node_connection_info(&self, accessor: Arc<dyn NodeConnectionInfo + Send + Sync>) {
+    pub async fn register_node_connection_info(
+        &self,
+        accessor: Arc<dyn NodeConnectionInfo + Send + Sync>,
+    ) {
         let mut connection_info = self.node_connection_info.write().await;
         *connection_info = Some(accessor);
     }
@@ -923,7 +1002,9 @@ impl ServiceLocatorImpl {
     ///
     /// ## Returns
     /// `Some(Arc<dyn NodeConnectionInfo>)` if registered, `None` otherwise
-    pub async fn get_node_connection_info(&self) -> Option<Arc<dyn NodeConnectionInfo + Send + Sync>> {
+    pub async fn get_node_connection_info(
+        &self,
+    ) -> Option<Arc<dyn NodeConnectionInfo + Send + Sync>> {
         let connection_info = self.node_connection_info.read().await;
         connection_info.clone()
     }
@@ -935,7 +1016,10 @@ impl ServiceLocatorImpl {
     ///
     /// ## Arguments
     /// * `manager` - ApplicationManager as a trait object
-    pub async fn register_application_manager(&self, manager: Arc<dyn plexspaces_core::ApplicationManager>) {
+    pub async fn register_application_manager(
+        &self,
+        manager: Arc<dyn plexspaces_core::ApplicationManager>,
+    ) {
         let mut app_manager = self.application_manager.write().await;
         *app_manager = Some(manager);
     }
@@ -947,7 +1031,9 @@ impl ServiceLocatorImpl {
     ///
     /// ## Returns
     /// `Some(Arc<dyn ApplicationManager>)` if registered, `None` otherwise
-    pub async fn get_application_manager(&self) -> Option<Arc<dyn plexspaces_core::ApplicationManager>> {
+    pub async fn get_application_manager(
+        &self,
+    ) -> Option<Arc<dyn plexspaces_core::ApplicationManager>> {
         let app_manager = self.application_manager.read().await;
         app_manager.clone()
     }
@@ -974,7 +1060,8 @@ impl ServiceLocatorImpl {
     /// let registry = service_locator.actor_registry().await?;
     /// ```
     pub async fn actor_registry(&self) -> Option<Arc<ActorRegistry>> {
-        self.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY).await
+        self.get_service_by_name::<ActorRegistry>(service_names::ACTOR_REGISTRY)
+            .await
     }
 
     /// Register ActorRegistry service
@@ -982,7 +1069,8 @@ impl ServiceLocatorImpl {
     /// ## Arguments
     /// * `registry` - The ActorRegistry to register
     pub async fn register_actor_registry(&self, registry: Arc<ActorRegistry>) {
-        self.register_service_by_name(service_names::ACTOR_REGISTRY, registry).await;
+        self.register_service_by_name(service_names::ACTOR_REGISTRY, registry)
+            .await;
     }
 
     /// Get ObjectRegistry service as trait object
@@ -1005,7 +1093,7 @@ impl ServiceLocatorImpl {
     /// callers in other crates should use `get_service_by_name` with the concrete type,
     /// then cast to `Arc<dyn ObjectRegistry>`:
     /// ```rust,ignore
-    /// let registry: Arc<plexspaces_object_registry::ObjectRegistry> = 
+    /// let registry: Arc<plexspaces_object_registry::ObjectRegistry> =
     ///     service_locator.get_service_by_name(service_names::OBJECT_REGISTRY).await?;
     /// let registry_trait: Arc<dyn ObjectRegistry> = registry;
     /// ```
@@ -1056,7 +1144,8 @@ impl ServiceLocatorImpl {
     /// let manager = service_locator.virtual_actor_manager().await?;
     /// ```
     pub async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
-        self.get_service_by_name::<VirtualActorManager>(service_names::VIRTUAL_ACTOR_MANAGER).await
+        self.get_service_by_name::<VirtualActorManager>(service_names::VIRTUAL_ACTOR_MANAGER)
+            .await
     }
 
     /// Get FacetManager service wrapper
@@ -1069,7 +1158,8 @@ impl ServiceLocatorImpl {
     /// let facet_manager = service_locator.facet_manager().await?;
     /// ```
     pub async fn facet_manager(&self) -> Option<Arc<FacetManagerServiceWrapper>> {
-        self.get_service_by_name::<FacetManagerServiceWrapper>(service_names::FACET_MANAGER).await
+        self.get_service_by_name::<FacetManagerServiceWrapper>(service_names::FACET_MANAGER)
+            .await
     }
 
     /// Get FacetRegistry service wrapper
@@ -1082,9 +1172,9 @@ impl ServiceLocatorImpl {
     /// let facet_registry = service_locator.facet_registry().await?;
     /// ```
     pub async fn facet_registry(&self) -> Option<Arc<FacetRegistryServiceWrapper>> {
-        self.get_service_by_name::<FacetRegistryServiceWrapper>(service_names::FACET_REGISTRY).await
+        self.get_service_by_name::<FacetRegistryServiceWrapper>(service_names::FACET_REGISTRY)
+            .await
     }
-
 
     /// Get ActorFactory as trait object
     ///
@@ -1108,7 +1198,6 @@ impl ServiceLocatorImpl {
         self.get_actor_factory().await
     }
 
-
     /// Get ReplyWaiterRegistry service
     ///
     /// ## Returns
@@ -1119,10 +1208,9 @@ impl ServiceLocatorImpl {
     /// let registry = service_locator.reply_waiter_registry().await?;
     /// ```
     pub async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>> {
-        self.get_service_by_name::<ReplyWaiterRegistry>(service_names::REPLY_WAITER_REGISTRY).await
+        self.get_service_by_name::<ReplyWaiterRegistry>(service_names::REPLY_WAITER_REGISTRY)
+            .await
     }
-
-
 
     /// Create a mailbox with default configuration (memory backend)
     ///
@@ -1146,14 +1234,14 @@ impl ServiceLocatorImpl {
     ) -> Result<plexspaces_mailbox::Mailbox, Box<dyn std::error::Error + Send + Sync>> {
         use plexspaces_mailbox::Mailbox;
         use plexspaces_proto::channel::v1::ChannelProvider;
-        
+
         // Create default mailbox config (defaults to memory)
         let mut mailbox_config = plexspaces_mailbox::mailbox_config_default();
-        
+
         // Default to IN_MEMORY (config_manager sets mailbox_provider in RuntimeConfig)
         // TODO: Read from RuntimeConfig.mailbox_provider when ServiceLocator has access to release_config
         mailbox_config.channel_provider = ChannelProvider::ChannelProviderInMemory as i32;
-        
+
         // Create mailbox with the configured backend
         Mailbox::new(mailbox_config, mailbox_id)
             .await
@@ -1179,9 +1267,12 @@ impl ServiceLocatorImpl {
     pub async fn create_default_channel(
         &self,
         channel_name: String,
-    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
-        
+    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>>
+    {
+        use plexspaces_proto::channel::v1::{
+            ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
+        };
+
         // Create default channel config (memory backend)
         // TODO: Read from RuntimeConfig.channel_provider when ServiceLocator has access to release_config
         let channel_config = ChannelConfig {
@@ -1192,12 +1283,12 @@ impl ServiceLocatorImpl {
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
             ..Default::default()
         };
-        
+
         // Create channel using the channel crate's create_channel function
         let channel = plexspaces_channel::create_channel(channel_config)
             .await
             .map_err(|e| format!("Failed to create channel: {}", e))?;
-        
+
         Ok(Arc::from(channel))
     }
 
@@ -1229,17 +1320,18 @@ impl ServiceLocatorImpl {
         &self,
         config: plexspaces_proto::channel::v1::ChannelConfig,
         ctx: &plexspaces_core::RequestContext,
-    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>>
+    {
         use plexspaces_proto::channel::v1::ChannelProvider;
-        
+
         // Use provider from config (defaults to IN_MEMORY if 0)
         // Provider is set by config_manager::initialize() based on RuntimeConfig.channel_provider
         let provider = ChannelProvider::try_from(config.provider)
             .unwrap_or(ChannelProvider::ChannelProviderInMemory);
-        
+
         // Validate provider-specific config
         self.validate_channel_config(&config)?;
-        
+
         // Create channel based on provider type
         match provider {
             ChannelProvider::ChannelProviderProcessGroup => {
@@ -1261,55 +1353,51 @@ impl ServiceLocatorImpl {
         config: &plexspaces_proto::channel::v1::ChannelConfig,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use plexspaces_proto::channel::v1::ChannelProvider;
-        
+
         let provider = ChannelProvider::try_from(config.provider)
             .unwrap_or(ChannelProvider::ChannelProviderInMemory);
-        
+
         match provider {
-            ChannelProvider::ChannelProviderKafka => {
-                match &config.backend_config {
-                    Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(kafka)) => {
-                        if kafka.brokers.is_empty() {
-                            return Err("Kafka provider requires brokers configuration".into());
-                        }
+            ChannelProvider::ChannelProviderKafka => match &config.backend_config {
+                Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(
+                    kafka,
+                )) => {
+                    if kafka.brokers.is_empty() {
+                        return Err("Kafka provider requires brokers configuration".into());
                     }
-                    _ => return Err("Kafka provider requires kafka config".into()),
                 }
-            }
-            ChannelProvider::ChannelProviderNats => {
-                match &config.backend_config {
-                    Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Nats(nats)) => {
-                        if nats.servers.is_empty() {
-                            return Err("NATS provider requires servers configuration".into());
-                        }
+                _ => return Err("Kafka provider requires kafka config".into()),
+            },
+            ChannelProvider::ChannelProviderNats => match &config.backend_config {
+                Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Nats(nats)) => {
+                    if nats.servers.is_empty() {
+                        return Err("NATS provider requires servers configuration".into());
                     }
-                    _ => return Err("NATS provider requires nats config".into()),
                 }
-            }
-            ChannelProvider::ChannelProviderSqs => {
-                match &config.backend_config {
-                    Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqs(sqs)) => {
-                        if sqs.region.is_empty() {
-                            return Err("SQS provider requires region configuration".into());
-                        }
+                _ => return Err("NATS provider requires nats config".into()),
+            },
+            ChannelProvider::ChannelProviderSqs => match &config.backend_config {
+                Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqs(sqs)) => {
+                    if sqs.region.is_empty() {
+                        return Err("SQS provider requires region configuration".into());
                     }
-                    _ => return Err("SQS provider requires sqs config".into()),
                 }
-            }
-            ChannelProvider::ChannelProviderRedis => {
-                match &config.backend_config {
-                    Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Redis(redis)) => {
-                        if redis.url.is_empty() {
-                            return Err("Redis provider requires url configuration".into());
-                        }
+                _ => return Err("SQS provider requires sqs config".into()),
+            },
+            ChannelProvider::ChannelProviderRedis => match &config.backend_config {
+                Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Redis(
+                    redis,
+                )) => {
+                    if redis.url.is_empty() {
+                        return Err("Redis provider requires url configuration".into());
                     }
-                    _ => return Err("Redis provider requires redis config".into()),
                 }
-            }
+                _ => return Err("Redis provider requires redis config".into()),
+            },
             // InMemory, ProcessGroup, SQLite, UDP, Postgres don't require config validation
             _ => {}
         }
-        
+
         Ok(())
     }
 
@@ -1319,14 +1407,17 @@ impl ServiceLocatorImpl {
         &self,
         config: plexspaces_proto::channel::v1::ChannelConfig,
         ctx: &plexspaces_core::RequestContext,
-    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>>
+    {
         use plexspaces_channel::ProcessGroupChannel;
-        
+
         // Get self as Arc for ProcessGroupChannel
         // Since we can't get Arc<Self> from &self, we create the channel differently
-        let process_group_service = self.get_process_group_service().await
+        let process_group_service = self
+            .get_process_group_service()
+            .await
             .ok_or("ProcessGroupService not available for ProcessGroup channel backend")?;
-        
+
         // Create ProcessGroupChannel using ServiceLocator
         // Note: ProcessGroupChannel requires Arc<dyn ServiceLocator>, which we can't easily get from &self
         // For now, return error suggesting to use plexspaces_channel::create_channel directly
@@ -1339,149 +1430,171 @@ impl ServiceLocatorImpl {
         &self,
         _config: plexspaces_proto::channel::v1::ChannelConfig,
         _ctx: &plexspaces_core::RequestContext,
-    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
-        Err("ProcessGroup channel backend not enabled. Enable 'process-group-backend' feature".into())
+    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>>
+    {
+        Err(
+            "ProcessGroup channel backend not enabled. Enable 'process-group-backend' feature"
+                .into(),
+        )
     }
 }
 
 #[async_trait::async_trait]
 impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
     async fn register_service<T: Service + 'static>(&self, service: Arc<T>)
-    where Self: Sized {
+    where
+        Self: Sized,
+    {
         self.register_service(service).await;
     }
-    
+
     async fn get_service<T: Service + 'static>(&self) -> Option<Arc<T>>
-    where Self: Sized {
+    where
+        Self: Sized,
+    {
         self.get_service().await
     }
-    
+
     async fn register_service_by_name<T: Service + 'static>(&self, name: &str, service: Arc<T>)
-    where Self: Sized {
+    where
+        Self: Sized,
+    {
         self.register_service_by_name(name, service).await;
     }
-    
+
     async fn get_service_by_name<T: Service + 'static>(&self, name: &str) -> Option<Arc<T>>
-    where Self: Sized {
+    where
+        Self: Sized,
+    {
         self.get_service_by_name(name).await
     }
-    
+
     async fn actor_registry(&self) -> Option<Arc<ActorRegistry>> {
         self.actor_registry().await
     }
-    
+
     async fn register_actor_registry(&self, registry: Arc<ActorRegistry>) {
         self.register_actor_registry(registry).await;
     }
-    
+
     async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
         self.virtual_actor_manager().await
     }
-    
+
     async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>> {
         self.reply_waiter_registry().await
     }
-    
+
     async fn get_actor_factory(&self) -> Option<Arc<dyn plexspaces_core::ActorFactory>> {
         self.get_actor_factory().await
     }
-    
+
     async fn register_actor_factory(&self, factory: Arc<dyn plexspaces_core::ActorFactory>) {
         self.register_actor_factory(factory).await;
     }
-    
+
     async fn get_actor_service(&self) -> Option<Arc<dyn ActorService>> {
         self.get_actor_service().await
     }
-    
+
     async fn register_actor_service(&self, service: Arc<dyn ActorService>) {
         self.register_actor_service(service).await;
     }
-    
+
     async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>> {
         self.get_channel_service().await
     }
-    
+
     async fn register_channel_service(&self, service: Arc<dyn ChannelService>) {
         self.register_channel_service(service).await;
     }
-    
+
     async fn get_tuplespace_provider(&self) -> Option<Arc<dyn TupleSpaceProvider>> {
         self.get_tuplespace_provider().await
     }
-    
+
     async fn register_tuplespace_provider(&self, service: Arc<dyn TupleSpaceProvider>) {
         self.register_tuplespace_provider(service).await;
     }
-    
+
     async fn get_object_registry(&self) -> Option<Arc<dyn ObjectRegistry>> {
         self.object_registry().await
     }
-    
+
     async fn register_object_registry(&self, service: Arc<dyn ObjectRegistry>) {
         self.register_object_registry(service).await;
     }
-    
+
     async fn get_journal_storage(&self) -> Option<Arc<dyn JournalStorage + Send + Sync>> {
         let storage = self.journal_storage.read().await;
         storage.clone()
     }
-    
+
     async fn register_journal_storage(&self, service: Arc<dyn JournalStorage + Send + Sync>) {
         let mut storage = self.journal_storage.write().await;
         *storage = Some(service);
     }
-    
-    async fn get_lock_manager(&self) -> Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>> {
+
+    async fn get_lock_manager(
+        &self,
+    ) -> Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>> {
         let manager = self.lock_manager.read().await;
         manager.clone()
     }
-    
-    async fn register_lock_manager(&self, service: Arc<dyn plexspaces_locks::LockManager + Send + Sync>) {
+
+    async fn register_lock_manager(
+        &self,
+        service: Arc<dyn plexspaces_locks::LockManager + Send + Sync>,
+    ) {
         let mut manager = self.lock_manager.write().await;
         *manager = Some(service);
     }
-    
-    async fn get_node_metrics_accessor(&self) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>> {
+
+    async fn get_node_metrics_accessor(
+        &self,
+    ) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>> {
         let accessor = self.node_metrics_accessor.read().await;
         accessor.clone()
     }
-    
-    async fn register_node_metrics_accessor(&self, service: Arc<dyn NodeMetricsAccessor + Send + Sync>) {
+
+    async fn register_node_metrics_accessor(
+        &self,
+        service: Arc<dyn NodeMetricsAccessor + Send + Sync>,
+    ) {
         let mut accessor = self.node_metrics_accessor.write().await;
         *accessor = Some(service);
     }
-    
+
     async fn get_facet_manager(&self) -> Option<Arc<FacetManagerServiceWrapper>> {
         self.facet_manager().await
     }
-    
+
     async fn register_facet_manager(&self, service: Arc<FacetManagerServiceWrapper>) {
         self.register_service(service).await;
     }
-    
+
     async fn get_facet_registry(&self) -> Option<Arc<FacetRegistryServiceWrapper>> {
         self.facet_registry().await
     }
-    
+
     async fn register_facet_registry(&self, service: Arc<FacetRegistryServiceWrapper>) {
         self.register_service(service).await;
     }
-    
+
     async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig> {
         let config_guard = self.node_config.lock().await;
         config_guard.clone()
     }
-    
+
     async fn register_node_config(&self, config: plexspaces_proto::node::v1::NodeConfig) {
         let mut config_guard = self.node_config.lock().await;
         *config_guard = Some(config);
     }
-    
+
     async fn get_security_config(&self) -> Option<plexspaces_proto::node::v1::SecurityConfig> {
         self.get_security_config().await
     }
-    
+
     async fn register_security_config(&self, config: plexspaces_proto::node::v1::SecurityConfig) {
         self.register_security_config(config).await
     }
@@ -1493,36 +1606,37 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
     async fn register_runtime_config(&self, config: plexspaces_proto::node::v1::RuntimeConfig) {
         self.register_runtime_config(config).await
     }
-    
+
     async fn is_auth_disabled(&self) -> bool {
         self.is_auth_disabled().await
     }
-    
-    async fn get_node_connection_info(&self) -> Option<Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync>> {
+
+    async fn get_node_connection_info(
+        &self,
+    ) -> Option<Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync>> {
         self.get_node_connection_info().await
     }
-    
-    async fn register_node_connection_info(&self, accessor: Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync>) {
+
+    async fn register_node_connection_info(
+        &self,
+        accessor: Arc<dyn plexspaces_core::NodeConnectionInfo + Send + Sync>,
+    ) {
         self.register_node_connection_info(accessor).await
     }
-    
+
     fn is_shutdown_requested(&self) -> bool {
         // This is a sync method in the trait, but ServiceLocatorImpl uses async
         // Use try_current() to avoid panicking if called from outside runtime
         // If we're in a runtime, use block_in_place to avoid blocking the runtime
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             // We're in an async runtime - use block_in_place to avoid blocking
-            tokio::task::block_in_place(|| {
-                handle.block_on(async {
-                    self.is_shutting_down().await
-                })
-            })
+            tokio::task::block_in_place(|| handle.block_on(async { self.is_shutting_down().await }))
         } else {
             // Not in a runtime - can't check async state, return false
             false
         }
     }
-    
+
     async fn initialize_services(
         &self,
         node_id: Option<String>,
@@ -1534,7 +1648,7 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
             // Services already initialized
             return;
         }
-        
+
         // We can't get Arc from &self, so we need to work differently
         // The helper function needs Arc<ServiceLocatorImpl> for register_service_by_name
         // Since ServiceLocatorImpl contains only Arc fields, cloning is cheap (just clones the Arc pointers)
@@ -1543,7 +1657,7 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         let service_locator_impl = Arc::new(self.clone());
         initialize_services_impl(service_locator_impl, node_id, node_config, release_config).await;
     }
-    
+
     fn request_shutdown(&self) {
         // Use try_current() to avoid panicking if called from outside runtime
         // If we're in a runtime, spawn a task to set shutdown
@@ -1558,37 +1672,44 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
             tracing::warn!("Cannot request shutdown: not in async runtime context");
         }
     }
-    
+
     async fn application_manager(&self) -> Option<Arc<dyn plexspaces_core::ApplicationManager>> {
         self.get_application_manager().await
     }
-    
-    async fn register_application_manager(&self, manager: Arc<dyn plexspaces_core::ApplicationManager>) {
+
+    async fn register_application_manager(
+        &self,
+        manager: Arc<dyn plexspaces_core::ApplicationManager>,
+    ) {
         let mut app_manager = self.application_manager.write().await;
         *app_manager = Some(manager);
     }
-    
+
     async fn get_behavior_registry(&self) -> Option<Arc<BehaviorRegistry>> {
         let registry = self.behavior_registry.read().await;
         registry.clone()
     }
-    
+
     async fn register_behavior_registry(&self, registry: Arc<BehaviorRegistry>) {
         let mut behavior_registry = self.behavior_registry.write().await;
         *behavior_registry = Some(registry);
     }
-    
-    async fn get_grpc_connection_manager(&self) -> Option<Arc<plexspaces_core::GrpcConnectionManager>> {
+
+    async fn get_grpc_connection_manager(
+        &self,
+    ) -> Option<Arc<plexspaces_core::GrpcConnectionManager>> {
         let manager = self.grpc_connection_manager.read().await;
         manager.clone()
     }
-    
-    async fn register_grpc_connection_manager(&self, manager: Arc<plexspaces_core::GrpcConnectionManager>) {
+
+    async fn register_grpc_connection_manager(
+        &self,
+        manager: Arc<plexspaces_core::GrpcConnectionManager>,
+    ) {
         let mut grpc_manager = self.grpc_connection_manager.write().await;
         *grpc_manager = Some(manager);
     }
-    
-    
+
     async fn get_actor_service_client(
         &self,
         node_id: &str,
@@ -1625,12 +1746,18 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
                         format!("http://{}", addr)
                     }
                 } else {
-                    return Err(format!("Node not found: {} (no ObjectRegistry or NodeRegistry)", node_id).into());
+                    return Err(format!(
+                        "Node not found: {} (no ObjectRegistry or NodeRegistry)",
+                        node_id
+                    )
+                    .into());
                 }
             }
         };
 
-        let connection_manager = self.get_grpc_connection_manager().await
+        let connection_manager = self
+            .get_grpc_connection_manager()
+            .await
             .ok_or_else(|| "GrpcConnectionManager not found in ServiceLocator".to_string())?;
 
         connection_manager
@@ -1638,7 +1765,24 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
             .await
             .map_err(|e| format!("Connection failed: {}", e).into())
     }
-    
+
+    async fn get_application_service_client(
+        &self,
+        node_id: &str,
+    ) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>> {
+        let (connection_key, node_address) = self.resolve_application_service_target(node_id).await?;
+
+        let connection_manager = self
+            .get_grpc_connection_manager()
+            .await
+            .ok_or_else(|| "GrpcConnectionManager not found in ServiceLocator".to_string())?;
+
+        connection_manager
+            .get_application_service_connection(&connection_key, &node_address)
+            .await
+            .map_err(|e| format!("Connection failed: {}", e).into())
+    }
+
     /// Context for operations that have no request (e.g. node registration, heartbeat).
     /// Tenant/namespace: empty strings - tenant comes from auth, not config.
     /// Admin=true so cross-namespace lookups work; never use tenant_id "internal".
@@ -1649,78 +1793,116 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
     }
 
     /// Same as request_context_for_system_operations but with explicit namespace (e.g. cluster_name).
-    async fn request_context_for_system_operations_with_namespace(&self, namespace: String) -> plexspaces_common::RequestContext {
+    async fn request_context_for_system_operations_with_namespace(
+        &self,
+        namespace: String,
+    ) -> plexspaces_common::RequestContext {
         // Tenant comes from auth, not config - use empty string
         plexspaces_common::RequestContext::new_without_auth(String::new(), namespace)
             .with_admin(true)
     }
-    
-    async fn get_wasm_runtime(&self) -> Option<std::sync::Arc<dyn plexspaces_core::WasmRuntimeTrait>> {
+
+    async fn get_wasm_runtime(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_core::WasmRuntimeTrait>> {
         let runtime = self.wasm_runtime.read().await;
         runtime.clone()
     }
-    
-    async fn register_wasm_runtime(&self, runtime: std::sync::Arc<dyn plexspaces_core::WasmRuntimeTrait>) {
+
+    async fn register_wasm_runtime(
+        &self,
+        runtime: std::sync::Arc<dyn plexspaces_core::WasmRuntimeTrait>,
+    ) {
         let mut wasm_runtime = self.wasm_runtime.write().await;
         *wasm_runtime = Some(runtime);
     }
 
-    async fn get_process_group_service(&self) -> Option<std::sync::Arc<dyn plexspaces_core::ProcessGroupService>> {
+    async fn get_process_group_service(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_core::ProcessGroupService>> {
         let service = self.process_group_service.read().await;
         service.clone()
     }
-    
-    async fn register_process_group_service(&self, service: std::sync::Arc<dyn plexspaces_core::ProcessGroupService>) {
+
+    async fn register_process_group_service(
+        &self,
+        service: std::sync::Arc<dyn plexspaces_core::ProcessGroupService>,
+    ) {
         let mut process_group_service = self.process_group_service.write().await;
         *process_group_service = Some(service);
     }
 
-    async fn get_elastic_pool_service(&self) -> Option<std::sync::Arc<dyn plexspaces_core::ElasticPoolService>> {
+    async fn get_elastic_pool_service(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_core::ElasticPoolService>> {
         let service = self.elastic_pool_service.read().await;
         service.clone()
     }
 
-    async fn register_elastic_pool_service(&self, service: std::sync::Arc<dyn plexspaces_core::ElasticPoolService>) {
+    async fn register_elastic_pool_service(
+        &self,
+        service: std::sync::Arc<dyn plexspaces_core::ElasticPoolService>,
+    ) {
         let mut elastic_pool_service = self.elastic_pool_service.write().await;
         *elastic_pool_service = Some(service);
     }
-    
-    async fn get_blob_service(&self) -> Option<std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>> {
+
+    async fn get_blob_service(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>> {
         let service = self.blob_service.read().await;
         service.clone()
     }
-    
-    async fn register_blob_service(&self, service: std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>) {
+
+    async fn register_blob_service(
+        &self,
+        service: std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>,
+    ) {
         let mut blob_service = self.blob_service.write().await;
         *blob_service = Some(service);
     }
-    
-    async fn get_node_registry(&self) -> Option<std::sync::Arc<dyn plexspaces_core::NodeRegistryTrait>> {
+
+    async fn get_node_registry(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_core::NodeRegistryTrait>> {
         let registry = self.node_registry.read().await;
         registry.clone()
     }
-    
-    async fn register_node_registry(&self, registry: std::sync::Arc<dyn plexspaces_core::NodeRegistryTrait>) {
+
+    async fn register_node_registry(
+        &self,
+        registry: std::sync::Arc<dyn plexspaces_core::NodeRegistryTrait>,
+    ) {
         let mut node_registry = self.node_registry.write().await;
         *node_registry = Some(registry);
     }
 
-    async fn get_keyvalue_store(&self) -> Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>> {
+    async fn get_keyvalue_store(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>> {
         let store = self.keyvalue_store.read().await;
         store.clone()
     }
 
-    async fn register_keyvalue_store(&self, store: std::sync::Arc<dyn plexspaces_core::KeyValueStore>) {
+    async fn register_keyvalue_store(
+        &self,
+        store: std::sync::Arc<dyn plexspaces_core::KeyValueStore>,
+    ) {
         let mut keyvalue_store = self.keyvalue_store.write().await;
         *keyvalue_store = Some(store);
     }
 
-    async fn get_process_group_registry(&self) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+    async fn get_process_group_registry(
+        &self,
+    ) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
         let registry = self.process_group_registry.read().await;
         registry.clone()
     }
 
-    async fn register_process_group_registry(&self, registry: std::sync::Arc<dyn std::any::Any + Send + Sync>) {
+    async fn register_process_group_registry(
+        &self,
+        registry: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+    ) {
         let mut pg_registry = self.process_group_registry.write().await;
         *pg_registry = Some(registry);
     }
@@ -1739,7 +1921,7 @@ impl ServiceLocatorImpl {
         let router = self.task_router.read().await;
         router.clone()
     }
-    
+
     /// Register TaskRouter
     ///
     /// ## Purpose
@@ -1754,22 +1936,20 @@ impl ServiceLocatorImpl {
     }
 }
 
-
-
 /// Internal helper function that implements service initialization
 /// Takes concrete ServiceLocatorImpl to access register_service_by_name
-/// 
+///
 /// # Configuration
 /// All configuration comes from ReleaseSpec.runtime which has already been
 /// initialized by config_manager::initialize() with env var overrides applied.
-/// 
+///
 /// This function does NOT read environment variables directly - all env var
 /// handling is centralized in config_manager.
-/// 
+///
 /// # Backend Selection
 /// - URL contains `:memory:` → SQLite :memory: backend (in-memory)
 /// - Otherwise → SQLite file-based
-/// 
+///
 /// # Panics
 /// Panics if database initialization fails (fatal error).
 async fn initialize_services_impl(
@@ -1783,11 +1963,11 @@ async fn initialize_services_impl(
     use plexspaces_object_registry::SqliteObjectRegistryRepository;
     use plexspaces_process_groups::ProcessGroupRegistry;
     use std::collections::HashMap;
-    
+
     // LockManager imports (behind feature flags)
     #[cfg(feature = "sqlite-backend")]
     use plexspaces_locks::sql::SqliteLockManager;
-    
+
     // Determine NodeConfig: priority is node_config > release_config.node > default
     let final_node_config = if let Some(config) = node_config {
         config
@@ -1827,27 +2007,32 @@ async fn initialize_services_impl(
             grpc_address: String::new(),
         }
     };
-    
+
     let node_id_str = final_node_config.id.clone();
-    
+
     // Get database URL from RuntimeConfig.db (already initialized by config_manager with env overrides)
     // Note: All env var handling is centralized in config_manager::initialize()
-    let db_url = release_config.as_ref()
+    let db_url = release_config
+        .as_ref()
         .and_then(|r| r.runtime.as_ref())
         .and_then(|rt| rt.db.as_ref())
         .map(|db| db.connection_string.clone())
         .filter(|s| !s.is_empty());
-    
+
     // Use in-memory if URL contains ":memory:"
-    let use_memory = db_url.as_ref()
+    let use_memory = db_url
+        .as_ref()
         .map(|s| s.contains(":memory:"))
         .unwrap_or(false);
-    
+
     // Run unified migrations once (SQLite or PostgreSQL) before any store uses the DB.
     // Skip for :memory: (each connection gets its own empty DB; stores run their own schema if needed).
     let connection_string_for_migrations = db_url.clone().unwrap_or_else(|| {
         let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
-        format!("sqlite:///tmp/plexspaces-kv-{}.db?mode=rwc", sanitized_node_id)
+        format!(
+            "sqlite:///tmp/plexspaces-kv-{}.db?mode=rwc",
+            sanitized_node_id
+        )
     });
     let use_memory_for_migrations = connection_string_for_migrations.contains(":memory:");
     if !use_memory_for_migrations {
@@ -1876,7 +2061,11 @@ async fn initialize_services_impl(
             url.clone()
         };
         // Strip query parameters (e.g., ?mode=rwc) - SqliteKVStore::new() adds them
-        path_with_params.split('?').next().unwrap_or(&path_with_params).to_string()
+        path_with_params
+            .split('?')
+            .next()
+            .unwrap_or(&path_with_params)
+            .to_string()
     } else {
         // Default: file-based SQLite with node_id in filename
         let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
@@ -1888,12 +2077,21 @@ async fn initialize_services_impl(
     // Otherwise, use SQLite with the config-derived path.
     // Each backend implements both plexspaces_keyvalue::KeyValueStore (rich) and
     // plexspaces_common::KeyValueStore (consumer-facing for WASM actors).
-    let effective_db_path = if use_memory { ":memory:".to_string() } else { db_path.clone() };
-    let (kv_store, kv_store_common): (Arc<dyn plexspaces_keyvalue::KeyValueStore>, Arc<dyn plexspaces_core::KeyValueStore>) = if std::env::var("PLEXSPACES_KV_BACKEND").is_ok() {
+    let effective_db_path = if use_memory {
+        ":memory:".to_string()
+    } else {
+        db_path.clone()
+    };
+    let (kv_store, kv_store_common): (
+        Arc<dyn plexspaces_keyvalue::KeyValueStore>,
+        Arc<dyn plexspaces_core::KeyValueStore>,
+    ) = if std::env::var("PLEXSPACES_KV_BACKEND").is_ok() {
         // Use environment-configured backend (Redis, PostgreSQL, DynamoDB, Blob, etc.)
         match plexspaces_keyvalue::create_keyvalue_stores_from_env().await {
             Ok(stores) => {
-                tracing::info!("KeyValue storage initialized from PLEXSPACES_KV_BACKEND environment variable");
+                tracing::info!(
+                    "KeyValue storage initialized from PLEXSPACES_KV_BACKEND environment variable"
+                );
                 stores
             }
             Err(e) => {
@@ -1914,7 +2112,10 @@ async fn initialize_services_impl(
         match plexspaces_keyvalue::create_keyvalue_stores_from_config(config).await {
             Ok(stores) => {
                 if use_memory {
-                    tracing::info!(backend = "SQLite :memory:", "KeyValue storage using in-memory SQLite");
+                    tracing::info!(
+                        backend = "SQLite :memory:",
+                        "KeyValue storage using in-memory SQLite"
+                    );
                 } else {
                     tracing::info!(backend = "SQLite", path = %effective_db_path, "KeyValue storage using file-based SQLite");
                 }
@@ -1935,14 +2136,19 @@ async fn initialize_services_impl(
             }
         }
     };
-    
+
     // Create ObjectRegistry with its own repository backend (indexed columns for fast queries)
     // Uses the same SQLite database path as KeyValueStore for simplicity, but with its own table
     // Always use SQLite - use :memory: for in-memory mode
-    let object_registry_repo: Arc<dyn plexspaces_object_registry::repository::ObjectRegistryRepository> = match SqliteObjectRegistryRepository::new(&effective_db_path).await {
+    let object_registry_repo: Arc<
+        dyn plexspaces_object_registry::repository::ObjectRegistryRepository,
+    > = match SqliteObjectRegistryRepository::new(&effective_db_path).await {
         Ok(repo) => {
             if use_memory {
-                tracing::info!(backend = "SQLite :memory:", "Object Registry using in-memory SQLite");
+                tracing::info!(
+                    backend = "SQLite :memory:",
+                    "Object Registry using in-memory SQLite"
+                );
             } else {
                 tracing::info!(backend = "SQLite", path = %effective_db_path, "Object Registry using SQLite backend");
             }
@@ -1962,14 +2168,16 @@ async fn initialize_services_impl(
             fatal_exit(&error_msg);
         }
     };
-    let object_registry = Arc::new(plexspaces_object_registry::ObjectRegistryImpl::new(object_registry_repo));
-    
+    let object_registry = Arc::new(plexspaces_object_registry::ObjectRegistryImpl::new(
+        object_registry_repo,
+    ));
+
     // Create ProcessGroupRegistry with same KeyValueStore backend
     let process_group_registry = Arc::new(ProcessGroupRegistry::new(
         node_id_str.clone(),
         kv_store.clone(),
     ));
-    
+
     // Create LockManager based on locks_provider from config
     // Config manager has already resolved this: Redis (if available) > Shared DB
     // Use MemoryLockManager for in-memory SQLite (more efficient than SQLite :memory:)
@@ -1982,7 +2190,7 @@ async fn initialize_services_impl(
             details = "tokio::sync::Semaphore + Mutex",
             "🔧 Lock manager initialized: MemoryLockManager (in-memory tokio primitives)"
         );
-            match create_lock_manager(LockBackend::Memory, None).await {
+        match create_lock_manager(LockBackend::Memory, None).await {
             Ok(manager) => manager,
             Err(e) => {
                 let error_msg = format!("FATAL: Failed to create in-memory lock manager: {}", e);
@@ -1996,9 +2204,13 @@ async fn initialize_services_impl(
             .as_ref()
             .and_then(|r| r.runtime.as_ref())
             .and_then(|rt| rt.locks_provider.as_ref());
-        
+
         match locks_provider {
-            Some(lp) if lp.provider == plexspaces_proto::storage::v1::StorageProvider::StorageProviderRedis as i32 => {
+            Some(lp)
+                if lp.provider
+                    == plexspaces_proto::storage::v1::StorageProvider::StorageProviderRedis
+                        as i32 =>
+            {
                 // Use Redis for locks
                 use plexspaces_locks::factory::{create_lock_manager, LockBackend};
                 #[cfg(feature = "redis-backend")]
@@ -2009,13 +2221,13 @@ async fn initialize_services_impl(
                             _ => None,
                         })
                         .unwrap_or_else(|| "redis://localhost:6379".to_string());
-                    
-                            tracing::info!(
-                                backend = "Redis",
-                                redis_url = %redis_url,
-                                implementation = "RedisLockManager",
-                                "🔧 Lock manager initialized: RedisLockManager (Redis backend)"
-                            );
+
+                    tracing::info!(
+                        backend = "Redis",
+                        redis_url = %redis_url,
+                        implementation = "RedisLockManager",
+                        "🔧 Lock manager initialized: RedisLockManager (Redis backend)"
+                    );
                     match create_lock_manager(LockBackend::Redis, Some(redis_url)).await {
                         Ok(manager) => manager,
                         Err(e) => {
@@ -2039,42 +2251,54 @@ async fn initialize_services_impl(
             }
         }
     };
-    
+
     // Register LockManager in ServiceLocator (use locks::LockManager directly)
     let service_locator: &dyn plexspaces_core::ServiceLocator = service_locator_impl.as_ref();
-    service_locator.register_lock_manager(lock_manager.clone()).await;
+    service_locator
+        .register_lock_manager(lock_manager.clone())
+        .await;
 
     // Register KeyValueStore in ServiceLocator so WASM actors can access the shared store
-    service_locator.register_keyvalue_store(kv_store_common).await;
+    service_locator
+        .register_keyvalue_store(kv_store_common)
+        .await;
 
     // Register ProcessGroupRegistry in ServiceLocator so WASM actors can use pg_join/pg_leave/pg_members/pg_broadcast
-    service_locator.register_process_group_registry(process_group_registry.clone() as Arc<dyn std::any::Any + Send + Sync>).await;
-    
+    service_locator
+        .register_process_group_registry(
+            process_group_registry.clone() as Arc<dyn std::any::Any + Send + Sync>
+        )
+        .await;
+
     // Create and register JournalStorage for durability facets and event sourcing
     // Use same database URL as KeyValueStore/ObjectRegistry for consistency
     // CRITICAL: Migrations run automatically in SqliteJournalStorage::new() (same pattern as other repositories)
-    use plexspaces_journaling::{JournalStorage, create_journal_storage};
+    use plexspaces_journaling::{create_journal_storage, JournalStorage};
     tracing::info!(
         db_path = %effective_db_path,
         use_memory = %use_memory,
         "Creating JournalStorage (migrations will run automatically on startup)"
     );
-    let journal_storage: Arc<dyn JournalStorage + Send + Sync> = match create_journal_storage(&effective_db_path).await {
-        Ok(storage) => storage,
-        Err(e) => {
-            let error_msg = format!(
-                "FATAL: Failed to create journal storage at '{}': {}. \
+    let journal_storage: Arc<dyn JournalStorage + Send + Sync> =
+        match create_journal_storage(&effective_db_path).await {
+            Ok(storage) => storage,
+            Err(e) => {
+                let error_msg = format!(
+                    "FATAL: Failed to create journal storage at '{}': {}. \
                 Journal storage is required for durability facets. \
                 Ensure the database path is correct and migrations can run.",
-                effective_db_path, e
-            );
-            tracing::error!("{}", error_msg);
-            fatal_exit(&error_msg);
-        }
-    };
-    
+                    effective_db_path, e
+                );
+                tracing::error!("{}", error_msg);
+                fatal_exit(&error_msg);
+            }
+        };
+
     if use_memory {
-        tracing::info!(backend = "SQLite :memory:", "Journal storage using in-memory SQLite");
+        tracing::info!(
+            backend = "SQLite :memory:",
+            "Journal storage using in-memory SQLite"
+        );
     } else {
         tracing::info!(
             backend = "SQLite",
@@ -2082,52 +2306,63 @@ async fn initialize_services_impl(
             "Journal storage using file-based SQLite (migrations completed - checkpoints table created)"
         );
     }
-    service_locator.register_journal_storage(journal_storage).await;
+    service_locator
+        .register_journal_storage(journal_storage)
+        .await;
     if tracing::enabled!(tracing::Level::TRACE) {
         tracing::trace!("✅ JournalStorage registered for durability facets");
     }
-    
+
     // Create ActorRegistry with ObjectRegistry (ObjectRegistry implements the trait directly)
     let object_registry_trait: Arc<dyn plexspaces_core::ObjectRegistry> = object_registry.clone();
     let actor_registry = Arc::new(ActorRegistry::new(
         object_registry_trait.clone(),
         node_id_str.clone(),
     ));
-    
+
     // Create and register essential services
     let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     let facet_manager = actor_registry.facet_manager().clone();
-    
+
     // Phase 1: Unified Lifecycle - Create and register FacetRegistry with default factories
     // FacetRegistry allows applications to create facets from proto configurations
+    use plexspaces_core::facet_service_wrapper::{
+        FacetManagerServiceWrapper, FacetRegistryServiceWrapper,
+    };
     use plexspaces_facet::FacetRegistry;
-    use plexspaces_core::facet_service_wrapper::{FacetRegistryServiceWrapper, FacetManagerServiceWrapper};
-    
+
     // Create FacetRegistry and register all facet factories
     // Factories are split between core (non-journaling) and journaling (journaling-related) to avoid circular dependencies
     use plexspaces_core::facet_factories::{
-        LockFacetFactory, RegistryFacetFactory, ProcessGroupFacetFactory,
-        KeyValueFacetFactory, HttpClientFacetFactory, EventEmitterFacetFactory,
-        LoggingFacetFactory, CachingFacetFactory, MetricsFacetFactory,
+        CachingFacetFactory, EventEmitterFacetFactory, HttpClientFacetFactory,
+        KeyValueFacetFactory, LockFacetFactory, LoggingFacetFactory, MetricsFacetFactory,
+        ProcessGroupFacetFactory, RegistryFacetFactory,
     };
     use plexspaces_journaling::facet_factories::{
-        VirtualActorFacetFactory, DurabilityFacetFactory, TimerFacetFactory,
-        ReminderFacetFactory, EventSourcingFacetFactory,
+        DurabilityFacetFactory, EventSourcingFacetFactory, ReminderFacetFactory, TimerFacetFactory,
+        VirtualActorFacetFactory,
     };
     use std::sync::Arc as StdArc;
-    let service_locator_for_factories: Arc<dyn plexspaces_core::ServiceLocator> = service_locator_impl.clone();
-    
+    let service_locator_for_factories: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator_impl.clone();
+
     let mut facet_registry = FacetRegistry::new();
-    
+
     // Register core factories (non-journaling)
     let lock_factory = StdArc::new(LockFacetFactory::new(service_locator_for_factories.clone()));
     facet_registry.register("locks".to_string(), lock_factory);
-    let registry_factory = StdArc::new(RegistryFacetFactory::new(service_locator_for_factories.clone()));
+    let registry_factory = StdArc::new(RegistryFacetFactory::new(
+        service_locator_for_factories.clone(),
+    ));
     facet_registry.register("registry".to_string(), registry_factory);
-    let process_group_factory = StdArc::new(ProcessGroupFacetFactory::new(service_locator_for_factories.clone()));
+    let process_group_factory = StdArc::new(ProcessGroupFacetFactory::new(
+        service_locator_for_factories.clone(),
+    ));
     facet_registry.register("process_groups".to_string(), process_group_factory);
-    let keyvalue_factory = StdArc::new(KeyValueFacetFactory::new(service_locator_for_factories.clone()));
+    let keyvalue_factory = StdArc::new(KeyValueFacetFactory::new(
+        service_locator_for_factories.clone(),
+    ));
     facet_registry.register("keyvalue".to_string(), keyvalue_factory);
     let http_client_factory = StdArc::new(HttpClientFacetFactory);
     facet_registry.register("http_client".to_string(), http_client_factory);
@@ -2139,36 +2374,63 @@ async fn initialize_services_impl(
     facet_registry.register("caching".to_string(), caching_factory);
     let metrics_factory = StdArc::new(MetricsFacetFactory);
     facet_registry.register("metrics".to_string(), metrics_factory);
-    
+
     // Register journaling factories
     let virtual_actor_factory = StdArc::new(VirtualActorFacetFactory);
     facet_registry.register("virtual_actor".to_string(), virtual_actor_factory);
-    let durability_factory = StdArc::new(DurabilityFacetFactory::new(service_locator_for_factories.clone()));
+    let durability_factory = StdArc::new(DurabilityFacetFactory::new(
+        service_locator_for_factories.clone(),
+    ));
     facet_registry.register("durability".to_string(), durability_factory);
-    let timer_factory = StdArc::new(TimerFacetFactory::new(service_locator_for_factories.clone()));
+    let timer_factory = StdArc::new(TimerFacetFactory::new(
+        service_locator_for_factories.clone(),
+    ));
     facet_registry.register("timer".to_string(), timer_factory);
-    let reminder_factory = StdArc::new(ReminderFacetFactory::new(service_locator_for_factories.clone()));
+    let reminder_factory = StdArc::new(ReminderFacetFactory::new(
+        service_locator_for_factories.clone(),
+    ));
     facet_registry.register("reminder".to_string(), reminder_factory);
-    let event_sourcing_factory = StdArc::new(EventSourcingFacetFactory::new(service_locator_for_factories.clone()));
+    let event_sourcing_factory = StdArc::new(EventSourcingFacetFactory::new(
+        service_locator_for_factories.clone(),
+    ));
     facet_registry.register("event_sourcing".to_string(), event_sourcing_factory);
-    
+
     let facet_registry = Arc::new(facet_registry);
     let facet_registry_wrapper = Arc::new(FacetRegistryServiceWrapper::new(facet_registry.clone()));
     let facet_manager_wrapper = Arc::new(FacetManagerServiceWrapper::new(facet_manager.clone()));
-    
+
     // Register all services using explicit service names for consistency
     let service_locator: &dyn plexspaces_core::ServiceLocator = service_locator_impl.as_ref();
-    service_locator.register_object_registry(object_registry_trait.clone()).await;
+    service_locator
+        .register_object_registry(object_registry_trait.clone())
+        .await;
     // Also register as trait object for type-safe access
-    service_locator.register_object_registry(object_registry_trait).await;
-    service_locator_impl.register_service_by_name(service_names::PROCESS_GROUP_REGISTRY, process_group_registry.clone()).await;
-    service_locator_impl.register_service_by_name(service_names::ACTOR_REGISTRY, actor_registry.clone()).await;
-    service_locator_impl.register_service_by_name(service_names::REPLY_WAITER_REGISTRY, reply_waiter_registry).await;
-    service_locator_impl.register_service_by_name(service_names::VIRTUAL_ACTOR_MANAGER, virtual_actor_manager).await;
-    service_locator_impl.register_service_by_name(service_names::FACET_MANAGER, facet_manager_wrapper).await;
-    service_locator.register_facet_registry(facet_registry_wrapper).await;
+    service_locator
+        .register_object_registry(object_registry_trait)
+        .await;
+    service_locator_impl
+        .register_service_by_name(
+            service_names::PROCESS_GROUP_REGISTRY,
+            process_group_registry.clone(),
+        )
+        .await;
+    service_locator_impl
+        .register_service_by_name(service_names::ACTOR_REGISTRY, actor_registry.clone())
+        .await;
+    service_locator_impl
+        .register_service_by_name(service_names::REPLY_WAITER_REGISTRY, reply_waiter_registry)
+        .await;
+    service_locator_impl
+        .register_service_by_name(service_names::VIRTUAL_ACTOR_MANAGER, virtual_actor_manager)
+        .await;
+    service_locator_impl
+        .register_service_by_name(service_names::FACET_MANAGER, facet_manager_wrapper)
+        .await;
+    service_locator
+        .register_facet_registry(facet_registry_wrapper)
+        .await;
     tracing::info!(registered_types = ?facet_registry.list_types(), "📦 FacetRegistry initialized with {} facet types", facet_registry.list_types().len());
-    
+
     // Create and register NodeRegistry (required for node connectivity and SWIM protocol)
     // NodeRegistry needs ObjectRegistry (concrete type), not trait object
     use crate::node_registry::NodeRegistry;
@@ -2177,60 +2439,84 @@ async fn initialize_services_impl(
         &final_node_config,
     ));
     let node_registry_trait: Arc<dyn plexspaces_core::NodeRegistryTrait> = node_registry.clone();
-    service_locator.register_node_registry(node_registry_trait).await;
+    service_locator
+        .register_node_registry(node_registry_trait)
+        .await;
     tracing::info!("📡 NodeRegistry initialized for node discovery and SWIM protocol");
-    
+
     // Create and register ActorFactoryImpl (services crate depends on actor crate, so this is safe)
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-    let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = service_locator_impl.clone();
+    let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator_impl.clone();
     let actor_factory_impl = ActorFactoryImpl::new_arc(service_locator_trait).await;
-    
+
     // Register ActorFactoryImpl (implements Service trait) in services map
-    service_locator_impl.register_service_by_name(service_names::ACTOR_FACTORY_IMPL, actor_factory_impl.clone()).await;
-    
+    service_locator_impl
+        .register_service_by_name(
+            service_names::ACTOR_FACTORY_IMPL,
+            actor_factory_impl.clone(),
+        )
+        .await;
+
     // Register ActorFactory as trait object (ActorFactoryImpl implements ActorFactory from core)
     use plexspaces_core::ActorFactory;
     let factory_trait: Arc<dyn ActorFactory> = actor_factory_impl.clone();
-    service_locator_impl.register_actor_factory(factory_trait.clone()).await;
-    
+    service_locator_impl
+        .register_actor_factory(factory_trait.clone())
+        .await;
+
     // Set ActorFactory on ActorRegistry for ActivationProvider.activate_actor
     // This enables ReminderFacet and other facets to activate virtual actors via ActorRegistry
     actor_registry.set_actor_factory(factory_trait).await;
-    
+
     if tracing::enabled!(tracing::Level::TRACE) {
         tracing::trace!("✅ ActorFactoryImpl registered and ready for actor spawning");
     }
-    
+
     // Create and register ActorServiceImpl (needs node_id, which we have from node_id_str)
     use crate::actor_service::ActorServiceImpl;
-    let actor_service = Arc::new(ActorServiceImpl::new(service_locator_impl.clone(), node_id_str.clone()));
-    service_locator.register_actor_service(actor_service as Arc<dyn plexspaces_core::ActorService + Send + Sync>).await;
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator_impl.clone(),
+        node_id_str.clone(),
+    ));
+    service_locator
+        .register_actor_service(
+            actor_service as Arc<dyn plexspaces_core::ActorService + Send + Sync>,
+        )
+        .await;
     if tracing::enabled!(tracing::Level::TRACE) {
         tracing::trace!(node_id = %node_id_str, "✅ ActorServiceImpl registered for message routing");
     }
-    
+
     // Create and register default TupleSpaceProvider
     // Tenant comes from auth, not config - use empty strings for initialization
     use plexspaces_core::service_wrappers::TupleSpaceProviderWrapper;
     use plexspaces_core::RequestContext;
-    let ctx = RequestContext::new_without_auth(String::new(), String::new())
-        .with_admin(true);
+    let ctx = RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
     let tuplespace = TupleSpaceProviderWrapper::from_context(&ctx);
     let tuplespace_provider = Arc::new(TupleSpaceProviderWrapper::new(tuplespace));
-    service_locator.register_tuplespace_provider(tuplespace_provider as Arc<dyn plexspaces_core::TupleSpaceProvider + Send + Sync>).await;
+    service_locator
+        .register_tuplespace_provider(
+            tuplespace_provider as Arc<dyn plexspaces_core::TupleSpaceProvider + Send + Sync>,
+        )
+        .await;
     if tracing::enabled!(tracing::Level::TRACE) {
         tracing::trace!("✅ TupleSpaceProvider registered");
     }
-    
+
     // Register NodeConfig (determined above)
-    service_locator.register_node_config(final_node_config.clone()).await;
-    
+    service_locator
+        .register_node_config(final_node_config.clone())
+        .await;
+
     // Register RuntimeConfig and SecurityConfig from ReleaseSpec.runtime if available
     if let Some(ref release) = release_config {
         if let Some(ref runtime) = release.runtime {
             // Register RuntimeConfig
-            service_locator.register_runtime_config(runtime.clone()).await;
-            
+            service_locator
+                .register_runtime_config(runtime.clone())
+                .await;
+
             // Update VirtualActorManager max_pool_per_actor_type from RuntimeConfig
             if let Some(ref default_virtual_actor_config) = runtime.default_virtual_actor_config {
                 use plexspaces_common::virtual_actor_config::get_max_pool_per_actor_type;
@@ -2244,23 +2530,27 @@ async fn initialize_services_impl(
                     );
                 }
             }
-            
+
             // Register SecurityConfig
             if let Some(security) = runtime.security.clone() {
                 service_locator.register_security_config(security).await;
             }
         }
     }
-    
+
     // Create and register GrpcConnectionManager with connection pooling
     // Tenant comes from auth (JWT/mTLS); namespace from application/actor.
     use plexspaces_core::GrpcConnectionManager;
     let pool_size = final_node_config.grpc_connection_pool_size;
-    let connection_manager = Arc::new(GrpcConnectionManager::new(
-        if pool_size > 0 { Some(pool_size) } else { None },
-    ));
-    service_locator.register_grpc_connection_manager(connection_manager).await;
-    
+    let connection_manager = Arc::new(GrpcConnectionManager::new(if pool_size > 0 {
+        Some(pool_size)
+    } else {
+        None
+    }));
+    service_locator
+        .register_grpc_connection_manager(connection_manager)
+        .await;
+
     // Create and register WASM runtime (if wasm-runtime feature is enabled)
     // Note: This is optional - Node can also create and register it separately
     // We create it here for convenience in tests and examples
@@ -2269,16 +2559,21 @@ async fn initialize_services_impl(
         use plexspaces_wasm_runtime::WasmRuntime;
         match WasmRuntime::new().await {
             Ok(runtime) => {
-                let wasm_runtime_trait: Arc<dyn plexspaces_core::WasmRuntimeTrait> = Arc::new(runtime);
-                service_locator.register_wasm_runtime(wasm_runtime_trait).await;
+                let wasm_runtime_trait: Arc<dyn plexspaces_core::WasmRuntimeTrait> =
+                    Arc::new(runtime);
+                service_locator
+                    .register_wasm_runtime(wasm_runtime_trait)
+                    .await;
             }
             Err(e) => {
-                tracing::warn!("Failed to create WASM runtime during service initialization: {}", e);
+                tracing::warn!(
+                    "Failed to create WASM runtime during service initialization: {}",
+                    e
+                );
                 // Continue without WASM runtime - it can be registered later by Node
             }
         }
     }
-    
 }
 
 impl Default for ServiceLocatorImpl {
@@ -2362,7 +2657,7 @@ mod tests {
                 "ServiceA".to_string()
             }
         }
-        
+
         struct ServiceB;
         impl Service for ServiceB {
             fn service_name(&self) -> String {
@@ -2397,7 +2692,6 @@ mod tests {
         assert_eq!(retrieved.value, 2);
     }
 
-
     #[tokio::test]
     async fn test_concurrent_service_access() {
         let locator = Arc::new(ServiceLocatorImpl::new());
@@ -2410,7 +2704,8 @@ mod tests {
         for _ in 0..10 {
             let locator_clone = locator.clone();
             let handle = tokio::spawn(async move {
-                let retrieved: Option<Arc<MockService>> = locator_clone.get_service_by_name("MockService").await;
+                let retrieved: Option<Arc<MockService>> =
+                    locator_clone.get_service_by_name("MockService").await;
                 retrieved.map(|s| s.value)
             });
             handles.push(handle);
@@ -2423,7 +2718,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn test_default_impl() {
         let locator = ServiceLocatorImpl::default();
@@ -2432,5 +2726,18 @@ mod tests {
         locator.register_service(service.clone()).await;
         let retrieved: Arc<MockService> = locator.get_service_by_name("MockService").await.unwrap();
         assert_eq!(retrieved.value, 99);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_application_service_target_normalizes_direct_loopback_address() {
+        let locator = ServiceLocatorImpl::new();
+
+        let (connection_key, node_address) = locator
+            .resolve_application_service_target("http://0.0.0.0:8093")
+            .await
+            .expect("direct address should resolve without registry lookup");
+
+        assert_eq!(connection_key, "http://localhost:8093");
+        assert_eq!(node_address, "http://localhost:8093");
     }
 }

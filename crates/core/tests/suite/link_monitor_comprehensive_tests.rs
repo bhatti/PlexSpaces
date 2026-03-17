@@ -34,14 +34,14 @@
 //! - Multiple links/monitors
 
 use plexspaces_core::{
-    ActorId, ActorRegistry, ExitReason, ExitAction, ActorContext, Actor, ActorError, BehaviorError,
-    Message, BehaviorType, ServiceLocator, RequestContext, ActorRef,
+    Actor, ActorContext, ActorError, ActorId, ActorRef, ActorRegistry, BehaviorError, BehaviorType,
+    ExitAction, ExitReason, Message, RequestContext, ServiceLocator,
 };
 // Note: Message is now unified proto Message from plexspaces_proto::common::v1
+use async_trait::async_trait;
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use async_trait::async_trait;
 
 // Helper to wrap ObjectRegistry for ActorRegistry
 struct ObjectRegistryAdapter {
@@ -55,12 +55,21 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         ctx: &plexspaces_core::RequestContext,
         object_id: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-    ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+    ) -> Result<
+        Option<plexspaces_proto::object_registry::v1::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let obj_type = object_type
+            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         self.inner
             .lookup(ctx, obj_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn lookup_full(
@@ -68,11 +77,19 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         ctx: &plexspaces_core::RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
-    ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        Option<plexspaces_proto::object_registry::v1::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         self.inner
             .lookup_full(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn register(
@@ -80,10 +97,12 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         ctx: &plexspaces_core::RequestContext,
         registration: plexspaces_proto::object_registry::v1::ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .register(ctx, registration)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        self.inner.register(ctx, registration).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn discover(
@@ -96,11 +115,28 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         self.inner
-            .discover(ctx, object_type, object_id_prefix, object_ids, tags, health_status, limit, offset)
+            .discover(
+                ctx,
+                object_type,
+                object_id_prefix,
+                object_ids,
+                tags,
+                health_status,
+                limit,
+                offset,
+            )
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn unregister(
@@ -112,7 +148,12 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         self.inner
             .unregister(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn heartbeat(
@@ -124,14 +165,23 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         self.inner
             .heartbeat(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 }
 
 async fn create_test_registry() -> Arc<ActorRegistry> {
-    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
-    let object_registry: Arc<dyn plexspaces_core::actor_context::ObjectRegistry> = 
+    let object_registry: Arc<dyn plexspaces_core::actor_context::ObjectRegistry> =
         Arc::new(ObjectRegistryAdapter {
             inner: object_registry_impl,
         });
@@ -253,17 +303,22 @@ async fn test_link_normal_exit_no_propagation() {
     // Verify link is bidirectional
     let links1 = registry.get_links(&actor1_id).await;
     assert!(links1.contains(&actor2_id));
-    
+
     let links2 = registry.get_links(&actor2_id).await;
     assert!(links2.contains(&actor1_id));
 
     // Terminate actor1 with normal exit
-    registry.handle_actor_termination(&actor1_id, ExitReason::Normal).await;
+    registry
+        .handle_actor_termination(&actor1_id, ExitReason::Normal)
+        .await;
 
     // Actor2 should NOT receive EXIT (normal exits don't propagate)
     // Verify links are cleaned up (actor1 removed from actor2's links)
     let links2_after = registry.get_links(&actor2_id).await;
-    assert!(!links2_after.contains(&actor1_id), "Actor1 should be removed from actor2's links after termination");
+    assert!(
+        !links2_after.contains(&actor1_id),
+        "Actor1 should be removed from actor2's links after termination"
+    );
 }
 
 /// Test: Link two actors - error exit propagates (cascading failure)
@@ -280,18 +335,23 @@ async fn test_link_error_exit_propagates() {
     // Verify links are bidirectional
     let links1 = registry.get_links(&actor1_id).await;
     assert!(links1.contains(&actor2_id));
-    
+
     let links2 = registry.get_links(&actor2_id).await;
     assert!(links2.contains(&actor1_id));
 
     // Terminate actor1 with error exit
     // Note: In a full implementation, this would send EXIT to actor2's mailbox
     // For now, we verify the link propagation logic exists
-    registry.handle_actor_termination(&actor1_id, ExitReason::Error("test error".to_string())).await;
+    registry
+        .handle_actor_termination(&actor1_id, ExitReason::Error("test error".to_string()))
+        .await;
 
     // Verify links are cleaned up after termination
     let links2_after = registry.get_links(&actor2_id).await;
-    assert!(!links2_after.contains(&actor1_id), "Actor1 should be removed from actor2's links after termination");
+    assert!(
+        !links2_after.contains(&actor1_id),
+        "Actor1 should be removed from actor2's links after termination"
+    );
 }
 
 /// Test: Link with trap_exit=true receives EXIT as message
@@ -322,10 +382,15 @@ async fn test_monitor_receives_down_message() {
     let monitor_ref = "monitor-ref-1".to_string();
 
     // Register monitor
-    registry.monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx).await.unwrap();
+    registry
+        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .await
+        .unwrap();
 
     // Terminate actor
-    registry.handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string())).await;
+    registry
+        .handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string()))
+        .await;
 
     // Monitor should receive DOWN message
     let down_msg = rx.recv().await;
@@ -349,11 +414,19 @@ async fn test_multiple_monitors_receive_down() {
     let (tx2, mut rx2) = mpsc::channel(10);
 
     // Register both monitors
-    registry.monitor(&actor_id, &monitor1_id, "monitor-ref-1".to_string(), tx1).await.unwrap();
-    registry.monitor(&actor_id, &monitor2_id, "monitor-ref-2".to_string(), tx2).await.unwrap();
+    registry
+        .monitor(&actor_id, &monitor1_id, "monitor-ref-1".to_string(), tx1)
+        .await
+        .unwrap();
+    registry
+        .monitor(&actor_id, &monitor2_id, "monitor-ref-2".to_string(), tx2)
+        .await
+        .unwrap();
 
     // Terminate actor
-    registry.handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string())).await;
+    registry
+        .handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string()))
+        .await;
 
     // Both monitors should receive DOWN messages
     let down1 = rx1.recv().await;
@@ -399,13 +472,21 @@ async fn test_demonitor_removes_monitor() {
     let monitor_ref = "monitor-ref-1".to_string();
 
     // Register monitor
-    registry.monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx).await.unwrap();
+    registry
+        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .await
+        .unwrap();
 
     // Demonitor
-    registry.demonitor(&actor_id, &monitor_id, &monitor_ref).await.unwrap();
+    registry
+        .demonitor(&actor_id, &monitor_id, &monitor_ref)
+        .await
+        .unwrap();
 
     // Terminate actor - monitor should NOT receive DOWN
-    registry.handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string())).await;
+    registry
+        .handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string()))
+        .await;
     // Verify no DOWN message (would need to check rx, but it's dropped)
 }
 
@@ -438,12 +519,17 @@ async fn test_shutdown_exit_no_link_propagation() {
     registry.link(&actor1_id, &actor2_id).await.unwrap();
 
     // Terminate actor1 with shutdown exit
-    registry.handle_actor_termination(&actor1_id, ExitReason::Shutdown).await;
+    registry
+        .handle_actor_termination(&actor1_id, ExitReason::Shutdown)
+        .await;
 
     // Actor2 should NOT receive EXIT (shutdown is like normal - doesn't propagate)
     // Verify links are cleaned up
     let links2_after = registry.get_links(&actor2_id).await;
-    assert!(!links2_after.contains(&actor1_id), "Actor1 should be removed from actor2's links after shutdown");
+    assert!(
+        !links2_after.contains(&actor1_id),
+        "Actor1 should be removed from actor2's links after shutdown"
+    );
 }
 
 /// Test: Killed exit propagates to links
@@ -470,17 +556,28 @@ async fn test_linked_exit_reason_nesting() {
     assert!(registry.get_links(&actor_b).await.contains(&actor_c));
 
     // Terminate A with error - should propagate to B, then C
-    registry.handle_actor_termination(&actor_a, ExitReason::Error("error from A".to_string())).await;
+    registry
+        .handle_actor_termination(&actor_a, ExitReason::Error("error from A".to_string()))
+        .await;
 
     // Verify links are cleaned up: A removed from B's links
-    assert!(!registry.get_links(&actor_b).await.contains(&actor_a), "Actor A should be removed from actor B's links");
+    assert!(
+        !registry.get_links(&actor_b).await.contains(&actor_a),
+        "Actor A should be removed from actor B's links"
+    );
     // Note: B and C are still linked (B hasn't terminated yet in this test)
     // In a full scenario with actual actors, B would receive EXIT message and terminate,
     // which would then propagate to C. But in this unit test, we're just testing the
     // link cleanup logic, not the full cascading termination.
     // Verify B and C are still linked (they haven't terminated)
-    assert!(registry.get_links(&actor_b).await.contains(&actor_c), "Actor B and C should still be linked");
-    assert!(registry.get_links(&actor_c).await.contains(&actor_b), "Actor C and B should still be linked");
+    assert!(
+        registry.get_links(&actor_b).await.contains(&actor_c),
+        "Actor B and C should still be linked"
+    );
+    assert!(
+        registry.get_links(&actor_c).await.contains(&actor_b),
+        "Actor C and B should still be linked"
+    );
 }
 
 /// Test: Link to non-existent actor (should still work - link is registered)
@@ -511,10 +608,15 @@ async fn test_monitor_nonexistent_actor() {
     let monitor_ref = "monitor-ref-1".to_string();
 
     // Monitor non-existent actor should still work
-    registry.monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx).await.unwrap();
+    registry
+        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .await
+        .unwrap();
 
     // When actor terminates, monitor should receive DOWN
-    registry.handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string())).await;
+    registry
+        .handle_actor_termination(&actor_id, ExitReason::Error("test error".to_string()))
+        .await;
     // Monitor should have received DOWN (verified in other tests)
 }
 
@@ -550,7 +652,9 @@ async fn test_multiple_links_same_actor() {
     assert!(links1.contains(&actor3_id));
 
     // Terminate actor1 - both actor2 and actor3 should receive EXIT
-    registry.handle_actor_termination(&actor1_id, ExitReason::Error("test error".to_string())).await;
+    registry
+        .handle_actor_termination(&actor1_id, ExitReason::Error("test error".to_string()))
+        .await;
 
     // Verify links are cleaned up
     assert!(!registry.get_links(&actor2_id).await.contains(&actor1_id));
@@ -580,10 +684,11 @@ async fn test_demonitor_nonexistent_monitor() {
     let monitor_ref = "monitor-ref-1".to_string();
 
     // Demonitor non-existent monitor should succeed (idempotent)
-    let result = registry.demonitor(&actor_id, &monitor_id, &monitor_ref).await;
+    let result = registry
+        .demonitor(&actor_id, &monitor_id, &monitor_ref)
+        .await;
     assert!(result.is_ok());
 }
-
 
 /// Test: Monitor receives DOWN for normal exit
 #[tokio::test]
@@ -596,10 +701,15 @@ async fn test_monitor_receives_down_normal_exit() {
     let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
 
-    registry.monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx).await.unwrap();
+    registry
+        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .await
+        .unwrap();
 
     // Terminate actor with normal exit
-    registry.handle_actor_termination(&actor_id, ExitReason::Normal).await;
+    registry
+        .handle_actor_termination(&actor_id, ExitReason::Normal)
+        .await;
 
     // Monitor should receive DOWN even for normal exit
     let down_msg = rx.recv().await;
@@ -620,10 +730,15 @@ async fn test_monitor_receives_down_shutdown_exit() {
     let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
 
-    registry.monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx).await.unwrap();
+    registry
+        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .await
+        .unwrap();
 
     // Terminate actor with shutdown exit
-    registry.handle_actor_termination(&actor_id, ExitReason::Shutdown).await;
+    registry
+        .handle_actor_termination(&actor_id, ExitReason::Shutdown)
+        .await;
 
     // Monitor should receive DOWN
     let down_msg = rx.recv().await;
@@ -644,10 +759,15 @@ async fn test_monitor_receives_down_killed_exit() {
     let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
 
-    registry.monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx).await.unwrap();
+    registry
+        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .await
+        .unwrap();
 
     // Terminate actor with killed exit
-    registry.handle_actor_termination(&actor_id, ExitReason::Killed).await;
+    registry
+        .handle_actor_termination(&actor_id, ExitReason::Killed)
+        .await;
 
     // Monitor should receive DOWN
     let down_msg = rx.recv().await;
@@ -668,14 +788,19 @@ async fn test_monitor_receives_down_linked_exit() {
     let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
 
-    registry.monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx).await.unwrap();
+    registry
+        .monitor(&actor_id, &monitor_id, monitor_ref.clone(), tx)
+        .await
+        .unwrap();
 
     // Terminate actor with linked exit
     let linked_reason = ExitReason::Linked {
         actor_id: ActorId::from("linked-actor@test-node".to_string()),
         reason: Box::new(ExitReason::Error("linked error".to_string())),
     };
-    registry.handle_actor_termination(&actor_id, linked_reason).await;
+    registry
+        .handle_actor_termination(&actor_id, linked_reason)
+        .await;
 
     // Monitor should receive DOWN with linked reason
     let down_msg = rx.recv().await;
@@ -699,17 +824,28 @@ async fn test_link_cleanup_removes_all_references() {
     registry.link(&actor1_id, &actor3_id).await.unwrap();
 
     // Terminate actor1
-    registry.handle_actor_termination(&actor1_id, ExitReason::Normal).await;
+    registry
+        .handle_actor_termination(&actor1_id, ExitReason::Normal)
+        .await;
 
     // Verify actor1's links are removed
     let links1 = registry.get_links(&actor1_id).await;
-    assert!(links1.is_empty(), "Actor1's links should be empty after termination");
+    assert!(
+        links1.is_empty(),
+        "Actor1's links should be empty after termination"
+    );
 
     // Verify actor1 is removed from actor2's and actor3's links
     let links2 = registry.get_links(&actor2_id).await;
     let links3 = registry.get_links(&actor3_id).await;
-    assert!(!links2.contains(&actor1_id), "Actor1 should be removed from actor2's links");
-    assert!(!links3.contains(&actor1_id), "Actor1 should be removed from actor3's links");
+    assert!(
+        !links2.contains(&actor1_id),
+        "Actor1 should be removed from actor2's links"
+    );
+    assert!(
+        !links3.contains(&actor1_id),
+        "Actor1 should be removed from actor3's links"
+    );
 }
 
 /// Test: Monitor cleanup on termination
@@ -724,11 +860,19 @@ async fn test_monitor_cleanup_on_termination() {
     let (tx1, mut rx1) = mpsc::channel(10);
     let (tx2, mut rx2) = mpsc::channel(10);
 
-    registry.monitor(&actor_id, &monitor1_id, "monitor-ref-1".to_string(), tx1).await.unwrap();
-    registry.monitor(&actor_id, &monitor2_id, "monitor-ref-2".to_string(), tx2).await.unwrap();
+    registry
+        .monitor(&actor_id, &monitor1_id, "monitor-ref-1".to_string(), tx1)
+        .await
+        .unwrap();
+    registry
+        .monitor(&actor_id, &monitor2_id, "monitor-ref-2".to_string(), tx2)
+        .await
+        .unwrap();
 
     // Terminate actor
-    registry.handle_actor_termination(&actor_id, ExitReason::Normal).await;
+    registry
+        .handle_actor_termination(&actor_id, ExitReason::Normal)
+        .await;
 
     // Both monitors should receive DOWN
     let down1 = rx1.recv().await;
@@ -739,7 +883,3 @@ async fn test_monitor_cleanup_on_termination() {
     // Monitors should be cleaned up (no longer registered)
     // Note: This is verified by the fact that monitors are removed in handle_actor_termination
 }
-
-
-
-

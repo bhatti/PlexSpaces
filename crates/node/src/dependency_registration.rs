@@ -35,10 +35,15 @@
 //! - Uses object-registry to discover services by name/type
 //! - Supports both critical and non-critical dependencies
 
-use plexspaces_core::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult, PlexSpacesHealthReporter};
+use crate::external_dependency_checkers::{
+    DynamoDBHealthChecker, MinIOHealthChecker, SQSHealthChecker,
+};
 use crate::health::circuit_breaker::CircuitBreakerHealthChecker;
-use crate::external_dependency_checkers::{MinIOHealthChecker, DynamoDBHealthChecker, SQSHealthChecker};
 use plexspaces_core::ObjectRegistry;
+use plexspaces_core::{
+    HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker,
+    PlexSpacesHealthReporter,
+};
 use plexspaces_proto::object_registry::v1::ObjectType;
 use plexspaces_proto::system::v1::DependencyRegistrationConfig;
 use std::sync::Arc;
@@ -62,8 +67,8 @@ pub async fn register_builtin_dependencies(
     let mut registered_count = 0;
 
     // Check for Redis (used by KeyValue store and TupleSpace)
-    if let Ok(redis_url) = std::env::var("PLEXSPACES_KV_REDIS_URL")
-        .or_else(|_| std::env::var("PLEXSPACES_REDIS_URL"))
+    if let Ok(redis_url) =
+        std::env::var("PLEXSPACES_KV_REDIS_URL").or_else(|_| std::env::var("PLEXSPACES_REDIS_URL"))
     {
         let checker = RedisHealthChecker {
             url: redis_url.clone(),
@@ -72,7 +77,9 @@ pub async fn register_builtin_dependencies(
         // Wrap with circuit breaker (using existing CircuitBreaker implementation)
         let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
         let cb_checker = Arc::new(cb_checker);
-        reporter.register_readiness_checker(cb_checker.clone()).await;
+        reporter
+            .register_readiness_checker(cb_checker.clone())
+            .await;
         reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
         tracing::warn!("✅ Registered Redis health checker (critical) with circuit breaker");
@@ -90,7 +97,9 @@ pub async fn register_builtin_dependencies(
         // Wrap with circuit breaker (using existing CircuitBreaker implementation)
         let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
         let cb_checker = Arc::new(cb_checker);
-        reporter.register_readiness_checker(cb_checker.clone()).await;
+        reporter
+            .register_readiness_checker(cb_checker.clone())
+            .await;
         reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
         tracing::warn!("✅ Registered PostgreSQL health checker (critical) with circuit breaker");
@@ -105,15 +114,17 @@ pub async fn register_builtin_dependencies(
         // Wrap with circuit breaker (using existing CircuitBreaker implementation)
         let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
         let cb_checker = Arc::new(cb_checker);
-        reporter.register_readiness_checker(cb_checker.clone()).await;
+        reporter
+            .register_readiness_checker(cb_checker.clone())
+            .await;
         reporter.register_startup_checker(cb_checker.clone()).await;
         registered_count += 1;
         tracing::warn!("✅ Registered Kafka health checker (critical) with circuit breaker");
     }
 
     // Check for MinIO (blob storage)
-    if let Ok(minio_endpoint) = std::env::var("BLOB_ENDPOINT")
-        .or_else(|_| std::env::var("PLEXSPACES_MINIO_ENDPOINT"))
+    if let Ok(minio_endpoint) =
+        std::env::var("BLOB_ENDPOINT").or_else(|_| std::env::var("PLEXSPACES_MINIO_ENDPOINT"))
     {
         let access_key = std::env::var("BLOB_ACCESS_KEY_ID")
             .or_else(|_| std::env::var("PLEXSPACES_MINIO_ACCESS_KEY"))
@@ -121,85 +132,91 @@ pub async fn register_builtin_dependencies(
         let secret_key = std::env::var("BLOB_SECRET_ACCESS_KEY")
             .or_else(|_| std::env::var("PLEXSPACES_MINIO_SECRET_KEY"))
             .ok();
-        
+
         // MinIO is critical if blob backend is minio
         let is_critical = std::env::var("BLOB_BACKEND")
             .unwrap_or_default()
-            .to_lowercase() == "minio";
-        
-        let checker = MinIOHealthChecker::new(
-            minio_endpoint.clone(),
-            access_key,
-            secret_key,
-            is_critical,
-        );
+            .to_lowercase()
+            == "minio";
+
+        let checker =
+            MinIOHealthChecker::new(minio_endpoint.clone(), access_key, secret_key, is_critical);
         let checker = Arc::new(checker);
         // Wrap with circuit breaker (using existing CircuitBreaker implementation)
         let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
         let cb_checker = Arc::new(cb_checker);
-        reporter.register_readiness_checker(cb_checker.clone()).await;
+        reporter
+            .register_readiness_checker(cb_checker.clone())
+            .await;
         if is_critical {
             reporter.register_startup_checker(cb_checker.clone()).await;
         }
         registered_count += 1;
-        tracing::warn!("✅ Registered MinIO health checker (critical: {}) with circuit breaker", is_critical);
+        tracing::warn!(
+            "✅ Registered MinIO health checker (critical: {}) with circuit breaker",
+            is_critical
+        );
     }
 
     // Check for DynamoDB (storage backend)
-    if let Ok(aws_region) = std::env::var("AWS_REGION")
-        .or_else(|_| std::env::var("PLEXSPACES_DYNAMODB_REGION"))
+    if let Ok(aws_region) =
+        std::env::var("AWS_REGION").or_else(|_| std::env::var("PLEXSPACES_DYNAMODB_REGION"))
     {
         let table_name = std::env::var("PLEXSPACES_DYNAMODB_TABLE").ok();
-        
+
         // DynamoDB is critical if used as storage backend
         let is_critical = std::env::var("KEYVALUE_BACKEND")
             .or_else(|_| std::env::var("TUPLESPACE_BACKEND"))
             .unwrap_or_default()
-            .to_lowercase() == "dynamodb";
-        
-        let checker = DynamoDBHealthChecker::new(
-            aws_region.clone(),
-            table_name,
-            is_critical,
-        );
+            .to_lowercase()
+            == "dynamodb";
+
+        let checker = DynamoDBHealthChecker::new(aws_region.clone(), table_name, is_critical);
         let checker = Arc::new(checker);
         // Wrap with circuit breaker (using existing CircuitBreaker implementation)
         let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
         let cb_checker = Arc::new(cb_checker);
-        reporter.register_readiness_checker(cb_checker.clone()).await;
+        reporter
+            .register_readiness_checker(cb_checker.clone())
+            .await;
         if is_critical {
             reporter.register_startup_checker(cb_checker.clone()).await;
         }
         registered_count += 1;
-        tracing::warn!("✅ Registered DynamoDB health checker (critical: {}) with circuit breaker", is_critical);
+        tracing::warn!(
+            "✅ Registered DynamoDB health checker (critical: {}) with circuit breaker",
+            is_critical
+        );
     }
 
     // Check for SQS (channel backend)
-    if let Ok(aws_region) = std::env::var("AWS_REGION")
-        .or_else(|_| std::env::var("PLEXSPACES_SQS_REGION"))
+    if let Ok(aws_region) =
+        std::env::var("AWS_REGION").or_else(|_| std::env::var("PLEXSPACES_SQS_REGION"))
     {
         let queue_url = std::env::var("PLEXSPACES_SQS_QUEUE_URL").ok();
-        
+
         // SQS is critical if used as channel backend
         let is_critical = std::env::var("CHANNEL_BACKEND")
             .unwrap_or_default()
-            .to_lowercase() == "sqs";
-        
-        let checker = SQSHealthChecker::new(
-            aws_region.clone(),
-            queue_url,
-            is_critical,
-        );
+            .to_lowercase()
+            == "sqs";
+
+        let checker = SQSHealthChecker::new(aws_region.clone(), queue_url, is_critical);
         let checker = Arc::new(checker);
         // Wrap with circuit breaker (using existing CircuitBreaker implementation)
         let cb_checker = CircuitBreakerHealthChecker::with_defaults(checker);
         let cb_checker = Arc::new(cb_checker);
-        reporter.register_readiness_checker(cb_checker.clone()).await;
+        reporter
+            .register_readiness_checker(cb_checker.clone())
+            .await;
         if is_critical {
             reporter.register_startup_checker(cb_checker.clone()).await;
         }
         registered_count += 1;
-        tracing::warn!("✅ Registered SQS health checker (critical: {}) with circuit breaker", is_critical);
+        tracing::warn!(
+            "✅ Registered SQS health checker (critical: {}) with circuit breaker",
+            is_critical
+        );
     }
 
     Ok(registered_count)
@@ -224,7 +241,7 @@ pub async fn register_dependencies(
     }
 
     let mut registered_count = 0;
-    
+
     // Create RequestContext for dependency lookup (tenant comes from auth, not config)
     use plexspaces_core::RequestContext;
     let ctx = RequestContext::new_without_auth(String::new(), String::new());
@@ -233,7 +250,10 @@ pub async fn register_dependencies(
         // Parse dependency spec: "name:type:critical"
         let parts: Vec<&str> = dep_spec.split(':').collect();
         if parts.len() < 2 {
-            tracing::warn!("Warning: Invalid dependency spec '{}', expected 'name:type:critical'", dep_spec);
+            tracing::warn!(
+                "Warning: Invalid dependency spec '{}', expected 'name:type:critical'",
+                dep_spec
+            );
             continue;
         }
 
@@ -247,16 +267,17 @@ pub async fn register_dependencies(
             "actor" => ObjectType::ObjectTypeActor,
             "tuplespace" => ObjectType::ObjectTypeTuplespace,
             _ => {
-                tracing::warn!("Warning: Unknown dependency type '{}' for '{}'", dep_type_str, dep_name);
+                tracing::warn!(
+                    "Warning: Unknown dependency type '{}' for '{}'",
+                    dep_type_str,
+                    dep_name
+                );
                 continue;
             }
         };
 
         // Lookup dependency in object-registry using RequestContext
-        let registration = match registry
-            .lookup_full(&ctx, object_type, dep_name)
-            .await
-        {
+        let registration = match registry.lookup_full(&ctx, object_type, dep_name).await {
             Ok(Some(reg)) => reg,
             Ok(None) => {
                 tracing::warn!("Warning: Dependency '{}' not found in registry", dep_name);
@@ -277,14 +298,24 @@ pub async fn register_dependencies(
 
         // Register based on criticality
         if is_critical {
-            reporter.register_readiness_checker(Arc::new(checker.clone())).await;
-            reporter.register_startup_checker(Arc::new(checker.clone())).await;
+            reporter
+                .register_readiness_checker(Arc::new(checker.clone()))
+                .await;
+            reporter
+                .register_startup_checker(Arc::new(checker.clone()))
+                .await;
         } else {
-            reporter.register_readiness_checker(Arc::new(checker.clone())).await;
+            reporter
+                .register_readiness_checker(Arc::new(checker.clone()))
+                .await;
         }
 
         registered_count += 1;
-        tracing::warn!("✅ Registered dependency checker: {} (critical: {})", dep_name, is_critical);
+        tracing::warn!(
+            "✅ Registered dependency checker: {} (critical: {})",
+            dep_name,
+            is_critical
+        );
     }
 
     Ok(registered_count)
@@ -317,31 +348,41 @@ impl HealthChecker for DependencyHealthChecker {
         match timeout(timeout_duration, async {
             use tonic_health::pb::health_client::HealthClient;
             use tonic_health::pb::HealthCheckRequest;
-            
+
             // Parse address (remove http:// or https:// if present)
-            let address = self.grpc_address
+            let address = self
+                .grpc_address
                 .strip_prefix("http://")
                 .or_else(|| self.grpc_address.strip_prefix("https://"))
                 .unwrap_or(&self.grpc_address);
-            
+
             // Create gRPC channel
             let channel = tonic::transport::Channel::from_shared(format!("http://{}", address))
                 .map_err(|e| HealthCheckError::CheckFailed(format!("Invalid gRPC address: {}", e)))?
                 .connect()
                 .await
-                .map_err(|e| HealthCheckError::CheckFailed(format!("Failed to connect to {}: {}", self.grpc_address, e)))?;
-            
+                .map_err(|e| {
+                    HealthCheckError::CheckFailed(format!(
+                        "Failed to connect to {}: {}",
+                        self.grpc_address, e
+                    ))
+                })?;
+
             // Create health client
             let mut client = HealthClient::new(channel);
-            
+
             // Check health (use empty service name for default service)
             let request = tonic::Request::new(HealthCheckRequest {
                 service: String::new(), // Empty = check overall service health
             });
-            
-            let response = client.check(request).await
-                .map_err(|e| HealthCheckError::CheckFailed(format!("Health check failed for {}: {}", self.name, e)))?;
-            
+
+            let response = client.check(request).await.map_err(|e| {
+                HealthCheckError::CheckFailed(format!(
+                    "Health check failed for {}: {}",
+                    self.name, e
+                ))
+            })?;
+
             // Verify response indicates healthy status
             use tonic_health::pb::health_check_response::ServingStatus;
             match response.into_inner().status() {
@@ -351,7 +392,9 @@ impl HealthChecker for DependencyHealthChecker {
                     self.name, status
                 ))),
             }
-        }).await {
+        })
+        .await
+        {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => Err(e),
             Err(_) => Err(HealthCheckError::Timeout(format!(
@@ -484,7 +527,7 @@ impl HealthChecker for KafkaHealthChecker {
             {
                 Ok(Ok(_stream)) => return Ok(()),
                 Ok(Err(_)) => continue, // Try next broker
-                Err(_) => continue,      // Try next broker
+                Err(_) => continue,     // Try next broker
             }
         }
 
@@ -599,4 +642,3 @@ mod tests {
         assert_eq!(port, 9092);
     }
 }
-

@@ -12,6 +12,12 @@ PlexSpaces has comprehensive test coverage including unit tests, integration tes
 # Run all unit tests and integration tests (recommended)
 make test
 
+# Fast local Rust test loop (prefers cargo-nextest when installed)
+make test-fast
+
+# Fast local compile verification without full linking/test execution
+make check
+
 # This runs:
 # - All unit tests (library tests)
 # - All WASM integration tests (offline, no AWS/MinIO)
@@ -21,12 +27,24 @@ make test
 ### Run Unit Tests Only
 
 ```bash
+# Fastest repo-level compile pass
+make build-fast
+
 # Run only library unit tests (fastest)
 cargo test --lib --all-features --workspace
 
 # Run tests for specific package
 cargo test --lib -p plexspaces-wasm-runtime
 ```
+
+### Build Performance Defaults
+
+The repository uses a single shared top-level `target/` directory for workspace crates, examples, and scripts. Local development paths also enable incremental compilation by default.
+
+- `make build`, `make test`, `make build-fast`, and `make test-fast` all reuse the shared `target/`
+- `cargo-nextest` is used automatically when installed for faster test scheduling
+- `sccache` is used automatically when installed for compiler artifact caching
+- `CARGO_BUILD_JOBS` controls build parallelism and `CARGO_TEST_JOBS` can be set separately for test runs
 
 ### Run Integration Tests
 
@@ -267,5 +285,4 @@ cargo test
 - `crates/wasm-runtime/tests/README.md` - WASM test details
 - `docs/SSL_CERTIFICATE_FIX.md` - SSL certificate configuration
 - `Makefile` - Test targets and commands
-
 

@@ -168,7 +168,7 @@ async fn test_mock_restart_recover_unacked() {
     let received: Vec<Message> = Channel::receive(&channel1, 2).await.unwrap();
     assert_eq!(received.len(), 2);
     let _unacked_ids: Vec<String> = received.iter().map(|m| m.id.clone()).collect();
-    
+
     // Channel is dropped (simulating crash/restart)
 
     // Phase 2: Restart - create new channel instance
@@ -188,7 +188,10 @@ async fn test_mock_restart_recover_unacked() {
     let remaining: Vec<Message> = Channel::receive(&channel2, 10).await.unwrap();
     // Note: Mock doesn't persist, so this would be empty
     // But the test verifies the shutdown/restart pattern
-    assert!(remaining.len() <= 3, "Should not have more than remaining messages");
+    assert!(
+        remaining.len() <= 3,
+        "Should not have more than remaining messages"
+    );
 }
 
 // ============================================================================
@@ -259,7 +262,10 @@ mod sqlite_tests {
             // In-memory database doesn't persist, so we verify the channel works after "restart"
             // For true recovery testing, use file-based database
             let stats: ChannelStats = Channel::get_stats(&channel).await.unwrap();
-            assert_eq!(stats.messages_sent, 0, "New instance starts fresh (in-memory)");
+            assert_eq!(
+                stats.messages_sent, 0,
+                "New instance starts fresh (in-memory)"
+            );
         }
     }
 
@@ -306,7 +312,10 @@ mod sqlite_tests {
             // In-memory database doesn't persist, so new instance starts fresh
             // This test verifies the shutdown/restart pattern works
             let stats: ChannelStats = Channel::get_stats(&channel).await.unwrap();
-            assert_eq!(stats.messages_sent, 0, "New instance starts fresh (in-memory)");
+            assert_eq!(
+                stats.messages_sent, 0,
+                "New instance starts fresh (in-memory)"
+            );
         }
     }
 
@@ -361,10 +370,15 @@ mod redis_tests {
         #[cfg(not(feature = "test-helpers"))]
         {
             // Fallback: fast TCP connection check
+            use std::time::Duration;
             use tokio::net::TcpStream;
             use tokio::time::timeout;
-            use std::time::Duration;
-            timeout(Duration::from_millis(500), TcpStream::connect("localhost:6379")).await.is_ok()
+            timeout(
+                Duration::from_millis(500),
+                TcpStream::connect("localhost:6379"),
+            )
+            .await
+            .is_ok()
         }
     }
 
@@ -492,5 +506,3 @@ mod redis_tests {
         cleanup_redis(&format!("test-stream:{}", channel_name)).await;
     }
 }
-
-

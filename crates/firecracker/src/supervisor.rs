@@ -162,10 +162,7 @@ impl VmSupervisor {
     }
 
     /// Create supervisor with custom health check settings
-    pub fn with_health_settings(
-        health_check_interval: Duration,
-        failure_threshold: u32,
-    ) -> Self {
+    pub fn with_health_settings(health_check_interval: Duration, failure_threshold: u32) -> Self {
         Self {
             vms: Arc::new(RwLock::new(HashMap::new())),
             health_check_interval,
@@ -474,4 +471,3 @@ mod tests {
         assert_eq!(supervisor.supervised_vm_count().await, 1);
     }
 }
-

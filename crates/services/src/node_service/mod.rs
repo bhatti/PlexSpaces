@@ -43,25 +43,28 @@ use async_trait::async_trait;
 use futures::Stream;
 use prost_types::Timestamp;
 use tokio::sync::RwLock;
-use tonic::{Request, Response, Status};
 use tonic::transport::Channel;
+use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
 
-use plexspaces_core::{RequestContext, ServiceLocator, mask_release_spec};
+use plexspaces_core::{
+    mask_release_spec, ConnectNodesResult, NodeConnectivity, NodeRegistryTrait, RequestContext,
+    ServiceLocator,
+};
 use plexspaces_proto::node::v1::{
-    node_service_server::NodeService as NodeServiceTrait,
-    node_service_client::NodeServiceClient,
-    CalculateCapacityRequest, ConnectNodesRequest, ConnectNodesResponse,
-    DisconnectNodesRequest, DisconnectNodesResponse, GetHealthRequest, GetHealthResponse,
-    GetMetricsRequest, GetReleaseSpecRequest, GetReleaseSpecResponse, ListConnectedNodesRequest,
+    node_service_client::NodeServiceClient, node_service_server::NodeService as NodeServiceTrait,
+    CalculateCapacityRequest, ConnectNodesRequest, ConnectNodesResponse, DisconnectNodesRequest,
+    DisconnectNodesResponse, GetHealthRequest, GetHealthResponse, GetMetricsRequest,
+    GetReleaseSpecRequest, GetReleaseSpecResponse, ListConnectedNodesRequest,
     ListConnectedNodesResponse, ListNodeApplicationsRequest, ListNodeApplicationsResponse,
-    NodeApplicationInfo, NodeCapacity, NodeHealthStatus, NodeMetrics, NodeRegistration,
-    NodeStatus, PingRequest, RegisterNodesRequest, RegisterNodesResponse, ReleaseSpec,
-    SendHeartbeatRequest, SendHeartbeatResponse, StreamConnectedNodesRequest,
-    UnregisterNodeRequest, UnregisterNodeResponse,
+    NodeApplicationInfo, NodeCapacity, NodeHealthStatus, NodeMetrics, NodeRegistration, NodeStatus,
+    PingRequest, RegisterNodesRequest, RegisterNodesResponse, ReleaseSpec, SendHeartbeatRequest,
+    SendHeartbeatResponse, StreamConnectedNodesRequest, UnregisterNodeRequest,
+    UnregisterNodeResponse,
 };
 
 use crate::request_context_from_grpc_request;
+use crate::node_address::{canonical_node_address_key, node_addresses_equivalent};
 
 /// Metrics tracking for NodeService
 struct NodeServiceMetrics {
@@ -103,8 +106,12 @@ pub struct NodeServiceImpl {
     service_locator: Arc<dyn ServiceLocator>,
     /// Local node ID
     local_node_id: String,
+    /// Local cluster name (from ReleaseSpec); used to only register nodes that match cluster.
+    local_cluster: String,
     /// Release spec (stored for get_release_spec)
     release_spec: Arc<RwLock<Option<ReleaseSpec>>>,
+    /// Registered NodeConnectivity (typically self; used for seed_nodes and cluster_seed_nodes)
+    connectivity: Arc<RwLock<Option<Arc<dyn NodeConnectivity>>>>,
     /// Internal metrics tracking
     metrics: NodeServiceMetrics,
 }
@@ -119,7 +126,9 @@ impl NodeServiceImpl {
         Self {
             service_locator,
             local_node_id,
+            local_cluster: String::new(),
             release_spec: Arc::new(RwLock::new(None)),
+            connectivity: Arc::new(RwLock::new(None)),
             metrics: NodeServiceMetrics::default(),
         }
     }
@@ -129,16 +138,23 @@ impl NodeServiceImpl {
     /// ## Arguments
     /// * `service_locator` - ServiceLocator for accessing required services
     /// * `local_node_id` - ID of the local node
-    /// * `release_spec` - ReleaseSpec for this node
+    /// * `release_spec` - ReleaseSpec for this node (local_cluster taken from spec.node.cluster_name)
     pub fn with_release_spec(
         service_locator: Arc<dyn ServiceLocator>,
         local_node_id: String,
         release_spec: ReleaseSpec,
     ) -> Self {
+        let local_cluster = release_spec
+            .node
+            .as_ref()
+            .map(|n| n.cluster_name.clone())
+            .unwrap_or_default();
         Self {
             service_locator,
             local_node_id,
+            local_cluster,
             release_spec: Arc::new(RwLock::new(Some(release_spec))),
+            connectivity: Arc::new(RwLock::new(None)),
             metrics: NodeServiceMetrics::default(),
         }
     }
@@ -148,12 +164,23 @@ impl NodeServiceImpl {
         let mut guard = self.release_spec.write().await;
         *guard = Some(spec);
     }
-    
-    /// Get the release spec (for internal/testing use)
-    #[cfg(test)]
+
+    /// Get the release spec (for internal use: cluster check in connect_to_nodes_impl, and tests)
     pub async fn get_release_spec_internal(&self) -> Option<ReleaseSpec> {
         let guard = self.release_spec.read().await;
         guard.clone()
+    }
+
+    /// Returns the registered NodeConnectivity (typically self), for seed_nodes and cluster_seed_nodes.
+    pub async fn get_node_connectivity(&self) -> Option<Arc<dyn NodeConnectivity>> {
+        let guard = self.connectivity.read().await;
+        guard.clone()
+    }
+
+    /// Registers the NodeConnectivity instance (node typically registers self after creation).
+    pub async fn register_node_connectivity(&self, connectivity: Arc<dyn NodeConnectivity>) {
+        let mut guard = self.connectivity.write().await;
+        *guard = Some(connectivity);
     }
 
     /// Get node uptime in seconds
@@ -176,9 +203,9 @@ impl NodeServiceImpl {
     /// - Actor/connection counts are cached via ServiceLocator
     /// - Message counters use atomic operations (no locks)
     async fn get_metrics_internal(&self) -> NodeMetrics {
-        use sysinfo::System;
         use std::sync::atomic::Ordering;
-        
+        use sysinfo::System;
+
         let mut system = System::new();
         system.refresh_all();
 
@@ -187,29 +214,39 @@ impl NodeServiceImpl {
         let available_memory = system.available_memory();
         let cpu_count = system.cpus().len() as u32;
         let cpu_usage = if cpu_count > 0 {
-            system.cpus().iter().map(|cpu| cpu.cpu_usage() as f64).sum::<f64>() / cpu_count as f64
+            system
+                .cpus()
+                .iter()
+                .map(|cpu| cpu.cpu_usage() as f64)
+                .sum::<f64>()
+                / cpu_count as f64
         } else {
             0.0
         };
 
         // Get actor counts from ActorRegistry
-        let active_actors = if let Some(actor_registry) = self.service_locator.actor_registry().await {
-            let registered_ids = actor_registry.registered_actor_ids().read().await;
-            registered_ids.len() as u32
-        } else {
-            0
-        };
+        let active_actors =
+            if let Some(actor_registry) = self.service_locator.actor_registry().await {
+                let registered_ids = actor_registry.registered_actor_ids().read().await;
+                registered_ids.len() as u32
+            } else {
+                0
+            };
 
         // Get connected nodes count from NodeRegistry
-        let connected_nodes = if let Some(node_registry) = self.service_locator.get_node_registry().await {
-            let ctx = self.service_locator.request_context_for_system_operations().await;
-            match node_registry.list_nodes(&ctx, None, 1000, "").await {
-                Ok((nodes, _)) => nodes.len() as u32,
-                Err(_) => 0,
-            }
-        } else {
-            0
-        };
+        let connected_nodes =
+            if let Some(node_registry) = self.service_locator.get_node_registry().await {
+                let ctx = self
+                    .service_locator
+                    .request_context_for_system_operations()
+                    .await;
+                match node_registry.list_nodes(&ctx, None, 1000, "").await {
+                    Ok((nodes, _)) => nodes.len() as u32,
+                    Err(_) => 0,
+                }
+            } else {
+                0
+            };
 
         // Get cluster name from NodeConfig
         let cluster_name = if let Some(config) = self.service_locator.get_node_config().await {
@@ -230,7 +267,7 @@ impl NodeServiceImpl {
             active_actors,
             connected_nodes,
             shard_groups_created: 0, // TODO: Track shard groups created in NodeService
-            shard_messages_sent: 0, // TODO: Track shard messages sent in NodeService
+            shard_messages_sent: 0,  // TODO: Track shard messages sent in NodeService
             shard_messages_received: 0, // TODO: Track shard messages received in NodeService
             shard_operations_total: 0, // TODO: Track shard operations total in NodeService
             shard_operations_failed: 0, // TODO: Track shard operations failed in NodeService
@@ -241,8 +278,8 @@ impl NodeServiceImpl {
 
     /// Calculate node capacity
     async fn calculate_capacity_internal(&self) -> NodeCapacity {
-        use sysinfo::{Disks, System};
         use plexspaces_proto::common::v1::ResourceSpec;
+        use sysinfo::{Disks, System};
 
         let mut sys = System::new_all();
         sys.refresh_all();
@@ -250,7 +287,7 @@ impl NodeServiceImpl {
         // Total resources
         let total_memory_bytes = sys.total_memory();
         let total_cpu_cores = sys.cpus().len() as f64;
-        
+
         let disks = Disks::new_with_refreshed_list();
         let total_disk_bytes: u64 = disks.iter().map(|d| d.total_space()).sum();
 
@@ -296,7 +333,8 @@ impl NodeServiceImpl {
         self.metrics.messages_routed.fetch_add(1, Ordering::Relaxed);
         metrics::counter!("plexspaces_node_messages_routed_total",
             "node_id" => self.local_node_id.clone()
-        ).increment(1);
+        )
+        .increment(1);
     }
 
     /// Increment local_deliveries counter
@@ -304,10 +342,13 @@ impl NodeServiceImpl {
     /// Thread-safe: uses atomic increment
     pub fn increment_local_deliveries(&self) {
         use std::sync::atomic::Ordering;
-        self.metrics.local_deliveries.fetch_add(1, Ordering::Relaxed);
+        self.metrics
+            .local_deliveries
+            .fetch_add(1, Ordering::Relaxed);
         metrics::counter!("plexspaces_node_local_deliveries_total",
             "node_id" => self.local_node_id.clone()
-        ).increment(1);
+        )
+        .increment(1);
     }
 
     /// Increment remote_deliveries counter
@@ -315,10 +356,13 @@ impl NodeServiceImpl {
     /// Thread-safe: uses atomic increment
     pub fn increment_remote_deliveries(&self) {
         use std::sync::atomic::Ordering;
-        self.metrics.remote_deliveries.fetch_add(1, Ordering::Relaxed);
+        self.metrics
+            .remote_deliveries
+            .fetch_add(1, Ordering::Relaxed);
         metrics::counter!("plexspaces_node_remote_deliveries_total",
             "node_id" => self.local_node_id.clone()
-        ).increment(1);
+        )
+        .increment(1);
     }
 
     /// Increment failed_deliveries counter
@@ -326,10 +370,13 @@ impl NodeServiceImpl {
     /// Thread-safe: uses atomic increment
     pub fn increment_failed_deliveries(&self) {
         use std::sync::atomic::Ordering;
-        self.metrics.failed_deliveries.fetch_add(1, Ordering::Relaxed);
+        self.metrics
+            .failed_deliveries
+            .fetch_add(1, Ordering::Relaxed);
         metrics::counter!("plexspaces_node_failed_deliveries_total",
             "node_id" => self.local_node_id.clone()
-        ).increment(1);
+        )
+        .increment(1);
     }
 
     /// Get current message routing statistics
@@ -355,7 +402,10 @@ impl NodeServiceTrait for NodeServiceImpl {
 
         // Only return release spec for local node
         if req.node_id != self.local_node_id {
-            return Err(Status::not_found(format!("Node not found: {}", req.node_id)));
+            return Err(Status::not_found(format!(
+                "Node not found: {}",
+                req.node_id
+            )));
         }
 
         // Get release spec and mask secrets before returning
@@ -384,7 +434,10 @@ impl NodeServiceTrait for NodeServiceImpl {
         let ctx = self.extract_context(&request).await?;
         let req = request.into_inner();
 
-        let node_registry = self.service_locator.get_node_registry().await
+        let node_registry = self
+            .service_locator
+            .get_node_registry()
+            .await
             .ok_or_else(|| Status::internal("NodeRegistry not available"))?;
 
         let mut registered_ids = Vec::new();
@@ -402,7 +455,11 @@ impl NodeServiceTrait for NodeServiceImpl {
             }
         }
 
-        info!("Registered {} nodes, {} errors", registered_ids.len(), errors.len());
+        info!(
+            "Registered {} nodes, {} errors",
+            registered_ids.len(),
+            errors.len()
+        );
 
         Ok(Response::new(RegisterNodesResponse {
             registered_node_ids: registered_ids,
@@ -417,10 +474,15 @@ impl NodeServiceTrait for NodeServiceImpl {
         let ctx = self.extract_context(&request).await?;
         let req = request.into_inner();
 
-        let node_registry = self.service_locator.get_node_registry().await
+        let node_registry = self
+            .service_locator
+            .get_node_registry()
+            .await
             .ok_or_else(|| Status::internal("NodeRegistry not available"))?;
 
-        node_registry.unregister_node(&ctx, &req.node_id).await
+        node_registry
+            .unregister_node(&ctx, &req.node_id)
+            .await
             .map_err(|e| Status::internal(format!("Failed to unregister: {}", e)))?;
 
         info!("Unregistered node: {}", req.node_id);
@@ -435,13 +497,26 @@ impl NodeServiceTrait for NodeServiceImpl {
         let ctx = self.extract_context(&request).await?;
         let req = request.into_inner();
 
-        let node_registry = self.service_locator.get_node_registry().await
+        let node_registry = self
+            .service_locator
+            .get_node_registry()
+            .await
             .ok_or_else(|| Status::internal("NodeRegistry not available"))?;
 
-        let cluster = if req.cluster.is_empty() { None } else { Some(req.cluster.as_str()) };
-        let page_size = if req.page_size > 0 { req.page_size as u32 } else { 100 };
+        let cluster = if req.cluster.is_empty() {
+            None
+        } else {
+            Some(req.cluster.as_str())
+        };
+        let page_size = if req.page_size > 0 {
+            req.page_size as u32
+        } else {
+            100
+        };
 
-        let (nodes, next_token) = node_registry.list_nodes(&ctx, cluster, page_size, &req.page_token).await
+        let (nodes, next_token) = node_registry
+            .list_nodes(&ctx, cluster, page_size, &req.page_token)
+            .await
             .map_err(|e| Status::internal(format!("Failed to list nodes: {}", e)))?;
 
         let total_count = nodes.len() as i32;
@@ -452,7 +527,8 @@ impl NodeServiceTrait for NodeServiceImpl {
         }))
     }
 
-    type StreamConnectedNodesStream = Pin<Box<dyn Stream<Item = Result<NodeRegistration, Status>> + Send + 'static>>;
+    type StreamConnectedNodesStream =
+        Pin<Box<dyn Stream<Item = Result<NodeRegistration, Status>> + Send + 'static>>;
 
     async fn stream_connected_nodes(
         &self,
@@ -461,15 +537,22 @@ impl NodeServiceTrait for NodeServiceImpl {
         let ctx = self.extract_context(&request).await?;
         let req = request.into_inner();
 
-        let node_registry = self.service_locator.get_node_registry().await
+        let node_registry = self
+            .service_locator
+            .get_node_registry()
+            .await
             .ok_or_else(|| Status::internal("NodeRegistry not available"))?;
 
-        let cluster = if req.cluster.is_empty() { None } else { Some(req.cluster.clone()) };
+        let cluster = if req.cluster.is_empty() {
+            None
+        } else {
+            Some(req.cluster.clone())
+        };
 
         // Stream nodes from registry
         let ctx_clone = ctx.clone();
         let cluster_clone = cluster.clone();
-        
+
         let stream = async_stream::try_stream! {
             let mut page_token = String::new();
             loop {
@@ -500,7 +583,10 @@ impl NodeServiceTrait for NodeServiceImpl {
 
         // Only return metrics for local node
         if req.node_id != self.local_node_id {
-            return Err(Status::not_found(format!("Node not found: {}", req.node_id)));
+            return Err(Status::not_found(format!(
+                "Node not found: {}",
+                req.node_id
+            )));
         }
 
         let metrics = self.get_metrics_internal().await;
@@ -516,7 +602,10 @@ impl NodeServiceTrait for NodeServiceImpl {
 
         // Only return capacity for local node
         if req.node_id != self.local_node_id {
-            return Err(Status::not_found(format!("Node not found: {}", req.node_id)));
+            return Err(Status::not_found(format!(
+                "Node not found: {}",
+                req.node_id
+            )));
         }
 
         let capacity = self.calculate_capacity_internal().await;
@@ -532,11 +621,17 @@ impl NodeServiceTrait for NodeServiceImpl {
 
         // Only return applications for local node
         if req.node_id != self.local_node_id {
-            return Err(Status::not_found(format!("Node not found: {}", req.node_id)));
+            return Err(Status::not_found(format!(
+                "Node not found: {}",
+                req.node_id
+            )));
         }
 
         // Get application list from ApplicationManager
-        let app_manager = self.service_locator.application_manager().await
+        let app_manager = self
+            .service_locator
+            .application_manager()
+            .await
             .ok_or_else(|| Status::internal("ApplicationManager not available"))?;
 
         let app_names = app_manager.list_applications().await;
@@ -545,16 +640,23 @@ impl NodeServiceTrait for NodeServiceImpl {
         for name in app_names {
             if let Some(info) = app_manager.get_application_info(&name).await {
                 // Convert status enum value to string
-                let status_str = match plexspaces_proto::application::v1::ApplicationStatus::try_from(info.status) {
-                    Ok(s) => format!("{:?}", s),
-                    Err(_) => "Unknown".to_string(),
-                };
+                let status_str =
+                    match plexspaces_proto::application::v1::ApplicationStatus::try_from(
+                        info.status,
+                    ) {
+                        Ok(s) => format!("{:?}", s),
+                        Err(_) => "Unknown".to_string(),
+                    };
                 applications.push(NodeApplicationInfo {
                     name: info.name,
                     version: info.version,
                     status: status_str,
                     started_at: info.deployed_at.clone(), // Use deployed_at as started_at
-                    actor_count: info.metrics.as_ref().map(|m| m.actor_count as i32).unwrap_or(0),
+                    actor_count: info
+                        .metrics
+                        .as_ref()
+                        .map(|m| m.actor_counts.get("total").copied().unwrap_or(0) as i32)
+                        .unwrap_or(0),
                     metadata: std::collections::HashMap::new(), // ApplicationInfo doesn't have metadata field
                 });
             }
@@ -577,16 +679,25 @@ impl NodeServiceTrait for NodeServiceImpl {
 
         // Only return health for local node
         if req.node_id != self.local_node_id {
-            return Err(Status::not_found(format!("Node not found: {}", req.node_id)));
+            return Err(Status::not_found(format!(
+                "Node not found: {}",
+                req.node_id
+            )));
         }
 
         // Check if shutdown is requested
         let is_shutting_down = self.service_locator.is_shutdown_requested();
-        
+
         let (status, message) = if is_shutting_down {
-            (NodeHealthStatus::NodeHealthStatusDegraded as i32, "Node is shutting down".to_string())
+            (
+                NodeHealthStatus::NodeHealthStatusDegraded as i32,
+                "Node is shutting down".to_string(),
+            )
         } else {
-            (NodeHealthStatus::NodeHealthStatusHealthy as i32, "Healthy".to_string())
+            (
+                NodeHealthStatus::NodeHealthStatusHealthy as i32,
+                "Healthy".to_string(),
+            )
         };
 
         let now = SystemTime::now()
@@ -611,10 +722,15 @@ impl NodeServiceTrait for NodeServiceImpl {
         let ctx = self.extract_context(&request).await?;
         let req = request.into_inner();
 
-        let node_registry = self.service_locator.get_node_registry().await
+        let node_registry = self
+            .service_locator
+            .get_node_registry()
+            .await
             .ok_or_else(|| Status::internal("NodeRegistry not available"))?;
 
-        node_registry.send_heartbeat(&ctx, &req.node_id, req.capacity).await
+        node_registry
+            .send_heartbeat(&ctx, &req.node_id, req.capacity)
+            .await
             .map_err(|e| Status::internal(format!("Failed to send heartbeat: {}", e)))?;
 
         let now = SystemTime::now()
@@ -639,28 +755,47 @@ impl NodeServiceTrait for NodeServiceImpl {
         request: Request<plexspaces_proto::node::v1::PingRequest>,
     ) -> Result<Response<plexspaces_proto::node::v1::PingResponse>, Status> {
         let req = request.into_inner();
-        
+
         if tracing::enabled!(tracing::Level::DEBUG) {
             debug!("Received ping from node: {}", req.source_node_id);
         }
         metrics::counter!("plexspaces_swim_pings_received").increment(1);
 
         // Get our incarnation from SWIM protocol
-        let incarnation = if let Some(_node_registry) = self.service_locator.get_node_registry().await {
-            // Get incarnation from local SWIM state - for now return 0
-            // In production this would query the SWIM protocol state
-            0u64
-        } else {
-            0u64
-        };
+        let incarnation =
+            if let Some(_node_registry) = self.service_locator.get_node_registry().await {
+                // Get incarnation from local SWIM state - for now return 0
+                // In production this would query the SWIM protocol state
+                0u64
+            } else {
+                0u64
+            };
 
         // Get cluster name for same-cluster check (ConnectNodes)
-        let cluster_name = self
-            .service_locator
-            .get_node_config()
-            .await
-            .map(|c| c.cluster_name)
+        let node_config = self.service_locator.get_node_config().await;
+        let cluster_name = node_config
+            .as_ref()
+            .map(|c| c.cluster_name.clone())
             .unwrap_or_default();
+        let node_address = node_config
+            .as_ref()
+            .map(|c| format!("http://{}", c.listen_addr))
+            .unwrap_or_default();
+        let last_heartbeat = if let Some(registry) = self.service_locator.get_node_registry().await
+        {
+            let ctx = self
+                .service_locator
+                .request_context_for_system_operations()
+                .await;
+            registry
+                .lookup_node(&ctx, &self.local_node_id)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|registration| registration.last_heartbeat)
+        } else {
+            None
+        };
 
         // Get piggyback updates to include in response
         let updates = Vec::new(); // Would get from SWIM protocol in full impl
@@ -671,6 +806,8 @@ impl NodeServiceTrait for NodeServiceImpl {
             incarnation,
             updates,
             cluster_name,
+            node_address,
+            last_heartbeat,
         }))
     }
 
@@ -679,7 +816,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         request: Request<plexspaces_proto::node::v1::PingReqRequest>,
     ) -> Result<Response<plexspaces_proto::node::v1::PingReqResponse>, Status> {
         let req = request.into_inner();
-        
+
         debug!(
             "Received ping_req from {} to ping {}",
             req.source_node_id, req.target_node_id
@@ -707,7 +844,7 @@ impl NodeServiceTrait for NodeServiceImpl {
         request: Request<plexspaces_proto::node::v1::SyncMembershipRequest>,
     ) -> Result<Response<plexspaces_proto::node::v1::SyncMembershipResponse>, Status> {
         let req = request.into_inner();
-        
+
         debug!(
             "Received sync_membership from {}, {} members, is_push={}",
             req.source_node_id,
@@ -718,7 +855,7 @@ impl NodeServiceTrait for NodeServiceImpl {
 
         // Process incoming membership updates
         let mut updates_applied = 0i32;
-        
+
         // In full implementation, would merge req.members with local SWIM state
         // For now, just acknowledge receipt
         updates_applied = req.members.len() as i32;
@@ -726,10 +863,12 @@ impl NodeServiceTrait for NodeServiceImpl {
         // Get our full membership state to return
         let members = Vec::new(); // Would get from SWIM protocol in full impl
 
-        Ok(Response::new(plexspaces_proto::node::v1::SyncMembershipResponse {
-            members,
-            updates_applied,
-        }))
+        Ok(Response::new(
+            plexspaces_proto::node::v1::SyncMembershipResponse {
+                members,
+                updates_applied,
+            },
+        ))
     }
 
     // ============================================================================
@@ -766,152 +905,44 @@ impl NodeServiceTrait for NodeServiceImpl {
         metrics::counter!(
             "plexspaces_node_connect_attempts_total",
             "node_id" => self.local_node_id.clone()
-        ).increment(req.node_addresses.len() as u64);
+        )
+        .increment(req.node_addresses.len() as u64);
 
         // Validate request
         if req.node_addresses.is_empty() {
-            return Err(Status::invalid_argument("At least one node address is required"));
+            return Err(Status::invalid_argument(
+                "At least one node address is required",
+            ));
         }
 
         // Get timeout (default 5 seconds)
-        let timeout = req.timeout
-            .map(|d| Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64))
-            .unwrap_or(Duration::from_secs(5));
+        let timeout_secs = req
+            .timeout
+            .map(|d| d.seconds as u64 + (d.nanos as u64) / 1_000_000_000)
+            .unwrap_or(5);
 
-        let node_registry = self.service_locator.get_node_registry().await
-            .ok_or_else(|| Status::internal("NodeRegistry not available"))?;
-
-        // Local cluster name for same-cluster check (empty means no cluster)
-        let local_cluster = self
-            .service_locator
-            .get_node_config()
+        let result = self
+            .connect_to_nodes_impl(req.node_addresses, timeout_secs)
             .await
-            .map(|c| c.cluster_name)
-            .unwrap_or_default();
-
-        let mut connected: HashMap<String, String> = HashMap::new();
-        let mut failed: HashMap<String, String> = HashMap::new();
-
-        // Connect to each node in parallel
-        let mut handles = Vec::new();
-        for address in req.node_addresses.iter() {
-            let address = address.clone();
-            let address_for_task = address.clone();
-            let timeout = timeout;
-            let local_node_id = self.local_node_id.clone();
-
-            let handle = tokio::spawn(async move {
-                Self::try_connect_to_node(&address_for_task, &local_node_id, timeout).await
-            });
-            handles.push((address, handle));
-        }
-
-        // Collect results
-        for (address, handle) in handles {
-            match handle.await {
-                Ok(Ok((node_id, node_address, remote_cluster))) => {
-                    // Same-cluster check: only connect if both have same cluster (empty matches empty)
-                    if !Self::same_cluster_ok(&local_cluster, &remote_cluster) {
-                        warn!(
-                            address = %address,
-                            local_cluster = %local_cluster,
-                            remote_cluster = %remote_cluster,
-                            "Rejecting connection: cluster mismatch"
-                        );
-                        failed.insert(address, "cluster mismatch".to_string());
-                        metrics::counter!(
-                            "plexspaces_node_connect_failures_total",
-                            "node_id" => self.local_node_id.clone(),
-                            "reason" => "cluster_mismatch"
-                        ).increment(1);
-                        continue;
-                    }
-                    // Register the node in NodeRegistry (set cluster in capabilities so list_nodes and SWIM filter align)
-                    let mut capabilities = HashMap::new();
-                    if !remote_cluster.is_empty() {
-                        capabilities.insert("cluster".to_string(), remote_cluster.clone());
-                    }
-                    let registration = NodeRegistration {
-                        node_id: node_id.clone(),
-                        node_address: node_address.clone(),
-                        capabilities,
-                        status: NodeStatus::NodeStatusReady as i32,
-                        last_heartbeat: Some(Timestamp {
-                            seconds: SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs() as i64,
-                            nanos: 0,
-                        }),
-                        actor_count: 0,
-                        message_count: 0,
-                        error_count: 0,
-                        registered_at: Some(Timestamp {
-                            seconds: SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs() as i64,
-                            nanos: 0,
-                        }),
-                    };
-
-                    match node_registry.register_node(&ctx, registration).await {
-                        Ok(()) => {
-                            info!(node_id = %node_id, address = %node_address, "Successfully connected to node");
-                            connected.insert(node_id, node_address);
-                            metrics::counter!(
-                                "plexspaces_node_connect_success_total",
-                                "node_id" => self.local_node_id.clone()
-                            ).increment(1);
-                        }
-                        Err(e) => {
-                            warn!(address = %address, error = %e, "Failed to register node after successful ping");
-                            failed.insert(address, format!("Registration failed: {}", e));
-                            metrics::counter!(
-                                "plexspaces_node_connect_failures_total",
-                                "node_id" => self.local_node_id.clone(),
-                                "reason" => "registration_failed"
-                            ).increment(1);
-                        }
-                    }
-                }
-                Ok(Err(e)) => {
-                    warn!(address = %address, error = %e, "Failed to connect to node");
-                    failed.insert(address, e);
-                    metrics::counter!(
-                        "plexspaces_node_connect_failures_total",
-                        "node_id" => self.local_node_id.clone(),
-                        "reason" => "connection_failed"
-                    ).increment(1);
-                }
-                Err(e) => {
-                    warn!(address = %address, error = %e, "Task panicked while connecting");
-                    failed.insert(address, format!("Task panicked: {}", e));
-                    metrics::counter!(
-                        "plexspaces_node_connect_failures_total",
-                        "node_id" => self.local_node_id.clone(),
-                        "reason" => "task_panic"
-                    ).increment(1);
-                }
-            }
-        }
+            .map_err(|e| Status::internal(e))?;
 
         let elapsed = start_time.elapsed();
         metrics::histogram!(
             "plexspaces_node_connect_duration_seconds",
             "node_id" => self.local_node_id.clone()
-        ).record(elapsed.as_secs_f64());
+        )
+        .record(elapsed.as_secs_f64());
 
         info!(
-            connected_count = connected.len(),
-            failed_count = failed.len(),
+            connected_count = result.connected.len(),
+            failed_count = result.failed.len(),
             elapsed_ms = elapsed.as_millis(),
             "ConnectNodes completed"
         );
 
         Ok(Response::new(ConnectNodesResponse {
-            connected,
-            failed,
+            connected: result.connected,
+            failed: result.failed,
             total_time: Some(prost_types::Duration {
                 seconds: elapsed.as_secs() as i64,
                 nanos: elapsed.subsec_nanos() as i32,
@@ -948,14 +979,18 @@ impl NodeServiceTrait for NodeServiceImpl {
         metrics::counter!(
             "plexspaces_node_disconnect_attempts_total",
             "node_id" => self.local_node_id.clone()
-        ).increment(req.node_ids.len() as u64);
+        )
+        .increment(req.node_ids.len() as u64);
 
         // Validate request
         if req.node_ids.is_empty() {
             return Err(Status::invalid_argument("At least one node_id is required"));
         }
 
-        let node_registry = self.service_locator.get_node_registry().await
+        let node_registry = self
+            .service_locator
+            .get_node_registry()
+            .await
             .ok_or_else(|| Status::internal("NodeRegistry not available"))?;
 
         let mut disconnected: Vec<String> = Vec::new();
@@ -967,7 +1002,9 @@ impl NodeServiceTrait for NodeServiceImpl {
                 // Look up node address first
                 if let Ok(Some(node_info)) = node_registry.lookup_node(&ctx, &node_id).await {
                     // Best-effort notification - don't fail if this doesn't work
-                    if let Err(e) = Self::notify_disconnect(&node_info.node_address, &self.local_node_id).await {
+                    if let Err(e) =
+                        Self::notify_disconnect(&node_info.node_address, &self.local_node_id).await
+                    {
                         debug!(
                             node_id = %node_id,
                             error = %e,
@@ -985,7 +1022,8 @@ impl NodeServiceTrait for NodeServiceImpl {
                     metrics::counter!(
                         "plexspaces_node_disconnect_success_total",
                         "node_id" => self.local_node_id.clone()
-                    ).increment(1);
+                    )
+                    .increment(1);
                 }
                 Err(e) => {
                     // Check if it's a "not found" error - treat as success (idempotent)
@@ -996,14 +1034,16 @@ impl NodeServiceTrait for NodeServiceImpl {
                         metrics::counter!(
                             "plexspaces_node_disconnect_success_total",
                             "node_id" => self.local_node_id.clone()
-                        ).increment(1);
+                        )
+                        .increment(1);
                     } else {
                         warn!(node_id = %node_id, error = %e, "Failed to disconnect from node");
                         failed.insert(node_id, e.to_string());
                         metrics::counter!(
                             "plexspaces_node_disconnect_failures_total",
                             "node_id" => self.local_node_id.clone()
-                        ).increment(1);
+                        )
+                        .increment(1);
                     }
                 }
             }
@@ -1023,69 +1063,76 @@ impl NodeServiceTrait for NodeServiceImpl {
 }
 
 impl NodeServiceImpl {
-    /// Returns true if local and remote cluster match (same-cluster rule for ConnectNodes).
-    /// Empty cluster matches empty; non-empty must match exactly.
-    fn same_cluster_ok(local: &str, remote: &str) -> bool {
-        local == remote
-    }
+    const UNKNOWN_NODE_ID_PREFIX: &'static str = "_unknown_";
 
-    /// Try to connect to a remote node by pinging it
-    ///
-    /// ## Returns
-    /// - Ok((node_id, address, remote_cluster_name)) on success
-    /// - Err(error_message) on failure
-    async fn try_connect_to_node(
-        address: &str,
-        local_node_id: &str,
-        timeout: Duration,
-    ) -> Result<(String, String, String), String> {
-        // Normalize address to include scheme if not present
-        let endpoint = if address.starts_with("http://") || address.starts_with("https://") {
+    fn normalize_node_address(address: &str) -> String {
+        if address.starts_with("http://") || address.starts_with("https://") {
             address.to_string()
         } else {
             format!("http://{}", address)
-        };
+        }
+    }
 
-        // Create gRPC client with timeout
-        let channel = match tokio::time::timeout(
-            timeout,
-            Channel::from_shared(endpoint.clone())
-                .map_err(|e| format!("Invalid endpoint: {}", e))?
-                .connect(),
-        ).await {
-            Ok(Ok(channel)) => channel,
-            Ok(Err(e)) => return Err(format!("Connection failed: {}", e)),
-            Err(_) => return Err(format!("Connection timed out after {:?}", timeout)),
-        };
-
-        let mut client = NodeServiceClient::new(channel);
-
-        // Send Ping request
-        let ping_request = PingRequest {
-            source_node_id: local_node_id.to_string(),
-            sequence_number: 1,
-            updates: Vec::new(),
-        };
-
-        match tokio::time::timeout(timeout, client.ping(ping_request)).await {
-            Ok(Ok(response)) => {
-                let ping_response = response.into_inner();
-                let remote_cluster = ping_response.cluster_name.clone();
-                Ok((ping_response.node_id, endpoint, remote_cluster))
+    async fn local_node_address_keys(&self) -> Vec<String> {
+        let mut keys = Vec::new();
+        if let Some(spec) = self.get_release_spec_internal().await {
+            if let Some(node) = spec.node {
+                if !node.listen_addr.is_empty() {
+                    keys.push(canonical_node_address_key(&node.listen_addr));
+                }
             }
-            Ok(Err(e)) => Err(format!("Ping failed: {}", e)),
-            Err(_) => Err(format!("Ping timed out after {:?}", timeout)),
+        }
+        if let Some(node_config) = self.service_locator.get_node_config().await {
+            if !node_config.listen_addr.is_empty() {
+                keys.push(canonical_node_address_key(&node_config.listen_addr));
+            }
+        }
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
+    fn unknown_node_id() -> String {
+        format!("{}{}", Self::UNKNOWN_NODE_ID_PREFIX, ulid::Ulid::new())
+    }
+
+    fn seeded_node_registration(&self, address: &str, cluster_name: &str) -> NodeRegistration {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default();
+        let mut capabilities = HashMap::new();
+        if !cluster_name.is_empty() {
+            capabilities.insert("cluster".to_string(), cluster_name.to_string());
+        }
+
+        NodeRegistration {
+            node_id: Self::unknown_node_id(),
+            node_address: Self::normalize_node_address(address),
+            capabilities,
+            status: NodeStatus::NodeStatusReady as i32,
+            last_heartbeat: Some(Timestamp {
+                seconds: now.as_secs() as i64,
+                nanos: now.subsec_nanos() as i32,
+            }),
+            actor_count: 0,
+            message_count: 0,
+            error_count: 0,
+            registered_at: Some(Timestamp {
+                seconds: now.as_secs() as i64,
+                nanos: now.subsec_nanos() as i32,
+            }),
         }
     }
 
     /// Notify a remote node that we are disconnecting (best-effort)
     async fn notify_disconnect(remote_address: &str, local_node_id: &str) -> Result<(), String> {
         // Normalize address
-        let endpoint = if remote_address.starts_with("http://") || remote_address.starts_with("https://") {
-            remote_address.to_string()
-        } else {
-            format!("http://{}", remote_address)
-        };
+        let endpoint =
+            if remote_address.starts_with("http://") || remote_address.starts_with("https://") {
+                remote_address.to_string()
+            } else {
+                format!("http://{}", remote_address)
+            };
 
         let channel = Channel::from_shared(endpoint)
             .map_err(|e| format!("Invalid endpoint: {}", e))?
@@ -1103,41 +1150,276 @@ impl NodeServiceImpl {
             updates: Vec::new(),
         };
 
-        client.ping(ping_request).await
+        client
+            .ping(ping_request)
+            .await
             .map_err(|e| format!("Notification failed: {}", e))?;
 
         Ok(())
+    }
+
+    /// Default timeout for connect: 1s per address, min 5s, max 5min.
+    const CONNECT_TIMEOUT_MIN_SECS: u64 = 5;
+    const CONNECT_TIMEOUT_MAX_SECS: u64 = 300;
+    const CONNECT_TIMEOUT_SECS_PER_ADDRESS: u64 = 1;
+
+    /// Helper: connect to a list of node addresses (gRPC addresses e.g. "localhost:8091").
+    /// Timeout: 1s per address, min 5s, max 5min. Use for cluster_seed_nodes and ApplicationSpec.seed_nodes.
+    pub async fn connect_to_node_addresses(
+        &self,
+        node_addresses: Vec<String>,
+    ) -> Result<ConnectNodesResult, String> {
+        let n = node_addresses.len() as u64;
+        let timeout_secs = (n * Self::CONNECT_TIMEOUT_SECS_PER_ADDRESS)
+            .max(Self::CONNECT_TIMEOUT_MIN_SECS)
+            .min(Self::CONNECT_TIMEOUT_MAX_SECS);
+        self.connect_to_nodes_impl(node_addresses, timeout_secs)
+            .await
+    }
+
+    /// Returns true if the string looks like a node address (host:port or URL), false if likely a node_id.
+    fn looks_like_address(s: &str) -> bool {
+        s.contains(':') || s.starts_with("http://") || s.starts_with("https://")
+    }
+
+    /// Lookup a node by address using registry list_nodes (exact address match; no scheme normalization).
+    async fn lookup_node_by_address(
+        node_registry: &dyn NodeRegistryTrait,
+        ctx: &RequestContext,
+        address: &str,
+    ) -> Result<Option<NodeRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+        let normalized_address = Self::normalize_node_address(address);
+        let (nodes, _) = node_registry.list_nodes(ctx, None, 0, "").await?;
+        for reg in nodes {
+            if node_addresses_equivalent(&reg.node_address, &normalized_address) {
+                return Ok(Some(reg));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Internal implementation for connecting to node addresses or node_ids.
+    /// - Address entries are registered synchronously so placement can see seeded nodes immediately.
+    /// - Periodic SWIM probes reconcile placeholder node IDs to the remote node's reported identity.
+    /// - Entries that look like node_ids (no ':') are resolved via node registry; if found, already connected.
+    pub async fn connect_to_nodes_impl(
+        &self,
+        node_addresses: Vec<String>,
+        _timeout_secs: u64,
+    ) -> Result<ConnectNodesResult, String> {
+        if node_addresses.is_empty() {
+            return Ok(ConnectNodesResult::default());
+        }
+
+        let node_registry = self
+            .service_locator
+            .get_node_registry()
+            .await
+            .ok_or_else(|| "NodeRegistry not available".to_string())?;
+
+        let ctx = self
+            .service_locator
+            .request_context_for_system_operations()
+            .await;
+        let mut connected: HashMap<String, String> = HashMap::new();
+        let mut failed: HashMap<String, String> = HashMap::new();
+
+        metrics::counter!(
+            "plexspaces_node_connect_attempts_total",
+            "node_id" => self.local_node_id.clone()
+        )
+        .increment(node_addresses.len() as u64);
+
+        let effective_local_cluster = self
+            .release_spec
+            .read()
+            .await
+            .as_ref()
+            .and_then(|s| s.node.as_ref())
+            .map(|n| n.cluster_name.clone())
+            .unwrap_or_else(|| self.local_cluster.clone());
+        let local_address_keys = self.local_node_address_keys().await;
+
+        // Only connect to nodes not already registered (lookup by address or node_id; node service logic)
+        for entry in node_addresses.iter() {
+            if Self::looks_like_address(entry) {
+                let address_key = canonical_node_address_key(entry);
+                if local_address_keys.iter().any(|key| key == &address_key) {
+                    info!(
+                        entry = %entry,
+                        local_node_id = %self.local_node_id,
+                        "Seed node address resolves to local node, skipping self registration"
+                    );
+                    continue;
+                }
+            }
+            let already = if Self::looks_like_address(entry) {
+                Self::lookup_node_by_address(node_registry.as_ref(), &ctx, entry).await
+            } else {
+                node_registry.lookup_node(&ctx, entry).await
+            };
+            match already {
+                Ok(Some(reg)) => {
+                    info!(
+                        node_id = %reg.node_id,
+                        node_address = %reg.node_address,
+                        entry = %entry,
+                        local_node_id = %self.local_node_id,
+                        "Node already registered, skipping connect"
+                    );
+                    connected.insert(reg.node_id, reg.node_address);
+                }
+                Ok(None) => {
+                    if Self::looks_like_address(entry) {
+                        let registration =
+                            self.seeded_node_registration(entry, &effective_local_cluster);
+                        let node_id = registration.node_id.clone();
+                        let node_address = registration.node_address.clone();
+                        match node_registry.register_node(&ctx, registration).await {
+                            Ok(()) => {
+                                info!(
+                                    node_id = %node_id,
+                                    node_address = %node_address,
+                                    entry = %entry,
+                                    local_node_id = %self.local_node_id,
+                                    "Registered seed node for background probe"
+                                );
+                                connected.insert(node_id, node_address);
+                                metrics::counter!(
+                                    "plexspaces_node_connect_success_total",
+                                    "node_id" => self.local_node_id.clone()
+                                )
+                                .increment(1);
+                            }
+                            Err(e) => {
+                                failed.insert(entry.clone(), format!("registration failed: {}", e));
+                                metrics::counter!(
+                                    "plexspaces_node_connect_failures_total",
+                                    "node_id" => self.local_node_id.clone(),
+                                    "reason" => "registration_failed"
+                                )
+                                .increment(1);
+                            }
+                        }
+                    } else {
+                        failed.insert(entry.clone(), "node_id not in registry".to_string());
+                        metrics::counter!(
+                            "plexspaces_node_connect_failures_total",
+                            "node_id" => self.local_node_id.clone(),
+                            "reason" => "node_id_not_in_registry"
+                        )
+                        .increment(1);
+                    }
+                }
+                Err(e) => {
+                    failed.insert(entry.clone(), format!("lookup failed: {}", e));
+                }
+            }
+        }
+
+        info!(
+            local_node_id = %self.local_node_id,
+            connected_count = connected.len(),
+            failed_count = failed.len(),
+            "Connect to nodes completed"
+        );
+        Ok(ConnectNodesResult { connected, failed })
+    }
+}
+
+#[async_trait::async_trait]
+impl NodeConnectivity for NodeServiceImpl {
+    async fn connect_to_nodes(
+        &self,
+        node_addresses: Vec<String>,
+        timeout_secs: Option<u64>,
+    ) -> Result<ConnectNodesResult, String> {
+        let timeout = timeout_secs.unwrap_or_else(|| {
+            let n = node_addresses.len() as u64;
+            (n * Self::CONNECT_TIMEOUT_SECS_PER_ADDRESS)
+                .max(Self::CONNECT_TIMEOUT_MIN_SECS)
+                .min(Self::CONNECT_TIMEOUT_MAX_SECS)
+        });
+        self.connect_to_nodes_impl(node_addresses, timeout).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use plexspaces_proto::node::v1::ReleaseSpec;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
+    use plexspaces_proto::node::v1::ReleaseSpec;
+    use std::collections::HashMap;
 
     #[test]
     fn test_node_service_metrics_default() {
         let metrics = NodeServiceMetrics::default();
-        assert_eq!(metrics.messages_routed.load(std::sync::atomic::Ordering::Relaxed), 0);
-        assert_eq!(metrics.local_deliveries.load(std::sync::atomic::Ordering::Relaxed), 0);
-        assert_eq!(metrics.remote_deliveries.load(std::sync::atomic::Ordering::Relaxed), 0);
-        assert_eq!(metrics.failed_deliveries.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(
+            metrics
+                .messages_routed
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            metrics
+                .local_deliveries
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            metrics
+                .remote_deliveries
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        assert_eq!(
+            metrics
+                .failed_deliveries
+                .load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
     }
 
     #[test]
     fn test_node_service_metrics_increment() {
         let metrics = NodeServiceMetrics::default();
-        metrics.messages_routed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        metrics.local_deliveries.fetch_add(2, std::sync::atomic::Ordering::Relaxed);
-        metrics.remote_deliveries.fetch_add(3, std::sync::atomic::Ordering::Relaxed);
-        metrics.failed_deliveries.fetch_add(4, std::sync::atomic::Ordering::Relaxed);
-        
-        assert_eq!(metrics.messages_routed.load(std::sync::atomic::Ordering::Relaxed), 1);
-        assert_eq!(metrics.local_deliveries.load(std::sync::atomic::Ordering::Relaxed), 2);
-        assert_eq!(metrics.remote_deliveries.load(std::sync::atomic::Ordering::Relaxed), 3);
-        assert_eq!(metrics.failed_deliveries.load(std::sync::atomic::Ordering::Relaxed), 4);
+        metrics
+            .messages_routed
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        metrics
+            .local_deliveries
+            .fetch_add(2, std::sync::atomic::Ordering::Relaxed);
+        metrics
+            .remote_deliveries
+            .fetch_add(3, std::sync::atomic::Ordering::Relaxed);
+        metrics
+            .failed_deliveries
+            .fetch_add(4, std::sync::atomic::Ordering::Relaxed);
+
+        assert_eq!(
+            metrics
+                .messages_routed
+                .load(std::sync::atomic::Ordering::Relaxed),
+            1
+        );
+        assert_eq!(
+            metrics
+                .local_deliveries
+                .load(std::sync::atomic::Ordering::Relaxed),
+            2
+        );
+        assert_eq!(
+            metrics
+                .remote_deliveries
+                .load(std::sync::atomic::Ordering::Relaxed),
+            3
+        );
+        assert_eq!(
+            metrics
+                .failed_deliveries
+                .load(std::sync::atomic::Ordering::Relaxed),
+            4
+        );
     }
 
     #[test]
@@ -1152,9 +1434,9 @@ mod tests {
     async fn test_node_service_impl_new() {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         let node_id = "test-node-1".to_string();
-        
+
         let service = NodeServiceImpl::new(service_locator.clone(), node_id.clone());
-        
+
         assert_eq!(service.local_node_id, node_id);
         assert_eq!(service.uptime_seconds(), 0); // Just created, uptime is 0
     }
@@ -1163,21 +1445,21 @@ mod tests {
     async fn test_node_service_with_release_spec() {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         let node_id = "test-node-2".to_string();
-        
+
         let release_spec = ReleaseSpec {
             version: "1.0.0".to_string(),
             name: "test-release".to_string(),
             ..Default::default()
         };
-        
+
         let service = NodeServiceImpl::with_release_spec(
-            service_locator.clone(), 
+            service_locator.clone(),
             node_id.clone(),
             release_spec.clone(),
         );
-        
+
         assert_eq!(service.local_node_id, node_id);
-        
+
         // Test get_release_spec_internal returns the spec
         let spec = service.get_release_spec_internal().await;
         assert!(spec.is_some());
@@ -1190,10 +1472,10 @@ mod tests {
     async fn test_node_service_set_release_spec() {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         // Initially no spec
         assert!(service.get_release_spec_internal().await.is_none());
-        
+
         // Set a spec
         let spec = ReleaseSpec {
             version: "2.0.0".to_string(),
@@ -1201,7 +1483,7 @@ mod tests {
             ..Default::default()
         };
         service.set_release_spec(spec).await;
-        
+
         // Now spec exists
         let retrieved = service.get_release_spec_internal().await;
         assert!(retrieved.is_some());
@@ -1212,17 +1494,17 @@ mod tests {
     async fn test_node_service_increment_metrics() {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         // Increment each metric type
         service.increment_messages_routed();
         service.increment_messages_routed();
         service.increment_local_deliveries();
         service.increment_remote_deliveries();
         service.increment_failed_deliveries();
-        
+
         // Get stats
         let (routed, local, remote, failed) = service.routing_stats();
-        
+
         assert_eq!(routed, 2);
         assert_eq!(local, 1);
         assert_eq!(remote, 1);
@@ -1233,13 +1515,13 @@ mod tests {
     async fn test_node_service_uptime() {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         // Initial uptime should be 0
         assert_eq!(service.uptime_seconds(), 0);
-        
+
         // Wait a bit
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        
+
         // Now uptime should be at least 1
         assert!(service.uptime_seconds() >= 1);
     }
@@ -1248,9 +1530,9 @@ mod tests {
     async fn test_calculate_capacity_internal() {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         let capacity = service.calculate_capacity_internal().await;
-        
+
         // Should have reasonable values
         let total = capacity.total.expect("Should have total resources");
         let available = capacity.available.expect("Should have available resources");
@@ -1264,13 +1546,13 @@ mod tests {
     async fn test_get_metrics_internal() {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         // Increment some metrics first
         service.increment_messages_routed();
         service.increment_local_deliveries();
-        
+
         let metrics = service.get_metrics_internal().await;
-        
+
         assert_eq!(metrics.node_id, "test-node");
         assert_eq!(metrics.messages_routed, 1);
         assert_eq!(metrics.local_deliveries, 1);
@@ -1281,55 +1563,83 @@ mod tests {
     // ConnectNodes / DisconnectNodes Tests
     // ============================================================================
 
-    #[tokio::test]
-    async fn test_try_connect_to_node_invalid_address() {
-        // Test with invalid address format
-        let result = NodeServiceImpl::try_connect_to_node(
-            "invalid-no-port",
-            "local-node",
-            Duration::from_millis(100),
-        ).await;
-        
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("Invalid endpoint") || err.contains("Connection failed") || err.contains("timed out"));
-    }
-
-    #[tokio::test]
-    async fn test_try_connect_to_node_connection_timeout() {
-        // Test with unreachable address - should timeout
-        let result = NodeServiceImpl::try_connect_to_node(
-            "192.0.2.1:9999", // TEST-NET-1, guaranteed unreachable
-            "local-node",
-            Duration::from_millis(100),
-        ).await;
-        
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        // Should be either timeout or connection error
-        assert!(
-            err.contains("timed out") || err.contains("Connection failed"),
-            "Expected timeout or connection error, got: {}",
-            err
+    #[test]
+    fn test_normalize_node_address() {
+        assert_eq!(
+            NodeServiceImpl::normalize_node_address("localhost:8091"),
+            "http://localhost:8091"
+        );
+        assert_eq!(
+            NodeServiceImpl::normalize_node_address("http://localhost:8091"),
+            "http://localhost:8091"
         );
     }
 
     #[tokio::test]
-    async fn test_try_connect_to_node_with_scheme() {
-        // Test that addresses with http:// scheme work
-        let result = NodeServiceImpl::try_connect_to_node(
-            "http://192.0.2.1:9999",
-            "local-node",
-            Duration::from_millis(100),
-        ).await;
-        
-        // Should fail but not due to invalid endpoint
-        assert!(result.is_err());
-        let err = result.unwrap_err();
+    async fn test_connect_to_nodes_impl_skips_local_seed_address_alias() {
+        use plexspaces_core::NodeRegistryTrait;
+        use plexspaces_proto::node::v1::NodeConfig;
+
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let node_registry = create_test_node_registry("test-node").await;
+        service_locator
+            .register_node_registry(node_registry.clone())
+            .await;
+
+        let release_spec = ReleaseSpec {
+            version: "1.0.0".to_string(),
+            name: "test".to_string(),
+            node: Some(NodeConfig {
+                id: "test-node".to_string(),
+                listen_addr: "0.0.0.0:8090".to_string(),
+                cluster_seed_nodes: vec![],
+                cluster_name: "my-cluster".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let service = NodeServiceImpl::with_release_spec(
+            service_locator,
+            "test-node".to_string(),
+            release_spec,
+        );
+
+        let result = service
+            .connect_to_nodes_impl(
+                vec!["localhost:8090".to_string(), "192.0.2.2:8000".to_string()],
+                1,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.connected.len(), 1);
+        assert!(!result.failed.contains_key("localhost:8090"));
+        let (_, address) = result.connected.iter().next().unwrap();
+        assert_eq!(address, "http://192.0.2.2:8000");
+
+        let ctx = RequestContext::new_without_auth(String::new(), String::new());
+        let (nodes, _) = node_registry.list_nodes(&ctx, None, 100, "").await.unwrap();
         assert!(
-            !err.contains("Invalid endpoint"),
-            "Should accept http:// scheme, got: {}",
-            err
+            nodes.iter()
+                .all(|node| !node_addresses_equivalent(&node.node_address, "localhost:8090")),
+            "self address alias should not be registered as a remote seed node"
+        );
+    }
+
+    #[test]
+    fn test_seeded_node_registration_uses_unknown_node_id() {
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        let registration = service.seeded_node_registration("localhost:8093", "cluster-a");
+
+        assert!(registration
+            .node_id
+            .starts_with(NodeServiceImpl::UNKNOWN_NODE_ID_PREFIX));
+        assert_eq!(registration.node_address, "http://localhost:8093");
+        assert_eq!(
+            registration.capabilities.get("cluster"),
+            Some(&"cluster-a".to_string())
         );
     }
 
@@ -1340,15 +1650,15 @@ mod tests {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         register_test_security_config_disable_auth(&service_locator).await;
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         let request = Request::new(ConnectNodesRequest {
             node_addresses: vec![],
             cluster: String::new(),
             timeout: None,
         });
-        
+
         let result = service.connect_nodes(request).await;
-        
+
         assert!(result.is_err());
         let status = result.unwrap_err();
         assert_eq!(status.code(), tonic::Code::InvalidArgument);
@@ -1363,15 +1673,18 @@ mod tests {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         register_test_security_config_disable_auth(&service_locator).await;
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         let request = Request::new(ConnectNodesRequest {
             node_addresses: vec!["192.0.2.1:8000".to_string()],
             cluster: String::new(),
-            timeout: Some(prost_types::Duration { seconds: 0, nanos: 100_000_000 }), // 100ms
+            timeout: Some(prost_types::Duration {
+                seconds: 0,
+                nanos: 100_000_000,
+            }), // 100ms
         });
-        
+
         let result = service.connect_nodes(request).await;
-        
+
         // Should fail because NodeRegistry is not available
         assert!(result.is_err());
         let status = result.unwrap_err();
@@ -1394,14 +1707,19 @@ mod tests {
     async fn create_test_node_registry(node_id: &str) -> Arc<crate::node_registry::NodeRegistry> {
         use crate::node_registry::NodeRegistry;
         use plexspaces_core::ObjectRegistry as ObjectRegistryTrait;
-        
-        let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
-        let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryImpl::new(object_repo));
-        
+
+        let object_repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let object_registry: Arc<dyn ObjectRegistryTrait> =
+            Arc::new(ObjectRegistryImpl::new(object_repo));
+
         Arc::new(NodeRegistry::new_simple(
             object_registry,
             node_id.to_string(),
-            Some(60), // cache_ttl_seconds
+            Some(60),    // cache_ttl_seconds
             Some(false), // gossip_enabled (disabled for tests)
             None,
             None,
@@ -1419,24 +1737,31 @@ mod tests {
         service_locator.register_node_registry(node_registry).await;
 
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         let request = Request::new(ConnectNodesRequest {
             node_addresses: vec![
                 "192.0.2.1:8000".to_string(), // TEST-NET-1, unreachable
                 "192.0.2.2:8000".to_string(),
             ],
             cluster: "test-cluster".to_string(),
-            timeout: Some(prost_types::Duration { seconds: 0, nanos: 200_000_000 }), // 200ms
+            timeout: Some(prost_types::Duration {
+                seconds: 0,
+                nanos: 200_000_000,
+            }), // 200ms
         });
-        
+
         let result = service.connect_nodes(request).await;
-        
-        // Should succeed but with all addresses in failed map
+
+        // Seed nodes are registered immediately and reconciled by background probes.
         assert!(result.is_ok());
         let response = result.unwrap().into_inner();
-        
-        assert!(response.connected.is_empty(), "No nodes should connect to unreachable addresses");
-        assert_eq!(response.failed.len(), 2, "Both addresses should fail");
+
+        assert_eq!(
+            response.connected.len(),
+            2,
+            "Both seed addresses should register"
+        );
+        assert!(response.failed.is_empty());
         assert!(response.total_time.is_some());
     }
 
@@ -1447,14 +1772,14 @@ mod tests {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         register_test_security_config_disable_auth(&service_locator).await;
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         let request = Request::new(DisconnectNodesRequest {
             node_ids: vec![],
             notify_remote: false,
         });
-        
+
         let result = service.disconnect_nodes(request).await;
-        
+
         assert!(result.is_err());
         let status = result.unwrap_err();
         assert_eq!(status.code(), tonic::Code::InvalidArgument);
@@ -1468,14 +1793,14 @@ mod tests {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         register_test_security_config_disable_auth(&service_locator).await;
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         let request = Request::new(DisconnectNodesRequest {
             node_ids: vec!["node-1".to_string()],
             notify_remote: false,
         });
-        
+
         let result = service.disconnect_nodes(request).await;
-        
+
         assert!(result.is_err());
         let status = result.unwrap_err();
         assert_eq!(status.code(), tonic::Code::Internal);
@@ -1492,40 +1817,45 @@ mod tests {
         service_locator.register_node_registry(node_registry).await;
 
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         // Try to disconnect a node that doesn't exist
         let request = Request::new(DisconnectNodesRequest {
             node_ids: vec!["nonexistent-node".to_string()],
             notify_remote: false,
         });
-        
+
         let result = service.disconnect_nodes(request).await;
-        
+
         // Should succeed (idempotent behavior)
         assert!(result.is_ok());
         let response = result.unwrap().into_inner();
-        
+
         // Either in disconnected (idempotent success) or failed
         // The exact behavior depends on NodeRegistry implementation
         assert!(
-            response.disconnected.contains(&"nonexistent-node".to_string()) ||
-            response.failed.contains_key("nonexistent-node"),
+            response
+                .disconnected
+                .contains(&"nonexistent-node".to_string())
+                || response.failed.contains_key("nonexistent-node"),
             "Node should be in either disconnected or failed list"
         );
     }
 
     #[tokio::test]
     async fn test_disconnect_nodes_with_registered_node() {
+        use plexspaces_core::{NodeRegistryTrait, RequestContext};
         use tonic::Request;
-        use plexspaces_core::{RequestContext, NodeRegistryTrait};
 
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
         register_test_security_config_disable_auth(&service_locator).await;
         let node_registry = create_test_node_registry("test-node").await;
-        service_locator.register_node_registry(node_registry.clone()).await;
-        
+        service_locator
+            .register_node_registry(node_registry.clone())
+            .await;
+
         // First register a node
-        let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+        let ctx =
+            RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
         let registration = NodeRegistration {
             node_id: "remote-node-1".to_string(),
             node_address: "http://remote:8000".to_string(),
@@ -1538,20 +1868,20 @@ mod tests {
             registered_at: None,
         };
         let _ = node_registry.register_node(&ctx, registration).await;
-        
+
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         // Now disconnect it
         let request = Request::new(DisconnectNodesRequest {
             node_ids: vec!["remote-node-1".to_string()],
             notify_remote: false,
         });
-        
+
         let result = service.disconnect_nodes(request).await;
-        
+
         assert!(result.is_ok());
         let response = result.unwrap().into_inner();
-        
+
         // Should be in disconnected list
         assert!(
             response.disconnected.contains(&"remote-node-1".to_string()),
@@ -1571,18 +1901,21 @@ mod tests {
         service_locator.register_node_registry(node_registry).await;
 
         let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
-        
+
         // Test with very short timeout
         let start = Instant::now();
         let request = Request::new(ConnectNodesRequest {
             node_addresses: vec!["192.0.2.1:8000".to_string()],
             cluster: String::new(),
-            timeout: Some(prost_types::Duration { seconds: 0, nanos: 50_000_000 }), // 50ms
+            timeout: Some(prost_types::Duration {
+                seconds: 0,
+                nanos: 50_000_000,
+            }), // 50ms
         });
-        
+
         let result = service.connect_nodes(request).await;
         let elapsed = start.elapsed();
-        
+
         assert!(result.is_ok());
         // Should complete relatively quickly (within 500ms including overhead)
         assert!(
@@ -1598,9 +1931,12 @@ mod tests {
         let request = ConnectNodesRequest {
             node_addresses: vec!["node1:8000".to_string(), "node2:8000".to_string()],
             cluster: "test-cluster".to_string(),
-            timeout: Some(prost_types::Duration { seconds: 10, nanos: 0 }),
+            timeout: Some(prost_types::Duration {
+                seconds: 10,
+                nanos: 0,
+            }),
         };
-        
+
         assert_eq!(request.node_addresses.len(), 2);
         assert_eq!(request.cluster, "test-cluster");
         assert!(request.timeout.is_some());
@@ -1613,7 +1949,7 @@ mod tests {
             node_ids: vec!["node-1".to_string(), "node-2".to_string()],
             notify_remote: true,
         };
-        
+
         assert_eq!(request.node_ids.len(), 2);
         assert!(request.notify_remote);
     }
@@ -1623,16 +1959,19 @@ mod tests {
         // Test response structure
         let mut connected = HashMap::new();
         connected.insert("node-1".to_string(), "http://node1:8000".to_string());
-        
+
         let mut failed = HashMap::new();
         failed.insert("node2:8000".to_string(), "Connection refused".to_string());
-        
+
         let response = ConnectNodesResponse {
             connected,
             failed,
-            total_time: Some(prost_types::Duration { seconds: 1, nanos: 500_000_000 }),
+            total_time: Some(prost_types::Duration {
+                seconds: 1,
+                nanos: 500_000_000,
+            }),
         };
-        
+
         assert_eq!(response.connected.len(), 1);
         assert_eq!(response.failed.len(), 1);
         assert!(response.total_time.is_some());
@@ -1643,12 +1982,12 @@ mod tests {
         // Test response structure
         let mut failed = HashMap::new();
         failed.insert("node-3".to_string(), "Internal error".to_string());
-        
+
         let response = DisconnectNodesResponse {
             disconnected: vec!["node-1".to_string(), "node-2".to_string()],
             failed,
         };
-        
+
         assert_eq!(response.disconnected.len(), 2);
         assert_eq!(response.failed.len(), 1);
     }
@@ -1656,39 +1995,205 @@ mod tests {
     #[tokio::test]
     async fn test_notify_disconnect_unreachable() {
         // Test notify_disconnect with unreachable address
-        let result = NodeServiceImpl::notify_disconnect(
-            "192.0.2.1:9999",
-            "local-node",
-        ).await;
-        
+        let result = NodeServiceImpl::notify_disconnect("192.0.2.1:9999", "local-node").await;
+
         // Should fail but not panic
         assert!(result.is_err());
     }
 
     // ============================================================================
-    // Same-cluster rule (ConnectNodes only connects nodes with same cluster)
+    // looks_like_address, lookup by address/id, get/register_node_connectivity
     // ============================================================================
 
     #[test]
-    fn test_same_cluster_ok_both_empty() {
-        assert!(NodeServiceImpl::same_cluster_ok("", ""));
+    fn test_looks_like_address() {
+        assert!(NodeServiceImpl::looks_like_address("localhost:8091"));
+        assert!(NodeServiceImpl::looks_like_address("192.168.1.1:8000"));
+        assert!(NodeServiceImpl::looks_like_address("http://host:80"));
+        assert!(NodeServiceImpl::looks_like_address("https://host:443"));
+        assert!(!NodeServiceImpl::looks_like_address("node-1"));
+        assert!(!NodeServiceImpl::looks_like_address("my-node"));
     }
 
-    #[test]
-    fn test_same_cluster_ok_same_non_empty() {
-        assert!(NodeServiceImpl::same_cluster_ok("production", "production"));
-        assert!(NodeServiceImpl::same_cluster_ok("test-cluster", "test-cluster"));
+    #[tokio::test]
+    async fn test_connect_to_nodes_impl_node_id_in_registry_returns_connected() {
+        use plexspaces_core::{NodeRegistryTrait, RequestContext};
+
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let node_registry = create_test_node_registry("test-node").await;
+        service_locator
+            .register_node_registry(node_registry.clone())
+            .await;
+
+        let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string());
+        let reg = NodeRegistration {
+            node_id: "peer-1".to_string(),
+            node_address: "http://peer1:8000".to_string(),
+            capabilities: HashMap::new(),
+            status: NodeStatus::NodeStatusReady as i32,
+            last_heartbeat: None,
+            actor_count: 0,
+            message_count: 0,
+            error_count: 0,
+            registered_at: None,
+        };
+        node_registry.register_node(&ctx, reg).await.unwrap();
+
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        let result = service
+            .connect_to_nodes_impl(vec!["peer-1".to_string()], 5)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.connected.get("peer-1"),
+            Some(&"http://peer1:8000".to_string())
+        );
+        assert!(result.failed.is_empty());
     }
 
-    #[test]
-    fn test_same_cluster_ok_mismatch_empty_vs_non_empty() {
-        assert!(!NodeServiceImpl::same_cluster_ok("", "production"));
-        assert!(!NodeServiceImpl::same_cluster_ok("production", ""));
+    #[tokio::test]
+    async fn test_connect_to_nodes_impl_node_id_not_in_registry_returns_failed() {
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let node_registry = create_test_node_registry("test-node").await;
+        service_locator.register_node_registry(node_registry).await;
+
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        let result = service
+            .connect_to_nodes_impl(vec!["unknown-node-id".to_string()], 5)
+            .await
+            .unwrap();
+
+        assert!(result.connected.is_empty());
+        assert_eq!(
+            result.failed.get("unknown-node-id"),
+            Some(&"node_id not in registry".to_string())
+        );
     }
 
-    #[test]
-    fn test_same_cluster_ok_mismatch_different_clusters() {
-        assert!(!NodeServiceImpl::same_cluster_ok("production", "staging"));
-        assert!(!NodeServiceImpl::same_cluster_ok("cluster-a", "cluster-b"));
+    #[tokio::test]
+    async fn test_connect_to_nodes_impl_mixed_node_id_and_address() {
+        use plexspaces_core::{NodeRegistryTrait, RequestContext};
+
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let node_registry = create_test_node_registry("test-node").await;
+        service_locator
+            .register_node_registry(node_registry.clone())
+            .await;
+
+        let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string());
+        let reg = NodeRegistration {
+            node_id: "known-peer".to_string(),
+            node_address: "http://known:8000".to_string(),
+            capabilities: HashMap::new(),
+            status: NodeStatus::NodeStatusReady as i32,
+            last_heartbeat: None,
+            actor_count: 0,
+            message_count: 0,
+            error_count: 0,
+            registered_at: None,
+        };
+        node_registry.register_node(&ctx, reg).await.unwrap();
+
+        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        // known-peer -> from registry (connected); unknown-id -> failed; address -> placeholder registration
+        let result = service
+            .connect_to_nodes_impl(
+                vec![
+                    "known-peer".to_string(),
+                    "unknown-id".to_string(),
+                    "192.0.2.1:8000".to_string(),
+                ],
+                1,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.connected.get("known-peer"),
+            Some(&"http://known:8000".to_string())
+        );
+        assert_eq!(
+            result.failed.get("unknown-id"),
+            Some(&"node_id not in registry".to_string())
+        );
+        let placeholder = result
+            .connected
+            .iter()
+            .find(|(node_id, address)| {
+                node_id.starts_with(NodeServiceImpl::UNKNOWN_NODE_ID_PREFIX)
+                    && *address == "http://192.0.2.1:8000"
+            })
+            .map(|(node_id, _)| node_id.clone());
+        assert!(
+            placeholder.is_some(),
+            "seed address should register immediately"
+        );
+        assert!(!result.failed.contains_key("192.0.2.1:8000"));
+    }
+
+    #[tokio::test]
+    async fn test_get_node_connectivity_and_register_node_connectivity() {
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        let node_service: Arc<NodeServiceImpl> = Arc::new(NodeServiceImpl::new(
+            service_locator.clone(),
+            "test-node".to_string(),
+        ));
+
+        assert!(node_service.get_node_connectivity().await.is_none());
+
+        node_service
+            .register_node_connectivity(node_service.clone() as Arc<dyn NodeConnectivity>)
+            .await;
+        let conn = node_service.get_node_connectivity().await;
+        assert!(conn.is_some());
+
+        // connect_to_node_addresses on empty list should succeed
+        let result = conn
+            .unwrap()
+            .connect_to_node_addresses(vec![])
+            .await
+            .unwrap();
+        assert!(result.connected.is_empty());
+        assert!(result.failed.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_connect_to_nodes_impl_cluster_from_release_spec_unknown_node() {
+        use plexspaces_proto::node::v1::NodeConfig;
+
+        let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
+        register_test_security_config_disable_auth(&service_locator).await;
+        let node_registry = create_test_node_registry("test-node").await;
+        service_locator.register_node_registry(node_registry).await;
+
+        let release_spec = ReleaseSpec {
+            version: "1.0.0".to_string(),
+            name: "test".to_string(),
+            node: Some(NodeConfig {
+                id: "test-node".to_string(),
+                listen_addr: "0.0.0.0:8090".to_string(),
+                cluster_seed_nodes: vec![],
+                cluster_name: "my-cluster".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let service = NodeServiceImpl::with_release_spec(
+            service_locator,
+            "test-node".to_string(),
+            release_spec,
+        );
+
+        let result = service
+            .connect_to_nodes_impl(vec!["192.0.2.2:8000".to_string()], 1)
+            .await
+            .unwrap();
+        let (_, address) = result.connected.iter().next().unwrap();
+        assert_eq!(address, "http://192.0.2.2:8000");
+        assert!(result.failed.is_empty());
     }
 }

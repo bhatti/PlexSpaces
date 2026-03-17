@@ -10,12 +10,12 @@
 use plexspaces_actor::ActorRef;
 use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId};
 use plexspaces_facet::capabilities::process_groups::ProcessGroupFacet;
+use plexspaces_mailbox::Mailbox;
 use plexspaces_mailbox::Message;
 use plexspaces_node::{Node, NodeBuilder};
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use plexspaces_mailbox::Mailbox;
 
 // Initialize tracing for tests (if not already initialized)
 static TRACING_INIT: std::sync::Once = std::sync::Once::new();
@@ -37,11 +37,11 @@ static SHARED_NODE: OnceLock<Arc<Node>> = OnceLock::new();
 static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Get or create shared test node
-/// 
+///
 /// ## Purpose
 /// Creates a test node with services initialized but without gRPC server.
 /// This is sufficient for facet integration tests that don't need network communication.
-/// 
+///
 /// ## Pattern
 /// Follows the same pattern as other integration tests in the codebase:
 /// - Build node with in-memory backends
@@ -55,7 +55,9 @@ async fn get_shared_node() -> Arc<Node> {
 
     // Use a lock to ensure only one thread initializes
     // Handle poison errors gracefully (if a test panicked while holding the lock)
-    let _guard = INIT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = INIT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     // Double-check after acquiring lock
     if let Some(node) = SHARED_NODE.get() {
@@ -68,12 +70,12 @@ async fn get_shared_node() -> Arc<Node> {
         NodeBuilder::new("test-node-process-group")
             .with_in_memory_backends()
             .build()
-            .await
+            .await,
     );
 
     // Wait for services to be ready with polling (no gRPC server startup needed)
-    use tokio::task::yield_now;
     use std::time::Duration;
+    use tokio::task::yield_now;
     use tokio::time::sleep;
     for _ in 0..5 {
         yield_now().await;
@@ -84,18 +86,18 @@ async fn get_shared_node() -> Arc<Node> {
 }
 
 /// Helper to get ActorRef after spawning an actor
-/// 
+///
 /// ## Purpose
 /// Waits for actor to be registered and creates ActorRef for ask() pattern.
 /// For local actors, uses ActorRef::local() with mailbox.
 /// For remote actors, uses ActorRef::remote().
-async fn get_actor_ref_after_spawn(
-    node: &Node,
-    actor_id: &ActorId,
-) -> ActorRef {
-    let actor_registry = node.service_locator().actor_registry().await
+async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef {
+    let actor_registry = node
+        .service_locator()
+        .actor_registry()
+        .await
         .expect("ActorRegistry should be available");
-    
+
     // Wait for actor to be registered (async registration)
     let node_id = node.id().as_str().to_string();
     for _ in 0..20 {
@@ -107,12 +109,9 @@ async fn get_actor_ref_after_spawn(
             // for reply routing, and the actual actor mailbox is used for receiving messages.
             use plexspaces_mailbox::{mailbox_config_default, Mailbox};
             let mailbox_for_ref = Arc::new(
-                Mailbox::new(
-                    mailbox_config_default(),
-                    format!("ref-{}", actor_id),
-                )
-                .await
-                .expect("Failed to create mailbox for ActorRef"),
+                Mailbox::new(mailbox_config_default(), format!("ref-{}", actor_id))
+                    .await
+                    .expect("Failed to create mailbox for ActorRef"),
             );
             return ActorRef::local(
                 actor_id.clone(),
@@ -132,9 +131,18 @@ struct ProcessGroupRegistryAdapter {
 }
 
 #[async_trait::async_trait]
-impl plexspaces_facet::capabilities::process_groups::ProcessGroupRegistry for ProcessGroupRegistryAdapter {
-    async fn create_group(&self, ctx: &plexspaces_common::RequestContext, group_name: &str) -> Result<(), String> {
-        self.inner.create_group(ctx, group_name).await.map_err(|e| e.to_string())
+impl plexspaces_facet::capabilities::process_groups::ProcessGroupRegistry
+    for ProcessGroupRegistryAdapter
+{
+    async fn create_group(
+        &self,
+        ctx: &plexspaces_common::RequestContext,
+        group_name: &str,
+    ) -> Result<(), String> {
+        self.inner
+            .create_group(ctx, group_name)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn join_group(
@@ -150,25 +158,44 @@ impl plexspaces_facet::capabilities::process_groups::ProcessGroupRegistry for Pr
             .map_err(|e| e.to_string())
     }
 
-    async fn leave_group(&self, ctx: &plexspaces_common::RequestContext, group_name: &str, actor_id: &str) -> Result<(), String> {
+    async fn leave_group(
+        &self,
+        ctx: &plexspaces_common::RequestContext,
+        group_name: &str,
+        actor_id: &str,
+    ) -> Result<(), String> {
         self.inner
             .leave_group(ctx, group_name, actor_id)
             .await
             .map_err(|e| e.to_string())
     }
 
-    async fn get_members(&self, ctx: &plexspaces_common::RequestContext, group_name: &str) -> Result<Vec<String>, String> {
-        self.inner.get_members(ctx, group_name).await.map_err(|e| e.to_string())
+    async fn get_members(
+        &self,
+        ctx: &plexspaces_common::RequestContext,
+        group_name: &str,
+    ) -> Result<Vec<String>, String> {
+        self.inner
+            .get_members(ctx, group_name)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    async fn get_local_members(&self, ctx: &plexspaces_common::RequestContext, group_name: &str) -> Result<Vec<String>, String> {
+    async fn get_local_members(
+        &self,
+        ctx: &plexspaces_common::RequestContext,
+        group_name: &str,
+    ) -> Result<Vec<String>, String> {
         self.inner
             .get_local_members(ctx, group_name)
             .await
             .map_err(|e| e.to_string())
     }
 
-    async fn list_groups(&self, ctx: &plexspaces_common::RequestContext) -> Result<Vec<String>, String> {
+    async fn list_groups(
+        &self,
+        ctx: &plexspaces_common::RequestContext,
+    ) -> Result<Vec<String>, String> {
         self.inner.list_groups(ctx).await.map_err(|e| e.to_string())
     }
 
@@ -187,12 +214,13 @@ impl plexspaces_facet::capabilities::process_groups::ProcessGroupRegistry for Pr
             payload: message,
             ..Default::default()
         };
-        
-        let recipient_count = self.inner
+
+        let recipient_count = self
+            .inner
             .publish_to_group(ctx, group_name, topic, msg)
             .await
             .map_err(|e| e.to_string())?;
-        
+
         // Get members to return as recipients
         let members = self.get_members(ctx, group_name).await?;
         // Return first N members where N = recipient_count
@@ -254,8 +282,8 @@ async fn test_rust_actor_process_group_facet_create_join() {
         .expect("Failed to create group");
 
     // ASSERT: Should receive success
-    let response: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
     assert_eq!(response["status"], "ok");
 
     // ACT: Join group
@@ -273,8 +301,8 @@ async fn test_rust_actor_process_group_facet_create_join() {
         .expect("Failed to join group");
 
     // ASSERT: Should receive success
-    let response: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
     assert_eq!(response["status"], "ok");
 
     // ACT: Get members
@@ -283,16 +311,24 @@ async fn test_rust_actor_process_group_facet_create_join() {
         .with_message_type("get_members");
 
     let reply = actor_ref
-        .ask(get_members_msg.to_proto(), std::time::Duration::from_secs(5))
+        .ask(
+            get_members_msg.to_proto(),
+            std::time::Duration::from_secs(5),
+        )
         .await
         .expect("Failed to get members");
 
     // ASSERT: Should contain actor
-    let response: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse response");
-    let members: Vec<String> = serde_json::from_value(response["members"].clone())
-        .expect("Failed to parse members");
-    assert!(members.contains(&actor_id), "Actor {} should be in members list: {:?}", actor_id, members);
+    let response: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
+    let members: Vec<String> =
+        serde_json::from_value(response["members"].clone()).expect("Failed to parse members");
+    assert!(
+        members.contains(&actor_id),
+        "Actor {} should be in members list: {:?}",
+        actor_id,
+        members
+    );
 }
 
 /// Test: Rust actor with ProcessGroupFacet - publish to group
@@ -353,7 +389,7 @@ async fn test_rust_actor_process_group_facet_publish() {
         "topics": ["news"]
     }))
     .expect("Failed to create message")
-        .with_message_type("join_group");
+    .with_message_type("join_group");
     actor_ref
         .ask(join_msg.to_proto(), std::time::Duration::from_secs(5))
         .await
@@ -374,7 +410,7 @@ async fn test_rust_actor_process_group_facet_publish() {
         .expect("Failed to publish");
 
     // ASSERT: Should receive success
-    let response: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
     assert_eq!(response["status"], "ok");
 }

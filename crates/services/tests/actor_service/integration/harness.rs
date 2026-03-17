@@ -14,11 +14,16 @@ use tonic::transport::Channel;
 /// Locate node_runner binary (next to test binary in target/debug or target/debug/deps).
 fn find_node_runner_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Current exe is e.g. target/debug/deps/integration_tests-<hash> or target/debug/integration_tests-<hash>
-    let current_exe = std::env::current_exe()
-        .map_err(|e| format!("current_exe failed: {}", e))?;
+    let current_exe = std::env::current_exe().map_err(|e| format!("current_exe failed: {}", e))?;
     let target_debug = current_exe
         .parent()
-        .and_then(|p| if p.file_name().and_then(|n| n.to_str()) == Some("deps") { p.parent() } else { Some(p) })
+        .and_then(|p| {
+            if p.file_name().and_then(|n| n.to_str()) == Some("deps") {
+                p.parent()
+            } else {
+                Some(p)
+            }
+        })
         .ok_or("cannot get target/debug from current exe")?;
     let exe_name = format!("node_runner{}", std::env::consts::EXE_SUFFIX);
     let candidate = target_debug.join(&exe_name);

@@ -46,8 +46,8 @@ use std::fs;
 /// Which JWT algorithm we expect (from key type). Pinned to avoid algorithm-confusion attacks.
 #[derive(Clone, Copy)]
 enum JwtKeyType {
-    Hmac,  // HS256
-    Rsa,   // RS256
+    Hmac, // HS256
+    Rsa,  // RS256
 }
 
 pub struct AuthInterceptor {
@@ -434,7 +434,7 @@ impl AuthInterceptor {
         // These headers must ONLY come from JWT, not from client
         // When auth is enabled, we explicitly remove these headers and only set them from JWT
         let mut modified_headers = std::collections::HashMap::new();
-        
+
         // Remove any existing headers (to prevent injection)
         // Setting them to empty string signals removal to the interceptor chain
         modified_headers.insert("x-tenant-id".to_string(), String::new());
@@ -442,7 +442,7 @@ impl AuthInterceptor {
         modified_headers.insert("x-user-roles".to_string(), String::new());
         modified_headers.insert("x-user-groups".to_string(), String::new());
         modified_headers.insert("x-admin".to_string(), String::new());
-        
+
         // Now set them ONLY from JWT claims (not from incoming headers)
         // This ensures security: users cannot spoof tenant_id/user_id via headers
         // Only add headers if they have values (remove empty ones)
@@ -462,7 +462,10 @@ impl AuthInterceptor {
         } else {
             modified_headers.remove("x-user-groups");
         }
-        modified_headers.insert("x-admin".to_string(), if claims.is_admin { "true" } else { "false" }.to_string());
+        modified_headers.insert(
+            "x-admin".to_string(),
+            if claims.is_admin { "true" } else { "false" }.to_string(),
+        );
 
         // Authentication and authorization successful
         Ok(InterceptorResult {
@@ -613,7 +616,10 @@ mod tests {
         };
 
         let result = interceptor.before_request(&context).await.unwrap();
-        assert_eq!(result.decision, InterceptorDecision::InterceptorDecisionAllow as i32);
+        assert_eq!(
+            result.decision,
+            InterceptorDecision::InterceptorDecisionAllow as i32
+        );
     }
 
     #[tokio::test]
@@ -640,7 +646,10 @@ mod tests {
         };
 
         let result = interceptor.before_request(&context).await.unwrap();
-        assert_eq!(result.decision, InterceptorDecision::InterceptorDecisionDeny as i32);
+        assert_eq!(
+            result.decision,
+            InterceptorDecision::InterceptorDecisionDeny as i32
+        );
         assert!(result
             .error_message
             .contains("Missing authorization header"));

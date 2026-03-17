@@ -29,16 +29,16 @@
 //! - Tracks spawned actors for graceful shutdown
 //! - Provides health checks and metrics
 
-use async_trait::async_trait;
 use crate::{Application, ApplicationError, ApplicationNode};
-use plexspaces_proto::v1::application::HealthStatus;
+use async_trait::async_trait;
+use metrics;
+use plexspaces_actor::{SupervisionStrategy, Supervisor};
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
-use plexspaces_actor::{Supervisor, SupervisionStrategy};
+use plexspaces_proto::v1::application::HealthStatus;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
-use metrics;
 
 /// Production-quality application implementation from ApplicationSpec
 ///
@@ -62,7 +62,8 @@ pub struct SpecApplication {
     /// Node reference (for spawning actors)
     node: Arc<RwLock<Option<Arc<dyn ApplicationNode>>>>,
     /// Behavior factory for dynamic actor spawning (optional)
-    behavior_factory: Option<Arc<dyn plexspaces_core::behavior_factory::BehaviorFactory + Send + Sync>>,
+    behavior_factory:
+        Option<Arc<dyn plexspaces_core::behavior_factory::BehaviorFactory + Send + Sync>>,
     /// Root supervisor handle (for graceful shutdown with Supervisor::shutdown())
     root_supervisor_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
     /// Root supervisor (for shutdown)
@@ -116,7 +117,7 @@ impl SpecApplication {
             root_supervisor: Arc::new(RwLock::new(None)),
         }
     }
-    
+
     /// Get application specification
     pub fn spec(&self) -> &ApplicationSpec {
         &self.spec
@@ -201,7 +202,7 @@ impl SpecApplication {
             // Use child.id as actor_type (start_module removed - was confusing)
             let actor_type = child.id.clone();
             let actor_id = format!("{}@{}", child.id, node.id());
-            
+
             // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
             // Use ActorFactory::spawn_actor() which supports facets directly.
             // Tenant/namespace: use explicit namespace from ApplicationSpec.
@@ -211,7 +212,7 @@ impl SpecApplication {
             let tenant_id = String::new();
             let namespace = self.spec.namespace.clone();
             let ctx = RequestContext::new_without_auth(tenant_id, namespace);
-            
+
             // Get ActorFactory from ApplicationNode (avoids circular dependency - application can't depend on services)
             let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = node.actor_factory().await
                 .ok_or_else(|| {
@@ -219,18 +220,18 @@ impl SpecApplication {
                         "ActorFactory not available from node. Ensure Node::start() has been called.".to_string()
                     )
                 })?;
-            
+
             // Phase 1: Unified Lifecycle - Convert proto facets to facet instances
             // Use FacetRegistry to create facets from proto configurations
             let facets: Vec<Box<dyn plexspaces_facet::Facet>> = if !child.facets.is_empty() {
                 // Get FacetRegistry from ServiceLocator
-                
+
                 if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
                     let facet_registry = facet_registry_wrapper.inner_clone();
                     // Use facet_helpers to create facets from proto
                     use plexspaces_actor::create_facets_from_proto;
                     let facets = create_facets_from_proto(&child.facets, &facet_registry).await;
-                    
+
                     info!(
                         application = %self.spec.name,
                         child_id = %child.id,
@@ -240,7 +241,7 @@ impl SpecApplication {
                         facets.len(),
                         child.id
                     );
-                    
+
                     facets
                 } else {
                     // FacetRegistry not available - log and skip facets (graceful degradation)
@@ -255,27 +256,31 @@ impl SpecApplication {
             } else {
                 Vec::new()
             };
-            
+
             // Spawn actor with facets using ActorFactory
-            let actor_id_parsed = actor_id.parse()
-                .map_err(|e| ApplicationError::StartupFailed(format!("Invalid actor ID '{}': {}", actor_id, e)))?;
-            
+            let actor_id_parsed = actor_id.parse().map_err(|e| {
+                ApplicationError::StartupFailed(format!("Invalid actor ID '{}': {}", actor_id, e))
+            })?;
+
             // Check if this child is a supervisor - if so, recursively spawn its children
             use plexspaces_proto::application::v1::ChildType as ProtoChildType;
             let child_type = ProtoChildType::try_from(child.r#type())
                 .unwrap_or(ProtoChildType::ChildTypeUnspecified);
-            
+
             if child_type == ProtoChildType::ChildTypeSupervisor {
                 // Spawn the supervisor actor first
-                match actor_factory.spawn_actor(
-                    &ctx,
-                    &actor_id_parsed,
-                    &actor_type, // Use child.id as actor_type
-                    vec![], // initial_state
-                    None, // config
-                    child.args.clone(), // labels (using args as labels for now)
-                    facets, // facets from ChildSpec
-                ).await {
+                match actor_factory
+                    .spawn_actor(
+                        &ctx,
+                        &actor_id_parsed,
+                        &actor_type,        // Use child.id as actor_type
+                        vec![],             // initial_state
+                        None,               // config
+                        child.args.clone(), // labels (using args as labels for now)
+                        facets,             // facets from ChildSpec
+                    )
+                    .await
+                {
                     Ok(_message_sender) => {
                         debug!(
                             application = %self.spec.name,
@@ -301,7 +306,7 @@ impl SpecApplication {
                         )));
                     }
                 }
-                
+
                 // Recursively spawn children of nested supervisor
                 if let Some(ref nested_supervisor_spec) = child.supervisor {
                     debug!(
@@ -314,21 +319,25 @@ impl SpecApplication {
                     let nested_actor_ids = Box::pin(self.initialize_supervisor_tree(
                         node.clone(),
                         service_locator.clone(),
-                        nested_supervisor_spec
-                    )).await?;
+                        nested_supervisor_spec,
+                    ))
+                    .await?;
                     actor_ids.extend(nested_actor_ids);
                 }
             } else {
                 // Regular worker - spawn normally
-                match actor_factory.spawn_actor(
-                    &ctx,
-                    &actor_id_parsed,
-                    &actor_type, // Use child.id as actor_type
-                    vec![], // initial_state
-                    None, // config
-                    child.args.clone(), // labels (using args as labels for now)
-                    facets, // facets from ChildSpec
-                ).await {
+                match actor_factory
+                    .spawn_actor(
+                        &ctx,
+                        &actor_id_parsed,
+                        &actor_type,        // Use child.id as actor_type
+                        vec![],             // initial_state
+                        None,               // config
+                        child.args.clone(), // labels (using args as labels for now)
+                        facets,             // facets from ChildSpec
+                    )
+                    .await
+                {
                     Ok(_message_sender) => {
                         debug!(
                             application = %self.spec.name,
@@ -374,7 +383,7 @@ impl SpecApplication {
                 actor_count = actor_ids.len(),
                 "Supervisor tree initialized successfully"
             );
-            
+
             // Log deployment progress: supervisor tree initialization complete
             debug!(
                 application = %self.spec.name,
@@ -431,10 +440,9 @@ impl Application for SpecApplication {
         }
 
         // Get ServiceLocator from node
-        let service_locator = node.service_locator()
-            .ok_or_else(|| ApplicationError::StartupFailed(
-                "ServiceLocator not available from node".to_string()
-            ))?;
+        let service_locator = node.service_locator().ok_or_else(|| {
+            ApplicationError::StartupFailed("ServiceLocator not available from node".to_string())
+        })?;
 
         // Initialize supervisor tree if specified (Phase 5/6: Production-grade with validation)
         let actor_count = if let Some(ref supervisor_spec) = self.spec.supervisor {
@@ -442,18 +450,20 @@ impl Application for SpecApplication {
             let startup_start = std::time::Instant::now();
             metrics::counter!("plexspaces_application_supervisor_tree_init_total",
                 "application" => self.spec.name.clone()
-            ).increment(1);
-            
+            )
+            .increment(1);
+
             // Validate ApplicationSpec/ChildSpec before creating supervisor (Production-grade validation)
             Self::validate_supervisor_spec_static(
                 &self.spec.name,
                 supervisor_spec,
                 self.behavior_factory.is_some(),
             )?;
-            
+
             // Use existing initialize_supervisor_tree which spawns actors
             // This maintains backward compatibility while adding validation
-            let actor_ids = self.initialize_supervisor_tree(node.clone(), service_locator.clone(), supervisor_spec)
+            let actor_ids = self
+                .initialize_supervisor_tree(node.clone(), service_locator.clone(), supervisor_spec)
                 .await
                 .map_err(|e| {
                     error!(
@@ -464,31 +474,34 @@ impl Application for SpecApplication {
                     metrics::counter!("plexspaces_application_supervisor_tree_init_errors_total",
                         "application" => self.spec.name.clone(),
                         "error_type" => format!("{:?}", e)
-                    ).increment(1);
+                    )
+                    .increment(1);
                     ApplicationError::StartupFailed(format!(
                         "Failed to initialize supervisor tree: {}",
                         e
                     ))
                 })?;
-            
+
             let actor_count = actor_ids.len() as u32;
-            
+
             // OBSERVABILITY: Record metrics for successful startup
             let startup_duration = startup_start.elapsed();
             metrics::histogram!("plexspaces_application_supervisor_tree_init_duration_seconds",
                 "application" => self.spec.name.clone()
-            ).record(startup_duration.as_secs_f64());
+            )
+            .record(startup_duration.as_secs_f64());
             metrics::counter!("plexspaces_application_supervisor_tree_init_success_total",
                 "application" => self.spec.name.clone()
-            ).increment(1);
-            
+            )
+            .increment(1);
+
             info!(
                 application = %self.spec.name,
                 actor_count = actor_count,
                 duration_ms = startup_duration.as_millis(),
                 "Supervisor tree initialized successfully with validation"
             );
-            
+
             actor_count
         } else {
             debug!(
@@ -530,8 +543,9 @@ impl Application for SpecApplication {
         let shutdown_start = std::time::Instant::now();
         metrics::counter!("plexspaces_application_shutdown_total",
             "application" => self.spec.name.clone()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         info!(
             application = %self.spec.name,
             "Stopping application (Phase 5/6: Graceful shutdown)"
@@ -549,20 +563,21 @@ impl Application for SpecApplication {
             let root_supervisor = self.root_supervisor.read().await;
             root_supervisor.clone()
         };
-        
+
         if let Some(root_supervisor) = root_supervisor_arc {
             // OBSERVABILITY: Record metrics for supervisor hierarchy shutdown
             let supervisor_shutdown_start = std::time::Instant::now();
             metrics::counter!("plexspaces_application_supervisor_shutdown_total",
                 "application" => self.spec.name.clone()
-            ).increment(1);
-            
+            )
+            .increment(1);
+
             // CRITICAL: Release application lock before supervisor shutdown to prevent deadlock
             let shutdown_result = {
                 let mut supervisor_guard = root_supervisor.write().await;
                 supervisor_guard.shutdown().await
             };
-            
+
             // Call Supervisor::shutdown() for top-down cascading shutdown
             // This will trigger facet lifecycle hooks for all child actors
             if let Err(e) = shutdown_result {
@@ -574,13 +589,15 @@ impl Application for SpecApplication {
                 metrics::counter!("plexspaces_application_supervisor_shutdown_errors_total",
                     "application" => self.spec.name.clone(),
                     "error_type" => format!("{:?}", e)
-                ).increment(1);
+                )
+                .increment(1);
             } else {
                 let supervisor_shutdown_duration = supervisor_shutdown_start.elapsed();
                 metrics::histogram!("plexspaces_application_supervisor_shutdown_duration_seconds",
                     "application" => self.spec.name.clone()
-                ).record(supervisor_shutdown_duration.as_secs_f64());
-                
+                )
+                .record(supervisor_shutdown_duration.as_secs_f64());
+
                 info!(
                     application = %self.spec.name,
                     duration_ms = supervisor_shutdown_duration.as_millis(),
@@ -588,7 +605,7 @@ impl Application for SpecApplication {
                 );
             }
         }
-        
+
         // Abort supervisor handle if still running
         if let Some(handle) = self.root_supervisor_handle.write().await.take() {
             handle.abort();
@@ -607,33 +624,35 @@ impl Application for SpecApplication {
         };
 
         if !actor_ids.is_empty() {
-            let node = node.ok_or_else(|| ApplicationError::ShutdownFailed(
-                "Node reference not available".to_string()
-            ))?;
-            
-            let service_locator = node.service_locator()
-                .ok_or_else(|| ApplicationError::ShutdownFailed(
-                    "ServiceLocator not available from node".to_string()
-                ))?;
-            
+            let node = node.ok_or_else(|| {
+                ApplicationError::ShutdownFailed("Node reference not available".to_string())
+            })?;
+
+            let service_locator = node.service_locator().ok_or_else(|| {
+                ApplicationError::ShutdownFailed(
+                    "ServiceLocator not available from node".to_string(),
+                )
+            })?;
+
             let mut errors = Vec::new();
             {
                 use plexspaces_core::RequestContext;
-                
+
                 // Get ActorFactory from ApplicationNode (avoids circular dependency)
-                let actor_factory = node.actor_factory().await
-                    .ok_or_else(|| ApplicationError::ActorStopFailed(
+                let actor_factory = node.actor_factory().await.ok_or_else(|| {
+                    ApplicationError::ActorStopFailed(
                         "unknown".to_string(),
-                        "ActorFactory not available from node".to_string()
-                    ))?;
-                
+                        "ActorFactory not available from node".to_string(),
+                    )
+                })?;
+
                 // Create RequestContext for shutdown using application's tenant_id and namespace
                 // Both are set during deployment from JWT token
                 let ctx = RequestContext::new_without_auth(
                     self.spec.tenant_id.clone(),
                     self.spec.namespace.clone(),
                 );
-                
+
                 for actor_id in actor_ids.iter().rev() {
                     if let Err(e) = actor_factory.stop_actor(&ctx, actor_id).await {
                         error!(
@@ -673,10 +692,12 @@ impl Application for SpecApplication {
         let shutdown_duration = shutdown_start.elapsed();
         metrics::histogram!("plexspaces_application_shutdown_duration_seconds",
             "application" => self.spec.name.clone()
-        ).record(shutdown_duration.as_secs_f64());
+        )
+        .record(shutdown_duration.as_secs_f64());
         metrics::counter!("plexspaces_application_shutdown_success_total",
             "application" => self.spec.name.clone()
-        ).increment(1);
+        )
+        .increment(1);
 
         // Mark as stopped
         {
@@ -700,7 +721,7 @@ impl Application for SpecApplication {
             HealthStatus::HealthStatusUnhealthy
         }
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -726,17 +747,17 @@ impl SpecApplication {
             .unwrap_or(ProtoSupervisionStrategy::SupervisionStrategyUnspecified);
         if strategy == ProtoSupervisionStrategy::SupervisionStrategyUnspecified {
             return Err(ApplicationError::ConfigError(
-                "Supervisor spec has unspecified supervision strategy".to_string()
+                "Supervisor spec has unspecified supervision strategy".to_string(),
             ));
         }
-        
+
         // Validate max_restarts
         if supervisor_spec.max_restarts == 0 {
             return Err(ApplicationError::ConfigError(
-                "Supervisor spec max_restarts must be > 0".to_string()
+                "Supervisor spec max_restarts must be > 0".to_string(),
             ));
         }
-        
+
         // Validate each child spec
         for (idx, child) in supervisor_spec.children.iter().enumerate() {
             // Validate child ID
@@ -746,7 +767,7 @@ impl SpecApplication {
                     idx, app_name
                 )));
             }
-            
+
             // Validate child type
             use plexspaces_proto::application::v1::ChildType as ProtoChildType;
             let child_type = ProtoChildType::try_from(child.r#type())
@@ -757,9 +778,9 @@ impl SpecApplication {
                     child.id, idx, app_name
                 )));
             }
-            
+
             // Note: start_module removed - actor_type is derived from child.id
-            
+
             // Validate restart policy
             use plexspaces_proto::application::v1::RestartPolicy as ProtoRestartPolicy;
             let restart_val = child.restart();
@@ -771,7 +792,7 @@ impl SpecApplication {
                     child.id, idx, app_name
                 )));
             }
-            
+
             // Validate nested supervisor spec if child is a supervisor
             if child_type == ProtoChildType::ChildTypeSupervisor {
                 if child.supervisor.is_none() {
@@ -783,21 +804,25 @@ impl SpecApplication {
                 // Recursively validate nested supervisor
                 if let Some(ref nested_spec) = child.supervisor {
                     // Recursive validation
-                    Self::validate_supervisor_spec_static(app_name, nested_spec, has_behavior_factory)?;
+                    Self::validate_supervisor_spec_static(
+                        app_name,
+                        nested_spec,
+                        has_behavior_factory,
+                    )?;
                 }
             }
         }
-        
+
         // OBSERVABILITY: Log validation success
         debug!(
             application = %app_name,
             children_count = supervisor_spec.children.len(),
             "Supervisor spec validation passed"
         );
-        
+
         Ok(())
     }
-    
+
     /// Create supervisor hierarchy from SupervisorSpec (Phase 5/6)
     ///
     /// ## Purpose
@@ -806,7 +831,7 @@ impl SpecApplication {
     ///
     /// ## Returns
     /// Tuple of (root_supervisor, supervisor_handle)
-    /// 
+    ///
     /// ## Note
     /// This is a placeholder for future enhancement. Currently, actors are spawned
     /// directly via initialize_supervisor_tree. In a full implementation, we would:
@@ -819,30 +844,38 @@ impl SpecApplication {
         node: Arc<dyn ApplicationNode>,
         service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
         supervisor_spec: &SupervisorSpec,
-    ) -> Result<(Arc<tokio::sync::RwLock<Supervisor>>, tokio::task::JoinHandle<()>), ApplicationError> {
+    ) -> Result<
+        (
+            Arc<tokio::sync::RwLock<Supervisor>>,
+            tokio::task::JoinHandle<()>,
+        ),
+        ApplicationError,
+    > {
         // Convert ApplicationSpec SupervisorSpec to Supervisor
         // Note: ApplicationSpec uses application.proto::SupervisorSpec
         // Supervisor::from_config() expects supervision.proto::SupervisorConfig
         // We'll create Supervisor directly from SupervisorSpec
-        
+
         // Convert supervision strategy (simplified - use OneForOne as default)
         // Note: Full conversion would use try_from, but for now we use a simple approach
         let strategy = SupervisionStrategy::OneForOne {
             max_restarts: supervisor_spec.max_restarts,
-            within_seconds: supervisor_spec.max_restart_window
+            within_seconds: supervisor_spec
+                .max_restart_window
                 .as_ref()
                 .map(|d| d.seconds as u64)
                 .unwrap_or(60),
         };
-        
+
         // Create root supervisor
         let supervisor_id = format!("{}@{}", self.spec.name, node.id());
-        let (mut supervisor, _event_rx) = Supervisor::new(supervisor_id.clone(), strategy, service_locator.clone());
-        
+        let (mut supervisor, _event_rx) =
+            Supervisor::new(supervisor_id.clone(), strategy, service_locator.clone());
+
         // Note: Node reference for linking would be added here if ApplicationNode exposed Node
         // For now, links will be established when children are added via Supervisor::add_child()
         // which uses the node field if available
-        
+
         // Add children from spec (recursively for nested supervisors)
         // Note: For now, we'll use the existing initialize_supervisor_tree logic
         // which spawns actors directly. In a future enhancement, we could
@@ -855,7 +888,7 @@ impl SpecApplication {
         // 3. Spawn actors using behavior factory (existing logic)
         // 4. Add actors to supervisor as children
         // 5. Call Supervisor::start() for bottom-up startup
-        
+
         // Use existing initialize_supervisor_tree to spawn actors
         // This spawns actors directly using behavior factory
         // After spawning, we can add them to supervisor if needed
@@ -863,7 +896,7 @@ impl SpecApplication {
         // The actual actor spawning happens in initialize_supervisor_tree
         // which is called separately. The supervisor is created for future
         // integration when we can use Supervisor::add_child() properly.
-        
+
         // For production-grade implementation with full Supervisor::start() integration:
         // 1. Spawn actors using behavior factory (existing initialize_supervisor_tree)
         // 2. Add spawned actors to supervisor via Supervisor::add_child()
@@ -872,17 +905,17 @@ impl SpecApplication {
         // Current approach: Use existing initialize_supervisor_tree
         // which handles actor spawning. Supervisor structure is created
         // for future enhancement.
-        
+
         // Start supervisor (Phase 4: Bottom-up startup with rollback)
         // Note: Supervisor::start() requires children to be added first
         // For now, we create the supervisor but don't start it yet
         // as children need to be added via initialize_supervisor_tree first
         let supervisor_arc = Arc::new(tokio::sync::RwLock::new(supervisor));
-        
+
         // TODO: After initialize_supervisor_tree spawns actors, add them to supervisor
         // and then call Supervisor::start(). For now, we'll use the existing
         // approach where actors are spawned directly.
-        
+
         // Create a placeholder handle (supervisor structure is created but not started yet)
         // In a full implementation with Supervisor::start() integration:
         // 1. Spawn actors via initialize_supervisor_tree
@@ -897,14 +930,14 @@ impl SpecApplication {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
-        
+
         // OBSERVABILITY: Log supervisor hierarchy creation
         debug!(
             application = %self.spec.name,
             supervisor_id = %supervisor_id,
             "Supervisor hierarchy structure created (actors spawned via initialize_supervisor_tree)"
         );
-        
+
         Ok((supervisor_arc, handle))
     }
 }
@@ -914,8 +947,8 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use plexspaces_proto::application::v1::{
-        ApplicationSpec, ApplicationType, ChildSpec, ChildType, RestartPolicy, SupervisorSpec,
-        SupervisionStrategy,
+        ApplicationSpec, ApplicationType, ChildSpec, ChildType, RestartPolicy, SupervisionStrategy,
+        SupervisorSpec,
     };
     use prost_types::Duration as ProtoDuration;
     use tokio::sync::RwLock;
@@ -933,15 +966,16 @@ mod tests {
         async fn new(id: impl Into<String>) -> Self {
             use plexspaces_node::create_default_service_locator;
             let id_str = id.into();
-            let service_locator = create_default_service_locator(Some(id_str.clone()), None, None).await;
-            
+            let service_locator =
+                create_default_service_locator(Some(id_str.clone()), None, None).await;
+
             // Register ActorFactory for tests (required by SpecApplication::initialize_supervisor_tree)
             use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
             let sl_trait: Arc<dyn plexspaces_core::ServiceLocator> = service_locator.clone();
             let actor_factory_impl = ActorFactoryImpl::new_arc(sl_trait).await;
             let factory: Arc<dyn plexspaces_actor::ActorFactory> = actor_factory_impl.clone();
             service_locator.register_actor_factory(factory).await;
-            
+
             Self {
                 id: id_str.clone(),
                 addr: "0.0.0.0:8000".to_string(),
@@ -1024,8 +1058,12 @@ mod tests {
             }),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProtoDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProtoDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: 0, // Default graceful
+            seed_nodes: vec![],
             metadata: None,
         }
     }
@@ -1044,8 +1082,12 @@ mod tests {
             supervisor: None,
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProtoDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProtoDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: 0,
+            seed_nodes: vec![],
             metadata: None,
         }
     }
@@ -1105,10 +1147,7 @@ mod tests {
         // Try to start again
         let result = app.start(node).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("already running"));
+        assert!(result.unwrap_err().to_string().contains("already running"));
     }
 
     /// Test: Stop application gracefully
@@ -1134,10 +1173,7 @@ mod tests {
 
         let result = app.stop().await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("not running"));
+        assert!(result.unwrap_err().to_string().contains("not running"));
     }
 
     /// Test: Health check for running application
@@ -1176,12 +1212,8 @@ mod tests {
 
         let result = app.start(node).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("empty ID"));
+        assert!(result.unwrap_err().to_string().contains("empty ID"));
     }
 
     // Note: start_module validation removed - actor_type is derived from child.id
 }
-

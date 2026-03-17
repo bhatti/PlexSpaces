@@ -20,7 +20,7 @@
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, ChannelStats};
+use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, ChannelStats};
 use plexspaces_proto::common::v1::Message;
 use thiserror::Error;
 

@@ -20,11 +20,13 @@
 
 #[cfg(feature = "sql-backend")]
 mod sql_tests {
-    use plexspaces_blob::{BlobRepository, repository::sql::SqlBlobRepository, repository::ListFilters};
-    use plexspaces_proto::storage::v1::BlobMetadata;
-    use plexspaces_blob::helpers::datetime_to_timestamp;
-    use plexspaces_core::RequestContext;
     use chrono::Utc;
+    use plexspaces_blob::helpers::datetime_to_timestamp;
+    use plexspaces_blob::{
+        repository::sql::SqlBlobRepository, repository::ListFilters, BlobRepository,
+    };
+    use plexspaces_core::RequestContext;
+    use plexspaces_proto::storage::v1::BlobMetadata;
     use std::sync::Arc;
     use std::sync::Once;
 
@@ -42,21 +44,21 @@ mod sql_tests {
     async fn create_test_repository() -> Arc<SqlBlobRepository> {
         // Ensure sqlx drivers are installed (idempotent, safe for parallel tests)
         init_sqlx_drivers();
-        
-        use sqlx::AnyPool;
+
         use sqlx::any::AnyPoolOptions;
-        
+        use sqlx::AnyPool;
+
         // Use in-memory SQLite database for tests (fast, isolated, no file cleanup needed)
         // Not recovery-related, so memory is appropriate
         // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
         let db_url = "sqlite::memory:";
-        
+
         let any_pool = AnyPoolOptions::new()
             .max_connections(1)
             .connect(db_url)
             .await
             .unwrap();
-        
+
         // Migrations are auto-applied in new()
         Arc::new(SqlBlobRepository::new(any_pool).await.unwrap())
     }
@@ -87,13 +89,11 @@ mod sql_tests {
     }
 
     fn create_admin_context(tenant_id: &str) -> RequestContext {
-        RequestContext::new_without_auth(tenant_id.to_string(), String::new())
-            .with_admin(true)
+        RequestContext::new_without_auth(tenant_id.to_string(), String::new()).with_admin(true)
     }
 
     fn create_internal_context(tenant_id: &str) -> RequestContext {
-        RequestContext::new_without_auth(tenant_id.to_string(), String::new())
-            .with_internal(true)
+        RequestContext::new_without_auth(tenant_id.to_string(), String::new()).with_internal(true)
     }
 
     #[tokio::test]
@@ -129,7 +129,7 @@ mod sql_tests {
     async fn test_list_with_filters() {
         let repo = create_test_repository().await;
         let ctx = create_test_context("tenant-1", "ns-1");
-        
+
         let mut metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
         metadata1.name = "file1.txt".to_string();
         metadata1.blob_group = "group1".to_string();
@@ -154,9 +154,11 @@ mod sql_tests {
     async fn test_find_expired() {
         let repo = create_test_repository().await;
         let ctx = create_test_context("tenant-1", "ns-1");
-        
+
         let mut metadata = create_test_metadata("blob-1", "tenant-1", "ns-1");
-        metadata.expires_at = Some(datetime_to_timestamp(Utc::now() - chrono::Duration::hours(1)));
+        metadata.expires_at = Some(datetime_to_timestamp(
+            Utc::now() - chrono::Duration::hours(1),
+        ));
         repo.save(&ctx, &metadata).await.unwrap();
 
         let expired = repo.find_expired(&ctx, 10).await.unwrap();
@@ -182,7 +184,7 @@ mod sql_tests {
         let repo = create_test_repository().await;
         let ctx1 = create_test_context("tenant-1", "ns-1");
         let ctx2 = create_test_context("tenant-2", "ns-1");
-        
+
         let metadata = create_test_metadata("blob-1", "tenant-1", "ns-1");
         repo.save(&ctx1, &metadata).await.unwrap();
 
@@ -197,7 +199,7 @@ mod sql_tests {
     async fn test_tenant_validation_on_save() {
         let repo = create_test_repository().await;
         let ctx = create_test_context("tenant-1", "ns-1");
-        
+
         // Try to save metadata with mismatched tenant_id
         let metadata = create_test_metadata("blob-1", "tenant-2", "ns-1");
         let result = repo.save(&ctx, &metadata).await;
@@ -209,7 +211,7 @@ mod sql_tests {
     async fn test_namespace_validation_on_save() {
         let repo = create_test_repository().await;
         let ctx = create_test_context("tenant-1", "ns-1");
-        
+
         // Try to save metadata with mismatched namespace
         let metadata = create_test_metadata("blob-1", "tenant-1", "ns-2");
         let result = repo.save(&ctx, &metadata).await;
@@ -222,7 +224,7 @@ mod sql_tests {
         let repo = create_test_repository().await;
         let ctx1 = create_test_context("tenant-1", "ns-1");
         let ctx2 = create_test_context("tenant-1", "ns-2");
-        
+
         let metadata = create_test_metadata("blob-1", "tenant-1", "ns-1");
         repo.save(&ctx1, &metadata).await.unwrap();
 
@@ -239,27 +241,36 @@ mod sql_tests {
         let ctx1 = create_test_context("tenant-1", "ns-1");
         let ctx2 = create_test_context("tenant-2", "ns-1");
         let ctx3 = create_test_context("tenant-1", "ns-2");
-        
+
         // Create blobs in different tenants/namespaces
         let metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
         repo.save(&ctx1, &metadata1).await.unwrap();
-        
+
         let metadata2 = create_test_metadata("blob-2", "tenant-2", "ns-1");
         repo.save(&ctx2, &metadata2).await.unwrap();
-        
+
         let metadata3 = create_test_metadata("blob-3", "tenant-1", "ns-2");
         repo.save(&ctx3, &metadata3).await.unwrap();
 
         // Each context should only see its own blobs
-        let (results1, total1) = repo.list(&ctx1, &ListFilters::default(), 10, 0).await.unwrap();
+        let (results1, total1) = repo
+            .list(&ctx1, &ListFilters::default(), 10, 0)
+            .await
+            .unwrap();
         assert_eq!(total1, 1);
         assert_eq!(results1[0].blob_id, "blob-1");
 
-        let (results2, total2) = repo.list(&ctx2, &ListFilters::default(), 10, 0).await.unwrap();
+        let (results2, total2) = repo
+            .list(&ctx2, &ListFilters::default(), 10, 0)
+            .await
+            .unwrap();
         assert_eq!(total2, 1);
         assert_eq!(results2[0].blob_id, "blob-2");
 
-        let (results3, total3) = repo.list(&ctx3, &ListFilters::default(), 10, 0).await.unwrap();
+        let (results3, total3) = repo
+            .list(&ctx3, &ListFilters::default(), 10, 0)
+            .await
+            .unwrap();
         assert_eq!(total3, 1);
         assert_eq!(results3[0].blob_id, "blob-3");
     }
@@ -279,17 +290,26 @@ mod sql_tests {
         repo.save(&ctx_ns2, &metadata2).await.unwrap();
 
         // List with empty namespace should return blobs from all namespaces
-        let (results, total) = repo.list(&ctx_empty, &ListFilters::default(), 10, 0).await.unwrap();
+        let (results, total) = repo
+            .list(&ctx_empty, &ListFilters::default(), 10, 0)
+            .await
+            .unwrap();
         assert_eq!(total, 2);
         assert!(results.iter().any(|b| b.blob_id == "blob-1"));
         assert!(results.iter().any(|b| b.blob_id == "blob-2"));
 
         // List with specific namespace should only return that namespace's blobs
-        let (results_ns1, total_ns1) = repo.list(&ctx_ns1, &ListFilters::default(), 10, 0).await.unwrap();
+        let (results_ns1, total_ns1) = repo
+            .list(&ctx_ns1, &ListFilters::default(), 10, 0)
+            .await
+            .unwrap();
         assert_eq!(total_ns1, 1);
         assert_eq!(results_ns1[0].blob_id, "blob-1");
 
-        let (results_ns2, total_ns2) = repo.list(&ctx_ns2, &ListFilters::default(), 10, 0).await.unwrap();
+        let (results_ns2, total_ns2) = repo
+            .list(&ctx_ns2, &ListFilters::default(), 10, 0)
+            .await
+            .unwrap();
         assert_eq!(total_ns2, 1);
         assert_eq!(results_ns2[0].blob_id, "blob-2");
     }
@@ -302,7 +322,7 @@ mod sql_tests {
         let ctx_empty = create_test_context("tenant-1", "");
 
         let sha256 = "c".repeat(64);
-        
+
         // Create blob in ns-1 with specific sha256
         let mut metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
         metadata1.sha256 = sha256.clone();
@@ -314,12 +334,20 @@ mod sql_tests {
         repo.save(&ctx_ns2, &metadata2).await.unwrap();
 
         // get_by_sha256 with empty namespace should find blob from any namespace
-        let retrieved = repo.get_by_sha256(&ctx_empty, &sha256).await.unwrap().unwrap();
+        let retrieved = repo
+            .get_by_sha256(&ctx_empty, &sha256)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(retrieved.blob_id, "blob-1");
         assert_eq!(retrieved.namespace, "ns-1");
 
         // get_by_sha256 with specific namespace should only find in that namespace
-        let retrieved_ns1 = repo.get_by_sha256(&ctx_ns1, &sha256).await.unwrap().unwrap();
+        let retrieved_ns1 = repo
+            .get_by_sha256(&ctx_ns1, &sha256)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(retrieved_ns1.blob_id, "blob-1");
 
         // get_by_sha256 with different namespace should not find it
@@ -336,12 +364,16 @@ mod sql_tests {
 
         // Create expired blob in ns-1
         let mut metadata1 = create_test_metadata("blob-1", "tenant-1", "ns-1");
-        metadata1.expires_at = Some(datetime_to_timestamp(Utc::now() - chrono::Duration::hours(1)));
+        metadata1.expires_at = Some(datetime_to_timestamp(
+            Utc::now() - chrono::Duration::hours(1),
+        ));
         repo.save(&ctx_ns1, &metadata1).await.unwrap();
 
         // Create expired blob in ns-2
         let mut metadata2 = create_test_metadata("blob-2", "tenant-1", "ns-2");
-        metadata2.expires_at = Some(datetime_to_timestamp(Utc::now() - chrono::Duration::hours(1)));
+        metadata2.expires_at = Some(datetime_to_timestamp(
+            Utc::now() - chrono::Duration::hours(1),
+        ));
         repo.save(&ctx_ns2, &metadata2).await.unwrap();
 
         // find_expired with empty namespace should return expired blobs from all namespaces
@@ -375,13 +407,19 @@ mod sql_tests {
         // Admin context with empty namespace should find blobs across namespaces
         let admin_ctx = create_admin_context("tenant-1");
         let retrieved = repo.get(&admin_ctx, "blob-1").await.unwrap();
-        assert!(retrieved.is_some(), "Admin should find blob across namespaces");
+        assert!(
+            retrieved.is_some(),
+            "Admin should find blob across namespaces"
+        );
         assert_eq!(retrieved.unwrap().blob_id, "blob-1");
 
         // Internal context with empty namespace should find blobs across namespaces
         let internal_ctx = create_internal_context("tenant-1");
         let retrieved = repo.get(&internal_ctx, "blob-2").await.unwrap();
-        assert!(retrieved.is_some(), "Internal should find blob across namespaces");
+        assert!(
+            retrieved.is_some(),
+            "Internal should find blob across namespaces"
+        );
         assert_eq!(retrieved.unwrap().blob_id, "blob-2");
     }
 
@@ -403,13 +441,19 @@ mod sql_tests {
         // Admin context with empty namespace should find blob by sha256 across namespaces
         let admin_ctx = create_admin_context("tenant-1");
         let retrieved = repo.get_by_sha256(&admin_ctx, &sha256).await.unwrap();
-        assert!(retrieved.is_some(), "Admin should find blob by sha256 across namespaces");
+        assert!(
+            retrieved.is_some(),
+            "Admin should find blob by sha256 across namespaces"
+        );
         assert_eq!(retrieved.unwrap().blob_id, "blob-1");
 
         // Internal context with empty namespace should find blob by sha256 across namespaces
         let internal_ctx = create_internal_context("tenant-1");
         let retrieved = repo.get_by_sha256(&internal_ctx, &sha256).await.unwrap();
-        assert!(retrieved.is_some(), "Internal should find blob by sha256 across namespaces");
+        assert!(
+            retrieved.is_some(),
+            "Internal should find blob by sha256 across namespaces"
+        );
         assert_eq!(retrieved.unwrap().blob_id, "blob-1");
     }
 
@@ -427,15 +471,27 @@ mod sql_tests {
 
         // Admin context with empty namespace should list blobs from all namespaces
         let admin_ctx = create_admin_context("tenant-1");
-        let (results, total) = repo.list(&admin_ctx, &ListFilters::default(), 10, 0).await.unwrap();
-        assert!(total >= 2, "Admin list should return blobs from all namespaces");
+        let (results, total) = repo
+            .list(&admin_ctx, &ListFilters::default(), 10, 0)
+            .await
+            .unwrap();
+        assert!(
+            total >= 2,
+            "Admin list should return blobs from all namespaces"
+        );
         assert!(results.iter().any(|b| b.blob_id == "blob-1"));
         assert!(results.iter().any(|b| b.blob_id == "blob-2"));
 
         // Internal context with empty namespace should list blobs from all namespaces
         let internal_ctx = create_internal_context("tenant-1");
-        let (results, total) = repo.list(&internal_ctx, &ListFilters::default(), 10, 0).await.unwrap();
-        assert!(total >= 2, "Internal list should return blobs from all namespaces");
+        let (results, total) = repo
+            .list(&internal_ctx, &ListFilters::default(), 10, 0)
+            .await
+            .unwrap();
+        assert!(
+            total >= 2,
+            "Internal list should return blobs from all namespaces"
+        );
         assert!(results.iter().any(|b| b.blob_id == "blob-1"));
         assert!(results.iter().any(|b| b.blob_id == "blob-2"));
     }

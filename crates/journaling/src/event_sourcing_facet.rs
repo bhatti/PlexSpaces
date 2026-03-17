@@ -98,10 +98,10 @@ use tokio::sync::RwLock;
 pub struct EventSourcingFacet<S: JournalStorage> {
     /// Facet configuration as Value (immutable, for Facet trait)
     config_value: Value,
-    
+
     /// Facet priority (immutable)
     priority: i32,
-    
+
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
 
@@ -160,7 +160,7 @@ impl<S: JournalStorage + Clone + 'static> EventSourcingFacet<S> {
                 .map(|v| v as i32)
                 .unwrap_or(1000),
         };
-        
+
         EventSourcingFacet {
             config_value: config,
             priority,
@@ -170,7 +170,7 @@ impl<S: JournalStorage + Clone + 'static> EventSourcingFacet<S> {
             event_sequence: Arc::new(RwLock::new(0)),
         }
     }
-    
+
     /// Legacy constructor for backward compatibility
     pub fn with_config(storage: Arc<S>, config: EventSourcingConfig) -> Self {
         // Convert EventSourcingConfig to Value manually
@@ -253,7 +253,10 @@ impl<S: JournalStorage + Clone + 'static> EventSourcingFacet<S> {
         }
 
         // Replay events from storage
-        let events = self.storage.replay_events_from(actor_id, from_sequence).await?;
+        let events = self
+            .storage
+            .replay_events_from(actor_id, from_sequence)
+            .await?;
 
         // Update sequence to last replayed event
         if let Some(last_event) = events.last() {
@@ -270,11 +273,11 @@ impl<S: JournalStorage + Clone + 'static> Facet for EventSourcingFacet<S> {
     fn facet_type(&self) -> &str {
         "event_sourcing"
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -343,9 +346,8 @@ impl<S: JournalStorage + Clone + 'static> Facet for EventSourcingFacet<S> {
         // Get actor ID
         let actor_id = {
             let aid = self.actor_id.read().await;
-            aid.clone().ok_or_else(|| {
-                FacetError::InvalidConfig("Actor ID not set".to_string())
-            })?
+            aid.clone()
+                .ok_or_else(|| FacetError::InvalidConfig("Actor ID not set".to_string()))?
         };
 
         // Log event for state change
@@ -367,11 +369,11 @@ impl<S: JournalStorage + Clone + 'static> Facet for EventSourcingFacet<S> {
         // Event sourcing doesn't handle errors
         Ok(ErrorHandling::Propagate)
     }
-    
+
     fn get_config(&self) -> Value {
         self.config_value.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }
@@ -452,11 +454,19 @@ mod tests {
         let config = create_test_config();
 
         let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Log an event
         let sequence = facet
-            .log_event("actor-1", "counter_incremented", b"{\"amount\": 5}", "corr-1")
+            .log_event(
+                "actor-1",
+                "counter_incremented",
+                b"{\"amount\": 5}",
+                "corr-1",
+            )
             .await
             .unwrap();
 
@@ -476,11 +486,19 @@ mod tests {
         config.event_log_enabled = false; // Disable event logging
 
         let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Log an event (should return 0, no event logged)
         let sequence = facet
-            .log_event("actor-1", "counter_incremented", b"{\"amount\": 5}", "corr-1")
+            .log_event(
+                "actor-1",
+                "counter_incremented",
+                b"{\"amount\": 5}",
+                "corr-1",
+            )
             .await
             .unwrap();
 
@@ -554,7 +572,10 @@ mod tests {
         let config = create_test_config();
 
         let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Call after_method (should log event)
         let result = facet
@@ -578,7 +599,10 @@ mod tests {
         config.event_log_enabled = false; // Disable event logging
 
         let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Call after_method (should not log event)
         let result = facet
@@ -611,7 +635,10 @@ mod tests {
         let config = create_test_config();
 
         let mut facet = EventSourcingFacet::new(storage, config_to_value(&config), 50);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Detach
         let result = facet.on_detach("actor-1").await;
@@ -632,7 +659,10 @@ mod tests {
         let config = create_test_config();
 
         let mut facet = EventSourcingFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Log multiple events
         for i in 1..=5 {
@@ -796,4 +826,3 @@ mod tests {
         assert!(matches!(result.unwrap(), ErrorHandling::Propagate));
     }
 }
-

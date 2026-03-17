@@ -4,8 +4,8 @@
 // Config module - consolidated configuration loading and bootstrapping
 
 pub mod bootstrap;
-pub mod loader;
 mod convert;
+pub mod loader;
 mod yaml;
 
 // Re-export main types for convenience

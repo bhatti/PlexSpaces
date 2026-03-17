@@ -5,8 +5,6 @@
 
 pub mod behavior_routing_tests;
 pub mod blob_host_functions_integration;
-pub mod simple_host_lock_integration;
-pub mod simple_host_elastic_pool_integration;
 pub mod channel_host_functions_tests;
 pub mod component_host_functions_tests;
 pub mod comprehensive_coverage_tests;
@@ -16,11 +14,13 @@ pub mod grpc_integration;
 pub mod integration_tests;
 pub mod messaging_host_functions_integration;
 pub mod new_host_functions_integration;
+pub mod reinstantiation_lock_tests;
+pub mod reinstantiation_tests;
 pub mod shared_wasm_module;
+pub mod simple_host_elastic_pool_integration;
+pub mod simple_host_lock_integration;
 pub mod tuplespace_host_functions_tests;
 pub mod wasm_actor_implementation_tests;
 pub mod wasm_component_integration;
 pub mod wasm_fuel_limit_tests;
-pub mod reinstantiation_tests;
-pub mod reinstantiation_lock_tests;
 pub mod wasm_state_persistence_tests;

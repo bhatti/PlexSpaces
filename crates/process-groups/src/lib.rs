@@ -244,7 +244,8 @@ impl ProcessGroupRegistry {
         self.storage.put(&ctx, &key, value).await?;
 
         let duration = start.elapsed();
-        metrics::histogram!("plexspaces_process_groups_create_duration_seconds").record(duration.as_secs_f64());
+        metrics::histogram!("plexspaces_process_groups_create_duration_seconds")
+            .record(duration.as_secs_f64());
         metrics::counter!("plexspaces_process_groups_created_total", "tenant" => tenant_id.to_string()).increment(1);
         debug!(duration_ms = duration.as_millis(), "Process group created");
 
@@ -295,7 +296,7 @@ impl ProcessGroupRegistry {
         let membership_prefix = Self::membership_prefix(tenant_id, group_name);
         let keys = self.storage.list(&ctx, &membership_prefix).await?;
         let member_count = keys.len();
-        
+
         // Batch delete memberships (sequential for simplicity - KeyValueStore handles concurrency)
         for key in keys {
             let _ = self.storage.delete(&ctx, &key).await;
@@ -306,14 +307,15 @@ impl ProcessGroupRegistry {
         let message_prefix = format!("tenant:{}:group:{}:message:", tenant_id, group_name);
         let message_keys = self.storage.list(&ctx, &message_prefix).await?;
         let message_count = message_keys.len();
-        
+
         // Batch delete messages (sequential for simplicity)
         for key in message_keys {
             let _ = self.storage.delete(&ctx, &key).await;
         }
 
         let duration = start.elapsed();
-        metrics::histogram!("plexspaces_process_groups_delete_duration_seconds").record(duration.as_secs_f64());
+        metrics::histogram!("plexspaces_process_groups_delete_duration_seconds")
+            .record(duration.as_secs_f64());
         metrics::counter!("plexspaces_process_groups_deleted_total", "tenant" => tenant_id.to_string()).increment(1);
         debug!(
             duration_ms = duration.as_millis(),
@@ -391,7 +393,8 @@ impl ProcessGroupRegistry {
 
         // Merge topics if actor already has membership (union of topics)
         if !topics.is_empty() {
-            let mut existing_topics: std::collections::HashSet<String> = membership.topics.iter().cloned().collect();
+            let mut existing_topics: std::collections::HashSet<String> =
+                membership.topics.iter().cloned().collect();
             for topic in topics {
                 existing_topics.insert(topic);
             }
@@ -407,13 +410,18 @@ impl ProcessGroupRegistry {
 
         // Update group member_count (optimized: only if new member)
         if membership.join_count == 1 {
-            self.update_member_count_with_namespace(tenant_id, group_name, ctx.namespace()).await?;
+            self.update_member_count_with_namespace(tenant_id, group_name, ctx.namespace())
+                .await?;
         }
 
         let duration = start.elapsed();
-        metrics::histogram!("plexspaces_process_groups_join_duration_seconds").record(duration.as_secs_f64());
+        metrics::histogram!("plexspaces_process_groups_join_duration_seconds")
+            .record(duration.as_secs_f64());
         metrics::counter!("plexspaces_process_groups_joins_total", "group" => group_name.to_string(), "tenant" => tenant_id.to_string()).increment(1);
-        debug!(duration_ms = duration.as_millis(), "Actor joined process group");
+        debug!(
+            duration_ms = duration.as_millis(),
+            "Actor joined process group"
+        );
 
         Ok(())
     }
@@ -483,13 +491,18 @@ impl ProcessGroupRegistry {
         // Update group member_count (optimized: only if member was fully removed)
         if was_removed {
             // Use cloned namespace for update_member_count
-            self.update_member_count_with_namespace(tenant_id, group_name, &namespace_clone).await?;
+            self.update_member_count_with_namespace(tenant_id, group_name, &namespace_clone)
+                .await?;
         }
 
         let duration = start.elapsed();
-        metrics::histogram!("plexspaces_process_groups_leave_duration_seconds").record(duration.as_secs_f64());
+        metrics::histogram!("plexspaces_process_groups_leave_duration_seconds")
+            .record(duration.as_secs_f64());
         metrics::counter!("plexspaces_process_groups_leaves_total", "group" => group_name.to_string(), "tenant" => tenant_id.to_string()).increment(1);
-        debug!(duration_ms = duration.as_millis(), "Actor left process group");
+        debug!(
+            duration_ms = duration.as_millis(),
+            "Actor left process group"
+        );
 
         Ok(())
     }
@@ -599,13 +612,16 @@ impl ProcessGroupRegistry {
     /// ## Note
     /// For admin operations to list groups across all namespaces, use admin context
     /// and call this method multiple times with different namespaces.
-    pub async fn list_groups(&self, ctx: &RequestContext) -> Result<Vec<String>, ProcessGroupError> {
+    pub async fn list_groups(
+        &self,
+        ctx: &RequestContext,
+    ) -> Result<Vec<String>, ProcessGroupError> {
         let tenant_id = ctx.tenant_id();
         let mut all_groups = Vec::new();
-        
+
         let prefix = format!("tenant:{}:group:", tenant_id);
         let keys = self.storage.list(ctx, &prefix).await?;
-        
+
         for key in keys {
             // Extract group name from key
             // Format: tenant:{tenant_id}:group:{group_name}
@@ -675,7 +691,8 @@ impl ProcessGroupRegistry {
                     // If member has no topics (empty list), they receive all messages
                     let should_receive = if let Some(topic_filter) = topic {
                         // Topic specified: member must be subscribed to this topic OR have no topics (receive all)
-                        membership.topics.is_empty() || membership.topics.contains(&topic_filter.to_string())
+                        membership.topics.is_empty()
+                            || membership.topics.contains(&topic_filter.to_string())
                     } else {
                         // No topic filter: all members receive
                         true
@@ -736,7 +753,8 @@ impl ProcessGroupRegistry {
 
         let duration = start.elapsed();
         let fanout_size = recipients.len();
-        metrics::histogram!("plexspaces_process_groups_publish_duration_seconds").record(duration.as_secs_f64());
+        metrics::histogram!("plexspaces_process_groups_publish_duration_seconds")
+            .record(duration.as_secs_f64());
         metrics::histogram!("plexspaces_process_groups_fanout_size").record(fanout_size as f64);
         metrics::counter!("plexspaces_process_groups_publish_total", "group" => group_name.to_string(), "tenant" => tenant_id.to_string()).increment(1);
         debug!(
@@ -761,7 +779,7 @@ impl ProcessGroupRegistry {
     /// ## Note
     /// - If context is admin/internal, searches across common namespaces
     /// Gets the namespace for a group.
-    /// 
+    ///
     /// For internal/admin contexts with empty namespace, returns empty namespace (no namespace filtering).
     /// Otherwise, uses the namespace from the context.
     async fn get_group_namespace(
@@ -773,7 +791,7 @@ impl ProcessGroupRegistry {
         if ctx.should_skip_namespace_filter() {
             return Ok(String::new());
         }
-        
+
         // Otherwise, use namespace from context (may be empty)
         Ok(ctx.namespace().to_string())
     }
@@ -874,9 +892,7 @@ mod tests {
             .await
             .unwrap();
 
-        let result = registry
-            .create_group(&test_ctx(), "test-group")
-            .await;
+        let result = registry.create_group(&test_ctx(), "test-group").await;
         assert!(matches!(
             result,
             Err(ProcessGroupError::GroupAlreadyExists(_))
@@ -893,10 +909,7 @@ mod tests {
             .await
             .unwrap();
         let ctx = test_ctx();
-        registry
-            .delete_group(&ctx, "test-group")
-            .await
-            .unwrap();
+        registry.delete_group(&ctx, "test-group").await.unwrap();
 
         // Verify group no longer exists
         let groups = registry.list_groups(&ctx).await.unwrap();
@@ -913,10 +926,7 @@ mod tests {
             .await
             .unwrap();
         let ctx = test_ctx();
-        registry
-            .delete_group(&ctx, "test-group")
-            .await
-            .unwrap();
+        registry.delete_group(&ctx, "test-group").await.unwrap();
 
         // Delete again - should succeed (idempotent)
         let result = registry.delete_group(&ctx, "test-group").await;
@@ -937,11 +947,9 @@ mod tests {
             .await
             .unwrap();
 
-        let ctx = RequestContext::new_without_auth(TEST_TENANT.to_string(), TEST_NAMESPACE.to_string());
-        let members = registry
-            .get_members(&ctx, "test-group")
-            .await
-            .unwrap();
+        let ctx =
+            RequestContext::new_without_auth(TEST_TENANT.to_string(), TEST_NAMESPACE.to_string());
+        let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(members[0], "actor-1");
     }
@@ -983,10 +991,7 @@ mod tests {
 
         // Should still appear once in members list
         let ctx = test_ctx();
-        let members = registry
-            .get_members(&ctx, "test-group")
-            .await
-            .unwrap();
+        let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(members[0], "actor-1");
     }
@@ -1004,17 +1009,15 @@ mod tests {
             .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
             .await
             .unwrap();
-        let ctx = RequestContext::new_without_auth(TEST_TENANT.to_string(), TEST_NAMESPACE.to_string());
+        let ctx =
+            RequestContext::new_without_auth(TEST_TENANT.to_string(), TEST_NAMESPACE.to_string());
         registry
             .leave_group(&ctx, "test-group", &ActorId::from("actor-1".to_string()))
             .await
             .unwrap();
 
         let ctx = test_ctx();
-        let members = registry
-            .get_members(&ctx, "test-group")
-            .await
-            .unwrap();
+        let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 0);
     }
 
@@ -1055,10 +1058,7 @@ mod tests {
             .unwrap();
 
         let ctx = test_ctx();
-        let members = registry
-            .get_members(&ctx, "test-group")
-            .await
-            .unwrap();
+        let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 1);
 
         // Leave third time - now fully removed
@@ -1068,10 +1068,7 @@ mod tests {
             .unwrap();
 
         let ctx = test_ctx();
-        let members = registry
-            .get_members(&ctx, "test-group")
-            .await
-            .unwrap();
+        let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 0);
     }
 
@@ -1118,10 +1115,7 @@ mod tests {
             .unwrap();
 
         let ctx = test_ctx();
-        let members = registry
-            .get_members(&ctx, "test-group")
-            .await
-            .unwrap();
+        let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 3);
         assert!(members.contains(&"actor-1".to_string()));
         assert!(members.contains(&"actor-2".to_string()));
@@ -1161,18 +1155,9 @@ mod tests {
         let registry = create_test_registry().await;
         let ctx = test_ctx();
 
-        registry
-            .create_group(&test_ctx(), "group-1")
-            .await
-            .unwrap();
-        registry
-            .create_group(&test_ctx(), "group-2")
-            .await
-            .unwrap();
-        registry
-            .create_group(&test_ctx(), "group-3")
-            .await
-            .unwrap();
+        registry.create_group(&test_ctx(), "group-1").await.unwrap();
+        registry.create_group(&test_ctx(), "group-2").await.unwrap();
+        registry.create_group(&test_ctx(), "group-3").await.unwrap();
 
         let groups = registry.list_groups(&ctx).await.unwrap();
         assert_eq!(groups.len(), 3);
@@ -1200,20 +1185,14 @@ mod tests {
             .unwrap();
 
         let ctx = test_ctx();
-        registry
-            .delete_group(&ctx, "test-group")
-            .await
-            .unwrap();
+        registry.delete_group(&ctx, "test-group").await.unwrap();
 
         // Re-create group - should be empty
         registry
             .create_group(&test_ctx(), "test-group")
             .await
             .unwrap();
-        let members = registry
-            .get_members(&ctx, "test-group")
-            .await
-            .unwrap();
+        let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 0);
     }
 
@@ -1238,10 +1217,7 @@ mod tests {
             .unwrap();
 
         let ctx = test_ctx();
-        let members = registry
-            .get_members(&ctx, "test-group")
-            .await
-            .unwrap();
+        let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 2);
 
         // Leave one actor
@@ -1251,10 +1227,7 @@ mod tests {
             .unwrap();
 
         let ctx = test_ctx();
-        let members = registry
-            .get_members(&ctx, "test-group")
-            .await
-            .unwrap();
+        let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 1);
     }
 
@@ -1335,26 +1308,38 @@ mod tests {
         let registry = create_test_registry().await;
         let ctx = test_ctx();
 
-        registry
-            .create_group(&test_ctx(), "events")
-            .await
-            .unwrap();
+        registry.create_group(&test_ctx(), "events").await.unwrap();
 
         // Actor 1 subscribes to "user.login" topic
         registry
-            .join_group(&test_ctx(), "events", &"actor-1".to_string(), vec!["user.login".to_string()])
+            .join_group(
+                &test_ctx(),
+                "events",
+                &"actor-1".to_string(),
+                vec!["user.login".to_string()],
+            )
             .await
             .unwrap();
 
         // Actor 2 subscribes to "user.logout" topic
         registry
-            .join_group(&test_ctx(), "events", &"actor-2".to_string(), vec!["user.logout".to_string()])
+            .join_group(
+                &test_ctx(),
+                "events",
+                &"actor-2".to_string(),
+                vec!["user.logout".to_string()],
+            )
             .await
             .unwrap();
 
         // Actor 3 subscribes to both topics
         registry
-            .join_group(&test_ctx(), "events", &"actor-3".to_string(), vec!["user.login".to_string(), "user.logout".to_string()])
+            .join_group(
+                &test_ctx(),
+                "events",
+                &"actor-3".to_string(),
+                vec!["user.login".to_string(), "user.logout".to_string()],
+            )
             .await
             .unwrap();
 
@@ -1406,20 +1391,27 @@ mod tests {
         let registry = create_test_registry().await;
         let ctx = test_ctx();
 
-        registry
-            .create_group(&test_ctx(), "events")
-            .await
-            .unwrap();
+        registry.create_group(&test_ctx(), "events").await.unwrap();
 
         // Join with topic "user.login"
         registry
-            .join_group(&test_ctx(), "events", &"actor-1".to_string(), vec!["user.login".to_string()])
+            .join_group(
+                &test_ctx(),
+                "events",
+                &"actor-1".to_string(),
+                vec!["user.login".to_string()],
+            )
             .await
             .unwrap();
 
         // Join again with topic "user.logout" - should merge topics
         registry
-            .join_group(&test_ctx(), "events", &"actor-1".to_string(), vec!["user.logout".to_string()])
+            .join_group(
+                &test_ctx(),
+                "events",
+                &"actor-1".to_string(),
+                vec!["user.logout".to_string()],
+            )
             .await
             .unwrap();
 
@@ -1459,10 +1451,7 @@ mod tests {
         }
 
         // Verify all members
-        let members = registry
-            .get_members(&ctx, "large-group")
-            .await
-            .unwrap();
+        let members = registry.get_members(&ctx, "large-group").await.unwrap();
         assert_eq!(members.len(), 100);
 
         // Publish to all - should reach all 100
@@ -1487,7 +1476,12 @@ mod tests {
         // Sequential joins (simulating concurrent behavior)
         for i in 0..10 {
             registry
-                .join_group(&test_ctx(), "sequential-group", &format!("actor-{}", i), vec![])
+                .join_group(
+                    &test_ctx(),
+                    "sequential-group",
+                    &format!("actor-{}", i),
+                    vec![],
+                )
                 .await
                 .unwrap();
         }
@@ -1503,7 +1497,11 @@ mod tests {
         // Sequential leaves
         for i in 0..10 {
             registry
-                .leave_group(&ctx, "sequential-group", &ActorId::from(format!("actor-{}", i)))
+                .leave_group(
+                    &ctx,
+                    "sequential-group",
+                    &ActorId::from(format!("actor-{}", i)),
+                )
                 .await
                 .unwrap();
         }
@@ -1520,18 +1518,14 @@ mod tests {
     #[tokio::test]
     async fn test_multi_tenant_isolation() {
         let registry = create_test_registry().await;
-        let ctx1 = RequestContext::new_without_auth("tenant-1".to_string(), TEST_NAMESPACE.to_string());
-        let ctx2 = RequestContext::new_without_auth("tenant-2".to_string(), TEST_NAMESPACE.to_string());
+        let ctx1 =
+            RequestContext::new_without_auth("tenant-1".to_string(), TEST_NAMESPACE.to_string());
+        let ctx2 =
+            RequestContext::new_without_auth("tenant-2".to_string(), TEST_NAMESPACE.to_string());
 
         // Create same group name in different tenants
-        registry
-            .create_group(&ctx1, "shared-group")
-            .await
-            .unwrap();
-        registry
-            .create_group(&ctx2, "shared-group")
-            .await
-            .unwrap();
+        registry.create_group(&ctx1, "shared-group").await.unwrap();
+        registry.create_group(&ctx2, "shared-group").await.unwrap();
 
         // Join different tenants (use same namespace as create)
         registry
@@ -1544,17 +1538,11 @@ mod tests {
             .unwrap();
 
         // Verify isolation
-        let members_1 = registry
-            .get_members(&ctx1, "shared-group")
-            .await
-            .unwrap();
+        let members_1 = registry.get_members(&ctx1, "shared-group").await.unwrap();
         assert_eq!(members_1.len(), 1);
         assert_eq!(members_1[0], "actor-1");
 
-        let members_2 = registry
-            .get_members(&ctx2, "shared-group")
-            .await
-            .unwrap();
+        let members_2 = registry.get_members(&ctx2, "shared-group").await.unwrap();
         assert_eq!(members_2.len(), 1);
         assert_eq!(members_2[0], "actor-2");
     }
@@ -1565,10 +1553,7 @@ mod tests {
         let registry = create_test_registry().await;
         let ctx = test_ctx();
 
-        registry
-            .create_group(&test_ctx(), "topics")
-            .await
-            .unwrap();
+        registry.create_group(&test_ctx(), "topics").await.unwrap();
 
         // Actor with empty topics (receives all)
         registry
@@ -1578,7 +1563,12 @@ mod tests {
 
         // Actor with specific topic
         registry
-            .join_group(&test_ctx(), "topics", &"actor-specific".to_string(), vec!["topic1".to_string()])
+            .join_group(
+                &test_ctx(),
+                "topics",
+                &"actor-specific".to_string(),
+                vec!["topic1".to_string()],
+            )
             .await
             .unwrap();
 
@@ -1634,9 +1624,16 @@ mod tests {
             .unwrap();
 
         let result = registry
-            .leave_group(&ctx, "test-group", &ActorId::from("nonexistent-actor".to_string()))
+            .leave_group(
+                &ctx,
+                "test-group",
+                &ActorId::from("nonexistent-actor".to_string()),
+            )
             .await;
-        assert!(matches!(result, Err(ProcessGroupError::ActorNotInGroup { .. })));
+        assert!(matches!(
+            result,
+            Err(ProcessGroupError::ActorNotInGroup { .. })
+        ));
     }
 
     /// TEST 28: Member count accuracy after multiple operations

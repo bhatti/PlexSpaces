@@ -339,9 +339,15 @@ impl DynamoDBWorkflowStorage {
         let client = DynamoDbClient::new(&config);
 
         // Create tables if they don't exist
-        Self::ensure_definitions_table_exists(&client, &format!("{}-definitions", table_prefix)).await?;
-        Self::ensure_executions_table_exists(&client, &format!("{}-executions", table_prefix)).await?;
-        Self::ensure_step_executions_table_exists(&client, &format!("{}-step-executions", table_prefix)).await?;
+        Self::ensure_definitions_table_exists(&client, &format!("{}-definitions", table_prefix))
+            .await?;
+        Self::ensure_executions_table_exists(&client, &format!("{}-executions", table_prefix))
+            .await?;
+        Self::ensure_step_executions_table_exists(
+            &client,
+            &format!("{}-step-executions", table_prefix),
+        )
+        .await?;
         Self::ensure_signals_table_exists(&client, &format!("{}-signals", table_prefix)).await?;
 
         let duration = start_time.elapsed();
@@ -402,10 +408,18 @@ impl DynamoDBWorkflowStorage {
             Err(e) => {
                 // Table doesn't exist, create it
                 let error_msg = format!("{}", e);
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_msg.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_msg.clone());
 
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         error = %e,
                         error_code = %error_code,
@@ -439,13 +453,17 @@ impl DynamoDBWorkflowStorage {
             .attribute_name("pk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let sk_attr = AttributeDefinition::builder()
             .attribute_name("sk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let create_table_result = client
             .create_table()
@@ -494,10 +512,18 @@ impl DynamoDBWorkflowStorage {
             Err(e) => {
                 // Table doesn't exist, create it
                 let error_msg = format!("{}", e);
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_msg.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_msg.clone());
 
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         error = %e,
                         error_code = %error_code,
@@ -531,44 +557,58 @@ impl DynamoDBWorkflowStorage {
             .attribute_name("pk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let sk_attr = AttributeDefinition::builder()
             .attribute_name("sk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let tenant_namespace_attr = AttributeDefinition::builder()
             .attribute_name("tenant_namespace")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let status_created_attr = AttributeDefinition::builder()
             .attribute_name("status_created")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let node_heartbeat_attr = AttributeDefinition::builder()
             .attribute_name("node_heartbeat")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         // GSI: status_index
         let status_gsi_pk = KeySchemaElement::builder()
             .attribute_name("tenant_namespace")
             .key_type(KeyType::Hash)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let status_gsi_sk = KeySchemaElement::builder()
             .attribute_name("status_created")
             .key_type(KeyType::Range)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let status_gsi_projection = Projection::builder()
             .projection_type(ProjectionType::All)
@@ -587,13 +627,17 @@ impl DynamoDBWorkflowStorage {
             .attribute_name("tenant_namespace")
             .key_type(KeyType::Hash)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let node_gsi_sk = KeySchemaElement::builder()
             .attribute_name("node_heartbeat")
             .key_type(KeyType::Range)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let node_gsi_projection = Projection::builder()
             .projection_type(ProjectionType::All)
@@ -659,10 +703,18 @@ impl DynamoDBWorkflowStorage {
             Err(e) => {
                 // Table doesn't exist, create it
                 let error_msg = format!("{}", e);
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_msg.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_msg.clone());
 
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         error = %e,
                         error_code = %error_code,
@@ -695,13 +747,17 @@ impl DynamoDBWorkflowStorage {
             .attribute_name("pk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let sk_attr = AttributeDefinition::builder()
             .attribute_name("sk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let create_table_result = client
             .create_table()
@@ -750,10 +806,18 @@ impl DynamoDBWorkflowStorage {
             Err(e) => {
                 // Table doesn't exist, create it
                 let error_msg = format!("{}", e);
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_msg.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_msg.clone());
 
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         error = %e,
                         error_code = %error_code,
@@ -786,13 +850,17 @@ impl DynamoDBWorkflowStorage {
             .attribute_name("pk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let sk_attr = AttributeDefinition::builder()
             .attribute_name("sk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| WorkflowError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let create_table_result = client
             .create_table()
@@ -870,7 +938,9 @@ impl DynamoDBWorkflowStorage {
                     }
                 }
             } else {
-                return Err(WorkflowError::Storage("Table status not available".to_string()));
+                return Err(WorkflowError::Storage(
+                    "Table status not available".to_string(),
+                ));
             }
         }
     }
@@ -903,13 +973,20 @@ impl DynamoDBWorkflowStorage {
             .ok_or_else(|| WorkflowError::Serialization("Missing status".to_string()))?;
         let status = ExecutionStatus::from_string(status_str)?;
 
-        let current_step_id = item.get("current_step_id").and_then(|v| v.as_s().ok()).cloned();
+        let current_step_id = item
+            .get("current_step_id")
+            .and_then(|v| v.as_s().ok())
+            .cloned();
 
         let input_json = item.get("input_json").and_then(|v| v.as_s().ok()).cloned();
-        let input = input_json.as_ref().and_then(|s| serde_json::from_str(s).ok());
+        let input = input_json
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok());
 
         let output_json = item.get("output_json").and_then(|v| v.as_s().ok()).cloned();
-        let output = output_json.as_ref().and_then(|s| serde_json::from_str(s).ok());
+        let output = output_json
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok());
 
         let error = item.get("error").and_then(|v| v.as_s().ok()).cloned();
 
@@ -972,10 +1049,14 @@ impl DynamoDBWorkflowStorage {
         let status = StepExecutionStatus::from_string(status_str)?;
 
         let input_json = item.get("input_json").and_then(|v| v.as_s().ok()).cloned();
-        let input = input_json.as_ref().and_then(|s| serde_json::from_str(s).ok());
+        let input = input_json
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok());
 
         let output_json = item.get("output_json").and_then(|v| v.as_s().ok()).cloned();
-        let output = output_json.as_ref().and_then(|s| serde_json::from_str(s).ok());
+        let output = output_json
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok());
 
         let error = item.get("error").and_then(|v| v.as_s().ok()).cloned();
 
@@ -1020,13 +1101,31 @@ impl DynamoDBWorkflowStorage {
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S(sk));
-        item.insert("step_execution_id".to_string(), AttributeValue::S(step_execution_id.clone()));
-        item.insert("execution_id".to_string(), AttributeValue::S(execution_id.to_string()));
-        item.insert("step_id".to_string(), AttributeValue::S(step_id.to_string()));
-        item.insert("status".to_string(), AttributeValue::S("RUNNING".to_string()));
+        item.insert(
+            "step_execution_id".to_string(),
+            AttributeValue::S(step_execution_id.clone()),
+        );
+        item.insert(
+            "execution_id".to_string(),
+            AttributeValue::S(execution_id.to_string()),
+        );
+        item.insert(
+            "step_id".to_string(),
+            AttributeValue::S(step_id.to_string()),
+        );
+        item.insert(
+            "status".to_string(),
+            AttributeValue::S("RUNNING".to_string()),
+        );
         item.insert("input_json".to_string(), AttributeValue::S(input_json));
-        item.insert("attempt".to_string(), AttributeValue::N(attempt.to_string()));
-        item.insert("started_at".to_string(), AttributeValue::N(now_secs.to_string()));
+        item.insert(
+            "attempt".to_string(),
+            AttributeValue::N(attempt.to_string()),
+        );
+        item.insert(
+            "started_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
 
         match self
             .client
@@ -1058,7 +1157,10 @@ impl DynamoDBWorkflowStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(WorkflowError::Storage(format!("DynamoDB put_item failed: {}", e)))
+                Err(WorkflowError::Storage(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -1075,20 +1177,35 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         let table_name = format!("{}-definitions", self.table_prefix);
         let pk = format!("{}#{}", Self::composite_key(ctx, &def.id), def.version);
 
-        let definition_json = serde_json::to_string(def)
-            .map_err(|e| WorkflowError::Serialization(e.to_string()))?;
+        let definition_json =
+            serde_json::to_string(def).map_err(|e| WorkflowError::Serialization(e.to_string()))?;
 
         let now_secs = Utc::now().timestamp();
 
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S("DEF".to_string()));
-        item.insert("definition_id".to_string(), AttributeValue::S(def.id.clone()));
-        item.insert("version".to_string(), AttributeValue::S(def.version.clone()));
+        item.insert(
+            "definition_id".to_string(),
+            AttributeValue::S(def.id.clone()),
+        );
+        item.insert(
+            "version".to_string(),
+            AttributeValue::S(def.version.clone()),
+        );
         item.insert("name".to_string(), AttributeValue::S(def.name.clone()));
-        item.insert("definition_json".to_string(), AttributeValue::S(definition_json));
-        item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
-        item.insert("updated_at".to_string(), AttributeValue::N(now_secs.to_string()));
+        item.insert(
+            "definition_json".to_string(),
+            AttributeValue::S(definition_json),
+        );
+        item.insert(
+            "created_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
+        item.insert(
+            "updated_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
         item.insert(
             "schema_version".to_string(),
             AttributeValue::N(self.schema_version.to_string()),
@@ -1124,7 +1241,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(WorkflowError::Storage(format!("DynamoDB put_item failed: {}", e)))
+                Err(WorkflowError::Storage(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -1162,7 +1282,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     id, version
                 )))
             }
-            Err(e) => Err(WorkflowError::Storage(format!("DynamoDB get_item failed: {}", e))),
+            Err(e) => Err(WorkflowError::Storage(format!(
+                "DynamoDB get_item failed: {}",
+                e
+            ))),
         }
     }
 
@@ -1221,7 +1344,9 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                         // Parse definition
                         if let Some(def_json_attr) = item.get("definition_json") {
                             if let Ok(def_json) = def_json_attr.as_s() {
-                                if let Ok(definition) = serde_json::from_str::<WorkflowDefinition>(def_json) {
+                                if let Ok(definition) =
+                                    serde_json::from_str::<WorkflowDefinition>(def_json)
+                                {
                                     definitions.push(definition);
                                 }
                             }
@@ -1235,7 +1360,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                 }
                 Err(e) => {
                     error!(error = %e, "Failed to scan definitions from DynamoDB");
-                    return Err(WorkflowError::Storage(format!("DynamoDB scan failed: {}", e)));
+                    return Err(WorkflowError::Storage(format!(
+                        "DynamoDB scan failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -1298,7 +1426,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(WorkflowError::Storage(format!("DynamoDB delete_item failed: {}", e)))
+                Err(WorkflowError::Storage(format!(
+                    "DynamoDB delete_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -1311,8 +1442,15 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         input: Value,
         _labels: HashMap<String, String>,
     ) -> Result<String, WorkflowError> {
-        self.create_execution_with_node(ctx, definition_id, definition_version, input, HashMap::new(), None)
-            .await
+        self.create_execution_with_node(
+            ctx,
+            definition_id,
+            definition_version,
+            input,
+            HashMap::new(),
+            None,
+        )
+        .await
     }
 
     async fn create_execution_with_node(
@@ -1339,26 +1477,56 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S("EXEC".to_string()));
-        item.insert("execution_id".to_string(), AttributeValue::S(execution_id.clone()));
-        item.insert("definition_id".to_string(), AttributeValue::S(definition_id.to_string()));
-        item.insert("definition_version".to_string(), AttributeValue::S(definition_version.to_string()));
-        item.insert("status".to_string(), AttributeValue::S("PENDING".to_string()));
+        item.insert(
+            "execution_id".to_string(),
+            AttributeValue::S(execution_id.clone()),
+        );
+        item.insert(
+            "definition_id".to_string(),
+            AttributeValue::S(definition_id.to_string()),
+        );
+        item.insert(
+            "definition_version".to_string(),
+            AttributeValue::S(definition_version.to_string()),
+        );
+        item.insert(
+            "status".to_string(),
+            AttributeValue::S("PENDING".to_string()),
+        );
         item.insert("input_json".to_string(), AttributeValue::S(input_json));
         item.insert("version".to_string(), AttributeValue::N("1".to_string()));
-        item.insert("tenant_namespace".to_string(), AttributeValue::S(tenant_namespace.clone()));
-        item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
-        item.insert("updated_at".to_string(), AttributeValue::N(now_secs.to_string()));
+        item.insert(
+            "tenant_namespace".to_string(),
+            AttributeValue::S(tenant_namespace.clone()),
+        );
+        item.insert(
+            "created_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
+        item.insert(
+            "updated_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
 
         // For status_index GSI
         let status_created = format!("PENDING#{}", now_secs);
-        item.insert("status_created".to_string(), AttributeValue::S(status_created));
+        item.insert(
+            "status_created".to_string(),
+            AttributeValue::S(status_created),
+        );
 
         if let Some(node) = node_id {
             item.insert("node_id".to_string(), AttributeValue::S(node.to_string()));
-            item.insert("last_heartbeat".to_string(), AttributeValue::N(now_secs.to_string()));
+            item.insert(
+                "last_heartbeat".to_string(),
+                AttributeValue::N(now_secs.to_string()),
+            );
             // For node_index GSI
             let node_heartbeat = format!("{}#{}", node, now_secs);
-            item.insert("node_heartbeat".to_string(), AttributeValue::S(node_heartbeat));
+            item.insert(
+                "node_heartbeat".to_string(),
+                AttributeValue::S(node_heartbeat),
+            );
         }
 
         match self
@@ -1391,7 +1559,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(WorkflowError::Storage(format!("DynamoDB put_item failed: {}", e)))
+                Err(WorkflowError::Storage(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -1451,7 +1622,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(WorkflowError::Storage(format!("DynamoDB get_item failed: {}", e)))
+                Err(WorkflowError::Storage(format!(
+                    "DynamoDB get_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -1462,7 +1636,8 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         execution_id: &str,
         status: ExecutionStatus,
     ) -> Result<(), WorkflowError> {
-        self.update_execution_status_with_version(ctx, execution_id, status, None).await
+        self.update_execution_status_with_version(ctx, execution_id, status, None)
+            .await
     }
 
     async fn update_execution_status_with_version(
@@ -1480,7 +1655,8 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         let tenant_namespace = Self::tenant_namespace_key(ctx);
 
         // Build update expression
-        let mut update_expr = "SET #status = :status, version = version + :one, updated_at = :now".to_string();
+        let mut update_expr =
+            "SET #status = :status, version = version + :one, updated_at = :now".to_string();
 
         // Update status_created for GSI
         let status_created = format!("{}#{}", status_str, now_secs);
@@ -1492,7 +1668,13 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             update_expr.push_str(", started_at = if_not_exists(started_at, :now)");
         }
 
-        if matches!(status, ExecutionStatus::Completed | ExecutionStatus::Failed | ExecutionStatus::Cancelled | ExecutionStatus::TimedOut) {
+        if matches!(
+            status,
+            ExecutionStatus::Completed
+                | ExecutionStatus::Failed
+                | ExecutionStatus::Cancelled
+                | ExecutionStatus::TimedOut
+        ) {
             update_expr.push_str(", completed_at = :now");
         }
 
@@ -1515,7 +1697,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         if let Some(version) = expected_version {
             update = update
                 .condition_expression("version = :expected_version")
-                .expression_attribute_values(":expected_version", AttributeValue::N(version.to_string()));
+                .expression_attribute_values(
+                    ":expected_version",
+                    AttributeValue::N(version.to_string()),
+                );
         }
 
         match update.send().await {
@@ -1536,14 +1721,21 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             }
             Err(e) => {
                 let error_str = e.to_string();
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_str.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_str.clone());
 
                 // Check for conditional check failures (optimistic locking)
-                if error_code == "ConditionalCheckFailedException" 
+                if error_code == "ConditionalCheckFailedException"
                     || error_str.contains("ConditionalCheckFailedException")
                     || error_str.contains("conditional")
-                    || error_str.contains("condition") {
+                    || error_str.contains("condition")
+                {
                     debug!(
                         execution_id = %execution_id,
                         expected_version = ?expected_version,
@@ -1567,7 +1759,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                         "backend" => "dynamodb"
                     )
                     .increment(1);
-                    Err(WorkflowError::Storage(format!("DynamoDB update_item failed: {}", e)))
+                    Err(WorkflowError::Storage(format!(
+                        "DynamoDB update_item failed: {}",
+                        e
+                    )))
                 }
             }
         }
@@ -1579,7 +1774,8 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         execution_id: &str,
         output: Value,
     ) -> Result<(), WorkflowError> {
-        self.update_execution_output_with_version(ctx, execution_id, output, None).await
+        self.update_execution_output_with_version(ctx, execution_id, output, None)
+            .await
     }
 
     async fn update_execution_output_with_version(
@@ -1604,7 +1800,9 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             .table_name(&table_name)
             .key("pk", AttributeValue::S(pk))
             .key("sk", AttributeValue::S("EXEC".to_string()))
-            .update_expression("SET output_json = :output, version = version + :one, updated_at = :now")
+            .update_expression(
+                "SET output_json = :output, version = version + :one, updated_at = :now",
+            )
             .expression_attribute_values(":output", AttributeValue::S(output_json))
             .expression_attribute_values(":one", AttributeValue::N("1".to_string()))
             .expression_attribute_values(":now", AttributeValue::N(now_secs.to_string()));
@@ -1612,7 +1810,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         if let Some(version) = expected_version {
             update = update
                 .condition_expression("version = :expected_version")
-                .expression_attribute_values(":expected_version", AttributeValue::N(version.to_string()));
+                .expression_attribute_values(
+                    ":expected_version",
+                    AttributeValue::N(version.to_string()),
+                );
         }
 
         match update.send().await {
@@ -1640,7 +1841,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     )))
                 } else {
                     error!(error = %e, execution_id = %execution_id, "Failed to update execution output");
-                    Err(WorkflowError::Storage(format!("DynamoDB update_item failed: {}", e)))
+                    Err(WorkflowError::Storage(format!(
+                        "DynamoDB update_item failed: {}",
+                        e
+                    )))
                 }
             }
         }
@@ -1659,14 +1863,23 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         let now_secs = Utc::now().timestamp();
 
         let mut expr_values = HashMap::new();
-        expr_values.insert(":node_id".to_string(), AttributeValue::S(new_node_id.to_string()));
+        expr_values.insert(
+            ":node_id".to_string(),
+            AttributeValue::S(new_node_id.to_string()),
+        );
         expr_values.insert(":one".to_string(), AttributeValue::N("1".to_string()));
         expr_values.insert(":now".to_string(), AttributeValue::N(now_secs.to_string()));
-        expr_values.insert(":expected_version".to_string(), AttributeValue::N(expected_version.to_string()));
+        expr_values.insert(
+            ":expected_version".to_string(),
+            AttributeValue::N(expected_version.to_string()),
+        );
 
         // Update node_heartbeat for GSI
         let node_heartbeat = format!("{}#{}", new_node_id, now_secs);
-        expr_values.insert(":node_heartbeat".to_string(), AttributeValue::S(node_heartbeat));
+        expr_values.insert(
+            ":node_heartbeat".to_string(),
+            AttributeValue::S(node_heartbeat),
+        );
 
         let mut update = self
             .client
@@ -1679,8 +1892,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         for (k, v) in expr_values {
             update = update.expression_attribute_values(k, v);
         }
-        match update.send().await
-        {
+        match update.send().await {
             Ok(_) => {
                 let duration = start_time.elapsed();
                 metrics::histogram!(
@@ -1711,7 +1923,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     )))
                 } else {
                     error!(error = %e, execution_id = %execution_id, "Failed to transfer ownership");
-                    Err(WorkflowError::Storage(format!("DynamoDB update_item failed: {}", e)))
+                    Err(WorkflowError::Storage(format!(
+                        "DynamoDB update_item failed: {}",
+                        e
+                    )))
                 }
             }
         }
@@ -1730,11 +1945,17 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
 
         let mut expr_values = HashMap::new();
         expr_values.insert(":now".to_string(), AttributeValue::N(now_secs.to_string()));
-        expr_values.insert(":node_id".to_string(), AttributeValue::S(node_id.to_string()));
+        expr_values.insert(
+            ":node_id".to_string(),
+            AttributeValue::S(node_id.to_string()),
+        );
 
         // Update node_heartbeat for GSI
         let node_heartbeat = format!("{}#{}", node_id, now_secs);
-        expr_values.insert(":node_heartbeat".to_string(), AttributeValue::S(node_heartbeat));
+        expr_values.insert(
+            ":node_heartbeat".to_string(),
+            AttributeValue::S(node_heartbeat),
+        );
 
         let mut update = self
             .client
@@ -1742,13 +1963,14 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             .table_name(&table_name)
             .key("pk", AttributeValue::S(pk))
             .key("sk", AttributeValue::S("EXEC".to_string()))
-            .update_expression("SET last_heartbeat = :now, updated_at = :now, node_heartbeat = :node_heartbeat")
+            .update_expression(
+                "SET last_heartbeat = :now, updated_at = :now, node_heartbeat = :node_heartbeat",
+            )
             .condition_expression("attribute_exists(node_id) AND node_id = :node_id");
         for (k, v) in expr_values {
             update = update.expression_attribute_values(k, v);
         }
-        match update.send().await
-        {
+        match update.send().await {
             Ok(_) => {
                 let duration = start_time.elapsed();
                 metrics::histogram!(
@@ -1760,14 +1982,21 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             }
             Err(e) => {
                 let error_str = e.to_string();
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_str.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_str.clone());
 
                 // Check for conditional check failures
-                if error_code == "ConditionalCheckFailedException" 
+                if error_code == "ConditionalCheckFailedException"
                     || error_str.contains("ConditionalCheckFailedException")
                     || error_str.contains("conditional")
-                    || error_str.contains("condition") {
+                    || error_str.contains("condition")
+                {
                     warn!(
                         execution_id = %execution_id,
                         node_id = %node_id,
@@ -1801,7 +2030,8 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         step_id: &str,
         input: Value,
     ) -> Result<String, WorkflowError> {
-        self.create_step_execution_with_attempt_internal(ctx, execution_id, step_id, input, 1).await
+        self.create_step_execution_with_attempt_internal(ctx, execution_id, step_id, input, 1)
+            .await
     }
 
     async fn get_step_execution(
@@ -1866,7 +2096,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                 }
                 Err(e) => {
                     error!(error = %e, step_exec_id = %step_exec_id, "Failed to get step execution");
-                    return Err(WorkflowError::Storage(format!("DynamoDB scan failed: {}", e)));
+                    return Err(WorkflowError::Storage(format!(
+                        "DynamoDB scan failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -1936,8 +2169,7 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         for (k, v) in expr_values {
             update = update.expression_attribute_values(k, v);
         }
-        match update.send().await
-        {
+        match update.send().await {
             Ok(_) => {
                 let duration = start_time.elapsed();
                 metrics::histogram!(
@@ -1955,7 +2187,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             }
             Err(e) => {
                 error!(error = %e, step_exec_id = %step_exec_id, "Failed to complete step execution");
-                Err(WorkflowError::Storage(format!("DynamoDB update_item failed: {}", e)))
+                Err(WorkflowError::Storage(format!(
+                    "DynamoDB update_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -1989,11 +2224,11 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                 Ok(result) => {
                     for item in result.items() {
                         match Self::item_to_step_execution(&item) {
-                                Ok(step_exec) => step_executions.push(step_exec),
-                                Err(e) => {
-                                    warn!(error = %e, "Failed to parse step execution item, skipping");
-                                }
+                            Ok(step_exec) => step_executions.push(step_exec),
+                            Err(e) => {
+                                warn!(error = %e, "Failed to parse step execution item, skipping");
                             }
+                        }
                     }
 
                     last_evaluated_key = result.last_evaluated_key().cloned();
@@ -2003,7 +2238,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                 }
                 Err(e) => {
                     error!(error = %e, execution_id = %execution_id, "Failed to query step executions");
-                    return Err(WorkflowError::Storage(format!("DynamoDB query failed: {}", e)));
+                    return Err(WorkflowError::Storage(format!(
+                        "DynamoDB query failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -2049,10 +2287,19 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S(sk));
         item.insert("signal_id".to_string(), AttributeValue::S(signal_id));
-        item.insert("execution_id".to_string(), AttributeValue::S(execution_id.to_string()));
-        item.insert("signal_name".to_string(), AttributeValue::S(signal_name.to_string()));
+        item.insert(
+            "execution_id".to_string(),
+            AttributeValue::S(execution_id.to_string()),
+        );
+        item.insert(
+            "signal_name".to_string(),
+            AttributeValue::S(signal_name.to_string()),
+        );
         item.insert("payload".to_string(), AttributeValue::S(payload_json));
-        item.insert("received_at".to_string(), AttributeValue::N(received_at.to_string()));
+        item.insert(
+            "received_at".to_string(),
+            AttributeValue::N(received_at.to_string()),
+        );
 
         match self
             .client
@@ -2084,7 +2331,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(WorkflowError::Storage(format!("DynamoDB put_item failed: {}", e)))
+                Err(WorkflowError::Storage(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -2106,7 +2356,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             .table_name(&table_name)
             .key_condition_expression("pk = :pk AND begins_with(sk, :sk_prefix)")
             .expression_attribute_values(":pk", AttributeValue::S(pk.clone()))
-            .expression_attribute_values(":sk_prefix", AttributeValue::S(format!("SIGNAL#{}#", signal_name)))
+            .expression_attribute_values(
+                ":sk_prefix",
+                AttributeValue::S(format!("SIGNAL#{}#", signal_name)),
+            )
             .limit(1)
             .scan_index_forward(true); // Ascending order (oldest first)
 
@@ -2174,7 +2427,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
             }
             Err(e) => {
                 error!(error = %e, execution_id = %execution_id, signal_name = %signal_name, "Failed to check signal");
-                Err(WorkflowError::Storage(format!("DynamoDB query failed: {}", e)))
+                Err(WorkflowError::Storage(format!(
+                    "DynamoDB query failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -2203,9 +2459,14 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     .query()
                     .table_name(&table_name)
                     .index_name("status_index")
-                    .key_condition_expression("tenant_namespace = :tn AND begins_with(status_created, :status_prefix)")
+                    .key_condition_expression(
+                        "tenant_namespace = :tn AND begins_with(status_created, :status_prefix)",
+                    )
                     .expression_attribute_values(":tn", AttributeValue::S(tenant_namespace.clone()))
-                    .expression_attribute_values(":status_prefix", AttributeValue::S(status_prefix.clone()));
+                    .expression_attribute_values(
+                        ":status_prefix",
+                        AttributeValue::S(status_prefix.clone()),
+                    );
 
                 if let Some(lek) = last_evaluated_key {
                     query = query.set_exclusive_start_key(Some(lek));
@@ -2244,7 +2505,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     }
                     Err(e) => {
                         error!(error = %e, "Failed to query executions by status");
-                        return Err(WorkflowError::Storage(format!("DynamoDB query failed: {}", e)));
+                        return Err(WorkflowError::Storage(format!(
+                            "DynamoDB query failed: {}",
+                            e
+                        )));
                     }
                 }
             }
@@ -2298,9 +2562,14 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     .query()
                     .table_name(&table_name)
                     .index_name("status_index")
-                    .key_condition_expression("tenant_namespace = :tn AND begins_with(status_created, :status_prefix)")
+                    .key_condition_expression(
+                        "tenant_namespace = :tn AND begins_with(status_created, :status_prefix)",
+                    )
                     .expression_attribute_values(":tn", AttributeValue::S(tenant_namespace.clone()))
-                    .expression_attribute_values(":status_prefix", AttributeValue::S(status_prefix.clone()));
+                    .expression_attribute_values(
+                        ":status_prefix",
+                        AttributeValue::S(status_prefix.clone()),
+                    );
 
                 if let Some(lek) = last_evaluated_key {
                     query = query.set_exclusive_start_key(Some(lek));
@@ -2310,7 +2579,8 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     Ok(result) => {
                         for item in result.items() {
                             // Check if stale (last_heartbeat or updated_at is older than threshold)
-                            let is_stale = if let Some(heartbeat_attr) = item.get("last_heartbeat") {
+                            let is_stale = if let Some(heartbeat_attr) = item.get("last_heartbeat")
+                            {
                                 if let Ok(heartbeat_str) = heartbeat_attr.as_n() {
                                     if let Ok(heartbeat_secs) = heartbeat_str.parse::<i64>() {
                                         heartbeat_secs < threshold_secs
@@ -2318,7 +2588,8 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                                         // No heartbeat, check updated_at
                                         if let Some(updated_attr) = item.get("updated_at") {
                                             if let Ok(updated_str) = updated_attr.as_n() {
-                                                if let Ok(updated_secs) = updated_str.parse::<i64>() {
+                                                if let Ok(updated_secs) = updated_str.parse::<i64>()
+                                                {
                                                     updated_secs < threshold_secs
                                                 } else {
                                                     false
@@ -2380,7 +2651,10 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
                     }
                     Err(e) => {
                         error!(error = %e, "Failed to query stale executions");
-                        return Err(WorkflowError::Storage(format!("DynamoDB query failed: {}", e)));
+                        return Err(WorkflowError::Storage(format!(
+                            "DynamoDB query failed: {}",
+                            e
+                        )));
                     }
                 }
             }
@@ -2410,4 +2684,3 @@ impl WorkflowStorageTrait for DynamoDBWorkflowStorage {
         Ok(executions)
     }
 }
-

@@ -24,12 +24,10 @@
 mod tests {
     use super::super::*;
     use async_trait::async_trait;
-    use plexspaces_core::{
-        Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType,
-    };
+    use plexspaces_core::{Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType};
     use plexspaces_proto::common::v1::Message;
     use std::sync::{Arc, Mutex};
-    
+
     /// Helper to create a test message
     fn create_test_message(payload: Vec<u8>) -> Message {
         Message {
@@ -85,7 +83,7 @@ mod tests {
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
         let ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
-            String::new(), // tenant_id (empty if auth disabled)
+            String::new(),         // tenant_id (empty if auth disabled)
             "test-ns".to_string(), // namespace
             service_locator,
             None,
@@ -245,20 +243,23 @@ mod tests {
 
         // Red -> Green
         let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Timer));
-        fsm.transition(&*ctx, TrafficLightEvent::Timer).await
-        .unwrap();
+        fsm.transition(&*ctx, TrafficLightEvent::Timer)
+            .await
+            .unwrap();
         assert_eq!(fsm.current_state(), &TrafficLightState::Green);
 
         // Green -> Yellow
         let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Timer));
-        fsm.transition(&*ctx, TrafficLightEvent::Timer).await
-        .unwrap();
+        fsm.transition(&*ctx, TrafficLightEvent::Timer)
+            .await
+            .unwrap();
         assert_eq!(fsm.current_state(), &TrafficLightState::Yellow);
 
         // Yellow -> Red
         let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Timer));
-        fsm.transition(&*ctx, TrafficLightEvent::Timer).await
-        .unwrap();
+        fsm.transition(&*ctx, TrafficLightEvent::Timer)
+            .await
+            .unwrap();
         assert_eq!(fsm.current_state(), &TrafficLightState::Red);
     }
 
@@ -280,9 +281,11 @@ mod tests {
         let mut fsm = GenStateMachineBehavior::new(TrafficLightState::Green, transition_fn);
 
         // Green -> Red (emergency)
-        let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Emergency));
-        fsm.transition(&*ctx, TrafficLightEvent::Emergency).await
-        .unwrap();
+        let (ctx, _) =
+            create_test_context_and_message(event_to_message(TrafficLightEvent::Emergency));
+        fsm.transition(&*ctx, TrafficLightEvent::Emergency)
+            .await
+            .unwrap();
 
         assert_eq!(fsm.current_state(), &TrafficLightState::Red);
     }
@@ -359,8 +362,9 @@ mod tests {
 
         // Should go to Yellow (overridden by handler) instead of Green
         let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Timer));
-        fsm.transition(&*ctx, TrafficLightEvent::Timer).await
-        .unwrap();
+        fsm.transition(&*ctx, TrafficLightEvent::Timer)
+            .await
+            .unwrap();
 
         assert_eq!(fsm.current_state(), &TrafficLightState::Yellow);
     }
@@ -384,16 +388,19 @@ mod tests {
         let mut fsm = GenStateMachineBehavior::new(TrafficLightState::Red, transition_fn);
 
         // Emergency should not transition (guard condition)
-        let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Emergency));
-        fsm.transition(&*ctx, TrafficLightEvent::Emergency).await
-        .unwrap();
+        let (ctx, _) =
+            create_test_context_and_message(event_to_message(TrafficLightEvent::Emergency));
+        fsm.transition(&*ctx, TrafficLightEvent::Emergency)
+            .await
+            .unwrap();
 
         assert_eq!(fsm.current_state(), &TrafficLightState::Red); // Still Red
 
         // Timer should transition
         let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Timer));
-        fsm.transition(&*ctx, TrafficLightEvent::Timer).await
-        .unwrap();
+        fsm.transition(&*ctx, TrafficLightEvent::Timer)
+            .await
+            .unwrap();
 
         assert_eq!(fsm.current_state(), &TrafficLightState::Green);
     }
@@ -424,9 +431,11 @@ mod tests {
         );
 
         // Self-transition should still call handler
-        let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Emergency));
-        fsm.transition(&*ctx, TrafficLightEvent::Emergency).await
-        .unwrap();
+        let (ctx, _) =
+            create_test_context_and_message(event_to_message(TrafficLightEvent::Emergency));
+        fsm.transition(&*ctx, TrafficLightEvent::Emergency)
+            .await
+            .unwrap();
 
         assert_eq!(fsm.current_state(), &TrafficLightState::Red);
 
@@ -473,32 +482,27 @@ mod tests {
 
         // Locked -> Unlocked
         let (ctx, _) = create_test_context_and_message(create_test_message(b"unlock".to_vec()));
-        fsm.transition(&*ctx, DoorEvent::Unlock).await
-        .unwrap();
+        fsm.transition(&*ctx, DoorEvent::Unlock).await.unwrap();
         assert_eq!(fsm.current_state(), &DoorState::Unlocked);
 
         // Unlocked -> Opened
         let (ctx, _) = create_test_context_and_message(create_test_message(b"open".to_vec()));
-        fsm.transition(&*ctx, DoorEvent::Open).await
-        .unwrap();
+        fsm.transition(&*ctx, DoorEvent::Open).await.unwrap();
         assert_eq!(fsm.current_state(), &DoorState::Opened);
 
         // Opened -> Unlocked
         let (ctx, _) = create_test_context_and_message(create_test_message(b"close".to_vec()));
-        fsm.transition(&*ctx, DoorEvent::Close).await
-        .unwrap();
+        fsm.transition(&*ctx, DoorEvent::Close).await.unwrap();
         assert_eq!(fsm.current_state(), &DoorState::Unlocked);
 
         // Unlocked -> Locked
         let (ctx, _) = create_test_context_and_message(create_test_message(b"lock".to_vec()));
-        fsm.transition(&*ctx, DoorEvent::Lock).await
-        .unwrap();
+        fsm.transition(&*ctx, DoorEvent::Lock).await.unwrap();
         assert_eq!(fsm.current_state(), &DoorState::Locked);
 
         // Locked -> Alarm (invalid code)
         let (ctx, _) = create_test_context_and_message(create_test_message(b"invalid".to_vec()));
-        fsm.transition(&*ctx, DoorEvent::InvalidCode).await
-        .unwrap();
+        fsm.transition(&*ctx, DoorEvent::InvalidCode).await.unwrap();
         assert_eq!(fsm.current_state(), &DoorState::Alarm);
     }
 
@@ -520,8 +524,9 @@ mod tests {
 
         // Transition
         let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Timer));
-        fsm.transition(&*ctx, TrafficLightEvent::Timer).await
-        .unwrap();
+        fsm.transition(&*ctx, TrafficLightEvent::Timer)
+            .await
+            .unwrap();
 
         // State should persist
         assert_eq!(fsm.current_state(), &TrafficLightState::Green);
@@ -586,13 +591,15 @@ mod tests {
 
         // Red -> Green (entry action)
         let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Timer));
-        fsm.transition(&*ctx, TrafficLightEvent::Timer).await
-        .unwrap();
+        fsm.transition(&*ctx, TrafficLightEvent::Timer)
+            .await
+            .unwrap();
 
         // Green -> Yellow (entry action)
         let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Timer));
-        fsm.transition(&*ctx, TrafficLightEvent::Timer).await
-        .unwrap();
+        fsm.transition(&*ctx, TrafficLightEvent::Timer)
+            .await
+            .unwrap();
 
         let events = log.lock().unwrap();
         // Note: Current limitation - all handlers are called for each transition
@@ -677,8 +684,9 @@ mod tests {
         );
 
         let (ctx, _) = create_test_context_and_message(event_to_message(TrafficLightEvent::Timer));
-        fsm.transition(&*ctx, TrafficLightEvent::Timer).await
-        .unwrap();
+        fsm.transition(&*ctx, TrafficLightEvent::Timer)
+            .await
+            .unwrap();
 
         let events = log.lock().unwrap();
         assert_eq!(events.len(), 1);

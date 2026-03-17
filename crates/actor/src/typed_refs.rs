@@ -53,10 +53,10 @@
 //! logger.emit("user_login", &event).await?;
 //! ```
 
-use std::time::Duration;
-use serde::{Serialize, de::DeserializeOwned};
-use plexspaces_core::Message;
 use crate::ActorRef;
+use plexspaces_core::Message;
+use serde::{de::DeserializeOwned, Serialize};
+use std::time::Duration;
 
 // ============================================================================
 // Default timeouts
@@ -220,7 +220,8 @@ impl GenServerRef {
         I: Serialize,
         O: DeserializeOwned,
     {
-        self.call_with_timeout(operation, request, DEFAULT_CALL_TIMEOUT).await
+        self.call_with_timeout(operation, request, DEFAULT_CALL_TIMEOUT)
+            .await
     }
 
     /// Call the GenServer with custom timeout.
@@ -243,11 +244,15 @@ impl GenServerRef {
             ..Default::default()
         };
 
-        let response = self.inner.ask(msg, timeout).await
+        let response = self
+            .inner
+            .ask(msg, timeout)
+            .await
             .map_err(|e| GenServerError::Call(e.to_string()))?;
 
-        serde_json::from_slice(&response.payload)
-            .map_err(|e| GenServerError::Serialization(format!("Failed to deserialize response: {}", e)))
+        serde_json::from_slice(&response.payload).map_err(|e| {
+            GenServerError::Serialization(format!("Failed to deserialize response: {}", e))
+        })
     }
 
     /// Cast to the GenServer (fire-and-forget).
@@ -258,7 +263,11 @@ impl GenServerRef {
     /// ```ignore
     /// server.cast("update_config", &new_config).await?;
     /// ```
-    pub async fn cast<T: Serialize>(&self, operation: &str, data: &T) -> Result<(), GenServerError> {
+    pub async fn cast<T: Serialize>(
+        &self,
+        operation: &str,
+        data: &T,
+    ) -> Result<(), GenServerError> {
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             receiver_id: self.inner.id().to_string(),
@@ -268,7 +277,9 @@ impl GenServerRef {
             ..Default::default()
         };
 
-        self.inner.tell(msg).await
+        self.inner
+            .tell(msg)
+            .await
             .map_err(|e| GenServerError::Cast(e.to_string()))
     }
 }
@@ -340,7 +351,9 @@ impl FsmRef {
             ..Default::default()
         };
 
-        self.inner.tell(msg).await
+        self.inner
+            .tell(msg)
+            .await
             .map_err(|e| FsmError::Transition(e.to_string()))
     }
 
@@ -358,7 +371,8 @@ impl FsmRef {
         T: Serialize,
         S: DeserializeOwned,
     {
-        self.transition_and_wait_with_timeout(event, data, DEFAULT_FSM_TIMEOUT).await
+        self.transition_and_wait_with_timeout(event, data, DEFAULT_FSM_TIMEOUT)
+            .await
     }
 
     /// Send a transition event and wait with custom timeout.
@@ -381,7 +395,10 @@ impl FsmRef {
             ..Default::default()
         };
 
-        let response = self.inner.ask(msg, timeout).await
+        let response = self
+            .inner
+            .ask(msg, timeout)
+            .await
             .map_err(|e| FsmError::Transition(e.to_string()))?;
 
         serde_json::from_slice(&response.payload)
@@ -411,7 +428,10 @@ impl FsmRef {
             ..Default::default()
         };
 
-        let response = self.inner.ask(msg, timeout).await
+        let response = self
+            .inner
+            .ask(msg, timeout)
+            .await
             .map_err(|e| FsmError::Query(e.to_string()))?;
 
         serde_json::from_slice(&response.payload)
@@ -442,7 +462,10 @@ impl FsmRef {
             ..Default::default()
         };
 
-        let response = self.inner.ask(msg, timeout).await
+        let response = self
+            .inner
+            .ask(msg, timeout)
+            .await
             .map_err(|e| FsmError::Query(e.to_string()))?;
 
         serde_json::from_slice(&response.payload)
@@ -514,7 +537,9 @@ impl EventRef {
             ..Default::default()
         };
 
-        self.inner.tell(msg).await
+        self.inner
+            .tell(msg)
+            .await
             .map_err(|e| EventError::Emit(e.to_string()))
     }
 
@@ -530,7 +555,9 @@ impl EventRef {
             ..Default::default()
         };
 
-        self.inner.tell(msg).await
+        self.inner
+            .tell(msg)
+            .await
             .map_err(|e| EventError::Emit(e.to_string()))
     }
 }
@@ -629,7 +656,11 @@ impl WorkflowRef {
     ///     Duration::from_secs(3600), // 1 hour timeout
     /// ).await?;
     /// ```
-    pub async fn run_with_timeout<I, O>(&self, input: &I, timeout: Duration) -> Result<O, WorkflowRefError>
+    pub async fn run_with_timeout<I, O>(
+        &self,
+        input: &I,
+        timeout: Duration,
+    ) -> Result<O, WorkflowRefError>
     where
         I: Serialize,
         O: DeserializeOwned,
@@ -643,11 +674,15 @@ impl WorkflowRef {
             ..Default::default()
         };
 
-        let response = self.inner.ask(msg, timeout).await
+        let response = self
+            .inner
+            .ask(msg, timeout)
+            .await
             .map_err(|e| WorkflowRefError::Execution(e.to_string()))?;
 
-        serde_json::from_slice(&response.payload)
-            .map_err(|e| WorkflowRefError::Serialization(format!("Failed to deserialize response: {}", e)))
+        serde_json::from_slice(&response.payload).map_err(|e| {
+            WorkflowRefError::Serialization(format!("Failed to deserialize response: {}", e))
+        })
     }
 
     /// Send a signal to the workflow (fire-and-forget).
@@ -674,7 +709,9 @@ impl WorkflowRef {
             ..Default::default()
         };
 
-        self.inner.tell(msg).await
+        self.inner
+            .tell(msg)
+            .await
             .map_err(|e| WorkflowRefError::Execution(e.to_string()))
     }
 
@@ -691,7 +728,8 @@ impl WorkflowRef {
     /// let status: WorkflowStatus = workflow.query("status").await?;
     /// ```
     pub async fn query<O: DeserializeOwned>(&self, name: &str) -> Result<O, WorkflowRefError> {
-        self.query_with_params_and_timeout(name, &(), DEFAULT_OPERATION_TIMEOUT).await
+        self.query_with_params_and_timeout(name, &(), DEFAULT_OPERATION_TIMEOUT)
+            .await
     }
 
     /// Query the workflow state with a custom timeout.
@@ -706,12 +744,17 @@ impl WorkflowRef {
     /// Query the workflow state with parameters.
     ///
     /// Uses `DEFAULT_OPERATION_TIMEOUT` (30 seconds).
-    pub async fn query_with_params<I, O>(&self, name: &str, params: &I) -> Result<O, WorkflowRefError>
+    pub async fn query_with_params<I, O>(
+        &self,
+        name: &str,
+        params: &I,
+    ) -> Result<O, WorkflowRefError>
     where
         I: Serialize,
         O: DeserializeOwned,
     {
-        self.query_with_params_and_timeout(name, params, DEFAULT_OPERATION_TIMEOUT).await
+        self.query_with_params_and_timeout(name, params, DEFAULT_OPERATION_TIMEOUT)
+            .await
     }
 
     /// Query the workflow state with parameters and custom timeout.
@@ -734,19 +777,28 @@ impl WorkflowRef {
             ..Default::default()
         };
 
-        let response = self.inner.ask(msg, timeout).await
+        let response = self
+            .inner
+            .ask(msg, timeout)
+            .await
             .map_err(|e| WorkflowRefError::Execution(e.to_string()))?;
 
-        serde_json::from_slice(&response.payload)
-            .map_err(|e| WorkflowRefError::Serialization(format!("Failed to deserialize response: {}", e)))
+        serde_json::from_slice(&response.payload).map_err(|e| {
+            WorkflowRefError::Serialization(format!("Failed to deserialize response: {}", e))
+        })
     }
 
     /// Signal and wait for acknowledgment.
     ///
     /// Uses `DEFAULT_OPERATION_TIMEOUT` (30 seconds).
     /// Unlike `signal()`, this waits for the signal to be processed.
-    pub async fn signal_and_wait<T: Serialize>(&self, name: &str, data: &T) -> Result<(), WorkflowRefError> {
-        self.signal_and_wait_with_timeout(name, data, DEFAULT_OPERATION_TIMEOUT).await
+    pub async fn signal_and_wait<T: Serialize>(
+        &self,
+        name: &str,
+        data: &T,
+    ) -> Result<(), WorkflowRefError> {
+        self.signal_and_wait_with_timeout(name, data, DEFAULT_OPERATION_TIMEOUT)
+            .await
     }
 
     /// Signal and wait for acknowledgment with custom timeout.
@@ -766,7 +818,9 @@ impl WorkflowRef {
         };
 
         // Use ask instead of tell to wait for processing
-        self.inner.ask(msg, timeout).await
+        self.inner
+            .ask(msg, timeout)
+            .await
             .map_err(|e| WorkflowRefError::Execution(e.to_string()))?;
 
         Ok(())

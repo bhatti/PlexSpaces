@@ -11,23 +11,19 @@
 //! - Remote actor handling
 //! - Error cases
 
-use plexspaces_services::actor_service::ActorServiceImpl;
-use plexspaces_actor::{ActorBuilder, actor_factory_impl::ActorFactoryImpl};
+use async_trait::async_trait;
+use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{
-    ActorRegistry, ServiceLocator, Actor as ActorTrait,
-    ActorContext, BehaviorError, BehaviorType, FacetManager, VirtualActorManager, RequestContext,
+    Actor as ActorTrait, ActorContext, ActorRegistry, BehaviorError, BehaviorType, FacetManager,
+    Message, RequestContext, ServiceLocator, VirtualActorManager,
 };
-use plexspaces_mailbox::Message;
-use plexspaces_keyvalue::SqliteKVStore;
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
-use plexspaces_proto::actor::v1::{
-    actor_service_server::ActorService, GetOrActivateActorRequest,
-};
+use plexspaces_proto::actor::v1::{actor_service_server::ActorService, GetOrActivateActorRequest};
 use plexspaces_proto::object_registry::v1::ObjectRegistration;
+use plexspaces_services::actor_service::ActorServiceImpl;
 use std::sync::Arc;
 use tonic::Request;
-use async_trait::async_trait;
 
 // Simple counter actor for testing
 struct CounterActor {
@@ -70,10 +66,18 @@ impl GenServer for CounterActor {
 // Helper to create test ActorService with registry
 async fn create_test_actor_service(
     node_id: &str,
-) -> (Arc<ActorServiceImpl>, Arc<ActorRegistry>, Arc<ServiceLocator>) {
+) -> (
+    Arc<ActorServiceImpl>,
+    Arc<ActorRegistry>,
+    Arc<dyn ServiceLocator>,
+) {
     use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
 
-    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
 
     // Simple adapter
@@ -89,14 +93,17 @@ async fn create_test_actor_service(
             object_id: &str,
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            let obj_type = object_type
-                .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+            let obj_type = object_type.unwrap_or(
+                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified,
+            );
             self.inner
                 .lookup(ctx, obj_type, object_id)
                 .await
                 .map_err(|e| {
-                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                        as Box<dyn std::error::Error + Send + Sync>
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
                 })
         }
 
@@ -110,8 +117,10 @@ async fn create_test_actor_service(
                 .lookup_full(ctx, object_type, object_id)
                 .await
                 .map_err(|e| {
-                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                        as Box<dyn std::error::Error + Send + Sync>
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
                 })
         }
 
@@ -120,13 +129,12 @@ async fn create_test_actor_service(
             ctx: &RequestContext,
             registration: ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            self.inner
-                .register(ctx, registration)
-                .await
-                .map_err(|e| {
-                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                        as Box<dyn std::error::Error + Send + Sync>
-                })
+            self.inner.register(ctx, registration).await.map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
         }
 
         async fn discover(
@@ -153,8 +161,10 @@ async fn create_test_actor_service(
                 .unregister(ctx, object_type, object_id)
                 .await
                 .map_err(|e| {
-                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                        as Box<dyn std::error::Error + Send + Sync>
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
                 })
         }
 
@@ -168,8 +178,10 @@ async fn create_test_actor_service(
                 .heartbeat(ctx, object_type, object_id)
                 .await
                 .map_err(|e| {
-                    Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                        as Box<dyn std::error::Error + Send + Sync>
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
                 })
         }
     }
@@ -178,24 +190,45 @@ async fn create_test_actor_service(
         inner: object_registry_impl,
     });
 
-    let actor_registry = Arc::new(ActorRegistry::new(object_registry.clone(), node_id.to_string()));
+    let actor_registry = Arc::new(ActorRegistry::new(
+        object_registry.clone(),
+        node_id.to_string(),
+    ));
     use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some(node_id.to_string()), None, None).await;
-    service_locator.register_service(actor_registry.clone()).await;
+    let service_locator =
+        create_default_service_locator(Some(node_id.to_string()), None, None).await;
+    service_locator
+        .register_service(actor_registry.clone())
+        .await;
 
     // Create ActorFactory and required services
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     use plexspaces_core::FacetManagerServiceWrapper;
-    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(FacetManager::new())));
-    service_locator.register_service(virtual_actor_manager).await;
+    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
+        FacetManager::new(),
+    )));
+    service_locator
+        .register_service(virtual_actor_manager)
+        .await;
     service_locator.register_service(facet_manager).await;
 
-    let actor_factory = ActorFactoryImpl::new_arc(service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>).await;
-    service_locator.register_service_by_name(plexspaces_core::service_names::ACTOR_FACTORY_IMPL, actor_factory.clone()).await;
+    let actor_factory = ActorFactoryImpl::new_arc(
+        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+    )
+    .await;
+    service_locator
+        .register_service_by_name(
+            plexspaces_core::service_names::ACTOR_FACTORY_IMPL,
+            actor_factory.clone(),
+        )
+        .await;
     let factory_trait: Arc<dyn plexspaces_actor::ActorFactory> = actor_factory.clone();
     service_locator.register_actor_factory(factory_trait).await;
 
-    let actor_service = Arc::new(ActorServiceImpl::new(service_locator, node_id.to_string()));
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        node_id.to_string(),
+    ));
 
     (actor_service, actor_registry, service_locator)
 }
@@ -236,8 +269,14 @@ async fn test_get_or_activate_existing_active_actor() {
 
     let response_inner = response.into_inner();
     assert_eq!(response_inner.actor_ref, actor_id);
-    assert!(!response_inner.was_activated, "Actor should already be active");
-    assert!(response_inner.actor.is_some(), "Actor details should be present");
+    assert!(
+        !response_inner.was_activated,
+        "Actor should already be active"
+    );
+    assert!(
+        response_inner.actor.is_some(),
+        "Actor details should be present"
+    );
 }
 
 /// TEST 2: Activate existing inactive actor (virtual actor)
@@ -259,9 +298,7 @@ async fn test_get_or_activate_existing_inactive_actor() {
 
     let grpc_request = Request::new(request);
     // This should either activate the virtual actor or create a new one
-    let response = actor_service
-        .get_or_activate_actor(grpc_request)
-        .await;
+    let response = actor_service.get_or_activate_actor(grpc_request).await;
 
     // For now, we expect it to work (create new actor if virtual actor not found)
     assert!(response.is_ok(), "get_or_activate_actor should succeed");
@@ -294,7 +331,10 @@ async fn test_get_or_activate_nonexistent_actor() {
         response_inner.was_activated,
         "New actor should be activated/created"
     );
-    assert!(response_inner.actor.is_some(), "Actor details should be present");
+    assert!(
+        response_inner.actor.is_some(),
+        "Actor details should be present"
+    );
 }
 
 /// TEST 4: Create actor with initial state
@@ -409,6 +449,8 @@ async fn test_get_or_activate_force_activation() {
     let response_inner = response.into_inner();
     assert_eq!(response_inner.actor_ref, actor_id);
     // Force activation may or may not set was_activated depending on implementation
-    assert!(response_inner.actor.is_some(), "Actor details should be present");
+    assert!(
+        response_inner.actor.is_some(),
+        "Actor details should be present"
+    );
 }
-

@@ -28,15 +28,13 @@ use plexspaces_proto::grpc::v1::{
     InterceptorDecision, InterceptorRequest, InterceptorResponse, InterceptorResult,
     RateLimitMiddlewareConfig,
 };
-use std::{
-    num::NonZeroU32,
-    sync::Arc,
-};
+use std::{num::NonZeroU32, sync::Arc};
 
 /// Rate limiting interceptor using token bucket algorithm
 pub struct RateLimitInterceptor {
     /// Global rate limiter (if per_client = false)
-    global_limiter: Option<Arc<RateLimiter<NotKeyed, InMemoryState, governor::clock::DefaultClock>>>,
+    global_limiter:
+        Option<Arc<RateLimiter<NotKeyed, InMemoryState, governor::clock::DefaultClock>>>,
 
     /// Per-client rate limiters (if per_client = true)
     /// Key: client IP address

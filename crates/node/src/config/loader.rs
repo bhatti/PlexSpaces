@@ -35,8 +35,8 @@ use regex::Regex;
 use std::env;
 use thiserror::Error;
 
-use super::yaml::ReleaseYaml;
 use super::convert::convert_yaml_to_proto;
+use super::yaml::ReleaseYaml;
 
 /// Config loader errors
 #[derive(Debug, Error)]
@@ -96,12 +96,13 @@ impl ConfigLoader {
     /// - `ConfigLoaderError::SecurityError` if security validation fails
     pub async fn load_release_spec(&self, path: &str) -> Result<ReleaseSpec, ConfigLoaderError> {
         // Read file
-        let content = tokio::fs::read_to_string(path)
-            .await
-            .map_err(|e| ConfigLoaderError::IoError {
-                path: path.to_string(),
-                source: e,
-            })?;
+        let content =
+            tokio::fs::read_to_string(path)
+                .await
+                .map_err(|e| ConfigLoaderError::IoError {
+                    path: path.to_string(),
+                    source: e,
+                })?;
 
         // Validate security in original YAML content (before substitution)
         // This ensures we catch hardcoded secrets in the config file
@@ -113,8 +114,8 @@ impl ConfigLoader {
         let substituted = self.substitute_env_vars(&content)?;
 
         // Parse YAML into intermediate representation
-        let yaml_release: ReleaseYaml = serde_yaml::from_str(&substituted)
-            .map_err(|e| ConfigLoaderError::YamlError {
+        let yaml_release: ReleaseYaml =
+            serde_yaml::from_str(&substituted).map_err(|e| ConfigLoaderError::YamlError {
                 path: path.to_string(),
                 error: e,
             })?;
@@ -134,7 +135,7 @@ impl ConfigLoader {
     fn substitute_env_vars(&self, content: &str) -> Result<String, ConfigLoaderError> {
         // Regex to match ${VAR_NAME} or ${VAR_NAME:-default}
         let re = Regex::new(r"\$\{([^}:]+)(?::-([^}]+))?\}").unwrap();
-        
+
         let mut result = content.to_string();
         let mut replacements = Vec::new();
 
@@ -173,25 +174,29 @@ impl ConfigLoader {
         // Parse YAML to check for hardcoded secrets
         // We'll do a simple string check for common secret patterns
         let re = Regex::new(r#"(?i)(secret|password|key|token)\s*:\s*["']([^"']+)["']"#).unwrap();
-        
+
         for cap in re.captures_iter(content) {
             let field_name = cap.get(1).unwrap().as_str().to_lowercase();
             let value = cap.get(2).unwrap().as_str();
-            
+
             // Skip if it's an env var reference
             if value.starts_with("${") && value.ends_with("}") {
                 continue;
             }
-            
+
             // Check if it looks like a hardcoded secret (not empty, not a path, not a URL)
-            if !value.is_empty() 
-                && !value.starts_with("/") 
-                && !value.starts_with("http://") 
+            if !value.is_empty()
+                && !value.starts_with("/")
+                && !value.starts_with("http://")
                 && !value.starts_with("https://")
-                && value.len() > 5  // Likely a secret if longer than 5 chars
+                && value.len() > 5
+            // Likely a secret if longer than 5 chars
             {
                 // Check if it's in the security section
-                if content.contains("security:") || content.contains("jwt_config:") || content.contains("authn_config:") {
+                if content.contains("security:")
+                    || content.contains("jwt_config:")
+                    || content.contains("authn_config:")
+                {
                     return Err(ConfigLoaderError::SecurityError(
                         format!("Hardcoded {} found in security configuration. Use environment variable reference (e.g., ${{{}}}) instead.", 
                             field_name, field_name.to_uppercase())
@@ -199,7 +204,7 @@ impl ConfigLoader {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -227,14 +232,17 @@ impl ConfigLoader {
                     // Validate mTLS cert paths (should be env vars or file paths, not hardcoded secrets)
                     // For now, we just check that they're not empty if mTLS is enabled
                     if mtls.enable_mtls && !mtls.auto_generate {
-                        if mtls.ca_certificate_path.is_empty() || mtls.server_certificate_path.is_empty() || mtls.server_key_path.is_empty() {
+                        if mtls.ca_certificate_path.is_empty()
+                            || mtls.server_certificate_path.is_empty()
+                            || mtls.server_key_path.is_empty()
+                        {
                             return Err(ConfigLoaderError::SecurityError(
-                                "mTLS is enabled but certificate paths are not configured".to_string(),
+                                "mTLS is enabled but certificate paths are not configured"
+                                    .to_string(),
                             ));
                         }
                     }
                 }
-
             }
         }
 
@@ -280,4 +288,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-

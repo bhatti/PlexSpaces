@@ -124,7 +124,7 @@ async fn test_host_functions_with_channel_service() {
     use plexspaces_wasm_runtime::HostFunctions;
     let channel_service = Arc::new(ErrorProneChannelService::new());
     let host_functions = HostFunctions::with_channel_service(channel_service);
-    
+
     // Test send_to_queue with channel service
     let result = host_functions
         .send_to_queue("test-queue", "test", b"payload".to_vec())
@@ -137,7 +137,7 @@ async fn test_host_functions_with_channel_service() {
 async fn test_host_functions_send_to_queue_no_service() {
     use plexspaces_wasm_runtime::HostFunctions;
     let host_functions = HostFunctions::new();
-    
+
     let result = host_functions
         .send_to_queue("test-queue", "test", b"payload".to_vec())
         .await;
@@ -150,7 +150,7 @@ async fn test_host_functions_send_to_queue_no_service() {
 async fn test_host_functions_publish_to_topic_no_service() {
     use plexspaces_wasm_runtime::HostFunctions;
     let host_functions = HostFunctions::new();
-    
+
     let result = host_functions
         .publish_to_topic("test-topic", "test", b"payload".to_vec())
         .await;
@@ -163,7 +163,7 @@ async fn test_host_functions_publish_to_topic_no_service() {
 async fn test_host_functions_receive_from_queue_no_service() {
     use plexspaces_wasm_runtime::HostFunctions;
     let host_functions = HostFunctions::new();
-    
+
     let result = host_functions.receive_from_queue("test-queue", 1000).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("not configured"));
@@ -175,7 +175,7 @@ async fn test_host_functions_receive_from_queue_with_timeout() {
     use plexspaces_wasm_runtime::HostFunctions;
     let channel_service = Arc::new(ErrorProneChannelService::new());
     let host_functions = HostFunctions::with_channel_service(channel_service);
-    
+
     // Test with timeout (should return None if no message)
     let result = host_functions.receive_from_queue("test-queue", 100).await;
     assert!(result.is_ok());
@@ -187,7 +187,7 @@ async fn test_host_functions_receive_from_queue_with_timeout() {
 async fn test_host_functions_receive_from_queue_with_message() {
     use plexspaces_wasm_runtime::HostFunctions;
     let channel_service = Arc::new(ErrorProneChannelService::new());
-    
+
     // Add a message to the queue
     {
         let mut messages = channel_service.queue_messages.write().await;
@@ -198,9 +198,9 @@ async fn test_host_functions_receive_from_queue_with_message() {
             ..Default::default()
         });
     }
-    
+
     let host_functions = HostFunctions::with_channel_service(channel_service);
-    
+
     // Test receiving message
     let result = host_functions.receive_from_queue("test-queue", 0).await;
     assert!(result.is_ok());
@@ -215,7 +215,7 @@ async fn test_host_functions_receive_from_queue_error() {
     use plexspaces_wasm_runtime::HostFunctions;
     let channel_service = Arc::new(ErrorProneChannelService::new().with_receive_error());
     let host_functions = HostFunctions::with_channel_service(channel_service);
-    
+
     let result = host_functions.receive_from_queue("test-queue", 0).await;
     assert!(result.is_err());
 }
@@ -259,18 +259,18 @@ async fn test_handle_request_error() {
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
         10_000_000_000, // max_fuel
-        None, // channel_service
-        None, // message_sender
-        None, // tuplespace_provider
-        None, // keyvalue_store
-        None, // process_group_registry
-        None, // lock_manager
-        None, // object_registry
-        None, // journal_storage
-        None, // blob_service
-        None, // elastic_pool_service
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
+        None,           // channel_service
+        None,           // message_sender
+        None,           // tuplespace_provider
+        None,           // keyvalue_store
+        None,           // process_group_registry
+        None,           // lock_manager
+        None,           // object_registry
+        None,           // journal_storage
+        None,           // blob_service
+        None,           // elastic_pool_service
+        false,          // durability_enabled
+        None,           // global_reinstantiation_semaphore
     )
     .await
     .expect("Failed to create instance");
@@ -279,7 +279,7 @@ async fn test_handle_request_error() {
     let result = instance
         .handle_message("sender", "call", b"test".to_vec())
         .await;
-    
+
     // Should succeed (error code is handled internally)
     assert!(result.is_ok());
 }
@@ -323,18 +323,18 @@ async fn test_handle_event_error() {
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
         10_000_000_000, // max_fuel
-        None, // channel_service
-        None, // message_sender
-        None, // tuplespace_provider
-        None, // keyvalue_store
-        None, // process_group_registry
-        None, // lock_manager
-        None, // object_registry
-        None, // journal_storage
-        None, // blob_service
-        None, // elastic_pool_service
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
+        None,           // channel_service
+        None,           // message_sender
+        None,           // tuplespace_provider
+        None,           // keyvalue_store
+        None,           // process_group_registry
+        None,           // lock_manager
+        None,           // object_registry
+        None,           // journal_storage
+        None,           // blob_service
+        None,           // elastic_pool_service
+        false,          // durability_enabled
+        None,           // global_reinstantiation_semaphore
     )
     .await
     .expect("Failed to create instance");
@@ -343,7 +343,7 @@ async fn test_handle_event_error() {
     let result = instance
         .handle_message("sender", "cast", b"test".to_vec())
         .await;
-    
+
     // Should succeed (error code is handled internally, same as handle_request)
     assert!(result.is_ok());
 }
@@ -352,7 +352,7 @@ async fn test_handle_event_error() {
 #[tokio::test]
 async fn test_channel_host_function_error_handling() {
     let channel_service = Arc::new(ErrorProneChannelService::new().with_send_error());
-    
+
     let wat = r#"
         (module
             (import "plexspaces" "send_to_queue" 
@@ -411,15 +411,15 @@ async fn test_channel_host_function_error_handling() {
         limits,
         10_000_000_000, // max_fuel
         Some(channel_service),
-        None, // message_sender
-        None, // tuplespace_provider
-        None, // keyvalue_store
-        None, // process_group_registry
-        None, // lock_manager
-        None, // object_registry
-        None, // journal_storage
-        None, // blob_service
-        None, // elastic_pool_service
+        None,  // message_sender
+        None,  // tuplespace_provider
+        None,  // keyvalue_store
+        None,  // process_group_registry
+        None,  // lock_manager
+        None,  // object_registry
+        None,  // journal_storage
+        None,  // blob_service
+        None,  // elastic_pool_service
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
     )
@@ -430,7 +430,7 @@ async fn test_channel_host_function_error_handling() {
     let result = instance
         .handle_message("sender", "test", b"trigger".to_vec())
         .await;
-    
+
     // Should succeed (error is logged but doesn't propagate)
     assert!(result.is_ok());
 }
@@ -441,7 +441,7 @@ async fn test_host_functions_with_services() {
     use plexspaces_wasm_runtime::HostFunctions;
     let channel_service = Arc::new(ErrorProneChannelService::new());
     let host_functions = HostFunctions::with_services(None, Some(channel_service));
-    
+
     // Test that channel service works
     let result = host_functions
         .send_to_queue("test-queue", "test", b"payload".to_vec())
@@ -454,7 +454,7 @@ async fn test_host_functions_with_services() {
 async fn test_message_type_extraction() {
     use plexspaces_wasm_runtime::HostFunctions;
     let channel_service = Arc::new(ErrorProneChannelService::new());
-    
+
     // Add a message with specific type
     {
         let mut messages = channel_service.queue_messages.write().await;
@@ -466,12 +466,11 @@ async fn test_message_type_extraction() {
         };
         messages.push(msg);
     }
-    
+
     let host_functions = HostFunctions::with_channel_service(channel_service);
-    
+
     let result = host_functions.receive_from_queue("test-queue", 0).await;
     assert!(result.is_ok());
     let (msg_type, _) = result.unwrap().unwrap();
     assert_eq!(msg_type, "custom-type");
 }
-

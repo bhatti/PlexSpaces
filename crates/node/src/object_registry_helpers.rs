@@ -22,9 +22,7 @@
 //! to simplify registration and discovery of different object types.
 
 use plexspaces_core::RequestContext;
-use plexspaces_proto::object_registry::v1::{
-    ObjectRegistration, ObjectType, HealthStatus,
-};
+use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 use prost_types::Timestamp;
 use std::time::SystemTime;
 
@@ -53,7 +51,7 @@ pub async fn register_node(
         seconds: now.as_secs() as i64,
         nanos: now.subsec_nanos() as i32,
     };
-    
+
     let registration = ObjectRegistration {
         object_type: ObjectType::ObjectTypeNode as i32,
         object_id: node_id.to_string(), // Use node_id directly, no "_node@" prefix needed
@@ -66,12 +64,21 @@ pub async fn register_node(
         health_status: HealthStatus::HealthStatusHealthy as i32,
         created_at: Some(timestamp.clone()),
         updated_at: Some(timestamp),
-        labels: cluster_name.map(|c| vec![c.to_string()]).unwrap_or_default(),
+        labels: cluster_name
+            .map(|c| vec![c.to_string()])
+            .unwrap_or_default(),
         ..Default::default()
     };
-    
-    object_registry.register(ctx, registration).await
-        .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+
+    object_registry
+        .register(ctx, registration)
+        .await
+        .map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
 }
 
 /// Register an application in object-registry
@@ -101,7 +108,7 @@ pub async fn register_application(
         seconds: now.as_secs() as i64,
         nanos: now.subsec_nanos() as i32,
     };
-    
+
     let registration = ObjectRegistration {
         object_type: ObjectType::ObjectTypeApplication as i32,
         object_id: format!("{}@{}", app_name, node_id),
@@ -117,9 +124,16 @@ pub async fn register_application(
         updated_at: Some(timestamp),
         ..Default::default()
     };
-    
-    object_registry.register(ctx, registration).await
-        .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+
+    object_registry
+        .register(ctx, registration)
+        .await
+        .map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
 }
 
 /// Unregister an application from object-registry
@@ -171,7 +185,7 @@ pub async fn register_workflow(
         seconds: now.as_secs() as i64,
         nanos: now.subsec_nanos() as i32,
     };
-    
+
     let registration = ObjectRegistration {
         object_type: ObjectType::ObjectTypeWorkflow as i32,
         object_id: workflow_id.to_string(),
@@ -186,9 +200,16 @@ pub async fn register_workflow(
         updated_at: Some(timestamp),
         ..Default::default()
     };
-    
-    object_registry.register(ctx, registration).await
-        .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+
+    object_registry
+        .register(ctx, registration)
+        .await
+        .map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
 }
 
 /// Discover applications by name across all nodes
@@ -205,18 +226,25 @@ pub async fn discover_application_nodes(
     ctx: &RequestContext,
     app_name: &str,
 ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-    let registrations = object_registry.discover(
-        ctx,
-        Some(ObjectType::ObjectTypeApplication),
-        Some(app_name.to_string()),
-        None, // capabilities
-        None, // labels
-        None, // health_status
-        0, // offset
-        1000, // limit
-    ).await
-    .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
-    
+    let registrations = object_registry
+        .discover(
+            ctx,
+            Some(ObjectType::ObjectTypeApplication),
+            Some(app_name.to_string()),
+            None, // capabilities
+            None, // labels
+            None, // health_status
+            0,    // offset
+            1000, // limit
+        )
+        .await
+        .map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
     Ok(registrations)
 }
 
@@ -234,18 +262,25 @@ pub async fn discover_workflow_nodes(
     ctx: &RequestContext,
     definition_id: &str,
 ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-    let registrations = object_registry.discover(
-        ctx,
-        Some(ObjectType::ObjectTypeWorkflow),
-        Some(definition_id.to_string()),
-        None, // capabilities
-        None, // labels
-        None, // health_status
-        0, // offset
-        1000, // limit
-    ).await
-    .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
-    
+    let registrations = object_registry
+        .discover(
+            ctx,
+            Some(ObjectType::ObjectTypeWorkflow),
+            Some(definition_id.to_string()),
+            None, // capabilities
+            None, // labels
+            None, // health_status
+            0,    // offset
+            1000, // limit
+        )
+        .await
+        .map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })?;
+
     Ok(registrations)
 }
 
@@ -265,6 +300,7 @@ pub async fn heartbeat_node(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Use heartbeat method which updates timestamps without re-registering
     use plexspaces_proto::object_registry::v1::ObjectType;
-    object_registry.heartbeat(ctx, ObjectType::ObjectTypeNode, node_id).await
+    object_registry
+        .heartbeat(ctx, ObjectType::ObjectTypeNode, node_id)
+        .await
 }
-

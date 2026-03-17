@@ -40,6 +40,7 @@
 //! ```
 
 use async_trait::async_trait;
+use metrics;
 use plexspaces_core::{ActorService, ServiceLocator};
 use plexspaces_facet::{Facet, FacetError};
 use plexspaces_proto::common::v1::Message;
@@ -50,7 +51,6 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use metrics;
 use tracing;
 
 // Optional dependency for distributed locking
@@ -77,23 +77,23 @@ use plexspaces_proto::timer::v1::TimerFired;
 pub struct TimerFacet {
     /// Facet configuration (immutable)
     config: Value,
-    
+
     /// Facet priority (immutable)
     priority: i32,
-    
+
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
-    
+
     /// ServiceLocator for looking up ActorService when sending messages
     service_locator: Arc<dyn ServiceLocator>,
-    
+
     /// Active timers: timer_name -> TimerHandle
     timers: Arc<RwLock<HashMap<String, TimerHandle>>>,
-    
+
     /// Optional LockManager for distributed locking (multi-node protection)
     #[cfg(feature = "locks")]
     lock_manager: Option<Arc<dyn LockManager>>,
-    
+
     /// Node ID for lock holder identification
     node_id: Arc<RwLock<Option<String>>>,
 }
@@ -105,7 +105,7 @@ pub const TIMER_FACET_DEFAULT_PRIORITY: i32 = 50;
 struct TimerHandle {
     /// Timer registration
     registration: TimerRegistration,
-    
+
     /// Tokio task handle (for cancellation)
     handle: JoinHandle<()>,
 }
@@ -132,7 +132,7 @@ impl TimerFacet {
             node_id: Arc::new(RwLock::new(None)),
         }
     }
-    
+
     /// Create a new timer facet with LockManager (for multi-node protection)
     ///
     /// ## Arguments
@@ -146,7 +146,7 @@ impl TimerFacet {
     /// New TimerFacet with distributed locking support
     #[cfg(feature = "locks")]
     pub fn with_lock_manager(
-        lock_manager: Arc<dyn LockManager>, 
+        lock_manager: Arc<dyn LockManager>,
         node_id: String,
         config: Value,
         priority: i32,
@@ -162,7 +162,7 @@ impl TimerFacet {
             node_id: Arc::new(RwLock::new(Some(node_id))),
         }
     }
-    
+
     /// Set node ID (called during attachment if not set)
     pub async fn set_node_id(&self, node_id: String) {
         let mut id_guard = self.node_id.write().await;
@@ -170,8 +170,7 @@ impl TimerFacet {
             *id_guard = Some(node_id);
         }
     }
-    
-    
+
     /// Register a timer
     ///
     /// ## Arguments
@@ -183,36 +182,43 @@ impl TimerFacet {
         &self,
         registration: TimerRegistration,
     ) -> Result<String, TimerError> {
-        let actor_id = self.actor_id.read().await
+        let actor_id = self
+            .actor_id
+            .read()
+            .await
             .clone()
             .ok_or_else(|| TimerError::NotAttached)?;
-        
+
         // Validate registration
         if registration.timer_name.is_empty() {
-            return Err(TimerError::InvalidRegistration("timer_name cannot be empty".to_string()));
+            return Err(TimerError::InvalidRegistration(
+                "timer_name cannot be empty".to_string(),
+            ));
         }
-        
+
         // Check if timer already exists
         let mut timers = self.timers.write().await;
         if timers.contains_key(&registration.timer_name) {
             return Err(TimerError::TimerExists(registration.timer_name.clone()));
         }
-        
+
         // Convert proto Duration to std::time::Duration
         let due_time = proto_duration_to_std(&registration.due_time)
             .ok_or_else(|| TimerError::InvalidRegistration("invalid due_time".to_string()))?;
-        
+
         let interval = proto_duration_to_std(&registration.interval)
             .ok_or_else(|| TimerError::InvalidRegistration("invalid interval".to_string()))?;
-        
+
         // Validate durations
         if interval.is_zero() && registration.periodic {
-            return Err(TimerError::InvalidRegistration("periodic timer must have interval > 0".to_string()));
+            return Err(TimerError::InvalidRegistration(
+                "periodic timer must have interval > 0".to_string(),
+            ));
         }
-        
+
         // Get actor_id for sending messages
         let actor_id_clone = actor_id.clone();
-        
+
         // Get lock manager and node ID for distributed locking (if enabled)
         #[cfg(feature = "locks")]
         let (lock_manager, node_id) = {
@@ -220,30 +226,30 @@ impl TimerFacet {
             let node_id_val = self.node_id.read().await.clone();
             (lock_mgr, node_id_val)
         };
-        
+
         // Clone ServiceLocator for spawned task
         let service_locator_clone = self.service_locator.clone();
-        
+
         // Create timer task
         let timer_name_for_task = registration.timer_name.clone();
         let timer_name_for_return = registration.timer_name.clone();
         let callback_data = registration.callback_data.clone();
         let periodic = registration.periodic;
-        
+
         let handle = tokio::spawn(async move {
             #[cfg(feature = "locks")]
             let mut current_lock: Option<plexspaces_locks::Lock> = None;
-            
+
             // Clone actor_id for lock operations (before it's moved into fire_timer)
             #[cfg(feature = "locks")]
             let actor_id_for_lock = actor_id_clone.clone();
-            
+
             // Helper function to fire timer (with lock check if enabled)
             let fire_timer = async move |lock_held: bool| -> bool {
                 if !lock_held {
                     return false; // Don't fire if lock not held
                 }
-                
+
                 // Fire timer - send TimerFired message to actor
                 let timer_fired = TimerFired {
                     actor_id: actor_id_clone.clone(),
@@ -251,10 +257,10 @@ impl TimerFacet {
                     fired_at: Some(prost_types::Timestamp::from(SystemTime::now())),
                     callback_data: callback_data.clone(),
                 };
-                
+
                 // Encode TimerFired using prost
                 let payload = prost::Message::encode_to_vec(&timer_fired);
-                
+
                 // Create message with timer type
                 let mut headers = std::collections::HashMap::new();
                 headers.insert("type".to_string(), "TimerFired".to_string());
@@ -265,10 +271,10 @@ impl TimerFacet {
                     message_type: "TimerFired".to_string(),
                     headers,
                     receiver_id: actor_id_clone.clone(), // Set receiver_id to target actor
-                    sender_id: String::new(), // Timer messages don't have a sender
+                    sender_id: String::new(),            // Timer messages don't have a sender
                     ..Default::default()
                 };
-                
+
                 // Get ActorService from ServiceLocator when needed
                 if let Some(actor_service) = service_locator_clone.get_actor_service().await {
                     // Use ActorService to send message (handles local/remote routing)
@@ -280,14 +286,17 @@ impl TimerFacet {
                 }
                 true
             };
-            
+
             // Note: TimerRegistration no longer has lock_key field, so locking is disabled
             // Locking for timers would require adding lock_key back to proto or using a different mechanism
             #[cfg(feature = "locks")]
-            let mut lock_held = if let (Some(ref lock_mgr), Some(node_id_val)) = (lock_manager.as_ref(), node_id.as_ref()) {
+            let mut lock_held = if let (Some(ref lock_mgr), Some(node_id_val)) =
+                (lock_manager.as_ref(), node_id.as_ref())
+            {
                 // Use actor_id as lock key since lock_key was removed from proto
                 // Use empty tenant/namespace for timer locks (timers don't have access to actor context or ServiceLocator)
-                let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
+                let ctx =
+                    plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
                 // Calculate lease duration: for periodic timers, use 2x interval (min 1 second), for one-time use 60s
                 let lease_secs = if periodic {
                     let interval_secs = interval.as_secs() as u32;
@@ -300,14 +309,20 @@ impl TimerFacet {
                 } else {
                     60
                 };
-                match lock_mgr.acquire_lock(&ctx, AcquireLockOptions {
-                    lock_key: format!("timer:{}", actor_id_for_lock),
-                    holder_id: node_id_val.clone(),
-                    lease_duration_secs: lease_secs,
-                    additional_wait_time_ms: 0,
-                    refresh_period_ms: 1000,
-                    metadata: Default::default(),
-                }).await {
+                match lock_mgr
+                    .acquire_lock(
+                        &ctx,
+                        AcquireLockOptions {
+                            lock_key: format!("timer:{}", actor_id_for_lock),
+                            holder_id: node_id_val.clone(),
+                            lease_duration_secs: lease_secs,
+                            additional_wait_time_ms: 0,
+                            refresh_period_ms: 1000,
+                            metadata: Default::default(),
+                        },
+                    )
+                    .await
+                {
                     Ok(lock) => {
                         current_lock = Some(lock);
                         true
@@ -320,30 +335,37 @@ impl TimerFacet {
             } else {
                 true // No lock manager or node_id, fire anyway
             };
-            
+
             #[cfg(not(feature = "locks"))]
             let lock_held = true; // No locking support, always fire
-            
+
             // Wait for due_time
             if !due_time.is_zero() {
                 tokio::time::sleep(due_time).await;
             }
-            
+
             // Fire timer (if lock held)
             if !fire_timer(lock_held).await {
                 return; // Lock not held, don't fire
             }
-            
+
             // If periodic, continue firing
             if periodic {
                 loop {
                     tokio::time::sleep(interval).await;
-                    
+
                     // Renew lock for periodic timers (if locking is enabled)
                     #[cfg(feature = "locks")]
-                    if let (Some(ref lock_mgr), Some(node_id_val), Some(ref lock)) = (lock_manager.as_ref(), node_id.as_ref(), current_lock.as_ref()) {
+                    if let (Some(ref lock_mgr), Some(node_id_val), Some(ref lock)) = (
+                        lock_manager.as_ref(),
+                        node_id.as_ref(),
+                        current_lock.as_ref(),
+                    ) {
                         // Use empty tenant/namespace for timer locks (timers don't have access to actor context or ServiceLocator)
-                        let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
+                        let ctx = plexspaces_core::RequestContext::new_without_auth(
+                            String::new(),
+                            String::new(),
+                        );
                         // Calculate lease duration: 2x interval (min 1 second for sub-second intervals)
                         let lease_secs = {
                             let interval_secs = interval.as_secs() as u32;
@@ -354,13 +376,19 @@ impl TimerFacet {
                                 interval_secs * 2
                             }
                         };
-                        match lock_mgr.renew_lock(&ctx, plexspaces_locks::RenewLockOptions {
-                            lock_key: format!("timer:{}", actor_id_for_lock),
-                            holder_id: node_id_val.clone(),
-                            version: lock.version.clone(),
-                            lease_duration_secs: lease_secs,
-                            metadata: Default::default(),
-                        }).await {
+                        match lock_mgr
+                            .renew_lock(
+                                &ctx,
+                                plexspaces_locks::RenewLockOptions {
+                                    lock_key: format!("timer:{}", actor_id_for_lock),
+                                    holder_id: node_id_val.clone(),
+                                    version: lock.version.clone(),
+                                    lease_duration_secs: lease_secs,
+                                    metadata: Default::default(),
+                                },
+                            )
+                            .await
+                        {
                             Ok(renewed_lock) => {
                                 current_lock = Some(renewed_lock);
                                 lock_held = true;
@@ -371,7 +399,7 @@ impl TimerFacet {
                             }
                         }
                     }
-                    
+
                     // Fire timer (if lock still held)
                     if !fire_timer(lock_held).await {
                         // Lost lock, stop firing
@@ -379,21 +407,31 @@ impl TimerFacet {
                     }
                 }
             }
-            
+
             // Release lock when timer task completes (if locking is enabled)
             #[cfg(feature = "locks")]
-            if let (Some(ref lock_mgr), Some(node_id_val), Some(ref lock)) = (lock_manager.as_ref(), node_id.as_ref(), current_lock.as_ref()) {
+            if let (Some(ref lock_mgr), Some(node_id_val), Some(ref lock)) = (
+                lock_manager.as_ref(),
+                node_id.as_ref(),
+                current_lock.as_ref(),
+            ) {
                 // Use empty tenant/namespace for timer locks (timers don't have access to actor context or ServiceLocator)
-                let ctx = plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
-                let _ = lock_mgr.release_lock(&ctx, ReleaseLockOptions {
-                    lock_key: format!("timer:{}", actor_id_for_lock),
-                    holder_id: node_id_val.clone(),
-                    version: lock.version.clone(),
-                    delete_lock: false,
-                }).await;
+                let ctx =
+                    plexspaces_core::RequestContext::new_without_auth(String::new(), String::new());
+                let _ = lock_mgr
+                    .release_lock(
+                        &ctx,
+                        ReleaseLockOptions {
+                            lock_key: format!("timer:{}", actor_id_for_lock),
+                            holder_id: node_id_val.clone(),
+                            version: lock.version.clone(),
+                            delete_lock: false,
+                        },
+                    )
+                    .await;
             }
         });
-        
+
         // Store timer
         timers.insert(
             timer_name_for_return.clone(),
@@ -402,10 +440,10 @@ impl TimerFacet {
                 handle,
             },
         );
-        
+
         Ok(timer_name_for_return)
     }
-    
+
     /// Register a timer with distributed lock (opt-in multi-node protection)
     ///
     /// ## Purpose
@@ -428,7 +466,7 @@ impl TimerFacet {
     /// * `interval` - Interval for periodic timers, or delay for one-time timers
     /// * `periodic` - Whether timer is periodic
     /// Note: lock_key removed from TimerRegistration proto - locking disabled
-    
+
     /// Unregister a timer
     ///
     /// ## Arguments
@@ -438,7 +476,7 @@ impl TimerFacet {
     /// Success or error
     pub async fn unregister_timer(&self, timer_name: &str) -> Result<(), TimerError> {
         let mut timers = self.timers.write().await;
-        
+
         if let Some(timer_handle) = timers.remove(timer_name) {
             // Cancel timer task
             timer_handle.handle.abort();
@@ -447,18 +485,19 @@ impl TimerFacet {
             Err(TimerError::TimerNotFound(timer_name.to_string()))
         }
     }
-    
+
     /// List all timers for this actor
     ///
     /// ## Returns
     /// Vector of timer registrations
     pub async fn list_timers(&self) -> Vec<TimerRegistration> {
         let timers = self.timers.read().await;
-        timers.values()
+        timers
+            .values()
             .map(|handle| handle.registration.clone())
             .collect()
     }
-    
+
     /// Register a timer with simplified API (convenience method)
     ///
     /// ## Purpose
@@ -484,10 +523,13 @@ impl TimerFacet {
         interval: std::time::Duration,
         periodic: bool,
     ) -> Result<String, TimerError> {
-        let actor_id = self.actor_id.read().await
+        let actor_id = self
+            .actor_id
+            .read()
+            .await
             .clone()
             .ok_or_else(|| TimerError::NotAttached)?;
-        
+
         let registration = TimerRegistration {
             actor_id,
             timer_name: name.to_string(),
@@ -502,10 +544,10 @@ impl TimerFacet {
             callback_data: vec![],
             periodic,
         };
-        
+
         self.register_timer(registration).await
     }
-    
+
     /// Register a one-time timer (convenience method)
     ///
     /// ## Usage
@@ -519,7 +561,7 @@ impl TimerFacet {
     ) -> Result<String, TimerError> {
         self.register_simple(name, delay, false).await
     }
-    
+
     /// Register a periodic timer (convenience method)
     ///
     /// ## Usage
@@ -540,22 +582,22 @@ impl Facet for TimerFacet {
     fn facet_type(&self) -> &str {
         "timer"
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-    
+
     async fn on_attach(&mut self, actor_id: &str, _config: Value) -> Result<(), FacetError> {
         // Store actor_id for message sending
         let mut id = self.actor_id.write().await;
         *id = Some(actor_id.to_string());
         Ok(())
     }
-    
+
     async fn on_detach(&mut self, _actor_id: &str) -> Result<(), FacetError> {
         // Cancel all timers
         let mut timers = self.timers.write().await;
@@ -563,11 +605,11 @@ impl Facet for TimerFacet {
             timer_handle.handle.abort();
         }
         timers.clear();
-        
+
         // Clear actor ID
         let mut id = self.actor_id.write().await;
         *id = None;
-        
+
         Ok(())
     }
 
@@ -593,26 +635,27 @@ impl Facet for TimerFacet {
         for (timer_name, handle) in timers.drain() {
             handle.handle.abort();
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                actor_id = %actor_id,
-                timer_name = %timer_name,
-                "Cancelled timer on EXIT signal"
-            );
+                tracing::debug!(
+                    actor_id = %actor_id,
+                    timer_name = %timer_name,
+                    "Cancelled timer on EXIT signal"
+                );
             }
         }
-        
+
         if timer_count > 0 {
             metrics::counter!("plexspaces_timer_facet_exit_cancelled_total",
                 "actor_id" => actor_id.to_string(),
                 "timer_count" => timer_count.to_string()
-            ).increment(timer_count as u64);
+            )
+            .increment(timer_count as u64);
             tracing::info!(
                 actor_id = %actor_id,
                 timer_count = timer_count,
                 "Cancelled all timers on EXIT signal"
             );
         }
-        
+
         Ok(())
     }
 
@@ -633,36 +676,36 @@ impl Facet for TimerFacet {
     ) -> Result<(), FacetError> {
         // Log DOWN notification for observability
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            actor_id = %actor_id,
-            monitored_id = %monitored_id,
-            reason = ?reason,
-            "TimerFacet received DOWN notification (no action needed)"
-        );
+            tracing::debug!(
+                actor_id = %actor_id,
+                monitored_id = %monitored_id,
+                reason = ?reason,
+                "TimerFacet received DOWN notification (no action needed)"
+            );
         }
-        
+
         metrics::counter!("plexspaces_timer_facet_down_total",
             "actor_id" => actor_id.to_string(),
             "monitored_id" => monitored_id.to_string()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         Ok(())
     }
-    
+
     fn get_state(&self) -> Result<Value, FacetError> {
         let _timers = self.timers.read();
         // TODO: Serialize timer state for persistence (if needed)
         Ok(Value::Null)
     }
-    
+
     fn get_config(&self) -> Value {
         self.config.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }
-    
 }
 
 /// Timer errors
@@ -670,22 +713,22 @@ impl Facet for TimerFacet {
 pub enum TimerError {
     #[error("Timer facet not attached to actor")]
     NotAttached,
-    
+
     #[error("Timer already exists: {0}")]
     TimerExists(String),
-    
+
     #[error("Timer not found: {0}")]
     TimerNotFound(String),
-    
+
     #[error("Invalid registration: {0}")]
     InvalidRegistration(String),
 }
 
 /// Convert proto Duration to std::time::Duration
 fn proto_duration_to_std(duration: &Option<prost_types::Duration>) -> Option<Duration> {
-    duration.as_ref().map(|d| {
-        Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64)
-    })
+    duration
+        .as_ref()
+        .map(|d| Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64))
 }
 
 #[cfg(test)]
@@ -695,39 +738,52 @@ mod tests {
     use plexspaces_mailbox::{Mailbox, MailboxConfig};
     use prost_types;
     use std::sync::Arc;
-    
+
     async fn create_test_facet() -> (TimerFacet, ActorRef, Arc<Mailbox>) {
         let test_actor_id = "test-actor";
         let mailbox_id = format!("timer-mailbox-{}", test_actor_id);
         let mailbox = Arc::new(
             Mailbox::new(MailboxConfig::default(), mailbox_id)
                 .await
-                .expect("Failed to create timer mailbox")
+                .expect("Failed to create timer mailbox"),
         );
         let actor_ref = ActorRef::new("test-actor@test-node".to_string()).unwrap();
-        
+
         let facet = TimerFacet::new(serde_json::json!({}), 75);
         (facet, actor_ref, mailbox)
     }
-    
+
     // Create a mock ActorService for tests
     struct MockActorService {
         mailbox: Arc<Mailbox>,
     }
     #[async_trait::async_trait]
     impl ActorService for MockActorService {
-        async fn spawn_actor(&self, _actor_id: &str, _actor_type: &str, _initial_state: Vec<u8>) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+        async fn spawn_actor(
+            &self,
+            _actor_id: &str,
+            _actor_type: &str,
+            _initial_state: Vec<u8>,
+        ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented".into())
         }
-        async fn send(&self, _actor_id: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        async fn send(
+            &self,
+            _actor_id: &str,
+            message: Message,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             // Convert proto Message to mailbox Message
             let mailbox_message = plexspaces_mailbox::Message::from_proto(&message);
-            self.mailbox.send(mailbox_message).await
-                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
+            self.mailbox.send(mailbox_message).await.map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
             Ok("msg-id".to_string())
         }
     }
-    
+
     fn create_test_timer_registration(
         timer_name: &str,
         interval_secs: u64,
@@ -749,128 +805,167 @@ mod tests {
             periodic,
         }
     }
-    
+
     #[tokio::test]
     async fn test_timer_facet_creation() {
         let (facet, _actor_ref, _rx) = create_test_facet().await;
         assert_eq!(facet.facet_type(), "timer");
     }
-    
+
     #[tokio::test]
     async fn test_timer_facet_attach() {
         let (mut facet, actor_ref, mailbox) = create_test_facet().await;
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        
+
         let actor_id = facet.actor_id.read().await.clone();
         assert_eq!(actor_id, Some("actor-1".to_string()));
     }
-    
+
     #[tokio::test]
     async fn test_register_timer_before_attach_fails() {
         let (facet, _actor_ref, _rx) = create_test_facet().await;
-        
+
         let registration = create_test_timer_registration("timer-1", 1, 0, false);
         let result = facet.register_timer(registration).await;
-        
+
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), TimerError::NotAttached));
     }
-    
+
     #[tokio::test]
     async fn test_register_timer_after_attach() {
         let (mut facet, actor_ref, mailbox) = create_test_facet().await;
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        facet.set_actor_service(Arc::new(MockActorService { mailbox: mailbox.clone() })).await;
-        
+        facet
+            .set_actor_service(Arc::new(MockActorService {
+                mailbox: mailbox.clone(),
+            }))
+            .await;
+
         let registration = create_test_timer_registration("timer-1", 1, 0, false);
         let timer_id = facet.register_timer(registration).await.unwrap();
-        
+
         assert_eq!(timer_id, "timer-1");
-        
+
         let timers = facet.list_timers().await;
         assert_eq!(timers.len(), 1);
         assert_eq!(timers[0].timer_name, "timer-1");
     }
-    
+
     #[tokio::test]
     async fn test_register_duplicate_timer_fails() {
         let (mut facet, actor_ref, mailbox) = create_test_facet().await;
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref.clone()).await;
-        facet.set_actor_service(Arc::new(MockActorService { mailbox: mailbox.clone() })).await;
-        
+        facet
+            .set_actor_service(Arc::new(MockActorService {
+                mailbox: mailbox.clone(),
+            }))
+            .await;
+
         let registration1 = create_test_timer_registration("timer-1", 1, 0, false);
         facet.register_timer(registration1).await.unwrap();
-        
+
         let registration2 = create_test_timer_registration("timer-1", 2, 0, false);
         let result = facet.register_timer(registration2).await;
-        
+
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), TimerError::TimerExists(_)));
     }
-    
+
     #[tokio::test]
     async fn test_unregister_timer() {
         let (mut facet, actor_ref, mailbox) = create_test_facet().await;
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        facet.set_actor_service(Arc::new(MockActorService { mailbox: mailbox.clone() })).await;
-        
+        facet
+            .set_actor_service(Arc::new(MockActorService {
+                mailbox: mailbox.clone(),
+            }))
+            .await;
+
         let registration = create_test_timer_registration("timer-1", 1, 0, false);
         facet.register_timer(registration).await.unwrap();
-        
+
         facet.unregister_timer("timer-1").await.unwrap();
-        
+
         let timers = facet.list_timers().await;
         assert_eq!(timers.len(), 0);
     }
-    
+
     #[tokio::test]
     async fn test_unregister_nonexistent_timer_fails() {
         let (mut facet, _actor_ref, _mailbox) = create_test_facet().await;
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
-        
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
+
         let result = facet.unregister_timer("nonexistent").await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), TimerError::TimerNotFound(_)));
     }
-    
+
     // Note: Timer firing tests require actual message delivery verification
     // These will be implemented after we have a working message delivery mechanism
     // For now, we test the registration/unregistration logic
-    
+
     #[tokio::test]
     async fn test_periodic_timer_zero_interval_fails() {
         let (mut facet, actor_ref, mailbox) = create_test_facet().await;
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        
+
         let registration = create_test_timer_registration("timer-1", 0, 0, true);
         let result = facet.register_timer(registration).await;
-        
+
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), TimerError::InvalidRegistration(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            TimerError::InvalidRegistration(_)
+        ));
     }
-    
+
     #[tokio::test]
     async fn test_multiple_timers() {
         let (mut facet, actor_ref, mailbox) = create_test_facet().await;
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
         facet.set_actor_ref(actor_ref).await;
-        facet.set_actor_service(Arc::new(MockActorService { mailbox: mailbox.clone() })).await;
-        
+        facet
+            .set_actor_service(Arc::new(MockActorService {
+                mailbox: mailbox.clone(),
+            }))
+            .await;
+
         let registration1 = create_test_timer_registration("timer-1", 1, 0, false);
         let registration2 = create_test_timer_registration("timer-2", 2, 0, false);
         let registration3 = create_test_timer_registration("timer-3", 3, 0, false);
-        
+
         facet.register_timer(registration1).await.unwrap();
         facet.register_timer(registration2).await.unwrap();
         facet.register_timer(registration3).await.unwrap();
-        
+
         let timers = facet.list_timers().await;
         assert_eq!(timers.len(), 3);
     }
 }
-

@@ -8,13 +8,13 @@
 // NOTE: These tests are designed to run offline without network access or SSL.
 // All tests use MockChannelService (in-memory) and do not require external services.
 
-use plexspaces_wasm_runtime::*;
+use futures::StreamExt;
 use plexspaces_core::ChannelService;
 use plexspaces_proto::common::v1::Message;
+use plexspaces_wasm_runtime::*;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use std::collections::HashMap;
-use futures::StreamExt;
 
 /// Mock ChannelService for testing
 struct MockChannelService {
@@ -39,7 +39,8 @@ impl ChannelService for MockChannelService {
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let mut queues = self.queues.write().await;
-        queues.entry(queue_name.to_string())
+        queues
+            .entry(queue_name.to_string())
             .or_insert_with(Vec::new)
             .push(message);
         Ok("msg-001".to_string())
@@ -51,7 +52,8 @@ impl ChannelService for MockChannelService {
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let mut topics = self.topics.write().await;
-        topics.entry(topic_name.to_string())
+        topics
+            .entry(topic_name.to_string())
             .or_insert_with(Vec::new)
             .push(message);
         Ok("msg-001".to_string())
@@ -60,7 +62,10 @@ impl ChannelService for MockChannelService {
     async fn subscribe_to_topic(
         &self,
         _topic_name: &str,
-    ) -> Result<futures::stream::BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        futures::stream::BoxStream<'static, Message>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         // Return empty stream for testing
         use futures::stream;
         Ok(Box::pin(stream::empty()))
@@ -118,18 +123,18 @@ async fn test_genserver_handle_request() {
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
         10_000_000_000, // max_fuel
-        None, // channel_service
-        None, // message_sender
-        None, // tuplespace_provider
-        None, // keyvalue_store
-        None, // process_group_registry
-        None, // lock_manager
-        None, // object_registry
-        None, // journal_storage
-        None, // blob_service
-        None, // elastic_pool_service
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
+        None,           // channel_service
+        None,           // message_sender
+        None,           // tuplespace_provider
+        None,           // keyvalue_store
+        None,           // process_group_registry
+        None,           // lock_manager
+        None,           // object_registry
+        None,           // journal_storage
+        None,           // blob_service
+        None,           // elastic_pool_service
+        false,          // durability_enabled
+        None,           // global_reinstantiation_semaphore
     )
     .await
     .expect("Failed to create instance");
@@ -180,18 +185,18 @@ async fn test_genevent_handle_event() {
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
         10_000_000_000, // max_fuel
-        None, // channel_service
-        None, // message_sender
-        None, // tuplespace_provider
-        None, // keyvalue_store
-        None, // process_group_registry
-        None, // lock_manager
-        None, // object_registry
-        None, // journal_storage
-        None, // blob_service
-        None, // elastic_pool_service
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
+        None,           // channel_service
+        None,           // message_sender
+        None,           // tuplespace_provider
+        None,           // keyvalue_store
+        None,           // process_group_registry
+        None,           // lock_manager
+        None,           // object_registry
+        None,           // journal_storage
+        None,           // blob_service
+        None,           // elastic_pool_service
+        false,          // durability_enabled
+        None,           // global_reinstantiation_semaphore
     )
     .await
     .expect("Failed to create instance");
@@ -242,18 +247,18 @@ async fn test_genfsm_handle_transition() {
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
         10_000_000_000, // max_fuel
-        None, // channel_service
-        None, // message_sender
-        None, // tuplespace_provider
-        None, // keyvalue_store
-        None, // process_group_registry
-        None, // lock_manager
-        None, // object_registry
-        None, // journal_storage
-        None, // blob_service
-        None, // elastic_pool_service
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
+        None,           // channel_service
+        None,           // message_sender
+        None,           // tuplespace_provider
+        None,           // keyvalue_store
+        None,           // process_group_registry
+        None,           // lock_manager
+        None,           // object_registry
+        None,           // journal_storage
+        None,           // blob_service
+        None,           // elastic_pool_service
+        false,          // durability_enabled
+        None,           // global_reinstantiation_semaphore
     )
     .await
     .expect("Failed to create instance");
@@ -303,18 +308,18 @@ async fn test_fallback_to_handle_message() {
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
         10_000_000_000, // max_fuel
-        None, // channel_service
-        None, // message_sender
-        None, // tuplespace_provider
-        None, // keyvalue_store
-        None, // process_group_registry
-        None, // lock_manager
-        None, // object_registry
-        None, // journal_storage
-        None, // blob_service
-        None, // elastic_pool_service
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
+        None,           // channel_service
+        None,           // message_sender
+        None,           // tuplespace_provider
+        None,           // keyvalue_store
+        None,           // process_group_registry
+        None,           // lock_manager
+        None,           // object_registry
+        None,           // journal_storage
+        None,           // blob_service
+        None,           // elastic_pool_service
+        false,          // durability_enabled
+        None,           // global_reinstantiation_semaphore
     )
     .await
     .expect("Failed to create instance");
@@ -376,19 +381,19 @@ async fn test_channel_send_to_queue() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
-        10_000_000_000, // max_fuel
+        10_000_000_000,        // max_fuel
         Some(channel_service), // channel_service
-        None, // message_sender
-        None, // tuplespace_provider
-        None, // keyvalue_store
-        None, // process_group_registry
-        None, // lock_manager
-        None, // object_registry
-        None, // journal_storage
-        None, // blob_service
-        None, // elastic_pool_service
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
+        None,                  // message_sender
+        None,                  // tuplespace_provider
+        None,                  // keyvalue_store
+        None,                  // process_group_registry
+        None,                  // lock_manager
+        None,                  // object_registry
+        None,                  // journal_storage
+        None,                  // blob_service
+        None,                  // elastic_pool_service
+        false,                 // durability_enabled
+        None,                  // global_reinstantiation_semaphore
     )
     .await
     .expect("Failed to create instance");
@@ -402,7 +407,8 @@ async fn test_channel_send_to_queue() {
 async fn test_channel_publish_to_topic() {
     let channel_service = Arc::new(MockChannelService::new());
 
-    let wasm_bytes = wat::parse_str(r#"
+    let wasm_bytes = wat::parse_str(
+        r#"
         (module
             (memory (export "memory") 1)
             (func (export "snapshot_state") (result i32 i32)
@@ -410,7 +416,9 @@ async fn test_channel_publish_to_topic() {
                 i32.const 0
             )
         )
-    "#).expect("Failed to parse WAT");
+    "#,
+    )
+    .expect("Failed to parse WAT");
 
     let runtime = WasmRuntime::new().await.expect("Failed to create runtime");
     let module = runtime
@@ -429,19 +437,19 @@ async fn test_channel_publish_to_topic() {
         &[],
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
-        10_000_000_000, // max_fuel
+        10_000_000_000,        // max_fuel
         Some(channel_service), // channel_service
-        None, // message_sender
-        None, // tuplespace_provider
-        None, // keyvalue_store
-        None, // process_group_registry
-        None, // lock_manager
-        None, // object_registry
-        None, // journal_storage
-        None, // blob_service
-        None, // elastic_pool_service
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
+        None,                  // message_sender
+        None,                  // tuplespace_provider
+        None,                  // keyvalue_store
+        None,                  // process_group_registry
+        None,                  // lock_manager
+        None,                  // object_registry
+        None,                  // journal_storage
+        None,                  // blob_service
+        None,                  // elastic_pool_service
+        false,                 // durability_enabled
+        None,                  // global_reinstantiation_semaphore
     )
     .await
     .expect("Failed to create instance");
@@ -453,7 +461,8 @@ async fn test_channel_publish_to_topic() {
 /// Test that channel service is optional
 #[tokio::test]
 async fn test_channel_service_optional() {
-    let wasm_bytes = wat::parse_str(r#"
+    let wasm_bytes = wat::parse_str(
+        r#"
         (module
             (memory (export "memory") 1)
             (func (export "handle_message") (param i32 i32 i32 i32 i32 i32) (result i32)
@@ -464,7 +473,9 @@ async fn test_channel_service_optional() {
                 i32.const 0
             )
         )
-    "#).expect("Failed to parse WAT");
+    "#,
+    )
+    .expect("Failed to parse WAT");
 
     let runtime = WasmRuntime::new().await.expect("Failed to create runtime");
     let module = runtime
@@ -485,18 +496,18 @@ async fn test_channel_service_optional() {
         plexspaces_wasm_runtime::capabilities::profiles::default(),
         limits,
         10_000_000_000, // max_fuel
-        None, // channel_service
-        None, // message_sender
-        None, // tuplespace_provider
-        None, // keyvalue_store
-        None, // process_group_registry
-        None, // lock_manager
-        None, // object_registry
-        None, // journal_storage
-        None, // blob_service
-        None, // elastic_pool_service
-        false, // durability_enabled
-        None,  // global_reinstantiation_semaphore
+        None,           // channel_service
+        None,           // message_sender
+        None,           // tuplespace_provider
+        None,           // keyvalue_store
+        None,           // process_group_registry
+        None,           // lock_manager
+        None,           // object_registry
+        None,           // journal_storage
+        None,           // blob_service
+        None,           // elastic_pool_service
+        false,          // durability_enabled
+        None,           // global_reinstantiation_semaphore
     )
     .await
     .expect("Failed to create instance");
@@ -504,4 +515,3 @@ async fn test_channel_service_optional() {
     // Should still work
     assert_eq!(instance.actor_id(), "test-optional");
 }
-

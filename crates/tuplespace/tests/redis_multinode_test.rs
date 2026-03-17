@@ -41,9 +41,9 @@
 
 #[cfg(feature = "redis-backend")]
 mod redis_multinode_tests {
-    use plexspaces_tuplespace::*;
-    use plexspaces_tuplespace::storage::StorageConfig;
     use plexspaces_proto::tuplespace::v1::RedisStorageConfig;
+    use plexspaces_tuplespace::storage::StorageConfig;
+    use plexspaces_tuplespace::*;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -56,10 +56,15 @@ mod redis_multinode_tests {
             enable_pubsub: false,
         });
 
-        let storage = storage::create_storage(config).await
+        let storage = storage::create_storage(config)
+            .await
             .expect("Failed to create Redis storage");
 
-        Arc::new(TupleSpace::with_storage_and_tenant(storage, "test-tenant", "test-namespace"))
+        Arc::new(TupleSpace::with_storage_and_tenant(
+            storage,
+            "test-tenant",
+            "test-namespace",
+        ))
     }
 
     /// Helper: Check if Redis is available
@@ -96,7 +101,9 @@ mod redis_multinode_tests {
             TupleField::Float(OrderedFloat::new(72.5)),
         ]);
 
-        node1.write(tuple.clone()).await
+        node1
+            .write(tuple.clone())
+            .await
             .expect("Node 1 write failed");
 
         println!("  ✅ Node 1 wrote tuple");
@@ -111,13 +118,18 @@ mod redis_multinode_tests {
             PatternField::Wildcard,
         ]);
 
-        let result = node2.read(pattern).await
-            .expect("Node 2 read failed");
+        let result = node2.read(pattern).await.expect("Node 2 read failed");
 
         assert!(result.is_some(), "Node 2 should see tuple from Node 1");
         let retrieved = result.unwrap();
-        assert_eq!(retrieved.fields()[0], TupleField::String("sensor".to_string()));
-        assert_eq!(retrieved.fields()[1], TupleField::String("temp".to_string()));
+        assert_eq!(
+            retrieved.fields()[0],
+            TupleField::String("sensor".to_string())
+        );
+        assert_eq!(
+            retrieved.fields()[1],
+            TupleField::String("temp".to_string())
+        );
 
         println!("  ✅ Node 2 read tuple from Node 1 (shared Redis)");
         println!("✅ Test passed: Multi-node write/read works!\n");
@@ -154,8 +166,7 @@ mod redis_multinode_tests {
             PatternField::Exact(TupleField::String("pending".to_string())),
         ]);
 
-        let taken = node1.take(pattern.clone()).await
-            .expect("Take failed");
+        let taken = node1.take(pattern.clone()).await.expect("Take failed");
 
         assert!(taken.is_some(), "Node 1 should take the job");
         println!("  ✅ Node 1 took job tuple (atomic remove)");
@@ -163,10 +174,12 @@ mod redis_multinode_tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // Node 2: Try to read (should NOT find it - it was removed!)
-        let result = node2.read(pattern).await
-            .expect("Read failed");
+        let result = node2.read(pattern).await.expect("Read failed");
 
-        assert!(result.is_none(), "Node 2 should NOT see tuple after Node 1 took it");
+        assert!(
+            result.is_none(),
+            "Node 2 should NOT see tuple after Node 1 took it"
+        );
         println!("  ✅ Node 2 confirms tuple removed (atomic operation worked)");
         println!("✅ Test passed: Atomic take() works across nodes!\n");
     }
@@ -210,12 +223,15 @@ mod redis_multinode_tests {
             PatternField::Wildcard,
         ]);
 
-        let count1 = node1.count(pattern.clone()).await
+        let count1 = node1
+            .count(pattern.clone())
+            .await
             .expect("Count failed on node1");
-        let count2 = node2.count(pattern.clone()).await
+        let count2 = node2
+            .count(pattern.clone())
+            .await
             .expect("Count failed on node2");
-        let count3 = node3.count(pattern).await
-            .expect("Count failed on node3");
+        let count3 = node3.count(pattern).await.expect("Count failed on node3");
 
         assert_eq!(count1, 5, "Node 1 should count 5 tuples");
         assert_eq!(count2, 5, "Node 2 should count 5 tuples");
@@ -278,8 +294,7 @@ mod redis_multinode_tests {
             PatternField::Wildcard,
         ]);
 
-        let count = node1.count(pattern).await
-            .expect("Count failed");
+        let count = node1.count(pattern).await.expect("Count failed");
 
         assert_eq!(count, expected_count, "All 3 actors should be at barrier");
         println!("  ✅ Barrier complete: {} arrivals counted", count);

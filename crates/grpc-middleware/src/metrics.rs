@@ -370,7 +370,10 @@ mod tests {
         let result = interceptor.before_request(&context).await;
         assert!(result.is_ok());
         let result = result.unwrap();
-        assert_eq!(result.decision, InterceptorDecision::InterceptorDecisionAllow as i32);
+        assert_eq!(
+            result.decision,
+            InterceptorDecision::InterceptorDecisionAllow as i32
+        );
     }
 
     #[tokio::test]

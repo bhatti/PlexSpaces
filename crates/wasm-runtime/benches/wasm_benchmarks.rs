@@ -125,8 +125,8 @@ const MEDIUM_WASM: &[u8] = &[
     0x03, 0x03, 0x02, 0x00, 0x00, // Function section: 2 functions
     0x07, 0x0b, 0x02, 0x03, 0x61, 0x64, 0x64, 0x00, 0x00, 0x03, 0x6d, 0x75, 0x6c, 0x00,
     0x01, // Exports: "add", "mul"
-    0x0a, 0x11, 0x02, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b, 0x07, 0x00, 0x20, 0x00,
-    0x20, 0x01, 0x6c, 0x0b, // Code: add/mul implementations
+    0x0a, 0x11, 0x02, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b, 0x07, 0x00, 0x20, 0x00, 0x20,
+    0x01, 0x6c, 0x0b, // Code: add/mul implementations
 ];
 
 /// Large WASM module (simulated) - repeat SIMPLE_WASM multiple times
@@ -212,7 +212,11 @@ fn bench_module_cache_hit(c: &mut Criterion) {
             async move {
                 // This should hit cache
                 runtime
-                    .load_module(black_box("test"), black_box("1.0.0"), black_box(SIMPLE_WASM))
+                    .load_module(
+                        black_box("test"),
+                        black_box("1.0.0"),
+                        black_box(SIMPLE_WASM),
+                    )
                     .await
                     .unwrap();
             }
@@ -239,11 +243,7 @@ fn bench_module_deployment(c: &mut Criterion) {
 
             async move {
                 service
-                    .deploy_module(
-                        black_box(&name),
-                        black_box("1.0.0"),
-                        black_box(SIMPLE_WASM),
-                    )
+                    .deploy_module(black_box(&name), black_box("1.0.0"), black_box(SIMPLE_WASM))
                     .await
                     .unwrap();
             }
@@ -298,7 +298,6 @@ fn bench_actor_instantiation(c: &mut Criterion) {
                         None,
                         None,
                         None,
-                        
                         None,
                     )
                     .await
@@ -359,7 +358,6 @@ fn bench_actor_instantiation_with_state(c: &mut Criterion) {
                             None,
                             None,
                             None,
-                            
                             None,
                         )
                         .await
@@ -411,9 +409,23 @@ fn bench_concurrent_instantiation(c: &mut Criterion) {
                     handles.push(tokio::spawn(async move {
                         let module = runtime.resolve_module("test-actor@1.0.0").await.unwrap();
                         runtime
-                        .instantiate(module, actor_id, &[], WasmConfig::default(), None, None, None, None, None, None, None, None,  None)
-                        .await
-                        .unwrap();
+                            .instantiate(
+                                module,
+                                actor_id,
+                                &[],
+                                WasmConfig::default(),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            )
+                            .await
+                            .unwrap();
                     }));
                 }
 
@@ -503,7 +515,21 @@ fn bench_memory_limits(c: &mut Criterion) {
 
                     let module = runtime.resolve_module("test-actor@1.0.0").await.unwrap();
                     runtime
-                        .instantiate(black_box(module), black_box(actor_id), &[], black_box(config), None, None, None, None, None, None, None, None,  None)
+                        .instantiate(
+                            black_box(module),
+                            black_box(actor_id),
+                            &[],
+                            black_box(config),
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
                         .await
                         .unwrap();
                 }
@@ -568,7 +594,6 @@ fn bench_execution_timeouts(c: &mut Criterion) {
                                 None,
                                 None,
                                 None,
-                                
                                 None,
                             )
                             .await
@@ -626,7 +651,6 @@ fn bench_e2e_deployment(c: &mut Criterion) {
                         None,
                         None,
                         None,
-                        
                         None,
                     )
                     .await

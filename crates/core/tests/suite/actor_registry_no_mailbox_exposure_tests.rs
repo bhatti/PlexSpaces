@@ -24,10 +24,12 @@
 //! 3. register_local() has been removed
 //! 4. is_actor_activated() checks MessageSender, not mailbox
 
-use plexspaces_core::{ActorRegistry, ActorId, actor_context::ObjectRegistry, MessageSender, Message, RequestContext};
+use plexspaces_core::{
+    actor_context::ObjectRegistry, ActorId, ActorRegistry, Message, MessageSender, RequestContext,
+};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use ulid::Ulid;
 
 // Atomic counter for generating unique test IDs
@@ -77,12 +79,21 @@ impl ObjectRegistry for ObjectRegistryAdapter {
         ctx: &RequestContext,
         object_id: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-    ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+    ) -> Result<
+        Option<plexspaces_proto::object_registry::v1::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let obj_type = object_type
+            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         self.inner
             .lookup(ctx, obj_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn lookup_full(
@@ -90,11 +101,19 @@ impl ObjectRegistry for ObjectRegistryAdapter {
         ctx: &RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
-    ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        Option<plexspaces_proto::object_registry::v1::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         self.inner
             .lookup_full(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn discover(
@@ -107,11 +126,28 @@ impl ObjectRegistry for ObjectRegistryAdapter {
         health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
         offset: usize,
         limit: usize,
-    ) -> Result<Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         self.inner
-            .discover(ctx, object_type, name_pattern, tags, metadata, health_status, offset, limit)
+            .discover(
+                ctx,
+                object_type,
+                name_pattern,
+                tags,
+                metadata,
+                health_status,
+                offset,
+                limit,
+            )
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn register(
@@ -119,10 +155,12 @@ impl ObjectRegistry for ObjectRegistryAdapter {
         ctx: &RequestContext,
         registration: plexspaces_proto::object_registry::v1::ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .register(ctx, registration)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        self.inner.register(ctx, registration).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn unregister(
@@ -134,7 +172,12 @@ impl ObjectRegistry for ObjectRegistryAdapter {
         self.inner
             .unregister(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn heartbeat(
@@ -146,15 +189,24 @@ impl ObjectRegistry for ObjectRegistryAdapter {
         self.inner
             .heartbeat(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 }
 
 async fn create_test_registry() -> Arc<ActorRegistry> {
-    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let object_repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
-    let object_registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryAdapter { 
-        inner: object_registry_impl 
+    let object_registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryAdapter {
+        inner: object_registry_impl,
     });
     Arc::new(ActorRegistry::new(object_registry, "test-node".to_string()))
 }
@@ -173,36 +225,43 @@ fn create_test_context() -> RequestContext {
 async fn test_register_actor_with_message_sender() {
     let registry = create_test_registry().await;
     let actor_id: ActorId = "test-actor@test-node".to_string();
-    
+
     // Create MessageSender
     let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
-    
+
     // Register actor with MessageSender
     let ctx = create_test_context();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None, None).await;
-    
+    registry
+        .register_actor(&ctx, actor_id.clone(), sender, None, None, None, None)
+        .await;
+
     // Verify actor is registered
     let found = registry.lookup_actor(&actor_id).await;
     assert!(found.is_some(), "Actor should be registered");
-    
+
     // Verify is_actor_activated works
-    assert!(registry.is_actor_activated(&actor_id).await, "Actor should be activated");
+    assert!(
+        registry.is_actor_activated(&actor_id).await,
+        "Actor should be activated"
+    );
 }
 
 #[tokio::test]
 async fn test_register_actor_mailbox_not_exposed() {
     let registry = create_test_registry().await;
     let actor_id: ActorId = "test-actor@test-node".to_string();
-    
+
     // Create MessageSender with internal message storage
     let test_sender = Arc::new(TestMessageSender::new(actor_id.clone()));
     let messages = test_sender.messages.clone();
     let sender: Arc<dyn MessageSender> = test_sender;
-    
+
     // Register actor
     let ctx = create_test_context();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None, None).await;
-    
+    registry
+        .register_actor(&ctx, actor_id.clone(), sender, None, None, None, None)
+        .await;
+
     // Verify we can send messages via MessageSender
     let sender = registry.lookup_actor(&actor_id).await.unwrap();
     let message = create_test_message(vec![1, 2, 3]);
@@ -210,8 +269,12 @@ async fn test_register_actor_mailbox_not_exposed() {
     if let Err(e) = &result {
         eprintln!("Error sending message: {}", e);
     }
-    assert!(result.is_ok(), "Should be able to send message via MessageSender, got error: {:?}", result.err());
-    
+    assert!(
+        result.is_ok(),
+        "Should be able to send message via MessageSender, got error: {:?}",
+        result.err()
+    );
+
     // Verify message was delivered
     let received = messages.read().await;
     assert_eq!(received.len(), 1, "Message should be stored");
@@ -221,18 +284,20 @@ async fn test_register_actor_mailbox_not_exposed() {
 async fn test_unregister_actor_removes_message_sender() {
     let registry = create_test_registry().await;
     let actor_id: ActorId = "test-actor@test-node".to_string();
-    
+
     // Register actor
     let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
     let ctx = create_test_context();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None, None).await;
-    
+    registry
+        .register_actor(&ctx, actor_id.clone(), sender, None, None, None, None)
+        .await;
+
     // Verify registered
     assert!(registry.is_actor_activated(&actor_id).await);
-    
+
     // Unregister
     registry.unregister(&actor_id).await.unwrap();
-    
+
     // Verify unregistered
     assert!(!registry.is_actor_activated(&actor_id).await);
     assert!(registry.lookup_actor(&actor_id).await.is_none());
@@ -242,15 +307,17 @@ async fn test_unregister_actor_removes_message_sender() {
 async fn test_is_actor_activated_checks_message_sender() {
     let registry = create_test_registry().await;
     let actor_id: ActorId = "test-actor@test-node".to_string();
-    
+
     // Initially not activated
     assert!(!registry.is_actor_activated(&actor_id).await);
-    
+
     // Register actor
     let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
     let ctx = create_test_context();
-    registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None, None).await;
-    
+    registry
+        .register_actor(&ctx, actor_id.clone(), sender, None, None, None, None)
+        .await;
+
     // Now activated
     assert!(registry.is_actor_activated(&actor_id).await);
 }
@@ -258,19 +325,25 @@ async fn test_is_actor_activated_checks_message_sender() {
 #[tokio::test]
 async fn test_multiple_actors_registration() {
     let registry = create_test_registry().await;
-    
+
     // Register multiple actors
     for i in 0..10 {
         let actor_id: ActorId = format!("actor-{}@test-node", i);
         let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
         let ctx = create_test_context();
-        registry.register_actor(&ctx, actor_id.clone(), sender, None, None, None, None).await;
+        registry
+            .register_actor(&ctx, actor_id.clone(), sender, None, None, None, None)
+            .await;
     }
-    
+
     // Verify all are registered
     for i in 0..10 {
         let actor_id: ActorId = format!("actor-{}@test-node", i);
-        assert!(registry.is_actor_activated(&actor_id).await, "Actor {} should be activated", i);
+        assert!(
+            registry.is_actor_activated(&actor_id).await,
+            "Actor {} should be activated",
+            i
+        );
     }
 }
 
@@ -318,12 +391,55 @@ async fn test_leader_election_discover_actors_by_namespace() {
     let found1 = registry.discover_actors_by_type(&ctx1, &actor_type).await;
     let found2 = registry.discover_actors_by_type(&ctx2, &actor_type).await;
 
-    assert_eq!(found1.len(), 1, "namespace term1 must resolve to exactly one actor");
-    assert_eq!(found2.len(), 1, "namespace term2 must resolve to exactly one actor");
+    assert_eq!(
+        found1.len(),
+        1,
+        "namespace term1 must resolve to exactly one actor"
+    );
+    assert_eq!(
+        found2.len(),
+        1,
+        "namespace term2 must resolve to exactly one actor"
+    );
     assert_ne!(
         found1[0], found2[0],
         "term1 and term2 must resolve to different actors (leader-election routing)"
     );
     assert_eq!(found1[0], actor_id1);
     assert_eq!(found2[0], actor_id2);
+}
+
+#[tokio::test]
+async fn test_register_actor_deduplicates_actor_type_index_entries() {
+    let registry = create_test_registry().await;
+    let ctx = create_test_context();
+    let actor_type = "leader".to_string();
+    let actor_id: ActorId = "01TEST//leader::test@test-node".to_string();
+    let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
+
+    registry
+        .register_actor(
+            &ctx,
+            actor_id.clone(),
+            sender.clone(),
+            Some(actor_type.clone()),
+            None,
+            None,
+            None,
+        )
+        .await;
+    registry
+        .register_actor(
+            &ctx,
+            actor_id.clone(),
+            sender,
+            Some(actor_type.clone()),
+            None,
+            None,
+            None,
+        )
+        .await;
+
+    let discovered = registry.discover_actors_by_type(&ctx, &actor_type).await;
+    assert_eq!(discovered, vec![actor_id]);
 }

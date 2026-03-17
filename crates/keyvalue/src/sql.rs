@@ -137,11 +137,11 @@ impl SqliteKVStore {
         let url = if path == ":memory:" {
             "sqlite::memory:".to_string()
         } else if path.starts_with('/') {
-            format!("sqlite://{}?mode=rwc", path)  // sqlite:// + /path = sqlite:///path
+            format!("sqlite://{}?mode=rwc", path) // sqlite:// + /path = sqlite:///path
         } else {
-            format!("sqlite:{}?mode=rwc", path)  // mode=rwc creates file if not exists
+            format!("sqlite:{}?mode=rwc", path) // mode=rwc creates file if not exists
         };
-        
+
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(5)
             .connect(&url)
@@ -387,7 +387,11 @@ impl KeyValueStore for SqliteKVStore {
         Ok(rows.into_iter().map(|row| row.get("key")).collect())
     }
 
-    async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>> {
+    async fn multi_get(
+        &self,
+        ctx: &RequestContext,
+        keys: &[&str],
+    ) -> KVResult<Vec<Option<Vec<u8>>>> {
         let mut results = Vec::with_capacity(keys.len());
         for key in keys {
             results.push(self.get(ctx, key).await?);
@@ -436,7 +440,13 @@ impl KeyValueStore for SqliteKVStore {
         Ok(())
     }
 
-    async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, ttl: Duration) -> KVResult<()> {
+    async fn put_with_ttl(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        value: Vec<u8>,
+        ttl: Duration,
+    ) -> KVResult<()> {
         let now = Self::now_timestamp();
         let expires_at = Self::expiry_from_ttl(ttl);
 
@@ -690,7 +700,11 @@ impl KeyValueStore for SqliteKVStore {
         Ok(rx)
     }
 
-    async fn watch_prefix(&self, _ctx: &RequestContext, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch_prefix(
+        &self,
+        _ctx: &RequestContext,
+        prefix: &str,
+    ) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: prefix.to_string(),
@@ -707,12 +721,14 @@ impl KeyValueStore for SqliteKVStore {
     async fn clear_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<usize> {
         let pattern = format!("{}%", prefix);
 
-        let result = sqlx::query("DELETE FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key LIKE ?")
-            .bind(ctx.tenant_id())
-            .bind(ctx.namespace())
-            .bind(pattern)
-            .execute(&self.pool)
-            .await?;
+        let result = sqlx::query(
+            "DELETE FROM kv_store WHERE tenant_id = ? AND namespace = ? AND key LIKE ?",
+        )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(pattern)
+        .execute(&self.pool)
+        .await?;
 
         Ok(result.rows_affected() as usize)
     }
@@ -827,7 +843,7 @@ impl PostgreSQLKVStore {
             .last()
             .unwrap_or("(hidden)")
             .to_string();
-        
+
         tracing::info!(
             db_url = %format!("postgres://...@{}", display_url),
             table = "kv_store",
@@ -1024,7 +1040,11 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(rows.into_iter().map(|row| row.get("key")).collect())
     }
 
-    async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>> {
+    async fn multi_get(
+        &self,
+        ctx: &RequestContext,
+        keys: &[&str],
+    ) -> KVResult<Vec<Option<Vec<u8>>>> {
         let mut results = Vec::with_capacity(keys.len());
         for key in keys {
             results.push(self.get(ctx, key).await?);
@@ -1072,7 +1092,13 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(())
     }
 
-    async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, ttl: Duration) -> KVResult<()> {
+    async fn put_with_ttl(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        value: Vec<u8>,
+        ttl: Duration,
+    ) -> KVResult<()> {
         let now = Self::now_timestamp();
         let expires_at = Self::expiry_from_ttl(ttl);
         let old_value = self.get(ctx, key).await?;
@@ -1325,7 +1351,11 @@ impl KeyValueStore for PostgreSQLKVStore {
         Ok(rx)
     }
 
-    async fn watch_prefix(&self, _ctx: &RequestContext, prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch_prefix(
+        &self,
+        _ctx: &RequestContext,
+        prefix: &str,
+    ) -> KVResult<mpsc::Receiver<KVEvent>> {
         let (tx, rx) = mpsc::channel(100);
         let watch = Watch {
             pattern: prefix.to_string(),
@@ -1342,12 +1372,14 @@ impl KeyValueStore for PostgreSQLKVStore {
     async fn clear_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<usize> {
         let pattern = format!("{}%", prefix);
 
-        let result = sqlx::query("DELETE FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key LIKE $3")
-            .bind(ctx.tenant_id())
-            .bind(ctx.namespace())
-            .bind(pattern)
-            .execute(&self.pool)
-            .await?;
+        let result = sqlx::query(
+            "DELETE FROM kv_store WHERE tenant_id = $1 AND namespace = $2 AND key LIKE $3",
+        )
+        .bind(ctx.tenant_id())
+        .bind(ctx.namespace())
+        .bind(pattern)
+        .execute(&self.pool)
+        .await?;
 
         Ok(result.rows_affected() as usize)
     }
@@ -1423,7 +1455,10 @@ mod tests {
     use super::*;
 
     fn test_ctx() -> RequestContext {
-        plexspaces_common::RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string())
+        plexspaces_common::RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        )
     }
 
     #[tokio::test]
@@ -1456,13 +1491,22 @@ mod tests {
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Each tenant should see their own value
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
 
         // Delete from tenant1 should not affect tenant2
         kv.delete(&ctx1, "key1").await.unwrap();
         assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), None);
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 
     #[tokio::test]
@@ -1476,8 +1520,14 @@ mod tests {
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Each namespace should see their own value
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 
     #[tokio::test]
@@ -1493,23 +1543,35 @@ mod tests {
 
         // Should exist immediately - use get() to verify it was actually stored
         let value = kv.get(&ctx, "key").await.unwrap();
-        assert!(value.is_some(), "Key should exist immediately after put_with_ttl");
+        assert!(
+            value.is_some(),
+            "Key should exist immediately after put_with_ttl"
+        );
         assert_eq!(value.unwrap(), b"value".to_vec());
-        
+
         // Also verify exists() works
-        assert!(kv.exists(&ctx, "key").await.unwrap(), "exists() should return true for key with TTL");
+        assert!(
+            kv.exists(&ctx, "key").await.unwrap(),
+            "exists() should return true for key with TTL"
+        );
 
         // Check TTL - should be approximately the duration we set (within 100ms tolerance for timing)
         let ttl = kv.get_ttl(&ctx, "key").await.unwrap();
         assert!(ttl.is_some(), "TTL should be set");
         let ttl_value = ttl.unwrap();
         // TTL should be close to what we set (within 100ms tolerance for timing variations)
-        assert!(ttl_value <= ttl_duration + Duration::from_millis(100), 
-            "TTL should be <= set duration + tolerance, got {:?} but expected <= {:?}", 
-            ttl_value, ttl_duration + Duration::from_millis(100));
-        assert!(ttl_value >= ttl_duration - Duration::from_millis(100), 
-            "TTL should be >= set duration - tolerance, got {:?} but expected >= {:?}", 
-            ttl_value, ttl_duration - Duration::from_millis(100));
+        assert!(
+            ttl_value <= ttl_duration + Duration::from_millis(100),
+            "TTL should be <= set duration + tolerance, got {:?} but expected <= {:?}",
+            ttl_value,
+            ttl_duration + Duration::from_millis(100)
+        );
+        assert!(
+            ttl_value >= ttl_duration - Duration::from_millis(100),
+            "TTL should be >= set duration - tolerance, got {:?} but expected >= {:?}",
+            ttl_value,
+            ttl_duration - Duration::from_millis(100)
+        );
 
         // Poll until expiry instead of fixed sleep
         // This is more reliable than fixed timing
@@ -1589,67 +1651,90 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite_admin_internal_empty_namespace_lookup() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
-        
+
         // Create data in different namespaces
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
         let ctx2 = RequestContext::new_without_auth("tenant1".to_string(), "ns2".to_string());
-        
+
         kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
-        
+
         // Admin context with empty namespace should see both
-        let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
-            .with_admin(true);
-        assert!(admin_ctx.should_skip_namespace_filter(), "Admin context should skip namespace filter");
+        let admin_ctx =
+            RequestContext::new_without_auth("tenant1".to_string(), String::new()).with_admin(true);
+        assert!(
+            admin_ctx.should_skip_namespace_filter(),
+            "Admin context should skip namespace filter"
+        );
         let value = kv.get(&admin_ctx, "key1").await.unwrap();
         assert!(value.is_some(), "Admin should find key across namespaces");
-        
+
         // Internal context with empty namespace should see both
-        let internal_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
-            .with_admin(true);
-        assert!(internal_ctx.should_skip_namespace_filter(), "Internal context should skip namespace filter");
+        let internal_ctx =
+            RequestContext::new_without_auth("tenant1".to_string(), String::new()).with_admin(true);
+        assert!(
+            internal_ctx.should_skip_namespace_filter(),
+            "Internal context should skip namespace filter"
+        );
         let value = kv.get(&internal_ctx, "key1").await.unwrap();
-        assert!(value.is_some(), "Internal should find key across namespaces");
-        
+        assert!(
+            value.is_some(),
+            "Internal should find key across namespaces"
+        );
+
         // List should return keys from all namespaces
         let keys = kv.list(&admin_ctx, "").await.unwrap();
-        assert!(keys.len() >= 1, "Admin list should return keys from all namespaces");
-        
+        assert!(
+            keys.len() >= 1,
+            "Admin list should return keys from all namespaces"
+        );
+
         // Stats should count all namespaces
         let stats = kv.get_stats(&admin_ctx).await.unwrap();
-        assert!(stats.total_keys >= 2, "Admin stats should count all namespaces");
+        assert!(
+            stats.total_keys >= 2,
+            "Admin stats should count all namespaces"
+        );
     }
 
     #[tokio::test]
     async fn test_sqlite_admin_internal_empty_namespace_exists() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
-        
+
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
         kv.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
-        
-        let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
-            .with_admin(true);
-        assert!(kv.exists(&admin_ctx, "key1").await.unwrap(), "Admin should find key across namespaces");
-        
-        let internal_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
-            .with_admin(true);
-        assert!(kv.exists(&internal_ctx, "key1").await.unwrap(), "Internal should find key across namespaces");
+
+        let admin_ctx =
+            RequestContext::new_without_auth("tenant1".to_string(), String::new()).with_admin(true);
+        assert!(
+            kv.exists(&admin_ctx, "key1").await.unwrap(),
+            "Admin should find key across namespaces"
+        );
+
+        let internal_ctx =
+            RequestContext::new_without_auth("tenant1".to_string(), String::new()).with_admin(true);
+        assert!(
+            kv.exists(&internal_ctx, "key1").await.unwrap(),
+            "Internal should find key across namespaces"
+        );
     }
 
     #[tokio::test]
     async fn test_sqlite_admin_internal_empty_namespace_get_ttl() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
-        
+
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
-        kv.put_with_ttl(&ctx1, "key1", b"value1".to_vec(), Duration::from_secs(60)).await.unwrap();
-        
-        let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
-            .with_admin(true);
+        kv.put_with_ttl(&ctx1, "key1", b"value1".to_vec(), Duration::from_secs(60))
+            .await
+            .unwrap();
+
+        let admin_ctx =
+            RequestContext::new_without_auth("tenant1".to_string(), String::new()).with_admin(true);
         let ttl = kv.get_ttl(&admin_ctx, "key1").await.unwrap();
         assert!(ttl.is_some(), "Admin should get TTL across namespaces");
-        
-        let internal_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
-            .with_admin(true);
+
+        let internal_ctx =
+            RequestContext::new_without_auth("tenant1".to_string(), String::new()).with_admin(true);
         let ttl = kv.get_ttl(&internal_ctx, "key1").await.unwrap();
         assert!(ttl.is_some(), "Internal should get TTL across namespaces");
     }
@@ -1657,21 +1742,31 @@ mod tests {
     #[tokio::test]
     async fn test_sqlite_admin_internal_empty_namespace_count_prefix() {
         let kv = SqliteKVStore::new(":memory:").await.unwrap();
-        
+
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
         let ctx2 = RequestContext::new_without_auth("tenant1".to_string(), "ns2".to_string());
-        
-        kv.put(&ctx1, "prefix:key1", b"value1".to_vec()).await.unwrap();
-        kv.put(&ctx2, "prefix:key2", b"value2".to_vec()).await.unwrap();
-        
-        let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
-            .with_admin(true);
+
+        kv.put(&ctx1, "prefix:key1", b"value1".to_vec())
+            .await
+            .unwrap();
+        kv.put(&ctx2, "prefix:key2", b"value2".to_vec())
+            .await
+            .unwrap();
+
+        let admin_ctx =
+            RequestContext::new_without_auth("tenant1".to_string(), String::new()).with_admin(true);
         let count = kv.count_prefix(&admin_ctx, "prefix:").await.unwrap();
-        assert!(count >= 2, "Admin count_prefix should count across all namespaces");
-        
-        let internal_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
-            .with_admin(true);
+        assert!(
+            count >= 2,
+            "Admin count_prefix should count across all namespaces"
+        );
+
+        let internal_ctx =
+            RequestContext::new_without_auth("tenant1".to_string(), String::new()).with_admin(true);
         let count = kv.count_prefix(&internal_ctx, "prefix:").await.unwrap();
-        assert!(count >= 2, "Internal count_prefix should count across all namespaces");
+        assert!(
+            count >= 2,
+            "Internal count_prefix should count across all namespaces"
+        );
     }
 }

@@ -27,33 +27,34 @@ mod security;
 async fn test_generate_mtls_certificates() {
     let temp_dir = TempDir::new().unwrap();
     let cert_dir = temp_dir.path();
-    
+
     // Test certificate generation
     let result = security::generate_mtls_certificates(
         Some(cert_dir.to_path_buf()),
         Some("Test CA".to_string()),
         Some("Test Server".to_string()),
         Some(90),
-    ).await;
-    
+    )
+    .await;
+
     assert!(result.is_ok(), "Certificate generation should succeed");
-    
+
     // Verify certificates were created
     let ca_cert = cert_dir.join("ca.crt");
     let ca_key = cert_dir.join("ca.key");
     let server_cert = cert_dir.join("server.crt");
     let server_key = cert_dir.join("server.key");
-    
+
     assert!(ca_cert.exists(), "CA certificate should exist");
     assert!(ca_key.exists(), "CA key should exist");
     assert!(server_cert.exists(), "Server certificate should exist");
     assert!(server_key.exists(), "Server key should exist");
-    
+
     // Verify certificates are valid PEM
     let ca_cert_content = std::fs::read_to_string(&ca_cert).unwrap();
     assert!(ca_cert_content.contains("BEGIN CERTIFICATE"));
     assert!(ca_cert_content.contains("END CERTIFICATE"));
-    
+
     let server_cert_content = std::fs::read_to_string(&server_cert).unwrap();
     assert!(server_cert_content.contains("BEGIN CERTIFICATE"));
     assert!(server_cert_content.contains("END CERTIFICATE"));
@@ -63,7 +64,7 @@ async fn test_generate_mtls_certificates() {
 async fn test_generate_release_config() {
     let temp_dir = TempDir::new().unwrap();
     let output_path = temp_dir.path().join("test-release.yaml");
-    
+
     // Test release config generation
     let result = security::generate_release_config(
         Some(output_path.clone()),
@@ -71,13 +72,14 @@ async fn test_generate_release_config() {
         Some("1.0.0".to_string()),
         Some("test-node".to_string()),
         Some("0.0.0.0:8000".to_string()),
-    ).await;
-    
+    )
+    .await;
+
     assert!(result.is_ok(), "Release config generation should succeed");
-    
+
     // Verify file was created
     assert!(output_path.exists(), "Release config file should exist");
-    
+
     // Verify content
     let content = std::fs::read_to_string(&output_path).unwrap();
     assert!(content.contains("name: test-cluster"));

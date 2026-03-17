@@ -37,13 +37,13 @@ use tonic::transport::Server;
 
 /// Minimal valid WASM module (exports "test" function returning i32)
 const SIMPLE_WASM: &[u8] = &[
-    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
-    0x03, 0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x00, 0x0a,
-    0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b,
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+    0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x00, 0x0a, 0x06, 0x01,
+    0x04, 0x00, 0x41, 0x2a, 0x0b,
 ];
 
 /// Start gRPC server on random port, return port and server handle
-/// 
+///
 /// NOTE: This uses localhost (127.0.0.1) only - no external network access required.
 /// The server runs entirely locally and does not require SSL or external connectivity.
 async fn start_grpc_server() -> (u16, tokio::task::JoinHandle<()>) {
@@ -52,9 +52,7 @@ async fn start_grpc_server() -> (u16, tokio::task::JoinHandle<()>) {
     let service = WasmRuntimeServiceImpl::new(Arc::new(runtime));
 
     // Bind to localhost on random port (no external network access required)
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let port = addr.port();
 
@@ -300,7 +298,11 @@ async fn test_grpc_instantiate_actor_missing_module() {
         target_node_id: String::new(),
     });
 
-    let response = client.instantiate_actor(request).await.unwrap().into_inner();
+    let response = client
+        .instantiate_actor(request)
+        .await
+        .unwrap()
+        .into_inner();
 
     // Verify error response
     assert!(!response.success, "Should fail for missing module");
@@ -390,8 +392,7 @@ async fn test_grpc_concurrent_deployments() {
         assert!(
             response.success,
             "Deployment {} should succeed: {:?}",
-            i,
-            response.error
+            i, response.error
         );
         assert_eq!(response.module_hash.len(), 64);
     }
@@ -441,5 +442,8 @@ async fn test_grpc_idempotent_deployment() {
     let hash2 = resp2.module_hash;
 
     // Hashes should be identical (content-addressable)
-    assert_eq!(hash1, hash2, "Idempotent deployment should return same hash");
+    assert_eq!(
+        hash1, hash2,
+        "Idempotent deployment should return same hash"
+    );
 }

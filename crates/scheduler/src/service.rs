@@ -64,14 +64,13 @@ impl SchedulingServiceImpl {
             capacity_tracker,
         }
     }
-    
+
     /// RequestContext for system operations.
     /// NOTE: default_tenant_id and default_namespace have been removed.
     /// For system operations, use empty strings (admin context).
     fn default_context(&self) -> RequestContext {
         RequestContext::new_without_auth(String::new(), String::new()).with_admin(true)
     }
-    
 }
 
 #[tonic::async_trait]
@@ -131,7 +130,6 @@ impl SchedulingService for SchedulingServiceImpl {
             scheduled_at: None,
             completed_at: None,
         };
-
 
         // Store request in state store (PENDING)
         self.state_store
@@ -214,7 +212,9 @@ impl SchedulingService for SchedulingServiceImpl {
             .get_request(&ctx, &req.request_id)
             .await
             .map_err(|e| Status::internal(format!("Failed to get request: {}", e)))?
-            .ok_or_else(|| Status::not_found(format!("Scheduling request {} not found", req.request_id)))?;
+            .ok_or_else(|| {
+                Status::not_found(format!("Scheduling request {} not found", req.request_id))
+            })?;
 
         Ok(Response::new(GetSchedulingStatusResponse {
             request: Some(scheduling_request),
@@ -227,7 +227,7 @@ impl SchedulingService for SchedulingServiceImpl {
     ) -> Result<Response<GetNodeCapacityResponse>, Status> {
         // Create RequestContext for internal operations using default tenant_id/namespace from node config
         let ctx = self.default_context();
-        
+
         // Now consume request
         let req = request.into_inner();
 
@@ -250,7 +250,7 @@ impl SchedulingService for SchedulingServiceImpl {
     ) -> Result<Response<ListNodeCapacitiesResponse>, Status> {
         // Create RequestContext for internal operations using default tenant_id/namespace from node config
         let ctx = self.default_context();
-        
+
         // Now consume request
         let req = request.into_inner();
 
@@ -305,9 +305,7 @@ mod tests {
     use plexspaces_core::ObjectRegistry;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::{
-        actor::v1::ActorResourceRequirements,
-        channel::v1::ChannelConfig,
-        common::v1::ResourceSpec,
+        actor::v1::ActorResourceRequirements, channel::v1::ChannelConfig, common::v1::ResourceSpec,
     };
     use std::sync::Arc;
 
@@ -317,27 +315,30 @@ mod tests {
         Arc<InMemoryChannel>,
     ) {
         let state_store = Arc::new(SqliteSchedulingStateStore::new(":memory:").await.unwrap());
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
 
         let channel_config = ChannelConfig {
             name: "scheduling:requests".to_string(),
-            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory as i32,
+            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory
+                as i32,
             capacity: 100,
-            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
-            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,
+            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce
+                as i32,
+            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo
+                as i32,
             ..Default::default()
         };
-        let channel = Arc::new(
-            futures::executor::block_on(InMemoryChannel::new(channel_config)).unwrap(),
-        );
+        let channel =
+            Arc::new(futures::executor::block_on(InMemoryChannel::new(channel_config)).unwrap());
 
-        let service = SchedulingServiceImpl::new(
-            state_store.clone(),
-            channel.clone(),
-            capacity_tracker,
-        );
+        let service =
+            SchedulingServiceImpl::new(state_store.clone(), channel.clone(), capacity_tracker);
 
         (service, state_store, channel)
     }
@@ -353,7 +354,6 @@ mod tests {
                     cluster: String::new(),
                     node_ids: vec![],
                     required_labels: HashMap::new(),
-                    preferred_node_ids: vec![],
                     avoid_node_ids: vec![],
                     resource_requirements: Some(ResourceSpec {
                         cpu_cores: 1.0,
@@ -363,7 +363,6 @@ mod tests {
                         gpu_type: String::new(),
                     }),
                     affinity_labels: HashMap::new(),
-                    preferred_node_id: String::new(),
                 }),
             }),
             request_id: String::new(),
@@ -371,21 +370,27 @@ mod tests {
 
         // Create request with metadata for tenant/namespace
         let mut request = Request::new(req);
-        request.metadata_mut().insert("x-tenant-id", "test-tenant".parse().unwrap());
-        request.metadata_mut().insert("x-namespace", "default".parse().unwrap());
+        request
+            .metadata_mut()
+            .insert("x-tenant-id", "test-tenant".parse().unwrap());
+        request
+            .metadata_mut()
+            .insert("x-namespace", "default".parse().unwrap());
 
-        let response = service
-            .schedule_actor(request)
-            .await
-            .unwrap()
-            .into_inner();
+        let response = service.schedule_actor(request).await.unwrap().into_inner();
 
-        assert_eq!(response.status, SchedulingStatus::SchedulingStatusPending as i32);
+        assert_eq!(
+            response.status,
+            SchedulingStatus::SchedulingStatusPending as i32
+        );
         assert!(!response.request_id.is_empty());
 
         // Verify request was stored - use node-config defaults
         let ctx = service.default_context();
-        let stored = state_store.get_request(&ctx, &response.request_id).await.unwrap();
+        let stored = state_store
+            .get_request(&ctx, &response.request_id)
+            .await
+            .unwrap();
         assert!(stored.is_some());
         assert_eq!(
             stored.unwrap().status,
@@ -421,7 +426,6 @@ mod tests {
                     cluster: String::new(),
                     node_ids: vec![],
                     required_labels: HashMap::new(),
-                    preferred_node_ids: vec![],
                     avoid_node_ids: vec![],
                     resource_requirements: Some(ResourceSpec {
                         cpu_cores: 1.0,
@@ -431,7 +435,6 @@ mod tests {
                         gpu_type: String::new(),
                     }),
                     affinity_labels: HashMap::new(),
-                    preferred_node_id: String::new(),
                 }),
             }),
             namespace: String::new(), // Empty for test
@@ -447,7 +450,10 @@ mod tests {
 
         // Use node-config defaults for test
         let ctx = service.default_context();
-        state_store.store_request(&ctx, scheduling_request.clone()).await.unwrap();
+        state_store
+            .store_request(&ctx, scheduling_request.clone())
+            .await
+            .unwrap();
 
         // Get status
         let req = GetSchedulingStatusRequest {

@@ -63,19 +63,17 @@ use thiserror::Error;
 
 // Import proto-generated types (Proto-First Design)
 pub use plexspaces_proto::application::v1::{
-    ApplicationSpec, ChildSpec, ChildType, RestartPolicy, ShutdownStrategy,
-    SupervisionStrategy, SupervisorSpec,
+    ApplicationSpec, ChildSpec, ChildType, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
+    SupervisorSpec,
 };
 pub use plexspaces_proto::node::v1::{
-    GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, ReleaseSpec,
-    RuntimeConfig, SecurityConfig, ShutdownConfig,
+    GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, ReleaseSpec, RuntimeConfig,
+    SecurityConfig, ShutdownConfig,
 };
-pub use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
 pub use plexspaces_proto::prost_types;
+pub use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
 
-use security_config_toml::{
-    SecurityConfigToml,
-};
+use security_config_toml::SecurityConfigToml;
 
 /// Release errors
 #[derive(Debug, Error)]
@@ -454,10 +452,10 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             id: toml.node.id,
             listen_addr: toml.node.listen_addr,
             cluster_seed_nodes: toml.node.cluster_seed_nodes,
-            grpc_connection_pool_size: 2, // Default
-            max_connections: 100, // Default
-            heartbeat_interval_ms: 5000, // Default
-            clustering_enabled: true, // Default
+            grpc_connection_pool_size: 2,               // Default
+            max_connections: 100,                       // Default
+            heartbeat_interval_ms: 5000,                // Default
+            clustering_enabled: true,                   // Default
             metadata: std::collections::HashMap::new(), // Default
             node_registry: None,
             grpc_address: String::new(),
@@ -508,20 +506,22 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             .into_iter()
             .map(|app| {
                 let strategy = match app.shutdown_strategy.as_str() {
-                    "immediate" | "brutal_kill" => ShutdownStrategy::ShutdownStrategyImmediate as i32,
+                    "immediate" | "brutal_kill" => {
+                        ShutdownStrategy::ShutdownStrategyImmediate as i32
+                    }
                     _ => ShutdownStrategy::ShutdownStrategyGraceful as i32,
                 };
 
                 ApplicationSpec {
                     name: app.name.clone(),
                     tenant_id: String::new(), // Set during deployment from JWT
-                    namespace: app.name, // Use app name as namespace by default
+                    namespace: app.name,      // Use app name as namespace by default
                     version: app.version,
                     description: String::new(), // Not in TOML
-                    r#type: 0, // APPLICATION_TYPE_UNSPECIFIED
+                    r#type: 0,                  // APPLICATION_TYPE_UNSPECIFIED
                     dependencies: app.dependencies,
                     env: std::collections::HashMap::new(), // Not in TOML
-                    supervisor: None, // Not in TOML
+                    supervisor: None,                      // Not in TOML
                     enabled: app.enabled,
                     auto_start: app.auto_start,
                     shutdown_timeout: Some(prost_types::Duration {
@@ -530,6 +530,7 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
                     }),
                     shutdown_strategy: strategy,
                     metadata: None, // Not in TOML
+                    seed_nodes: vec![],
                 }
             })
             .collect(),
@@ -592,10 +593,7 @@ fn convert_security_config(
             service_id: si.service_id.clone(),
             certificate,
             private_key,
-            expires_at: si
-                .expires_at
-                .as_ref()
-                .and_then(|s| parse_timestamp(s).ok()),
+            expires_at: si.expires_at.as_ref().and_then(|s| parse_timestamp(s).ok()),
             allowed_services: si.allowed_services.clone(),
         });
     }
@@ -616,16 +614,16 @@ fn convert_security_config(
         security.mtls = Some(MtlsConfig {
             enable_mtls: mtls.enable_mtls,
             ca_certificate_path: ca_cert,
-            server_certificate_path: String::new(),  // Not in TOML
-            server_key_path: String::new(),  // Not in TOML
-            auto_generate: false,  // Not in TOML
-            cert_dir: "/app/certs".to_string(),  // Default
-            certificate_rotation_interval: mtls
-                .certificate_rotation_interval_seconds
-                .map(|s| prost_types::Duration {
+            server_certificate_path: String::new(), // Not in TOML
+            server_key_path: String::new(),         // Not in TOML
+            auto_generate: false,                   // Not in TOML
+            cert_dir: "/app/certs".to_string(),     // Default
+            certificate_rotation_interval: mtls.certificate_rotation_interval_seconds.map(|s| {
+                prost_types::Duration {
                     seconds: s as i64,
                     nanos: 0,
-                }),
+                }
+            }),
             trusted_services: mtls.trusted_services.clone(),
         });
     }
@@ -644,9 +642,9 @@ fn convert_security_config(
                 seconds: s as i64,
                 nanos: 0,
             }),
-            refresh_token_ttl: None,  // Not in TOML
-            tenant_id_claim: "tenant_id".to_string(),  // Default
-            user_id_claim: "sub".to_string(),  // Default
+            refresh_token_ttl: None,                  // Not in TOML
+            tenant_id_claim: "tenant_id".to_string(), // Default
+            user_id_claim: "sub".to_string(),         // Default
         });
     }
 
@@ -828,7 +826,11 @@ mod tests {
         assert_eq!(release.spec().applications.len(), 2);
         assert_eq!(release.spec().applications[0].name, "app1");
         assert_eq!(
-            release.spec().applications[0].shutdown_timeout.as_ref().map(|d| d.seconds).unwrap_or(0),
+            release.spec().applications[0]
+                .shutdown_timeout
+                .as_ref()
+                .map(|d| d.seconds)
+                .unwrap_or(0),
             30
         );
         assert_eq!(
@@ -1031,7 +1033,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
-            cluster_name: String::new(),
+                cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1072,9 +1074,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
@@ -1088,9 +1094,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1169,7 +1179,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
-            cluster_name: String::new(),
+                cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1210,9 +1220,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
@@ -1226,9 +1240,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1242,9 +1260,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1272,7 +1294,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
-            cluster_name: String::new(),
+                cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1313,9 +1335,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
@@ -1329,9 +1355,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1345,9 +1375,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
                 ApplicationSpec {
                     name: "app-c".to_string(),
@@ -1361,9 +1395,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1393,7 +1431,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
-            cluster_name: String::new(),
+                cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1434,9 +1472,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1450,9 +1492,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1480,7 +1526,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
-            cluster_name: String::new(),
+                cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1520,9 +1566,13 @@ mod tests {
                 supervisor: None,
                 enabled: true,
                 auto_start: true,
-                shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                shutdown_timeout: Some(prost_types::Duration {
+                    seconds: 30,
+                    nanos: 0,
+                }),
                 shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                 metadata: None,
+                seed_nodes: vec![],
             }],
             env: std::collections::HashMap::new(),
             shutdown: None,
@@ -1554,7 +1604,7 @@ mod tests {
             version: "1.0.0".to_string(),
             description: "Test".to_string(),
             node: Some(NodeConfig {
-            cluster_name: String::new(),
+                cluster_name: String::new(),
                 id: "node1".to_string(),
                 listen_addr: "0.0.0.0:9001".to_string(),
                 cluster_seed_nodes: vec![],
@@ -1595,9 +1645,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1611,9 +1665,13 @@ mod tests {
                     supervisor: None,
                     enabled: true,
                     auto_start: true,
-                    shutdown_timeout: Some(prost_types::Duration { seconds: 30, nanos: 0 }),
+                    shutdown_timeout: Some(prost_types::Duration {
+                        seconds: 30,
+                        nanos: 0,
+                    }),
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
+                    seed_nodes: vec![],
                 },
             ],
             env: std::collections::HashMap::new(),

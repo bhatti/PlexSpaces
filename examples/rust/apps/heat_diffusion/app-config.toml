@@ -1,0 +1,23 @@
+name = "heat-diffusion-rust"
+version = "1.0.0"
+namespace = "heat-diffusion-rust"
+seed_nodes = ["localhost:8091", "localhost:8093"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "leader"
+type = "leader"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "leader" }
+
+[[supervisor.children]]
+id = "worker"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "worker" }

@@ -21,9 +21,8 @@
 #[cfg(test)]
 mod tests {
     use plexspaces_proto::security::v1::{
-        ServiceIdentity, MtlsConfig, JwtConfig, ApiKey,
-        AuthenticateServiceRequest, AuthenticateServiceResponse,
-        AuthenticateApiRequest, AuthenticateApiResponse,
+        ApiKey, AuthenticateApiRequest, AuthenticateApiResponse, AuthenticateServiceRequest,
+        AuthenticateServiceResponse, JwtConfig, MtlsConfig, ServiceIdentity,
     };
     use prost_types::Timestamp;
 
@@ -133,7 +132,10 @@ mod tests {
             service_id: "actor-service".to_string(),
             certificate: b"cert".to_vec(),
             private_key: b"key".to_vec(),
-            expires_at: Some(Timestamp { seconds: 1735689600, nanos: 0 }),
+            expires_at: Some(Timestamp {
+                seconds: 1735689600,
+                nanos: 0,
+            }),
             allowed_services: vec![],
         };
 
@@ -175,4 +177,3 @@ mod tests {
         assert_eq!(response.scopes.len(), 2);
     }
 }
-

@@ -367,7 +367,7 @@ impl ExponentialBackoff {
         let mut rng = rand::thread_rng();
         let min_sleep = self.base.as_millis() as u64;
         let max_sleep = (self.current.as_millis() as u64).saturating_mul(3);
-        
+
         let jittered = if max_sleep > min_sleep {
             rng.gen_range(min_sleep..=max_sleep)
         } else {
@@ -531,10 +531,9 @@ impl SwimConfig {
     #[inline]
     pub fn suspicion_timeout(&self, cluster_size: usize) -> Duration {
         let log_n = ((cluster_size + 1) as f64).ln().max(1.0);
-        let timeout_ms = self.suspicion_mult as f64 
-            * log_n 
-            * self.protocol_period.as_millis() as f64;
-        
+        let timeout_ms =
+            self.suspicion_mult as f64 * log_n * self.protocol_period.as_millis() as f64;
+
         Duration::from_millis(timeout_ms as u64)
             .max(self.suspicion_min)
             .min(self.suspicion_max)
@@ -600,20 +599,28 @@ impl SwimStats {
     /// Report all stats to metrics
     pub fn report_metrics(&self) {
         metrics::gauge!(METRIC_DIRECT_PINGS).set(self.direct_pings.load(Ordering::Relaxed) as f64);
-        metrics::gauge!(METRIC_DIRECT_PING_SUCCESS).set(self.direct_ping_success.load(Ordering::Relaxed) as f64);
-        metrics::gauge!(METRIC_DIRECT_PING_FAILED).set(self.direct_ping_failed.load(Ordering::Relaxed) as f64);
-        metrics::gauge!(METRIC_INDIRECT_PINGS).set(self.indirect_pings.load(Ordering::Relaxed) as f64);
-        metrics::gauge!(METRIC_INDIRECT_PING_SUCCESS).set(self.indirect_ping_success.load(Ordering::Relaxed) as f64);
-        metrics::gauge!(METRIC_INDIRECT_PING_FAILED).set(self.indirect_ping_failed.load(Ordering::Relaxed) as f64);
+        metrics::gauge!(METRIC_DIRECT_PING_SUCCESS)
+            .set(self.direct_ping_success.load(Ordering::Relaxed) as f64);
+        metrics::gauge!(METRIC_DIRECT_PING_FAILED)
+            .set(self.direct_ping_failed.load(Ordering::Relaxed) as f64);
+        metrics::gauge!(METRIC_INDIRECT_PINGS)
+            .set(self.indirect_pings.load(Ordering::Relaxed) as f64);
+        metrics::gauge!(METRIC_INDIRECT_PING_SUCCESS)
+            .set(self.indirect_ping_success.load(Ordering::Relaxed) as f64);
+        metrics::gauge!(METRIC_INDIRECT_PING_FAILED)
+            .set(self.indirect_ping_failed.load(Ordering::Relaxed) as f64);
         metrics::gauge!(METRIC_SUSPICIONS).set(self.suspicions.load(Ordering::Relaxed) as f64);
         metrics::gauge!(METRIC_DEATHS).set(self.deaths.load(Ordering::Relaxed) as f64);
         metrics::gauge!(METRIC_JOINS).set(self.joins.load(Ordering::Relaxed) as f64);
         metrics::gauge!(METRIC_LEAVES).set(self.leaves.load(Ordering::Relaxed) as f64);
         metrics::gauge!(METRIC_REAPS).set(self.reaps.load(Ordering::Relaxed) as f64);
         metrics::gauge!(METRIC_REFUTATIONS).set(self.refutations.load(Ordering::Relaxed) as f64);
-        metrics::gauge!(METRIC_UPDATES_BROADCAST).set(self.updates_broadcast.load(Ordering::Relaxed) as f64);
-        metrics::gauge!(METRIC_UPDATES_RECEIVED).set(self.updates_received.load(Ordering::Relaxed) as f64);
-        metrics::gauge!(METRIC_ANTI_ENTROPY_SYNCS).set(self.anti_entropy_syncs.load(Ordering::Relaxed) as f64);
+        metrics::gauge!(METRIC_UPDATES_BROADCAST)
+            .set(self.updates_broadcast.load(Ordering::Relaxed) as f64);
+        metrics::gauge!(METRIC_UPDATES_RECEIVED)
+            .set(self.updates_received.load(Ordering::Relaxed) as f64);
+        metrics::gauge!(METRIC_ANTI_ENTROPY_SYNCS)
+            .set(self.anti_entropy_syncs.load(Ordering::Relaxed) as f64);
     }
 
     /// Get snapshot of current stats
@@ -762,10 +769,10 @@ impl SwimProtocol {
     pub async fn upsert_member(&self, member: SwimMember) {
         let should_queue_update;
         let update_data;
-        
+
         {
             let mut members = self.members.write().await;
-            
+
             if let Some(existing) = members.get_mut(&member.node_id) {
                 // Only update if new info has higher incarnation
                 if member.incarnation > existing.incarnation {
@@ -776,7 +783,12 @@ impl SwimProtocol {
                     );
                     *existing = member.clone();
                     should_queue_update = true;
-                    update_data = Some((member.node_id.clone(), member.state, member.incarnation, member.address.clone()));
+                    update_data = Some((
+                        member.node_id.clone(),
+                        member.state,
+                        member.incarnation,
+                        member.address.clone(),
+                    ));
                 } else {
                     should_queue_update = false;
                     update_data = None;
@@ -790,9 +802,14 @@ impl SwimProtocol {
                 );
                 self.stats.joins.fetch_add(1, Ordering::Relaxed);
                 metrics::counter!(METRIC_JOINS).increment(1);
-                
+
                 should_queue_update = true;
-                update_data = Some((member.node_id.clone(), member.state, member.incarnation, member.address.clone()));
+                update_data = Some((
+                    member.node_id.clone(),
+                    member.state,
+                    member.incarnation,
+                    member.address.clone(),
+                ));
                 members.insert(member.node_id.clone(), member);
             }
 
@@ -800,15 +817,14 @@ impl SwimProtocol {
             let member_count = members.len();
             metrics::gauge!(METRIC_MEMBERS_TOTAL).set(member_count as f64);
         }
-        
+
         // Queue update outside the lock
         if should_queue_update {
             if let Some((node_id, state, incarnation, address)) = update_data {
-                self.queue_update(MembershipUpdate::new(
-                    node_id,
-                    state,
-                    incarnation,
-                ).with_address(address)).await;
+                self.queue_update(
+                    MembershipUpdate::new(node_id, state, incarnation).with_address(address),
+                )
+                .await;
             }
         }
     }
@@ -822,7 +838,8 @@ impl SwimProtocol {
     /// Get all alive members
     pub async fn alive_members(&self) -> Vec<SwimMember> {
         let members = self.members.read().await;
-        members.values()
+        members
+            .values()
             .filter(|m| m.state == NodeState::Alive)
             .cloned()
             .collect()
@@ -831,7 +848,8 @@ impl SwimProtocol {
     /// Get all active members (alive or suspect)
     pub async fn active_members(&self) -> Vec<SwimMember> {
         let members = self.members.read().await;
-        members.values()
+        members
+            .values()
             .filter(|m| m.state.is_active())
             .cloned()
             .collect()
@@ -851,7 +869,7 @@ impl SwimProtocol {
         counts.insert(NodeState::Suspect, 0);
         counts.insert(NodeState::Dead, 0);
         counts.insert(NodeState::Left, 0);
-        
+
         for member in members.values() {
             *counts.entry(member.state).or_insert(0) += 1;
         }
@@ -867,10 +885,10 @@ impl SwimProtocol {
                 member.state = NodeState::Suspect;
                 member.state_changed_at = Instant::now();
                 debug!("Node moved to suspect state");
-                
+
                 self.stats.suspicions.fetch_add(1, Ordering::Relaxed);
                 metrics::counter!(METRIC_SUSPICIONS).increment(1);
-                
+
                 // Queue update for broadcast
                 let incarnation = member.incarnation;
                 drop(members);
@@ -878,7 +896,8 @@ impl SwimProtocol {
                     node_id.to_string(),
                     NodeState::Suspect,
                     incarnation,
-                )).await;
+                ))
+                .await;
             }
         }
     }
@@ -892,10 +911,10 @@ impl SwimProtocol {
                 info!("Node declared dead");
                 member.state = NodeState::Dead;
                 member.state_changed_at = Instant::now();
-                
+
                 self.stats.deaths.fetch_add(1, Ordering::Relaxed);
                 metrics::counter!(METRIC_DEATHS).increment(1);
-                
+
                 // Queue update for broadcast
                 let incarnation = member.incarnation;
                 drop(members);
@@ -903,7 +922,8 @@ impl SwimProtocol {
                     node_id.to_string(),
                     NodeState::Dead,
                     incarnation,
-                )).await;
+                ))
+                .await;
             }
         }
     }
@@ -912,7 +932,7 @@ impl SwimProtocol {
     #[instrument(skip(self))]
     pub async fn process_alive(&self, node_id: &str, incarnation: u64, address: &str) {
         let mut members = self.members.write().await;
-        
+
         if let Some(member) = members.get_mut(node_id) {
             if member.update_state(NodeState::Alive, incarnation) {
                 member.address = address.to_string();
@@ -924,7 +944,7 @@ impl SwimProtocol {
             let mut member = SwimMember::new(node_id.to_string(), address.to_string());
             member.incarnation = incarnation;
             members.insert(node_id.to_string(), member);
-            
+
             info!("New node joined cluster");
             self.stats.joins.fetch_add(1, Ordering::Relaxed);
             metrics::counter!(METRIC_JOINS).increment(1);
@@ -941,13 +961,17 @@ impl SwimProtocol {
         if node_id == self.local_node_id {
             let new_incarnation = self.increment_incarnation();
             info!(new_incarnation, "Refuting suspicion about self");
-            
-            self.queue_update(MembershipUpdate::new(
-                self.local_node_id.clone(),
-                NodeState::Alive,
-                new_incarnation,
-            ).with_address(self.local_address.clone())).await;
-            
+
+            self.queue_update(
+                MembershipUpdate::new(
+                    self.local_node_id.clone(),
+                    NodeState::Alive,
+                    new_incarnation,
+                )
+                .with_address(self.local_address.clone()),
+            )
+            .await;
+
             return;
         }
 
@@ -963,7 +987,8 @@ impl SwimProtocol {
     /// Select next node to probe (round-robin with randomization)
     pub async fn select_probe_target(&self) -> Option<SwimMember> {
         let members = self.members.read().await;
-        let active: Vec<_> = members.values()
+        let active: Vec<_> = members
+            .values()
             .filter(|m| m.state.is_active() && m.node_id != self.local_node_id)
             .collect();
 
@@ -974,19 +999,20 @@ impl SwimProtocol {
         // Round-robin with some randomization for fairness
         let seq = self.probe_sequence.fetch_add(1, Ordering::Relaxed);
         let idx = (seq as usize) % active.len();
-        
+
         Some(active[idx].clone())
     }
 
     /// Select k random nodes for indirect ping (excluding target and self)
     pub async fn select_indirect_targets(&self, exclude_node_id: &str) -> Vec<SwimMember> {
         use rand::seq::SliceRandom;
-        
+
         let members = self.members.read().await;
-        let mut candidates: Vec<_> = members.values()
+        let mut candidates: Vec<_> = members
+            .values()
             .filter(|m| {
-                m.state == NodeState::Alive 
-                    && m.node_id != self.local_node_id 
+                m.state == NodeState::Alive
+                    && m.node_id != self.local_node_id
                     && m.node_id != exclude_node_id
             })
             .cloned()
@@ -994,8 +1020,9 @@ impl SwimProtocol {
 
         let mut rng = rand::thread_rng();
         candidates.shuffle(&mut rng);
-        
-        candidates.into_iter()
+
+        candidates
+            .into_iter()
             .take(self.config.indirect_ping_nodes)
             .collect()
     }
@@ -1009,8 +1036,8 @@ impl SwimProtocol {
         let mut to_declare_dead = Vec::new();
 
         for member in members.values() {
-            if member.state == NodeState::Suspect 
-                && member.state_changed_at.elapsed() > suspicion_timeout 
+            if member.state == NodeState::Suspect
+                && member.state_changed_at.elapsed() > suspicion_timeout
             {
                 to_declare_dead.push(member.node_id.clone());
             }
@@ -1027,9 +1054,9 @@ impl SwimProtocol {
     pub async fn reap_dead_nodes(&self) {
         let mut members = self.members.write().await;
         let before = members.len();
-        
+
         members.retain(|_, member| !member.should_reap(self.config.dead_node_reap_timeout));
-        
+
         let reaped = before - members.len();
         if reaped > 0 {
             info!(reaped, "Reaped dead nodes from membership");
@@ -1041,7 +1068,7 @@ impl SwimProtocol {
     /// Queue a membership update for piggybacking
     async fn queue_update(&self, update: MembershipUpdate) {
         let mut queue = self.updates_queue.write().await;
-        
+
         // Check if we already have an update for this node
         if let Some(existing) = queue.iter_mut().find(|u| u.node_id == update.node_id) {
             // Only replace if newer incarnation or more recent
@@ -1063,10 +1090,11 @@ impl SwimProtocol {
     pub async fn get_piggyback_updates(&self) -> Vec<MembershipUpdate> {
         let cluster_size = self.cluster_size().await;
         let broadcast_limit = self.config.effective_broadcast_limit(cluster_size);
-        
+
         let mut queue = self.updates_queue.write().await;
-        
-        let updates: Vec<_> = queue.iter()
+
+        let updates: Vec<_> = queue
+            .iter()
             .filter(|u| !u.should_drop(broadcast_limit))
             .take(self.config.max_piggyback_updates)
             .cloned()
@@ -1093,11 +1121,13 @@ impl SwimProtocol {
             match update.state {
                 NodeState::Alive => {
                     if let Some(addr) = update.address {
-                        self.process_alive(&update.node_id, update.incarnation, &addr).await;
+                        self.process_alive(&update.node_id, update.incarnation, &addr)
+                            .await;
                     }
                 }
                 NodeState::Suspect => {
-                    self.process_suspect(&update.node_id, update.incarnation).await;
+                    self.process_suspect(&update.node_id, update.incarnation)
+                        .await;
                 }
                 NodeState::Dead => {
                     self.declare_dead(&update.node_id).await;
@@ -1124,14 +1154,14 @@ impl SwimProtocol {
     #[instrument(skip(self, remote_state))]
     pub async fn merge_full_state(&self, remote_state: Vec<SwimMember>) {
         let merged_count = remote_state.len();
-        
+
         for remote_member in remote_state {
             if remote_member.node_id == self.local_node_id {
                 continue; // Skip self
             }
 
             let mut members = self.members.write().await;
-            
+
             if let Some(local_member) = members.get_mut(&remote_member.node_id) {
                 // Higher incarnation wins
                 if remote_member.incarnation > local_member.incarnation {
@@ -1149,7 +1179,9 @@ impl SwimProtocol {
             }
         }
 
-        self.stats.anti_entropy_syncs.fetch_add(1, Ordering::Relaxed);
+        self.stats
+            .anti_entropy_syncs
+            .fetch_add(1, Ordering::Relaxed);
         metrics::counter!(METRIC_ANTI_ENTROPY_SYNCS).increment(1);
         debug!(merged_count, "Merged anti-entropy state");
     }
@@ -1180,10 +1212,14 @@ impl SwimProtocol {
     pub fn record_direct_ping(&self, success: bool, latency: Duration) {
         self.stats.direct_pings.fetch_add(1, Ordering::Relaxed);
         if success {
-            self.stats.direct_ping_success.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .direct_ping_success
+                .fetch_add(1, Ordering::Relaxed);
             metrics::counter!(METRIC_DIRECT_PING_SUCCESS).increment(1);
         } else {
-            self.stats.direct_ping_failed.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .direct_ping_failed
+                .fetch_add(1, Ordering::Relaxed);
             metrics::counter!(METRIC_DIRECT_PING_FAILED).increment(1);
         }
         metrics::histogram!(METRIC_PROBE_LATENCY).record(latency.as_secs_f64());
@@ -1193,10 +1229,14 @@ impl SwimProtocol {
     pub fn record_indirect_ping(&self, success: bool) {
         self.stats.indirect_pings.fetch_add(1, Ordering::Relaxed);
         if success {
-            self.stats.indirect_ping_success.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .indirect_ping_success
+                .fetch_add(1, Ordering::Relaxed);
             metrics::counter!(METRIC_INDIRECT_PING_SUCCESS).increment(1);
         } else {
-            self.stats.indirect_ping_failed.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .indirect_ping_failed
+                .fetch_add(1, Ordering::Relaxed);
             metrics::counter!(METRIC_INDIRECT_PING_FAILED).increment(1);
         }
     }
@@ -1258,7 +1298,7 @@ mod tests {
     fn test_backoff_initial_delay() {
         let mut backoff = ExponentialBackoff::new();
         let delay = backoff.next_backoff().unwrap();
-        
+
         // Should be between base and base*3 due to jitter
         assert!(delay >= Duration::from_millis(100));
         assert!(delay <= Duration::from_millis(300));
@@ -1315,16 +1355,13 @@ mod tests {
 
     #[test]
     fn test_backoff_reset() {
-        let mut backoff = ExponentialBackoff::with_params(
-            Duration::from_millis(100),
-            Duration::from_secs(1),
-            5,
-        );
+        let mut backoff =
+            ExponentialBackoff::with_params(Duration::from_millis(100), Duration::from_secs(1), 5);
 
         backoff.next_backoff();
         backoff.next_backoff();
         backoff.next_backoff();
-        
+
         assert_eq!(backoff.attempts(), 3);
 
         backoff.reset();
@@ -1405,7 +1442,7 @@ mod tests {
     #[test]
     fn test_member_creation() {
         let member = SwimMember::new("node-1".to_string(), "localhost:8001".to_string());
-        
+
         assert_eq!(member.node_id, "node-1");
         assert_eq!(member.address, "localhost:8001");
         assert_eq!(member.state, NodeState::Alive);
@@ -1417,11 +1454,14 @@ mod tests {
     fn test_member_with_metadata() {
         let mut metadata = HashMap::new();
         metadata.insert("cluster".to_string(), "test-cluster".to_string());
-        
+
         let member = SwimMember::new("node-1".to_string(), "localhost:8001".to_string())
             .with_metadata(metadata);
-        
-        assert_eq!(member.metadata.get("cluster"), Some(&"test-cluster".to_string()));
+
+        assert_eq!(
+            member.metadata.get("cluster"),
+            Some(&"test-cluster".to_string())
+        );
     }
 
     #[test]
@@ -1482,7 +1522,7 @@ mod tests {
     #[test]
     fn test_member_should_reap() {
         let mut member = SwimMember::new("node-1".to_string(), "localhost:8001".to_string());
-        
+
         // Alive member should not be reaped
         assert!(!member.should_reap(Duration::from_secs(1)));
 
@@ -1508,11 +1548,11 @@ mod tests {
     #[test]
     fn test_member_probe_failure_count() {
         let mut member = SwimMember::new("node-1".to_string(), "localhost:8001".to_string());
-        
+
         for _ in 0..5 {
             member.record_probe_failure();
         }
-        
+
         assert_eq!(member.failed_probes, 5);
     }
 
@@ -1539,7 +1579,7 @@ mod tests {
     #[test]
     fn test_membership_update_creation() {
         let update = MembershipUpdate::new("node-1".to_string(), NodeState::Alive, 5);
-        
+
         assert_eq!(update.node_id, "node-1");
         assert_eq!(update.state, NodeState::Alive);
         assert_eq!(update.incarnation, 5);
@@ -1551,19 +1591,19 @@ mod tests {
     fn test_membership_update_with_address() {
         let update = MembershipUpdate::new("node-1".to_string(), NodeState::Alive, 5)
             .with_address("localhost:8001".to_string());
-        
+
         assert_eq!(update.address, Some("localhost:8001".to_string()));
     }
 
     #[test]
     fn test_membership_update_should_drop() {
         let mut update = MembershipUpdate::new("node-1".to_string(), NodeState::Alive, 0);
-        
+
         assert!(!update.should_drop(5));
-        
+
         update.broadcast_count = 5;
         assert!(update.should_drop(5));
-        
+
         update.broadcast_count = 4;
         assert!(!update.should_drop(5));
     }
@@ -1612,10 +1652,10 @@ mod tests {
     #[test]
     fn test_config_effective_broadcast_limit() {
         let config = SwimConfig::default();
-        
+
         let limit_10 = config.effective_broadcast_limit(10);
         let limit_100 = config.effective_broadcast_limit(100);
-        
+
         // Larger clusters should have higher broadcast limits
         assert!(limit_100 > limit_10);
     }
@@ -1623,7 +1663,7 @@ mod tests {
     #[test]
     fn test_config_default_values() {
         let config = SwimConfig::default();
-        
+
         assert_eq!(config.protocol_period, Duration::from_secs(1));
         assert_eq!(config.probe_timeout, Duration::from_millis(500));
         assert_eq!(config.indirect_ping_nodes, 3);
@@ -1646,7 +1686,7 @@ mod tests {
         let stats = SwimStats::new();
         stats.direct_pings.store(100, Ordering::Relaxed);
         stats.joins.store(10, Ordering::Relaxed);
-        
+
         let snapshot = stats.snapshot();
         assert_eq!(snapshot.direct_pings, 100);
         assert_eq!(snapshot.joins, 10);
@@ -1655,11 +1695,11 @@ mod tests {
     #[test]
     fn test_stats_atomic_increments() {
         let stats = SwimStats::new();
-        
+
         for _ in 0..100 {
             stats.direct_pings.fetch_add(1, Ordering::Relaxed);
         }
-        
+
         assert_eq!(stats.direct_pings.load(Ordering::Relaxed), 100);
     }
 
@@ -1877,16 +1917,13 @@ mod tests {
 
         // Add multiple members
         for i in 1..=5 {
-            let member = SwimMember::new(
-                format!("node-{}", i),
-                format!("localhost:800{}", i),
-            );
+            let member = SwimMember::new(format!("node-{}", i), format!("localhost:800{}", i));
             protocol.upsert_member(member).await;
         }
 
         // Select indirect targets excluding node-1
         let targets = protocol.select_indirect_targets("node-1").await;
-        
+
         // Should get up to indirect_ping_nodes (default 3)
         assert!(targets.len() <= 3);
         // Should not include node-1 or local-node
@@ -2063,7 +2100,9 @@ mod tests {
         member.incarnation = u64::MAX - 1;
         protocol.upsert_member(member).await;
 
-        protocol.process_alive("node-1", u64::MAX, "localhost:8001").await;
+        protocol
+            .process_alive("node-1", u64::MAX, "localhost:8001")
+            .await;
 
         let updated = protocol.get_member("node-1").await.unwrap();
         assert_eq!(updated.incarnation, u64::MAX);
@@ -2085,7 +2124,9 @@ mod tests {
             if i % 2 == 0 {
                 protocol.suspect_member("node-1").await;
             } else {
-                protocol.process_alive("node-1", i as u64, "localhost:8001").await;
+                protocol
+                    .process_alive("node-1", i as u64, "localhost:8001")
+                    .await;
             }
         }
 

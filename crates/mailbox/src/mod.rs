@@ -51,16 +51,16 @@
 //! and recovered on actor restart. Currently, mailbox messages are in-memory
 //! only and are lost on actor restart. This is a future enhancement.
 
+use plexspaces_channel::{create_channel, Channel, ChannelError};
+use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider};
+use plexspaces_proto::common::v1::Message as ProtoMessage;
 use rand::Rng;
-use std::collections::{BinaryHeap, VecDeque};
 use std::cmp::Ordering;
+use std::collections::{BinaryHeap, VecDeque};
+use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use std::io::Write;
 use tokio::sync::{mpsc, Notify, RwLock};
-use plexspaces_channel::{Channel, ChannelError, create_channel};
-use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig};
-use plexspaces_proto::common::v1::Message as ProtoMessage;
 
 #[path = "lru_cache.rs"]
 mod lru_cache;
@@ -72,8 +72,8 @@ pub use message_helpers::*;
 
 // Re-export proto-generated types
 pub use plexspaces_proto::mailbox::v1::{
-    BackpressureStrategy, MailboxConfig, MailboxError as MailboxErrorProto,
-    MessagePriority, OrderingStrategy,
+    BackpressureStrategy, MailboxConfig, MailboxError as MailboxErrorProto, MessagePriority,
+    OrderingStrategy,
 };
 
 // Wrapper for MailboxError to provide thiserror compatibility
@@ -105,13 +105,25 @@ impl From<MailboxError> for MailboxErrorProto {
 impl From<MailboxErrorProto> for MailboxError {
     fn from(proto: MailboxErrorProto) -> Self {
         match proto {
-            MailboxErrorProto::MailboxErrorUnspecified => MailboxError::StorageError("Unspecified error".to_string()),
-            MailboxErrorProto::MailboxErrorNotFound => MailboxError::StorageError("Mailbox not found".to_string()),
+            MailboxErrorProto::MailboxErrorUnspecified => {
+                MailboxError::StorageError("Unspecified error".to_string())
+            }
+            MailboxErrorProto::MailboxErrorNotFound => {
+                MailboxError::StorageError("Mailbox not found".to_string())
+            }
             MailboxErrorProto::MailboxErrorFull => MailboxError::Full,
-            MailboxErrorProto::MailboxErrorTimeout => MailboxError::StorageError("Timeout".to_string()),
-            MailboxErrorProto::MailboxErrorInvalidConfig => MailboxError::InvalidConfig("Invalid config".to_string()),
-            MailboxErrorProto::MailboxErrorStorage => MailboxError::StorageError("Storage error".to_string()),
-            MailboxErrorProto::MailboxErrorSerialization => MailboxError::StorageError("Serialization error".to_string()),
+            MailboxErrorProto::MailboxErrorTimeout => {
+                MailboxError::StorageError("Timeout".to_string())
+            }
+            MailboxErrorProto::MailboxErrorInvalidConfig => {
+                MailboxError::InvalidConfig("Invalid config".to_string())
+            }
+            MailboxErrorProto::MailboxErrorStorage => {
+                MailboxError::StorageError("Storage error".to_string())
+            }
+            MailboxErrorProto::MailboxErrorSerialization => {
+                MailboxError::StorageError("Serialization error".to_string())
+            }
         }
     }
 }
@@ -171,8 +183,7 @@ fn mailbox_config_deduplication_window(config: &MailboxConfig) -> Duration {
 }
 
 fn mailbox_config_ordering(config: &MailboxConfig) -> OrderingStrategy {
-    OrderingStrategy::try_from(config.ordering_strategy)
-        .unwrap_or(OrderingStrategy::OrderingFifo)
+    OrderingStrategy::try_from(config.ordering_strategy).unwrap_or(OrderingStrategy::OrderingFifo)
 }
 
 fn mailbox_config_max_size(config: &MailboxConfig) -> usize {
@@ -321,53 +332,57 @@ impl Mailbox {
     pub async fn new(config: MailboxConfig, mailbox_id: String) -> Result<Self, MailboxError> {
         // Determine channel backend (default to IN_MEMORY if not specified)
         let channel_provider = if config.channel_provider != 0 {
-            ChannelProvider::try_from(config.channel_provider)
-                .map_err(|_| MailboxError::InvalidConfig(format!("Invalid channel_provider: {}", config.channel_provider)))?
+            ChannelProvider::try_from(config.channel_provider).map_err(|_| {
+                MailboxError::InvalidConfig(format!(
+                    "Invalid channel_provider: {}",
+                    config.channel_provider
+                ))
+            })?
         } else {
             ChannelProvider::ChannelProviderInMemory
         };
         let is_in_memory = channel_provider == ChannelProvider::ChannelProviderInMemory;
         let channel_provider_value = channel_provider as i32;
-        
+
         // Helper to check if backend is in-memory (needed for shutdown logic)
         let _is_in_memory_clone = is_in_memory;
 
         // Create channel config from mailbox config
-        let mut channel_config = config.channel_config.clone().unwrap_or_else(|| {
-            ChannelConfig {
+        let mut channel_config = config
+            .channel_config
+            .clone()
+            .unwrap_or_else(|| ChannelConfig {
                 name: format!("mailbox:{}", mailbox_id),
                 provider: channel_provider_value,
                 capacity: config.capacity as u64,
                 ..Default::default()
-            }
-        });
-        
+            });
+
         // Ensure channel name is set
         if channel_config.name.is_empty() {
             channel_config.name = format!("mailbox:{}", mailbox_id);
         }
-        
+
         // Create channel backend
-        let channel = create_channel(channel_config.clone())
-            .await
-            .map_err(|e| MailboxError::StorageError(format!("Failed to create channel backend: {}", e)))?;
-        
+        let channel = create_channel(channel_config.clone()).await.map_err(|e| {
+            MailboxError::StorageError(format!("Failed to create channel backend: {}", e))
+        })?;
+
         // For InMemory backend, create a local mpsc channel for fast-path dequeue
         let (local_sender, local_receiver) = if is_in_memory {
-            let (s, r): (mpsc::UnboundedSender<ProtoMessage>, mpsc::UnboundedReceiver<ProtoMessage>) = mpsc::unbounded_channel();
+            let (s, r): (
+                mpsc::UnboundedSender<ProtoMessage>,
+                mpsc::UnboundedReceiver<ProtoMessage>,
+            ) = mpsc::unbounded_channel();
             (Some(s), Some(r))
         } else {
             (None, None)
         };
-        
+
         // Initialize internal queue based on ordering strategy
         let internal_queue = match mailbox_config_ordering(&config) {
-            OrderingStrategy::OrderingPriority => {
-                MessageStorage::Priority(BinaryHeap::new())
-            }
-            _ => {
-                MessageStorage::Queue(VecDeque::new())
-            }
+            OrderingStrategy::OrderingPriority => MessageStorage::Priority(BinaryHeap::new()),
+            _ => MessageStorage::Queue(VecDeque::new()),
         };
 
         let mailbox = Mailbox {
@@ -395,7 +410,7 @@ impl Mailbox {
             shutdown_flag: Arc::new(RwLock::new(false)),
             in_progress_count: Arc::new(RwLock::new(0)),
         };
-        
+
         // Store is_in_memory flag for later use (we'll add a method to access it)
 
         // Start background processor task to move messages from internal queue to channel
@@ -428,12 +443,12 @@ impl Mailbox {
                     MessageStorage::Priority(heap) => !heap.is_empty(),
                 };
                 drop(queue_guard);
-                
+
                 // If no messages, wait for notification
                 if !has_messages {
                     notify.notified().await;
                 }
-                
+
                 // Process messages from internal queue to channel
                 let mut queue_guard = internal_queue.write().await;
                 let mut messages_to_send = Vec::new();
@@ -474,13 +489,13 @@ impl Mailbox {
                         }
                     }
                 }
-                
+
                 // Update stats after sending (current_size tracks internal queue, not channel)
                 if num_sent > 0 {
                     let mut stats_guard = stats.write().await;
                     stats_guard.current_size = stats_guard.current_size.saturating_sub(num_sent);
                 }
-                
+
                 // Notify waiting dequeuers that messages are available
                 // This wakes up any actors waiting on dequeue() when messages arrive
                 if num_sent > 0 {
@@ -515,12 +530,12 @@ impl Mailbox {
                     MessageStorage::Priority(heap) => !heap.is_empty(),
                 };
                 drop(queue_guard);
-                
+
                 // If no messages, wait for notification
                 if !has_messages {
                     notify.notified().await;
                 }
-                
+
                 // Process messages from internal queue to channel
                 let mut queue_guard = internal_queue.write().await;
                 let mut messages_to_send = Vec::new();
@@ -550,11 +565,11 @@ impl Mailbox {
                     let mut channel_msg = msg.clone();
                     channel_msg.channel = channel_name.clone();
                     let channel_send_result = channel.send(channel_msg).await;
-                    
+
                     // Also send to local receiver for fast-path (InMemory backend)
                     // This is non-blocking and doesn't require a lock
                     let local_send_result = local_sender.send(msg.clone());
-                    
+
                     if tracing::enabled!(tracing::Level::TRACE) {
                         tracing::trace!(
                             message_id = %msg_id,
@@ -563,7 +578,7 @@ impl Mailbox {
                             "Mailbox processor: sending message"
                         );
                     }
-                    
+
                     match (channel_send_result, local_send_result) {
                         (Ok(_), Ok(())) => {
                             num_sent += 1;
@@ -593,13 +608,13 @@ impl Mailbox {
                         }
                     }
                 }
-                
+
                 // Update stats after sending
                 if num_sent > 0 {
                     let mut stats_guard = stats.write().await;
                     stats_guard.current_size = stats_guard.current_size.saturating_sub(num_sent);
                 }
-                
+
                 // Notify waiting dequeuers
                 if num_sent > 0 {
                     notify.notify_waiters();
@@ -632,13 +647,13 @@ impl Mailbox {
                 ));
             }
         }
-        
+
         // Check for duplicate message ID (LRU cache with fixed size)
         {
             let mut cache = self.message_id_cache.write().await;
             // Cleanup expired entries (LRU cache handles TTL automatically)
             cache.cleanup_expired();
-            
+
             // Check if message ID already seen (LRU cache returns None if expired or not found)
             if cache.get(&message.id).is_some() {
                 // Duplicate message ID - skip
@@ -647,18 +662,18 @@ impl Mailbox {
                 }
                 return Ok(());
             }
-            
+
             // Add to cache (LRU cache handles eviction if full)
             cache.insert(message.id.clone(), SystemTime::now());
         }
-        
+
         // Check for duplicate idempotency key (LRU cache with fixed size)
         if !message.idempotency_key.is_empty() {
             let idempotency_key = &message.idempotency_key;
             let mut cache = self.idempotency_cache.write().await;
             // Cleanup expired entries
             cache.cleanup_expired();
-            
+
             // Check if idempotency key already seen
             if let Some(_cached_entry) = cache.get(idempotency_key) {
                 // Duplicate idempotency key - skip message (deduplication)
@@ -668,12 +683,12 @@ impl Mailbox {
                 }
                 return Ok(());
             }
-            
+
             // Add to cache (no cached response yet - will be set after processing)
             // LRU cache handles eviction if full
             cache.insert(idempotency_key.clone(), (SystemTime::now(), None));
         }
-        
+
         let mut queue_guard = self.internal_queue.write().await;
         let mut stats = self.stats.write().await;
 
@@ -713,13 +728,13 @@ impl Mailbox {
         }
 
         let message_id = message.id.clone();
-        
+
         // Clone values before moving message
         let sender_id = message.sender_id.clone();
         let receiver_id = message.receiver_id.clone();
         let message_type = message.message_type.clone();
         let correlation_id = message.correlation_id.clone();
-        
+
         // Add message based on ordering (always use internal queue, processor moves to channel)
         match mailbox_config_ordering(&self.config) {
             OrderingStrategy::OrderingFifo => {
@@ -754,17 +769,17 @@ impl Mailbox {
 
         stats.total_enqueued += 1;
         stats.current_size += 1;
-        
+
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            message_id = %message_id,
-            sender_id = %sender_id,
-            receiver_id = %receiver_id,
-            message_type = %message_type,
-            correlation_id = %correlation_id,
-            queue_size = stats.current_size,
-            "Mailbox::enqueue: ✅ Message enqueued successfully"
-        );
+            tracing::debug!(
+                message_id = %message_id,
+                sender_id = %sender_id,
+                receiver_id = %receiver_id,
+                message_type = %message_type,
+                correlation_id = %correlation_id,
+                queue_size = stats.current_size,
+                "Mailbox::enqueue: ✅ Message enqueued successfully"
+            );
         }
 
         // Notify processor that a message is available
@@ -826,7 +841,7 @@ impl Mailbox {
             ChannelProvider::try_from(channel_provider),
             Ok(ChannelProvider::ChannelProviderInMemory)
         );
-        
+
         async move {
             tracing::trace!(
                 mailbox_id = %mailbox_id,
@@ -839,20 +854,20 @@ impl Mailbox {
             let mut attempts = 0;
             loop {
                 attempts += 1;
-                
+
                 // Check if we have a receiver (brief lock - only for checking)
                 let has_receiver = {
                     let receiver_opt = local_receiver.lock().await;
                     receiver_opt.is_some()
                 };
-                
+
                 if !has_receiver {
                     if tracing::enabled!(tracing::Level::TRACE) {
                         tracing::trace!("Mailbox::dequeue: local_receiver not available (attempt {}), falling back to channel backend", attempts);
                     }
                     break; // Fall through to channel backend
                 }
-                
+
                 // Try to receive without blocking (brief lock - only for try_recv)
                 let msg_opt = {
                     let mut receiver_opt = local_receiver.lock().await;
@@ -862,24 +877,24 @@ impl Mailbox {
                         None
                     }
                 };
-                
+
                 if let Some(msg) = msg_opt {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        mailbox_id = %mailbox_id,
-                        message_id = %msg.id,
-                        message_type = %message_type_str(&msg),
-                        sender_id = %msg.sender_id,
-                        receiver_id = %msg.receiver_id,
-                        correlation_id = %msg.correlation_id,
-                        attempts = attempts,
-                        "📬 Mailbox::dequeue: ✅ Received message from local_receiver (try_recv)"
-                    );
+                        tracing::debug!(
+                            mailbox_id = %mailbox_id,
+                            message_id = %msg.id,
+                            message_type = %message_type_str(&msg),
+                            sender_id = %msg.sender_id,
+                            receiver_id = %msg.receiver_id,
+                            correlation_id = %msg.correlation_id,
+                            attempts = attempts,
+                            "📬 Mailbox::dequeue: ✅ Received message from local_receiver (try_recv)"
+                        );
                     }
-                    
+
                     return Some(msg);
                 }
-                
+
                 // Check timeout if specified
                 if let Some(duration) = timeout {
                     if start_time.elapsed() >= duration {
@@ -891,7 +906,7 @@ impl Mailbox {
                         return None;
                     }
                 }
-                
+
                 // Log every 100 attempts to avoid spam (roughly every 1ms with 10μs sleep)
                 if attempts % 100 == 0 {
                     tracing::trace!(
@@ -900,13 +915,13 @@ impl Mailbox {
                         "Mailbox::dequeue: Still waiting for message from local_receiver..."
                     );
                 }
-                
+
                 // Yield to allow other tasks to run (processor can send messages)
                 // Use a very short sleep to avoid busy-waiting while still being responsive
                 tokio::task::yield_now().await;
                 tokio::time::sleep(std::time::Duration::from_micros(10)).await;
             }
-            
+
             // Fall back to channel backend (for durable backends like SQLite, Redis, Kafka)
             // Check shutdown flag before receiving (for non-memory channels)
             // (shutdown_flag and is_in_memory already captured above)
@@ -919,28 +934,28 @@ impl Mailbox {
                             let shutdown = *shutdown_flag.read().await;
                             if shutdown {
                                 if tracing::enabled!(tracing::Level::DEBUG) {
-                                tracing::debug!(
-                                    mailbox_id = %mailbox_id,
-                                    "Mailbox::dequeue: Shutdown in progress, stopping receive"
-                                );
+                                    tracing::debug!(
+                                        mailbox_id = %mailbox_id,
+                                        "Mailbox::dequeue: Shutdown in progress, stopping receive"
+                                    );
                                 }
                                 return None;
                             }
                         }
-                        
+
                         match channel.receive(1).await {
                             Ok(messages) => {
                                 if let Some(channel_msg) = messages.first() {
                                     if tracing::enabled!(tracing::Level::DEBUG) {
-                                    tracing::debug!(
-                                        mailbox_id = %mailbox_id,
-                                        message_id = %channel_msg.id,
-                                        message_type = %message_type_str(channel_msg),
-                                        sender = ?channel_msg.sender_id,
-                                        receiver = %channel_msg.receiver_id,
-                                        correlation_id = ?channel_msg.correlation_id,
-                                        "📬 Mailbox::dequeue: ✅ Received message from channel (receive)"
-                                    );
+                                        tracing::debug!(
+                                            mailbox_id = %mailbox_id,
+                                            message_id = %channel_msg.id,
+                                            message_type = %message_type_str(channel_msg),
+                                            sender = ?channel_msg.sender_id,
+                                            receiver = %channel_msg.receiver_id,
+                                            correlation_id = ?channel_msg.correlation_id,
+                                            "📬 Mailbox::dequeue: ✅ Received message from channel (receive)"
+                                        );
                                     }
                                     return Some(channel_msg.clone());
                                 }
@@ -965,34 +980,34 @@ impl Mailbox {
                         let shutdown = *shutdown_flag.read().await;
                         if shutdown {
                             if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!(
-                                mailbox_id = %mailbox_id,
-                                "Mailbox::dequeue: Shutdown in progress, stopping receive"
-                            );
+                                tracing::debug!(
+                                    mailbox_id = %mailbox_id,
+                                    "Mailbox::dequeue: Shutdown in progress, stopping receive"
+                                );
                             }
                             return None;
                         }
                     }
-                    
+
                     let start = std::time::Instant::now();
                     loop {
                         if start.elapsed() >= duration {
                             return None;
                         }
-                        
+
                         match channel.try_receive(1).await {
                             Ok(messages) => {
                                 if let Some(channel_msg) = messages.first() {
                                     if tracing::enabled!(tracing::Level::DEBUG) {
-                                    tracing::debug!(
-                                        mailbox_id = %mailbox_id,
-                                        message_id = %channel_msg.id,
-                                        message_type = %message_type_str(channel_msg),
-                                        sender = ?channel_msg.sender_id,
-                                        receiver = %channel_msg.receiver_id,
-                                        correlation_id = ?channel_msg.correlation_id,
-                                        "📬 Mailbox::dequeue: ✅ Received message from channel (try_receive)"
-                                    );
+                                        tracing::debug!(
+                                            mailbox_id = %mailbox_id,
+                                            message_id = %channel_msg.id,
+                                            message_type = %message_type_str(channel_msg),
+                                            sender = ?channel_msg.sender_id,
+                                            receiver = %channel_msg.receiver_id,
+                                            correlation_id = ?channel_msg.correlation_id,
+                                            "📬 Mailbox::dequeue: ✅ Received message from channel (try_receive)"
+                                        );
                                     }
                                     return Some(channel_msg.clone());
                                 }
@@ -1050,7 +1065,9 @@ impl Mailbox {
         let channel_msg_id = &message.id;
 
         // Call channel.ack() - channel implementation handles backend-specific behavior
-        self.channel.ack(channel_msg_id).await
+        self.channel
+            .ack(channel_msg_id)
+            .await
             .map_err(|e| MailboxError::StorageError(format!("Failed to ack message: {}", e)))?;
 
         // Update stats
@@ -1067,12 +1084,12 @@ impl Mailbox {
         );
 
         if tracing::enabled!(tracing::Level::TRACE) {
-        tracing::trace!(
-            mailbox_id = %self.mailbox_id,
-            message_id = %message.id,
-            channel_msg_id = %channel_msg_id,
-            "✅ Mailbox::ack_message: Message acknowledged"
-        );
+            tracing::trace!(
+                mailbox_id = %self.mailbox_id,
+                message_id = %message.id,
+                channel_msg_id = %channel_msg_id,
+                "✅ Mailbox::ack_message: Message acknowledged"
+            );
         }
 
         Ok(())
@@ -1094,14 +1111,20 @@ impl Mailbox {
     ///   - Redis/Kafka = tracks retry count, requeues or sends to DLQ based on channel config
     /// - No backend-specific checks needed - channel trait handles it
     /// - Retry/DLQ logic is in channel implementation, not mailbox
-    pub async fn nack_message(&self, message: &ProtoMessage, error: Option<&str>) -> Result<(), MailboxError> {
+    pub async fn nack_message(
+        &self,
+        message: &ProtoMessage,
+        error: Option<&str>,
+    ) -> Result<(), MailboxError> {
         // Get channel message ID (use message.id directly for proto Message)
         let channel_msg_id = &message.id;
 
         // Call channel.nack() with requeue=true
         // Channel implementation will handle retry counting and DLQ logic based on its config
         // For channels that support retry/DLQ, they track delivery_count internally
-        self.channel.nack(channel_msg_id, true).await
+        self.channel
+            .nack(channel_msg_id, true)
+            .await
             .map_err(|e| MailboxError::StorageError(format!("Failed to nack message: {}", e)))?;
 
         // Update stats
@@ -1128,7 +1151,7 @@ impl Mailbox {
     /// Note: This is less efficient with channel-based architecture as it requires
     /// checking messages. For better performance, use pattern matching in the actor loop.
     pub async fn dequeue_matching<F>(&self, predicate: F) -> Option<ProtoMessage>
-        where
+    where
         F: Fn(&ProtoMessage) -> bool,
     {
         // For selective receive, we need to check the internal queue
@@ -1202,7 +1225,7 @@ impl Mailbox {
         match ChannelProvider::try_from(self.channel_provider) {
             Ok(ChannelProvider::ChannelProviderInMemory) => false,
             Ok(ChannelProvider::ChannelProviderUdp) => false, // UDP is best-effort, not persistent
-            Ok(_) => true, // SQLite, Redis, Kafka, NATS are all durable
+            Ok(_) => true,   // SQLite, Redis, Kafka, NATS are all durable
             Err(_) => false, // Invalid backend, assume not durable
         }
     }
@@ -1278,20 +1301,20 @@ impl Mailbox {
             backend = %self.backend_type(),
             "Starting graceful shutdown"
         );
-        
+
         // Step 1: Set shutdown flag to stop accepting new messages (for non-memory channels)
         if !self.is_in_memory() {
             let mut shutdown_flag = self.shutdown_flag.write().await;
             *shutdown_flag = true;
             drop(shutdown_flag);
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                mailbox_id = %self.mailbox_id,
-                "Shutdown flag set - no new messages will be accepted"
-            );
+                tracing::debug!(
+                    mailbox_id = %self.mailbox_id,
+                    "Shutdown flag set - no new messages will be accepted"
+                );
             }
         }
-        
+
         // Step 2: For durable backends, flush pending messages
         if self.is_durable() {
             let queue_guard = self.internal_queue.read().await;
@@ -1300,7 +1323,7 @@ impl Mailbox {
                 MessageStorage::Priority(heap) => heap.len(),
             };
             drop(queue_guard);
-            
+
             if pending_count > 0 {
                 tracing::info!(
                     mailbox_id = %self.mailbox_id,
@@ -1308,29 +1331,29 @@ impl Mailbox {
                     pending_messages = pending_count,
                     "Flushing pending messages to durable backend during graceful shutdown"
                 );
-                
+
                 // Messages will be flushed by the processor task
                 // Wait a bit for processor to flush (non-blocking)
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
         }
-        
+
         // Step 3: Wait for in-progress messages to complete (with timeout)
         let timeout_duration = timeout.unwrap_or(Duration::from_secs(30));
         let start = std::time::Instant::now();
-        
+
         loop {
             let in_progress = *self.in_progress_count.read().await;
             if in_progress == 0 {
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    mailbox_id = %self.mailbox_id,
-                    "All in-progress messages completed"
-                );
+                    tracing::debug!(
+                        mailbox_id = %self.mailbox_id,
+                        "All in-progress messages completed"
+                    );
                 }
                 break;
             }
-            
+
             if start.elapsed() >= timeout_duration {
                 tracing::warn!(
                     mailbox_id = %self.mailbox_id,
@@ -1340,10 +1363,10 @@ impl Mailbox {
                 );
                 break;
             }
-            
+
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        
+
         // Step 4: Close the channel to stop receiving (for non-memory channels)
         if !self.is_in_memory() {
             if let Err(e) = self.channel.close().await {
@@ -1354,19 +1377,19 @@ impl Mailbox {
                 );
             } else {
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    mailbox_id = %self.mailbox_id,
-                    "Channel closed successfully"
-                );
+                    tracing::debug!(
+                        mailbox_id = %self.mailbox_id,
+                        "Channel closed successfully"
+                    );
                 }
             }
         }
-        
+
         tracing::info!(
             mailbox_id = %self.mailbox_id,
             "Graceful shutdown completed"
         );
-        
+
         Ok(())
     }
 }
@@ -1395,7 +1418,9 @@ mod tests {
 
     /// Helper to create a test mailbox with InMemory backend
     async fn create_test_mailbox(config: MailboxConfig) -> Mailbox {
-        Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new())).await.unwrap()
+        Mailbox::new(config, format!("test-mailbox-{}", ulid::Ulid::new()))
+            .await
+            .unwrap()
     }
 
     /// Helper to create a test mailbox with default config
@@ -1478,10 +1503,22 @@ mod tests {
     #[tokio::test]
     async fn test_priority_comparison() {
         // System (10) > Highest (5) > High (4) > Normal (3) > Low (2)
-        assert!(message_priority_value(&MessagePriority::System) > message_priority_value(&MessagePriority::Highest));
-        assert!(message_priority_value(&MessagePriority::Highest) > message_priority_value(&MessagePriority::High));
-        assert!(message_priority_value(&MessagePriority::High) > message_priority_value(&MessagePriority::Normal));
-        assert!(message_priority_value(&MessagePriority::Normal) > message_priority_value(&MessagePriority::Low));
+        assert!(
+            message_priority_value(&MessagePriority::System)
+                > message_priority_value(&MessagePriority::Highest)
+        );
+        assert!(
+            message_priority_value(&MessagePriority::Highest)
+                > message_priority_value(&MessagePriority::High)
+        );
+        assert!(
+            message_priority_value(&MessagePriority::High)
+                > message_priority_value(&MessagePriority::Normal)
+        );
+        assert!(
+            message_priority_value(&MessagePriority::Normal)
+                > message_priority_value(&MessagePriority::Low)
+        );
 
         // Verify signal message has Highest priority
         let signal_msg = Message::signal(b"signal".to_vec());
@@ -1511,7 +1548,11 @@ mod tests {
         }
 
         // Message should be in channel now (size() tracks internal queue, not channel)
-        assert_eq!(mailbox.size().await, 0, "Internal queue should be empty after processor runs");
+        assert_eq!(
+            mailbox.size().await,
+            0,
+            "Internal queue should be empty after processor runs"
+        );
 
         // Message should be available for dequeue
         let msg = mailbox.dequeue().await;
@@ -1577,7 +1618,10 @@ mod tests {
 
         // Signal (Highest) should come first
         let msg1 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg1.payload, b"signal", "Signal (Highest priority) should come first");
+        assert_eq!(
+            msg1.payload, b"signal",
+            "Signal (Highest priority) should come first"
+        );
 
         let msg2 = mailbox.dequeue().await.unwrap();
         assert_eq!(msg2.payload, b"low", "Low priority should come second");
@@ -1617,7 +1661,10 @@ mod tests {
 
         // Dequeue in priority order: signal (Highest=5) > high (4) > normal (3) > low (2)
         let msg1 = mailbox.dequeue().await.unwrap();
-        assert_eq!(msg1.payload, b"signal", "Signal (Highest=5) should come first");
+        assert_eq!(
+            msg1.payload, b"signal",
+            "Signal (Highest=5) should come first"
+        );
 
         let msg2 = mailbox.dequeue().await.unwrap();
         assert_eq!(msg2.payload, b"high", "High (4) should come second");
@@ -1685,10 +1732,22 @@ mod tests {
     async fn test_message_priorities() {
         // Test priority ordering using helper function
         // System (10) > Highest (5) > High (4) > Normal (3) > Low (2) > Lowest (1)
-        assert!(message_priority_value(&MessagePriority::System) > message_priority_value(&MessagePriority::Highest));
-        assert!(message_priority_value(&MessagePriority::Highest) > message_priority_value(&MessagePriority::High));
-        assert!(message_priority_value(&MessagePriority::High) > message_priority_value(&MessagePriority::Normal));
-        assert!(message_priority_value(&MessagePriority::Normal) > message_priority_value(&MessagePriority::Low));
+        assert!(
+            message_priority_value(&MessagePriority::System)
+                > message_priority_value(&MessagePriority::Highest)
+        );
+        assert!(
+            message_priority_value(&MessagePriority::Highest)
+                > message_priority_value(&MessagePriority::High)
+        );
+        assert!(
+            message_priority_value(&MessagePriority::High)
+                > message_priority_value(&MessagePriority::Normal)
+        );
+        assert!(
+            message_priority_value(&MessagePriority::Normal)
+                > message_priority_value(&MessagePriority::Low)
+        );
     }
 
     #[tokio::test]
@@ -1974,14 +2033,25 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
         // First two messages should still be there
-        let msg1 = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_millis(100))).await.unwrap();
+        let msg1 = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_millis(100)))
+            .await
+            .unwrap();
         assert_eq!(msg1.payload, b"first");
 
-        let msg2 = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_millis(100))).await.unwrap();
+        let msg2 = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_millis(100)))
+            .await
+            .unwrap();
         assert_eq!(msg2.payload, b"second");
 
         // No third message
-        assert_eq!(mailbox.dequeue_with_timeout(Some(std::time::Duration::from_millis(10))).await, None);
+        assert_eq!(
+            mailbox
+                .dequeue_with_timeout(Some(std::time::Duration::from_millis(10)))
+                .await,
+            None
+        );
     }
 
     /// Test backpressure Reject strategy
@@ -2041,7 +2111,7 @@ mod tests {
     #[tokio::test]
     async fn test_random_ordering() {
         use tokio::time::Duration;
-        
+
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingRandom as i32;
         let mailbox = create_test_mailbox(config).await;
@@ -2061,7 +2131,10 @@ mod tests {
         // Dequeue all messages (use timeout to avoid hanging)
         let mut dequeued = Vec::new();
         for _ in 0..10 {
-            if let Some(msg) = mailbox.dequeue_with_timeout(Some(Duration::from_millis(100))).await {
+            if let Some(msg) = mailbox
+                .dequeue_with_timeout(Some(Duration::from_millis(100)))
+                .await
+            {
                 dequeued.push(String::from_utf8(msg.payload).unwrap());
             } else {
                 break; // Timeout means no more messages
@@ -2105,7 +2178,9 @@ mod tests {
         let mailbox = create_default_mailbox().await;
 
         // Dequeue from empty mailbox with timeout should return None after timeout
-        let result = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_millis(10))).await;
+        let result = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_millis(10)))
+            .await;
         assert_eq!(result, None, "Should timeout and return None");
     }
 
@@ -2116,27 +2191,43 @@ mod tests {
 
         // Test timeout on empty mailbox
         let start = std::time::Instant::now();
-        let result = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_millis(50))).await;
+        let result = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_millis(50)))
+            .await;
         let elapsed = start.elapsed();
-        
+
         assert_eq!(result, None, "Should timeout and return None");
-        assert!(elapsed >= std::time::Duration::from_millis(50), "Should wait at least 50ms");
-        assert!(elapsed < std::time::Duration::from_millis(100), "Should not wait much longer than timeout");
+        assert!(
+            elapsed >= std::time::Duration::from_millis(50),
+            "Should wait at least 50ms"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_millis(100),
+            "Should not wait much longer than timeout"
+        );
 
         // Test message arrives before timeout
         let mailbox2 = create_default_mailbox().await;
-        mailbox2.enqueue(Message::new(b"test".to_vec())).await.unwrap();
-        
+        mailbox2
+            .enqueue(Message::new(b"test".to_vec()))
+            .await
+            .unwrap();
+
         // Wait a bit for processor to move message to channel
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        
+
         let start = std::time::Instant::now();
-        let result = mailbox2.dequeue_with_timeout(Some(std::time::Duration::from_millis(100))).await;
+        let result = mailbox2
+            .dequeue_with_timeout(Some(std::time::Duration::from_millis(100)))
+            .await;
         let elapsed = start.elapsed();
-        
+
         assert!(result.is_some(), "Should receive message before timeout");
         assert_eq!(result.unwrap().payload, b"test");
-        assert!(elapsed < std::time::Duration::from_millis(50), "Should receive message quickly");
+        assert!(
+            elapsed < std::time::Duration::from_millis(50),
+            "Should receive message quickly"
+        );
     }
 
     /// Test dequeue_matching() with no match returns None
@@ -2225,10 +2316,12 @@ mod tests {
 
         // Mailbox should be empty
         assert_eq!(mailbox.size().await, 0);
-        
+
         // Dequeue with timeout should return None (empty mailbox)
         // Note: dequeue() without timeout waits indefinitely, so use timeout version
-        let result = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_millis(10))).await;
+        let result = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_millis(10)))
+            .await;
         assert_eq!(result, None, "Should timeout on empty mailbox");
     }
 
@@ -2246,18 +2339,21 @@ mod tests {
             .with_sender("sender-actor".to_string())
             .with_message_type("test_type".to_string())
             .with_metadata("key1".to_string(), "value1".to_string());
-        
+
         // ProtoMessage is already in the correct format, just set channel name
         let mut channel_msg = msg.clone();
         channel_msg.channel = "test-channel".to_string();
-        
+
         assert_eq!(channel_msg.id, msg.id);
         assert_eq!(channel_msg.payload, b"test payload");
         assert_eq!(channel_msg.channel, "test-channel");
         assert_eq!(channel_msg.sender_id, "sender-actor");
         assert_eq!(channel_msg.correlation_id, "corr-123");
         assert_eq!(channel_msg.reply_to, "reply-addr");
-        assert_eq!(channel_msg.headers.get("message_type"), Some(&"test_type".to_string()));
+        assert_eq!(
+            channel_msg.headers.get("message_type"),
+            Some(&"test_type".to_string())
+        );
         assert_eq!(channel_msg.headers.get("priority"), Some(&"4".to_string())); // High = 4
         assert_eq!(channel_msg.headers.get("key1"), Some(&"value1".to_string()));
     }
@@ -2265,10 +2361,10 @@ mod tests {
     /// Test ProtoMessage to Message conversion
     #[test]
     fn test_channel_message_to_message() {
+        use chrono::Utc;
         use plexspaces_proto::common::v1::Message as ProtoMessage;
         use prost_types::Timestamp;
-        use chrono::Utc;
-        
+
         let now = Utc::now();
         let channel_msg = ProtoMessage {
             id: "msg-123".to_string(),
@@ -2297,9 +2393,9 @@ mod tests {
             uri_path: String::new(),
             uri_method: String::new(),
         };
-        
+
         let msg: Message = Message::from_proto(&channel_msg);
-        
+
         assert_eq!(msg.id, "msg-123");
         assert_eq!(msg.payload, b"test payload");
         assert_eq!(msg.priority, MessagePriority::High);
@@ -2316,17 +2412,21 @@ mod tests {
     async fn test_mailbox_inmemory_backend() {
         let mut config = mailbox_config_default();
         config.channel_provider = ChannelProvider::ChannelProviderInMemory as i32;
-        
-        let mailbox = Mailbox::new(config, "test-mailbox".to_string()).await.unwrap();
-        
+
+        let mailbox = Mailbox::new(config, "test-mailbox".to_string())
+            .await
+            .unwrap();
+
         // Test basic send/receive
         let msg = Message::new(b"test".to_vec());
         mailbox.enqueue(msg.clone()).await.unwrap();
-        
+
         // Wait for processor to move message
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        
-        let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
+
+        let received = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
+            .await;
         assert!(received.is_some());
         assert_eq!(received.unwrap().payload, b"test");
     }
@@ -2336,13 +2436,13 @@ mod tests {
     #[cfg(feature = "sqlite-backend")]
     async fn test_mailbox_sqlite_backend() {
         use plexspaces_proto::channel::v1::{ChannelConfig, SqliteConfig};
-        
+
         // Use in-memory database to prevent concurrency issues
         let db_path_str = ":memory:".to_string();
-        
+
         let mut config = mailbox_config_default();
         config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
-        
+
         let sqlite_config = SqliteConfig {
             database_path: db_path_str,
             table_name: "channel_messages".to_string(),
@@ -2350,27 +2450,33 @@ mod tests {
             cleanup_acked: true,
             cleanup_age_seconds: 3600,
         };
-        
+
         let channel_config = ChannelConfig {
             name: "test-mailbox-sqlite".to_string(),
             provider: ChannelProvider::ChannelProviderSqlite as i32,
             capacity: 1000,
-            backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
+            backend_config: Some(
+                plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config),
+            ),
             ..Default::default()
         };
-        
+
         config.channel_config = Some(channel_config);
-        
-        let mailbox = Mailbox::new(config, "test-mailbox-sqlite".to_string()).await.unwrap();
-        
+
+        let mailbox = Mailbox::new(config, "test-mailbox-sqlite".to_string())
+            .await
+            .unwrap();
+
         // Test basic send/receive
         let msg = Message::new(b"test-sqlite".to_vec());
         mailbox.enqueue(msg.clone()).await.unwrap();
-        
+
         // Wait for processor to move message
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        
-        let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
+
+        let received = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
+            .await;
         assert!(received.is_some());
         assert_eq!(received.unwrap().payload, b"test-sqlite");
     }
@@ -2380,7 +2486,7 @@ mod tests {
     async fn test_mailbox_invalid_backend() {
         let mut config = mailbox_config_default();
         config.channel_provider = 999; // Invalid backend value
-        
+
         let result = Mailbox::new(config, "test-mailbox".to_string()).await;
         assert!(result.is_err());
         if let Err(MailboxError::InvalidConfig(_)) = result {
@@ -2395,16 +2501,20 @@ mod tests {
     async fn test_mailbox_default_backend() {
         let config = mailbox_config_default();
         // channel_provider is 0 (unspecified), should default to InMemory
-        
-        let mailbox = Mailbox::new(config, "test-mailbox".to_string()).await.unwrap();
-        
+
+        let mailbox = Mailbox::new(config, "test-mailbox".to_string())
+            .await
+            .unwrap();
+
         // Should work with InMemory backend
         let msg = Message::new(b"test".to_vec());
         mailbox.enqueue(msg).await.unwrap();
-        
+
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        
-        let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
+
+        let received = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
+            .await;
         assert!(received.is_some());
     }
 
@@ -2412,28 +2522,32 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_custom_channel_config() {
         use plexspaces_proto::channel::v1::ChannelConfig;
-        
+
         let mut config = mailbox_config_default();
         config.channel_provider = ChannelProvider::ChannelProviderInMemory as i32;
-        
+
         let channel_config = ChannelConfig {
             name: "custom-mailbox".to_string(),
             provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 5000,
             ..Default::default()
         };
-        
+
         config.channel_config = Some(channel_config);
-        
-        let mailbox = Mailbox::new(config, "test-mailbox".to_string()).await.unwrap();
-        
+
+        let mailbox = Mailbox::new(config, "test-mailbox".to_string())
+            .await
+            .unwrap();
+
         // Should work with custom config
         let msg = Message::new(b"test".to_vec());
         mailbox.enqueue(msg).await.unwrap();
-        
+
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        
-        let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
+
+        let received = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
+            .await;
         assert!(received.is_some());
     }
 
@@ -2443,29 +2557,35 @@ mod tests {
     async fn test_mailbox_sqlite_recovery() {
         use plexspaces_proto::channel::v1::{ChannelConfig, SqliteConfig};
         use std::path::PathBuf;
-        
+
         // Create persistent test directory (not auto-deleted)
         let temp_base = std::env::temp_dir();
-        let test_dir = temp_base.join(format!("plexspaces_mailbox_recovery_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let test_dir = temp_base.join(format!(
+            "plexspaces_mailbox_recovery_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir_all(&test_dir).unwrap();
         let db_path = test_dir.join("recovery_test.db");
-        
+
         // Keep test_dir alive
         let _keep_alive = &test_dir;
-        
+
         // Get absolute path as string
         let db_path_str = db_path.to_str().unwrap().to_string();
-        
+
         // Touch the database file to ensure it exists (sqlx should create it, but this helps)
         if !db_path.exists() {
             std::fs::File::create(&db_path).unwrap();
         }
-        
+
         // Create first mailbox instance and send messages
         {
             let mut config = mailbox_config_default();
             config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
-            
+
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
                 table_name: "channel_messages".to_string(),
@@ -2473,34 +2593,46 @@ mod tests {
                 cleanup_acked: false, // Don't cleanup for recovery test
                 cleanup_age_seconds: 0,
             };
-            
+
             let channel_config = ChannelConfig {
                 name: "recovery-mailbox".to_string(),
                 provider: ChannelProvider::ChannelProviderSqlite as i32,
                 capacity: 1000,
-                backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
+                backend_config: Some(
+                    plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(
+                        sqlite_config,
+                    ),
+                ),
                 ..Default::default()
             };
-            
+
             config.channel_config = Some(channel_config);
-            
-            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string()).await.unwrap();
-            
+
+            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string())
+                .await
+                .unwrap();
+
             // Send messages but don't dequeue (simulating crash)
-            mailbox.enqueue(Message::new(b"msg1".to_vec())).await.unwrap();
-            mailbox.enqueue(Message::new(b"msg2".to_vec())).await.unwrap();
-            
+            mailbox
+                .enqueue(Message::new(b"msg1".to_vec()))
+                .await
+                .unwrap();
+            mailbox
+                .enqueue(Message::new(b"msg2".to_vec()))
+                .await
+                .unwrap();
+
             // Wait for messages to be sent to channel
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            
+
             // Mailbox is dropped here (simulating crash)
         }
-        
+
         // Create new mailbox instance (simulating recovery after restart)
         {
             let mut config = mailbox_config_default();
             config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
-            
+
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
                 table_name: "channel_messages".to_string(),
@@ -2508,31 +2640,39 @@ mod tests {
                 cleanup_acked: false,
                 cleanup_age_seconds: 0,
             };
-            
+
             let channel_config = ChannelConfig {
                 name: "recovery-mailbox".to_string(),
                 provider: ChannelProvider::ChannelProviderSqlite as i32,
                 capacity: 1000,
-                backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
+                backend_config: Some(
+                    plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(
+                        sqlite_config,
+                    ),
+                ),
                 ..Default::default()
             };
-            
+
             config.channel_config = Some(channel_config);
-            
-            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string()).await.unwrap();
-            
+
+            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string())
+                .await
+                .unwrap();
+
             // Wait for recovery to complete
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            
+
             // Should be able to receive messages that were sent before crash
             // Note: This depends on SQLite channel recovery implementation
             // For now, we just verify the mailbox can be created and used
             let msg = Message::new(b"new-msg".to_vec());
             mailbox.enqueue(msg).await.unwrap();
-            
+
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            
-            let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
+
+            let received = mailbox
+                .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
+                .await;
             assert!(received.is_some());
         }
     }
@@ -2547,29 +2687,35 @@ mod tests {
     async fn test_mailbox_sqlite_recovery_integration() {
         use plexspaces_proto::channel::v1::{ChannelConfig, SqliteConfig};
         use std::path::PathBuf;
-        
+
         // Create persistent test directory (not auto-deleted)
         let temp_base = std::env::temp_dir();
-        let test_dir = temp_base.join(format!("plexspaces_mailbox_recovery_int_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let test_dir = temp_base.join(format!(
+            "plexspaces_mailbox_recovery_int_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir_all(&test_dir).unwrap();
         let db_path = test_dir.join("recovery_integration.db");
-        
+
         // Keep test_dir alive
         let _keep_alive = &test_dir;
-        
+
         // Get absolute path as string
         let db_path_str = db_path.to_str().unwrap().to_string();
-        
+
         // Touch the database file to ensure it exists (sqlx should create it, but this helps)
         if !db_path.exists() {
             std::fs::File::create(&db_path).unwrap();
         }
-        
+
         // Phase 1: Create mailbox, send messages, simulate crash
         {
             let mut config = mailbox_config_default();
             config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
-            
+
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
                 table_name: "channel_messages".to_string(),
@@ -2577,35 +2723,50 @@ mod tests {
                 cleanup_acked: false, // Don't cleanup for recovery test
                 cleanup_age_seconds: 0,
             };
-            
+
             let channel_config = ChannelConfig {
                 name: "recovery-mailbox".to_string(),
                 provider: ChannelProvider::ChannelProviderSqlite as i32,
                 capacity: 1000,
-                backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
+                backend_config: Some(
+                    plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(
+                        sqlite_config,
+                    ),
+                ),
                 ..Default::default()
             };
-            
+
             config.channel_config = Some(channel_config);
-            
-            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string()).await.unwrap();
-            
+
+            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string())
+                .await
+                .unwrap();
+
             // Send messages
-            mailbox.enqueue(Message::new(b"msg1".to_vec())).await.unwrap();
-            mailbox.enqueue(Message::new(b"msg2".to_vec())).await.unwrap();
-            mailbox.enqueue(Message::new(b"msg3".to_vec())).await.unwrap();
-            
+            mailbox
+                .enqueue(Message::new(b"msg1".to_vec()))
+                .await
+                .unwrap();
+            mailbox
+                .enqueue(Message::new(b"msg2".to_vec()))
+                .await
+                .unwrap();
+            mailbox
+                .enqueue(Message::new(b"msg3".to_vec()))
+                .await
+                .unwrap();
+
             // Wait for messages to be sent to channel
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            
+
             // Mailbox is dropped here (simulating crash)
         }
-        
+
         // Phase 2: Create new mailbox instance (simulating recovery after restart)
         {
             let mut config = mailbox_config_default();
             config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
-            
+
             // Use the same db_path_str from Phase 1
             let sqlite_config = SqliteConfig {
                 database_path: db_path_str.clone(),
@@ -2614,31 +2775,39 @@ mod tests {
                 cleanup_acked: false,
                 cleanup_age_seconds: 0,
             };
-            
+
             let channel_config = ChannelConfig {
                 name: "recovery-mailbox".to_string(),
                 provider: ChannelProvider::ChannelProviderSqlite as i32,
                 capacity: 1000,
-                backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
+                backend_config: Some(
+                    plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(
+                        sqlite_config,
+                    ),
+                ),
                 ..Default::default()
             };
-            
+
             config.channel_config = Some(channel_config);
-            
-            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string()).await.unwrap();
-            
+
+            let mailbox = Mailbox::new(config, "recovery-mailbox".to_string())
+                .await
+                .unwrap();
+
             // Wait for recovery to complete
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            
+
             // Should be able to receive messages that were sent before crash
             // Note: This depends on SQLite channel recovery implementation
             // For now, verify mailbox can be created and used after "restart"
             let msg = Message::new(b"new-msg".to_vec());
             mailbox.enqueue(msg).await.unwrap();
-            
+
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            
-            let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
+
+            let received = mailbox
+                .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
+                .await;
             assert!(received.is_some());
         }
     }
@@ -2647,22 +2816,28 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_graceful_shutdown() {
         let mailbox = create_default_mailbox().await;
-        
+
         // Send some messages
-        mailbox.enqueue(Message::new(b"msg1".to_vec())).await.unwrap();
-        mailbox.enqueue(Message::new(b"msg2".to_vec())).await.unwrap();
-        
+        mailbox
+            .enqueue(Message::new(b"msg1".to_vec()))
+            .await
+            .unwrap();
+        mailbox
+            .enqueue(Message::new(b"msg2".to_vec()))
+            .await
+            .unwrap();
+
         // Wait for processing
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        
+
         // Check size before shutdown
         let size_before = mailbox.size().await;
         assert!(size_before >= 0); // May have been processed
-        
+
         // Simulate graceful shutdown (mailbox is dropped)
         // In real implementation, we'd record metrics here
         drop(mailbox);
-        
+
         // Test passes if no panic
         assert!(true);
     }
@@ -2672,50 +2847,60 @@ mod tests {
     #[cfg(feature = "sqlite-backend")]
     async fn test_mailbox_multiple_messages_recovery() {
         use plexspaces_proto::channel::v1::{ChannelConfig, SqliteConfig};
-        
+
         // Use in-memory database to avoid file locking issues in concurrent tests
         let db_path_str = ":memory:".to_string();
-        
+
         // Create mailbox with SQLite
         let mut config = mailbox_config_default();
         config.channel_provider = ChannelProvider::ChannelProviderSqlite as i32;
-        
+
         let sqlite_config = SqliteConfig {
             database_path: db_path_str,
-                table_name: "channel_messages".to_string(),
+            table_name: "channel_messages".to_string(),
             wal_mode: true,
             cleanup_acked: false,
             cleanup_age_seconds: 0,
         };
-        
+
         let channel_config = ChannelConfig {
             name: "multi-mailbox".to_string(),
             provider: ChannelProvider::ChannelProviderSqlite as i32,
             capacity: 1000,
-            backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
+            backend_config: Some(
+                plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config),
+            ),
             ..Default::default()
         };
-        
+
         config.channel_config = Some(channel_config);
-        
-        let mailbox = Mailbox::new(config, "multi-mailbox".to_string()).await.unwrap();
-        
+
+        let mailbox = Mailbox::new(config, "multi-mailbox".to_string())
+            .await
+            .unwrap();
+
         // Send multiple messages
         for i in 1..=10 {
-            mailbox.enqueue(Message::new(format!("msg{}", i).into_bytes())).await.unwrap();
+            mailbox
+                .enqueue(Message::new(format!("msg{}", i).into_bytes()))
+                .await
+                .unwrap();
         }
-        
+
         // Wait for processing
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        
+
         // Receive some messages
         let mut received_count = 0;
         for _ in 0..5 {
-            if let Some(_) = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_millis(100))).await {
+            if let Some(_) = mailbox
+                .dequeue_with_timeout(Some(std::time::Duration::from_millis(100)))
+                .await
+            {
                 received_count += 1;
             }
         }
-        
+
         assert!(received_count > 0);
     }
 }

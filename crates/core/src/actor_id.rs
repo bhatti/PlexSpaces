@@ -48,7 +48,7 @@ pub enum ActorIdError {
     /// Invalid actor ID format
     #[error("Invalid actor ID format: {0}")]
     InvalidFormat(String),
-    
+
     /// Missing required component
     #[error("Missing required component: {0}")]
     MissingComponent(String),
@@ -70,7 +70,12 @@ pub struct ParsedActorId {
 impl ParsedActorId {
     /// Rebuild actor ID from parsed components
     pub fn to_actor_id(&self) -> ActorId {
-        build_actor_id(&self.id, &self.actor_type, self.namespace.as_deref(), &self.node_id)
+        build_actor_id(
+            &self.id,
+            &self.actor_type,
+            self.namespace.as_deref(),
+            &self.node_id,
+        )
     }
 }
 
@@ -92,20 +97,25 @@ impl ParsedActorId {
 /// ## Examples
 /// ```rust
 /// use plexspaces_core::actor_id::build_actor_id;
-/// 
+///
 /// // Full format
 /// let actor_id = build_actor_id("user-123", "read-state-tracker", Some("orbit-read-state-ts"), "node-1");
 /// // Result: "user-123//read-state-tracker::orbit-read-state-ts@node-1"
-/// 
+///
 /// // No base ID (ULID will be generated)
 /// let actor_id = build_actor_id("", "read-state-tracker", Some("orbit-read-state-ts"), "node-1");
 /// // Result: "//read-state-tracker::orbit-read-state-ts@node-1"
-/// 
+///
 /// // No namespace
 /// let actor_id = build_actor_id("counter", "GenServer", None, "node-1");
 /// // Result: "counter//GenServer@node-1"
 /// ```
-pub fn build_actor_id(id: &str, actor_type: &str, namespace: Option<&str>, node_id: &str) -> ActorId {
+pub fn build_actor_id(
+    id: &str,
+    actor_type: &str,
+    namespace: Option<&str>,
+    node_id: &str,
+) -> ActorId {
     if actor_type.is_empty() {
         // Legacy format: just id@node_id (backward compatibility)
         if id.is_empty() {
@@ -146,14 +156,14 @@ pub fn build_actor_id(id: &str, actor_type: &str, namespace: Option<&str>, node_
 /// ## Examples
 /// ```rust
 /// use plexspaces_core::actor_id::parse_actor_id;
-/// 
+///
 /// // New format
 /// let parsed = parse_actor_id("user-123//read-state-tracker::orbit-read-state-ts@node-1")?;
 /// assert_eq!(parsed.id, "user-123");
 /// assert_eq!(parsed.actor_type, "read-state-tracker");
 /// assert_eq!(parsed.namespace, Some("orbit-read-state-ts".to_string()));
 /// assert_eq!(parsed.node_id, "node-1");
-/// 
+///
 /// // Legacy format
 /// let parsed = parse_actor_id("counter@node-1")?;
 /// assert_eq!(parsed.id, "");
@@ -163,14 +173,17 @@ pub fn build_actor_id(id: &str, actor_type: &str, namespace: Option<&str>, node_
 /// ```
 pub fn parse_actor_id(actor_id: &str) -> Result<ParsedActorId, ActorIdError> {
     // Split by @ to get node_id
-    let (before_node, node_id) = actor_id
-        .rsplit_once('@')
-        .ok_or_else(|| ActorIdError::InvalidFormat(format!("Missing @ delimiter in actor ID: {}", actor_id)))?;
-    
+    let (before_node, node_id) = actor_id.rsplit_once('@').ok_or_else(|| {
+        ActorIdError::InvalidFormat(format!("Missing @ delimiter in actor ID: {}", actor_id))
+    })?;
+
     if node_id.is_empty() {
-        return Err(ActorIdError::InvalidFormat(format!("Empty node_id in actor ID: {}", actor_id)));
+        return Err(ActorIdError::InvalidFormat(format!(
+            "Empty node_id in actor ID: {}",
+            actor_id
+        )));
     }
-    
+
     // Try new format: {id}//{actor_type}::{namespace} or {id}//{actor_type}
     if let Some((before_type, after_type)) = before_node.split_once("//") {
         // Has actor_type separator
@@ -242,13 +255,26 @@ mod tests {
 
     #[test]
     fn test_build_actor_id_full() {
-        let actor_id = build_actor_id("user-123", "read-state-tracker", Some("orbit-read-state-ts"), "node-1");
-        assert_eq!(actor_id, "user-123//read-state-tracker::orbit-read-state-ts@node-1");
+        let actor_id = build_actor_id(
+            "user-123",
+            "read-state-tracker",
+            Some("orbit-read-state-ts"),
+            "node-1",
+        );
+        assert_eq!(
+            actor_id,
+            "user-123//read-state-tracker::orbit-read-state-ts@node-1"
+        );
     }
 
     #[test]
     fn test_build_actor_id_no_base_id() {
-        let actor_id = build_actor_id("", "read-state-tracker", Some("orbit-read-state-ts"), "node-1");
+        let actor_id = build_actor_id(
+            "",
+            "read-state-tracker",
+            Some("orbit-read-state-ts"),
+            "node-1",
+        );
         assert_eq!(actor_id, "//read-state-tracker::orbit-read-state-ts@node-1");
     }
 
@@ -266,7 +292,8 @@ mod tests {
 
     #[test]
     fn test_parse_actor_id_new_format() {
-        let parsed = parse_actor_id("user-123//read-state-tracker::orbit-read-state-ts@node-1").unwrap();
+        let parsed =
+            parse_actor_id("user-123//read-state-tracker::orbit-read-state-ts@node-1").unwrap();
         assert_eq!(parsed.id, "user-123");
         assert_eq!(parsed.actor_type, "read-state-tracker");
         assert_eq!(parsed.namespace, Some("orbit-read-state-ts".to_string()));
@@ -293,13 +320,22 @@ mod tests {
 
     #[test]
     fn test_extract_actor_type() {
-        assert_eq!(extract_actor_type("user-123//read-state-tracker::orbit-read-state-ts@node-1"), Some("read-state-tracker".to_string()));
-        assert_eq!(extract_actor_type("counter@node-1"), Some("counter".to_string()));
+        assert_eq!(
+            extract_actor_type("user-123//read-state-tracker::orbit-read-state-ts@node-1"),
+            Some("read-state-tracker".to_string())
+        );
+        assert_eq!(
+            extract_actor_type("counter@node-1"),
+            Some("counter".to_string())
+        );
     }
 
     #[test]
     fn test_extract_namespace() {
-        assert_eq!(extract_namespace("user-123//read-state-tracker::orbit-read-state-ts@node-1"), Some("orbit-read-state-ts".to_string()));
+        assert_eq!(
+            extract_namespace("user-123//read-state-tracker::orbit-read-state-ts@node-1"),
+            Some("orbit-read-state-ts".to_string())
+        );
         assert_eq!(extract_namespace("counter@node-1"), None);
     }
 
@@ -315,7 +351,7 @@ mod tests {
     fn test_parse_actor_id_invalid_format() {
         // Missing @ delimiter
         assert!(parse_actor_id("invalid").is_err());
-        
+
         // Empty node_id
         assert!(parse_actor_id("actor@").is_err());
     }
@@ -325,7 +361,7 @@ mod tests {
         // Empty everything except node_id
         let actor_id = build_actor_id("", "", None, "node-1");
         assert_eq!(actor_id, "@node-1");
-        
+
         // Empty base_id, has actor_type and namespace
         let actor_id = build_actor_id("", "test-type", Some("ns"), "node-1");
         assert_eq!(actor_id, "//test-type::ns@node-1");
@@ -334,20 +370,29 @@ mod tests {
     #[test]
     fn test_extract_functions() {
         // Test extract_actor_type
-        assert_eq!(extract_actor_type("user-123//read-state-tracker::orbit-read-state-ts@node-1"), 
-                   Some("read-state-tracker".to_string()));
-        assert_eq!(extract_actor_type("counter@node-1"), Some("counter".to_string()));
+        assert_eq!(
+            extract_actor_type("user-123//read-state-tracker::orbit-read-state-ts@node-1"),
+            Some("read-state-tracker".to_string())
+        );
+        assert_eq!(
+            extract_actor_type("counter@node-1"),
+            Some("counter".to_string())
+        );
         assert_eq!(extract_actor_type("invalid"), None);
-        
+
         // Test extract_namespace
-        assert_eq!(extract_namespace("user-123//read-state-tracker::orbit-read-state-ts@node-1"), 
-                   Some("orbit-read-state-ts".to_string()));
+        assert_eq!(
+            extract_namespace("user-123//read-state-tracker::orbit-read-state-ts@node-1"),
+            Some("orbit-read-state-ts".to_string())
+        );
         assert_eq!(extract_namespace("counter@node-1"), None);
         assert_eq!(extract_namespace("invalid"), None);
-        
+
         // Test extract_base_id
-        assert_eq!(extract_base_id("user-123//read-state-tracker::orbit-read-state-ts@node-1"), 
-                   Some("user-123".to_string()));
+        assert_eq!(
+            extract_base_id("user-123//read-state-tracker::orbit-read-state-ts@node-1"),
+            Some("user-123".to_string())
+        );
         assert_eq!(extract_base_id("counter@node-1"), Some("".to_string()));
         assert_eq!(extract_base_id("invalid"), None);
     }
@@ -360,8 +405,11 @@ mod tests {
             namespace: Some("orbit-read-state-ts".to_string()),
             node_id: "node-1".to_string(),
         };
-        
+
         let actor_id = parsed.to_actor_id();
-        assert_eq!(actor_id, "user-123//read-state-tracker::orbit-read-state-ts@node-1");
+        assert_eq!(
+            actor_id,
+            "user-123//read-state-tracker::orbit-read-state-ts@node-1"
+        );
     }
 }

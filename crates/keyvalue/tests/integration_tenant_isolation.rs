@@ -5,8 +5,8 @@
 
 #[cfg(feature = "sql-backend")]
 mod sqlite_tests {
-    use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
     use plexspaces_common::RequestContext;
+    use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
     use std::time::Duration;
 
     fn tenant1_ctx() -> RequestContext {
@@ -40,13 +40,22 @@ mod sqlite_tests {
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Each tenant should see their own value
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
 
         // Delete from tenant1 should not affect tenant2
         kv.delete(&ctx1, "key1").await.unwrap();
         assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), None);
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 
     #[tokio::test]
@@ -60,8 +69,14 @@ mod sqlite_tests {
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Each namespace should see their own value
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 
     #[tokio::test]
@@ -71,9 +86,13 @@ mod sqlite_tests {
         let ctx2 = tenant2_ctx();
 
         // Put keys with same prefix for different tenants
-        kv.put(&ctx1, "actor:alice", b"ref1".to_vec()).await.unwrap();
+        kv.put(&ctx1, "actor:alice", b"ref1".to_vec())
+            .await
+            .unwrap();
         kv.put(&ctx1, "actor:bob", b"ref2".to_vec()).await.unwrap();
-        kv.put(&ctx2, "actor:charlie", b"ref3".to_vec()).await.unwrap();
+        kv.put(&ctx2, "actor:charlie", b"ref3".to_vec())
+            .await
+            .unwrap();
 
         // Each tenant should only see their own keys
         let keys1 = kv.list(&ctx1, "actor:").await.unwrap();
@@ -93,17 +112,27 @@ mod sqlite_tests {
         let ctx2 = namespace2_ctx();
 
         // Put keys with same prefix for different namespaces
-        kv.put(&ctx1, "config:timeout", b"30s".to_vec()).await.unwrap();
-        kv.put(&ctx2, "config:timeout", b"60s".to_vec()).await.unwrap();
+        kv.put(&ctx1, "config:timeout", b"30s".to_vec())
+            .await
+            .unwrap();
+        kv.put(&ctx2, "config:timeout", b"60s".to_vec())
+            .await
+            .unwrap();
 
         // Each namespace should only see their own keys
         let keys1 = kv.list(&ctx1, "config:").await.unwrap();
         assert_eq!(keys1.len(), 1);
-        assert_eq!(kv.get(&ctx1, "config:timeout").await.unwrap(), Some(b"30s".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "config:timeout").await.unwrap(),
+            Some(b"30s".to_vec())
+        );
 
         let keys2 = kv.list(&ctx2, "config:").await.unwrap();
         assert_eq!(keys2.len(), 1);
-        assert_eq!(kv.get(&ctx2, "config:timeout").await.unwrap(), Some(b"60s".to_vec()));
+        assert_eq!(
+            kv.get(&ctx2, "config:timeout").await.unwrap(),
+            Some(b"60s".to_vec())
+        );
     }
 
     #[tokio::test]
@@ -113,15 +142,24 @@ mod sqlite_tests {
         let ctx2 = tenant2_ctx();
 
         // Acquire lock in tenant1
-        let acquired1 = kv.cas(&ctx1, "lock:resource", None, b"node1".to_vec()).await.unwrap();
+        let acquired1 = kv
+            .cas(&ctx1, "lock:resource", None, b"node1".to_vec())
+            .await
+            .unwrap();
         assert!(acquired1);
 
         // Tenant2 should be able to acquire same lock (different tenant)
-        let acquired2 = kv.cas(&ctx2, "lock:resource", None, b"node2".to_vec()).await.unwrap();
+        let acquired2 = kv
+            .cas(&ctx2, "lock:resource", None, b"node2".to_vec())
+            .await
+            .unwrap();
         assert!(acquired2);
 
         // But tenant1 should not be able to acquire again
-        let acquired3 = kv.cas(&ctx1, "lock:resource", None, b"node3".to_vec()).await.unwrap();
+        let acquired3 = kv
+            .cas(&ctx1, "lock:resource", None, b"node3".to_vec())
+            .await
+            .unwrap();
         assert!(!acquired3);
     }
 
@@ -151,14 +189,24 @@ mod sqlite_tests {
         let ctx2 = tenant2_ctx();
 
         // Put with TTL in tenant1
-        kv.put_with_ttl(&ctx1, "session:abc", b"data1".to_vec(), Duration::from_secs(1))
-            .await
-            .unwrap();
+        kv.put_with_ttl(
+            &ctx1,
+            "session:abc",
+            b"data1".to_vec(),
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
 
         // Put with longer TTL in tenant2
-        kv.put_with_ttl(&ctx2, "session:abc", b"data2".to_vec(), Duration::from_secs(10))
-            .await
-            .unwrap();
+        kv.put_with_ttl(
+            &ctx2,
+            "session:abc",
+            b"data2".to_vec(),
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
 
         // Both should exist initially
         assert!(kv.exists(&ctx1, "session:abc").await.unwrap());
@@ -219,16 +267,14 @@ mod sqlite_tests {
         let ctx2 = tenant2_ctx();
 
         // Multi-put in tenant1
-        kv.multi_put(&ctx1, &[
-            ("k1", b"v1".to_vec()),
-            ("k2", b"v2".to_vec()),
-        ]).await.unwrap();
+        kv.multi_put(&ctx1, &[("k1", b"v1".to_vec()), ("k2", b"v2".to_vec())])
+            .await
+            .unwrap();
 
         // Multi-put in tenant2
-        kv.multi_put(&ctx2, &[
-            ("k1", b"v3".to_vec()),
-            ("k2", b"v4".to_vec()),
-        ]).await.unwrap();
+        kv.multi_put(&ctx2, &[("k1", b"v3".to_vec()), ("k2", b"v4".to_vec())])
+            .await
+            .unwrap();
 
         // Multi-get should return tenant-specific values
         let values1 = kv.multi_get(&ctx1, &["k1", "k2"]).await.unwrap();
@@ -248,8 +294,12 @@ mod sqlite_tests {
         let ctx_empty = empty_namespace_ctx();
 
         // Put keys in different namespaces
-        kv.put(&ctx_ns1, "key:ns1", b"value1".to_vec()).await.unwrap();
-        kv.put(&ctx_ns2, "key:ns2", b"value2".to_vec()).await.unwrap();
+        kv.put(&ctx_ns1, "key:ns1", b"value1".to_vec())
+            .await
+            .unwrap();
+        kv.put(&ctx_ns2, "key:ns2", b"value2".to_vec())
+            .await
+            .unwrap();
 
         // List with empty namespace should return keys from all namespaces
         let keys = kv.list(&ctx_empty, "key:").await.unwrap();
@@ -275,10 +325,14 @@ mod sqlite_tests {
         let ctx2_ns1 = tenant2_ctx(); // tenant2, namespace "default"
 
         // Put keys in tenant1, namespace1
-        kv.put(&ctx1_ns1, "key:1", b"value1".to_vec()).await.unwrap();
-        
+        kv.put(&ctx1_ns1, "key:1", b"value1".to_vec())
+            .await
+            .unwrap();
+
         // Put keys in tenant2, namespace "default"
-        kv.put(&ctx2_ns1, "key:2", b"value2".to_vec()).await.unwrap();
+        kv.put(&ctx2_ns1, "key:2", b"value2".to_vec())
+            .await
+            .unwrap();
 
         // Empty namespace in tenant1 should only see tenant1's keys across all namespaces
         let keys = kv.list(&ctx1_empty, "key:").await.unwrap();
@@ -291,6 +345,3 @@ mod sqlite_tests {
         assert!(keys2.contains(&"key:2".to_string()));
     }
 }
-
-
-

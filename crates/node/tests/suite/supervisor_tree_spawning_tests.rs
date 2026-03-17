@@ -26,37 +26,37 @@
 //! 5. Actor types are correctly set from ChildSpec.id
 //! 6. The entire tree is spawned when an application is deployed
 
-use plexspaces_node::{NodeBuilder, Node};
-use plexspaces_services::application_service::ApplicationServiceImpl;
-use plexspaces_proto::application::v1::{
-    application_service_server::ApplicationService, DeployApplicationRequest,
-    ApplicationSpec, ApplicationType, ShutdownStrategy, SupervisorSpec, ChildSpec, ChildType,
-    SupervisionStrategy, RestartPolicy,
-};
-use plexspaces_proto::wasm::v1::WasmModule;
-use plexspaces_proto::v1::application::ApplicationState;
+use super::test_helpers::app_request_with_tenant;
 use plexspaces_core::{service_names, ApplicationManager};
+use plexspaces_node::{Node, NodeBuilder};
+use plexspaces_proto::application::v1::{
+    application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
+    ChildType, DeployApplicationRequest, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
+    SupervisorSpec,
+};
+use plexspaces_proto::v1::application::ApplicationState;
+use plexspaces_proto::wasm::v1::WasmModule;
+use plexspaces_proto::ActorLifecycleEvent;
+use plexspaces_services::application_service::ApplicationServiceImpl;
 use prost_types::Duration as ProstDuration;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration, timeout};
-use tokio::task::yield_now;
+use std::sync::OnceLock;
 use tokio::sync::mpsc;
-use super::test_helpers::app_request_with_tenant;
+use tokio::task::yield_now;
+use tokio::time::{sleep, timeout, Duration};
 use tonic::Request;
 use wat;
-use plexspaces_proto::ActorLifecycleEvent;
-use std::sync::OnceLock;
 
 /// Shared minimal WASM module for all tests (loaded once, reused)
-/// 
+///
 /// ## Purpose
 /// Caches the minimal WASM module to avoid re-parsing WAT on every test.
 /// Uses OnceLock pattern from WASM integration tests for thread-safe initialization.
 static SHARED_WASM_BYTES: OnceLock<Vec<u8>> = OnceLock::new();
 
 /// Get or create shared minimal WASM module bytes
-/// 
+///
 /// ## Expected Behavior
 /// - First call: Parses WAT and caches the bytes
 /// - Subsequent calls: Returns cached bytes (no parsing overhead)
@@ -84,21 +84,27 @@ fn create_minimal_wasm_module() -> Vec<u8> {
 }
 
 /// Create a test node with services initialized (without starting gRPC server)
-/// 
+///
 /// ## Purpose
 /// Creates a node with all services initialized but does NOT start the gRPC server.
 /// This avoids port conflicts when running tests in parallel.
-/// 
+///
 /// ## Expected Behavior
 /// - Node is built and services are initialized
 /// - ActorFactory, ApplicationManager, and other services are ready
 /// - gRPC server is NOT started (use create_test_node_with_server() for integration tests)
 async fn create_test_node() -> Arc<Node> {
-    let node = Arc::new(NodeBuilder::new("test-node")
-        .with_in_memory_backends()
-        .build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node")
+            .with_in_memory_backends()
+            .build()
+            .await,
+    );
     let node_clone = node.clone();
-    node_clone.initialize_services().await.expect("Failed to initialize services");
+    node_clone
+        .initialize_services()
+        .await
+        .expect("Failed to initialize services");
     // Wait for services to be ready with polling (no gRPC server startup)
     for _ in 0..5 {
         yield_now().await;
@@ -108,11 +114,11 @@ async fn create_test_node() -> Arc<Node> {
 }
 
 /// Create a test node with gRPC server started (for integration tests only)
-/// 
+///
 /// ## Purpose
 /// Creates a node with gRPC server started. Use this ONLY for integration tests
 /// that need actual gRPC communication. Most unit tests should use create_test_node().
-/// 
+///
 /// ## Expected Behavior
 /// - Node is built, services initialized, and gRPC server is started
 /// - Server listens on an ephemeral port (0) to avoid conflicts
@@ -123,10 +129,13 @@ async fn create_test_node_with_server() -> Arc<Node> {
             .with_listen_addr("127.0.0.1:0") // Ephemeral port to avoid conflicts
             .with_in_memory_backends()
             .build()
-            .await
+            .await,
     );
     let node_clone = node.clone();
-    node_clone.initialize_services().await.expect("Failed to initialize services");
+    node_clone
+        .initialize_services()
+        .await
+        .expect("Failed to initialize services");
     let node_clone2 = node.clone();
     node_clone2.start().await.expect("Failed to start node");
     // Wait for services and server to be ready
@@ -144,26 +153,29 @@ async fn wait_for_actors_activated(
     timeout_duration: Duration,
 ) -> bool {
     // Get ActorRegistry
-    let registry = node.service_locator()
+    let registry = node
+        .service_locator()
         .actor_registry()
         .await
         .expect("ActorRegistry not found");
-    
+
     let start = std::time::Instant::now();
     let mut last_check = std::time::Instant::now();
-    
+
     // Poll with adaptive backoff - check registered_actor_ids which is more reliable
     while start.elapsed() < timeout_duration {
         // Check if all actors are registered (registered_actor_ids is updated when actors are spawned)
         let registered_ids = registry.registered_actor_ids().read().await;
-        let expected_set: std::collections::HashSet<String> = expected_actor_ids.iter().cloned().collect();
-        let registered_set: std::collections::HashSet<String> = registered_ids.iter().map(|id| id.to_string()).collect();
-        
+        let expected_set: std::collections::HashSet<String> =
+            expected_actor_ids.iter().cloned().collect();
+        let registered_set: std::collections::HashSet<String> =
+            registered_ids.iter().map(|id| id.to_string()).collect();
+
         if expected_set.is_subset(&registered_set) {
             return true;
         }
         drop(registered_ids);
-        
+
         // Use adaptive polling: check more frequently at first, then back off
         let elapsed = last_check.elapsed();
         let sleep_duration = if elapsed < Duration::from_millis(100) {
@@ -173,12 +185,12 @@ async fn wait_for_actors_activated(
         } else {
             Duration::from_millis(100) // Slower polling after 500ms
         };
-        
+
         yield_now().await;
         sleep(sleep_duration).await;
         last_check = std::time::Instant::now();
     }
-    
+
     false
 }
 
@@ -192,7 +204,11 @@ async fn wait_for_application_state(
     let start = std::time::Instant::now();
     while start.elapsed() < timeout_duration {
         let app_manager = node.application_manager();
-        let current_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), app_name).await;
+        let current_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+            app_manager.as_ref(),
+            app_name,
+        )
+        .await;
         // Compare by matching the enum variant directly
         match (current_state, &expected_state) {
             (Some(current), expected) if current == *expected => return true,
@@ -211,14 +227,15 @@ async fn wait_for_min_actors_activated(
     timeout_duration: Duration,
 ) -> bool {
     // Get ActorRegistry
-    let registry = node.service_locator()
+    let registry = node
+        .service_locator()
         .actor_registry()
         .await
         .expect("ActorRegistry not found");
-    
+
     let start = std::time::Instant::now();
     let mut last_check = std::time::Instant::now();
-    
+
     // Poll with adaptive backoff
     while start.elapsed() < timeout_duration {
         // Check current count
@@ -227,7 +244,7 @@ async fn wait_for_min_actors_activated(
             return true;
         }
         drop(registered_ids);
-        
+
         // Use adaptive polling
         let elapsed = last_check.elapsed();
         let sleep_duration = if elapsed < Duration::from_millis(100) {
@@ -237,12 +254,12 @@ async fn wait_for_min_actors_activated(
         } else {
             Duration::from_millis(100)
         };
-        
+
         yield_now().await;
         sleep(sleep_duration).await;
         last_check = std::time::Instant::now();
     }
-    
+
     false
 }
 
@@ -343,22 +360,24 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
 
 /// Get all actor IDs from ActorRegistry
 async fn get_all_actor_ids(node: &Node) -> Vec<String> {
-    let actor_registry = node.service_locator()
+    let actor_registry = node
+        .service_locator()
         .actor_registry()
         .await
         .expect("ActorRegistry not found");
-    
+
     let registered_ids = actor_registry.registered_actor_ids().read().await;
     registered_ids.iter().cloned().collect()
 }
 
 /// Get actor type for an actor ID
 async fn get_actor_type(node: &Node, actor_id: &str) -> Option<String> {
-    let actor_registry = node.service_locator()
+    let actor_registry = node
+        .service_locator()
         .actor_registry()
         .await
         .expect("ActorRegistry not found");
-    
+
     let index = actor_registry.actor_type_index().read().await;
     for ((_tenant, _namespace, actor_type), actor_ids) in index.iter() {
         if actor_ids.contains(&actor_id.to_string()) {
@@ -369,12 +388,12 @@ async fn get_actor_type(node: &Node, actor_id: &str) -> Option<String> {
 }
 
 /// Register a mock behavior factory in ServiceLocator
-/// 
+///
 /// ## Purpose
 /// Registers a BehaviorRegistry in the ServiceLocator. ActorFactory::spawn_actor looks for
 /// BehaviorRegistry in ServiceLocator. If not found or actor_type is not registered, spawn_actor
 /// will FAIL with an error.
-/// 
+///
 /// ## Expected Behavior
 /// - Registers BehaviorRegistry in ServiceLocator
 /// - ActorFactory will use it to create behaviors for spawned actors
@@ -383,36 +402,38 @@ async fn get_actor_type(node: &Node, actor_id: &str) -> Option<String> {
 async fn register_mock_behavior_factory(node: &Node) -> Result<(), String> {
     use plexspaces_core::behavior_factory::BehaviorRegistry;
     use std::sync::Arc;
-    
+
     let registry = BehaviorRegistry::new();
     let registry_arc = Arc::new(registry);
-    
+
     // Register in ServiceLocator (ActorFactory looks for BehaviorRegistry by type)
     let service_locator = node.service_locator();
-    service_locator.register_behavior_registry(registry_arc.clone()).await;
-    
+    service_locator
+        .register_behavior_registry(registry_arc.clone())
+        .await;
+
     tracing::debug!("Registered behavior factory in ServiceLocator (unknown actor_types will fail - register behaviors first)");
-    
+
     Ok(())
 }
 
 /// Deploy application using SpecApplication directly (mock/simulated setup for unit tests)
-/// 
+///
 /// ## Purpose
 /// Deploys an application using SpecApplication directly, bypassing WASM runtime.
 /// This is a mock/simulated setup for unit tests that don't need actual WASM deployment.
-/// 
+///
 /// ## Expected Behavior
 /// 1. Creates SpecApplication with mock behavior factory
 /// 2. Registers application with ApplicationManager
 /// 3. Starts the application (spawns supervisor tree and actors)
 /// 4. Returns success/failure result
-/// 
+///
 /// ## Arguments
 /// * `node` - Node instance (services must be initialized)
 /// * `app_name` - Application name
 /// * `app_spec` - Application specification with supervisor tree
-/// 
+///
 /// ## Returns
 /// Result indicating success or failure
 async fn deploy_application_mock(
@@ -420,62 +441,67 @@ async fn deploy_application_mock(
     app_name: &str,
     app_spec: ApplicationSpec,
 ) -> Result<(), String> {
-    use plexspaces_application::SpecApplication;
     use plexspaces_application::Application;
+    use plexspaces_application::SpecApplication;
     use std::sync::Arc;
-    
+
     tracing::debug!(
         application = %app_name,
         "Deploying application using SpecApplication (mock/simulated unit test mode)"
     );
-    
-    register_mock_behavior_factory(node).await
+
+    register_mock_behavior_factory(node)
+        .await
         .map_err(|e| format!("Failed to register behavior factory: {}", e))?;
-    
+
     // Create SpecApplication (behavior factory is in ServiceLocator, not passed directly)
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
-    
+
     // Register application
-    node.application_manager().register(app).await
+    node.application_manager()
+        .register(app)
+        .await
         .map_err(|e| format!("Failed to register application: {}", e))?;
-    
+
     tracing::debug!(
         application = %app_name,
         "Application registered, starting..."
     );
-    
+
     // Start application (spawns supervisor tree)
-    node.application_manager().start(app_name).await
+    node.application_manager()
+        .start(app_name)
+        .await
         .map_err(|e| format!("Failed to start application: {}", e))?;
-    
+
     tracing::debug!(
         application = %app_name,
         "Application started successfully"
     );
-    
+
     Ok(())
 }
 
 /// Deploy application via ApplicationServiceImpl with WASM (integration test setup)
-/// 
+///
 /// ## Purpose
 /// Deploys an application using ApplicationServiceImpl with actual WASM deployment.
 /// This requires the node to be started (WASM runtime initialized).
 /// Use this ONLY for integration tests that verify full WASM deployment flow.
-/// 
+///
 /// ## Expected Behavior
 /// 1. Creates DeployApplicationRequest from spec and WASM module
 /// 2. Calls ApplicationServiceImpl::deploy_application() directly (bypasses gRPC)
 /// 3. Application is registered and started (supervisor tree and actors are spawned)
 /// 4. Returns success/failure result
-/// 
+///
 /// ## Arguments
 /// * `node` - Node instance (MUST be started - WASM runtime must be initialized)
 /// * `app_name` - Application name
 /// * `app_spec` - Application specification with supervisor tree
 /// * `wasm_module` - WASM module bytes
-/// 
+///
 /// ## Returns
 /// Result indicating success or failure
 async fn deploy_application_with_wasm(
@@ -485,21 +511,21 @@ async fn deploy_application_with_wasm(
     wasm_module: WasmModule,
 ) -> Result<(), String> {
     use plexspaces_services::application_service::ApplicationServiceImpl;
-    use tonic::Request;
     use std::sync::Arc;
-    
+    use tonic::Request;
+
     tracing::debug!(
         application = %app_name,
         "Deploying application with WASM (integration test mode)"
     );
-    
+
     // Get ApplicationManager
     let application_manager = node.application_manager();
-    
+
     // Create ApplicationServiceImpl (doesn't require gRPC server to be running)
     let node_arc = Arc::new(node.clone());
-    let service = ApplicationServiceImpl::new(node_arc.service_locator().clone());
-    
+    let service = ApplicationServiceImpl::new(node_arc.service_locator().clone(), None);
+
     // Create deployment request (same as gRPC would receive)
     let request = DeployApplicationRequest {
         application_id: format!("{}-001", app_name),
@@ -509,26 +535,28 @@ async fn deploy_application_with_wasm(
         config: Some(app_spec),
         initial_state: vec![],
     };
-    
+
     // Call deploy_application directly (bypasses gRPC layer)
-    let response = service.deploy_application(app_request_with_tenant(request)).await
+    let response = service
+        .deploy_application(app_request_with_tenant(request))
+        .await
         .map_err(|e| format!("DeployApplication failed: {}", e))?;
-    
+
     let res = response.into_inner();
     if !res.success {
         return Err(format!("Deployment failed: success=false"));
     }
-    
+
     tracing::debug!(
         application = %app_name,
         "Application deployed and started successfully"
     );
-    
+
     Ok(())
 }
 
 /// Test 1: Simple supervisor tree - all workers should be spawned
-/// 
+///
 /// ## Expected Behavior
 /// - All 3 worker actors should be spawned and registered
 /// - Actor types should be set correctly from ChildSpec.id
@@ -537,7 +565,7 @@ async fn deploy_application_with_wasm(
 async fn test_simple_supervisor_tree_all_workers_spawned() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
-        
+
         // Create supervisor tree with 3 workers
         let supervisor_spec = create_simple_supervisor_tree();
         let app_spec = ApplicationSpec {
@@ -551,66 +579,85 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
             supervisor: Some(supervisor_spec),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
         };
 
         // Deploy using mock/simulated setup (no WASM runtime needed)
-        deploy_application_mock(&node, "test-app", app_spec).await
+        deploy_application_mock(&node, "test-app", app_spec)
+            .await
             .expect("Deployment should succeed");
 
         // Wait for application to be running
-        let app_running = wait_for_application_state(&node, "test-app", ApplicationState::ApplicationStateRunning, Duration::from_secs(1)).await;
-        assert!(app_running, "Application should be running within 5 seconds");
+        let app_running = wait_for_application_state(
+            &node,
+            "test-app",
+            ApplicationState::ApplicationStateRunning,
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(
+            app_running,
+            "Application should be running within 5 seconds"
+        );
 
         // Wait for actors to be activated using lifecycle events
         let node_id = node.id().as_str();
         let expected_actors = vec![
-        format!("worker-1@{}", node_id),
-        format!("worker-2@{}", node_id),
-        format!("worker-3@{}", node_id),
+            format!("worker-1@{}", node_id),
+            format!("worker-2@{}", node_id),
+            format!("worker-3@{}", node_id),
         ];
-        let actors_activated = wait_for_actors_activated(&node, &expected_actors, Duration::from_secs(1)).await;
-        assert!(actors_activated, "Actors should be activated within 5 seconds");
+        let actors_activated =
+            wait_for_actors_activated(&node, &expected_actors, Duration::from_secs(1)).await;
+        assert!(
+            actors_activated,
+            "Actors should be activated within 5 seconds"
+        );
 
         // Get all actor IDs
         let actor_ids = get_all_actor_ids(&node).await;
-        
+
         // Verify all 3 workers are spawned
         let node_id = node.id().as_str();
         let expected_actors = vec![
-        format!("worker-1@{}", node_id),
-        format!("worker-2@{}", node_id),
-        format!("worker-3@{}", node_id),
+            format!("worker-1@{}", node_id),
+            format!("worker-2@{}", node_id),
+            format!("worker-3@{}", node_id),
         ];
 
         for expected_actor in &expected_actors {
-        assert!(
-            actor_ids.contains(expected_actor),
-            "Actor {} should be spawned. Found actors: {:?}",
-            expected_actor,
-            actor_ids
-        );
+            assert!(
+                actor_ids.contains(expected_actor),
+                "Actor {} should be spawned. Found actors: {:?}",
+                expected_actor,
+                actor_ids
+            );
         }
 
         // Verify actor types are set correctly
         for expected_actor in &expected_actors {
-        let actor_type = get_actor_type(&node, expected_actor).await;
-        let expected_type = expected_actor.split('@').next().unwrap();
-        assert_eq!(
-            actor_type,
-            Some(expected_type.to_string()),
-            "Actor {} should have type {}",
-            expected_actor,
-            expected_type
-        );
+            let actor_type = get_actor_type(&node, expected_actor).await;
+            let expected_type = expected_actor.split('@').next().unwrap();
+            assert_eq!(
+                actor_type,
+                Some(expected_type.to_string()),
+                "Actor {} should have type {}",
+                expected_actor,
+                expected_type
+            );
         }
-    }).await.expect("Test should complete within 2 seconds");
+    })
+    .await
+    .expect("Test should complete within 2 seconds");
 }
 
 /// Test 2: Nested supervisor tree - all workers and supervisors should be spawned
-/// 
+///
 /// ## Expected Behavior
 /// - Root worker, child supervisor (as actor), and nested workers should all be spawned
 /// - Supervisor should be spawned as an actor (Erlang-style)
@@ -619,7 +666,7 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
 async fn test_nested_supervisor_tree_all_actors_spawned() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
-        
+
         // Create nested supervisor tree
         let supervisor_spec = create_nested_supervisor_tree();
         let app_spec = ApplicationSpec {
@@ -633,78 +680,101 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
             supervisor: Some(supervisor_spec),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
         };
 
-        deploy_application_mock(&node, "nested-app", app_spec).await
+        deploy_application_mock(&node, "nested-app", app_spec)
+            .await
             .expect("Deployment should succeed");
 
         // Wait for application to be running
-        let app_running = wait_for_application_state(&node, "nested-app", ApplicationState::ApplicationStateRunning, Duration::from_secs(1)).await;
-        assert!(app_running, "Application should be running within 5 seconds");
+        let app_running = wait_for_application_state(
+            &node,
+            "nested-app",
+            ApplicationState::ApplicationStateRunning,
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(
+            app_running,
+            "Application should be running within 5 seconds"
+        );
 
         // Wait for actors to be activated using lifecycle events
-        let actors_activated = wait_for_min_actors_activated(&node, 4, Duration::from_secs(1)).await;
-        assert!(actors_activated, "At least 4 actors should be activated within 5 seconds");
+        let actors_activated =
+            wait_for_min_actors_activated(&node, 4, Duration::from_secs(1)).await;
+        assert!(
+            actors_activated,
+            "At least 4 actors should be activated within 5 seconds"
+        );
 
         // Verify application is running
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "nested-app").await;
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+            app_manager.as_ref(),
+            "nested-app",
+        )
+        .await;
         assert_eq!(
-        app_state,
-        Some(ApplicationState::ApplicationStateRunning),
-        "Application should be running"
+            app_state,
+            Some(ApplicationState::ApplicationStateRunning),
+            "Application should be running"
         );
 
         // Get all actor IDs
         let actor_ids = get_all_actor_ids(&node).await;
-        
+
         let node_id = node.id().as_str();
-        
+
         // Expected actors:
         // - root-worker-1 (worker)
         // - child-supervisor (supervisor actor - Erlang-style)
         // - nested-worker-1 (worker under child supervisor)
         // - nested-worker-2 (worker under child supervisor)
         let expected_actors = vec![
-        format!("root-worker-1@{}", node_id),
-        format!("child-supervisor@{}", node_id), // Supervisor should be spawned as actor
-        format!("nested-worker-1@{}", node_id),
-        format!("nested-worker-2@{}", node_id),
+            format!("root-worker-1@{}", node_id),
+            format!("child-supervisor@{}", node_id), // Supervisor should be spawned as actor
+            format!("nested-worker-1@{}", node_id),
+            format!("nested-worker-2@{}", node_id),
         ];
 
         for expected_actor in &expected_actors {
-        assert!(
-            actor_ids.contains(expected_actor),
-            "Actor {} should be spawned. Found actors: {:?}",
-            expected_actor,
-            actor_ids
-        );
+            assert!(
+                actor_ids.contains(expected_actor),
+                "Actor {} should be spawned. Found actors: {:?}",
+                expected_actor,
+                actor_ids
+            );
         }
 
         // Verify actor types are set correctly
         for expected_actor in &expected_actors {
-        let actor_type = get_actor_type(&node, expected_actor).await;
-        let expected_type = expected_actor.split('@').next().unwrap();
-        assert_eq!(
-            actor_type,
-            Some(expected_type.to_string()),
-            "Actor {} should have type {}",
-            expected_actor,
-            expected_type
-        );
+            let actor_type = get_actor_type(&node, expected_actor).await;
+            let expected_type = expected_actor.split('@').next().unwrap();
+            assert_eq!(
+                actor_type,
+                Some(expected_type.to_string()),
+                "Actor {} should have type {}",
+                expected_actor,
+                expected_type
+            );
         }
 
         // Verify total count matches expected (4 actors total)
         assert_eq!(
-        actor_ids.len(),
-        expected_actors.len(),
-        "Should have exactly {} actors spawned",
-        expected_actors.len()
+            actor_ids.len(),
+            expected_actors.len(),
+            "Should have exactly {} actors spawned",
+            expected_actors.len()
         );
-    }).await.expect("Test should complete within 2 seconds");
+    })
+    .await
+    .expect("Test should complete within 2 seconds");
 }
 
 /// Create a deeply nested supervisor tree (3 levels)
@@ -714,18 +784,16 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
         strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
         max_restarts: 3,
         max_restart_window: None,
-        children: vec![
-            ChildSpec {
-                id: "deep-worker-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![],
+        children: vec![ChildSpec {
+            id: "deep-worker-1".to_string(),
+            r#type: ChildType::ChildTypeWorker.into(),
+            args: HashMap::new(),
+            restart: RestartPolicy::RestartPolicyPermanent.into(),
+            shutdown_timeout: None,
+            supervisor: None,
+            facets: vec![],
             behavior_kind: None,
-        },
-        ],
+        }],
     };
 
     // Level 2: Middle supervisor
@@ -742,8 +810,8 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(level3_supervisor),
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
             ChildSpec {
                 id: "level2-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
@@ -752,8 +820,8 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
         ],
     };
 
@@ -771,8 +839,8 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
             ChildSpec {
                 id: "level1-supervisor".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
@@ -781,8 +849,8 @@ fn create_deeply_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(level2_supervisor),
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
         ],
     }
 }
@@ -803,8 +871,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
             ChildSpec {
                 id: "supervisor-a-worker-2".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
@@ -813,8 +881,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
         ],
     };
 
@@ -823,18 +891,16 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
         strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
         max_restarts: 3,
         max_restart_window: None,
-        children: vec![
-            ChildSpec {
-                id: "supervisor-b-worker-1".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![],
+        children: vec![ChildSpec {
+            id: "supervisor-b-worker-1".to_string(),
+            r#type: ChildType::ChildTypeWorker.into(),
+            args: HashMap::new(),
+            restart: RestartPolicy::RestartPolicyPermanent.into(),
+            shutdown_timeout: None,
+            supervisor: None,
+            facets: vec![],
             behavior_kind: None,
-        },
-        ],
+        }],
     };
 
     // Root supervisor with two sibling supervisors
@@ -851,8 +917,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(supervisor_a),
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
             ChildSpec {
                 id: "supervisor-b".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
@@ -861,8 +927,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(supervisor_b),
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
             ChildSpec {
                 id: "root-worker".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
@@ -871,8 +937,8 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
         ],
     }
 }
@@ -882,7 +948,7 @@ fn create_multiple_sibling_supervisors_spec() -> SupervisorSpec {
 async fn test_deeply_nested_supervisor_tree() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
-        
+
         // Create deeply nested supervisor tree
         let supervisor_spec = create_deeply_nested_supervisor_tree();
         let app_spec = ApplicationSpec {
@@ -896,22 +962,30 @@ async fn test_deeply_nested_supervisor_tree() {
             supervisor: Some(supervisor_spec),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
         };
 
         // Deploy using mock/simulated setup (no WASM runtime needed)
-        deploy_application_mock(&node, "test-app", app_spec).await
+        deploy_application_mock(&node, "test-app", app_spec)
+            .await
             .expect("Deployment should succeed");
-        let actors_activated = wait_for_min_actors_activated(&node, 3, Duration::from_secs(1)).await;
-        assert!(actors_activated, "At least 3 actors should be activated within 5 seconds");
+        let actors_activated =
+            wait_for_min_actors_activated(&node, 3, Duration::from_secs(1)).await;
+        assert!(
+            actors_activated,
+            "At least 3 actors should be activated within 5 seconds"
+        );
 
         // Get all actor IDs
         let actor_ids = get_all_actor_ids(&node).await;
-        
+
         let node_id = node.id().as_str();
-        
+
         // Expected actors (all supervisors and workers):
         // - root-worker (worker)
         // - level1-supervisor (supervisor actor)
@@ -919,26 +993,26 @@ async fn test_deeply_nested_supervisor_tree() {
         //   - level2-supervisor (supervisor actor)
         //     - deep-worker-1 (worker)
         let expected_actors = vec![
-        format!("root-worker@{}", node_id),
-        format!("level1-supervisor@{}", node_id),
-        format!("level2-worker@{}", node_id),
-        format!("level2-supervisor@{}", node_id),
-        format!("deep-worker-1@{}", node_id),
+            format!("root-worker@{}", node_id),
+            format!("level1-supervisor@{}", node_id),
+            format!("level2-worker@{}", node_id),
+            format!("level2-supervisor@{}", node_id),
+            format!("deep-worker-1@{}", node_id),
         ];
 
         for expected_actor in &expected_actors {
-        assert!(
-            actor_ids.contains(expected_actor),
-            "Actor {} should be spawned. Found actors: {:?}",
-            expected_actor,
-            actor_ids
-        );
+            assert!(
+                actor_ids.contains(expected_actor),
+                "Actor {} should be spawned. Found actors: {:?}",
+                expected_actor,
+                actor_ids
+            );
         }
 
         // Verify all supervisors are spawned as actors (Erlang-style)
         let supervisor_actors = vec![
-        format!("level1-supervisor@{}", node_id),
-        format!("level2-supervisor@{}", node_id),
+            format!("level1-supervisor@{}", node_id),
+            format!("level2-supervisor@{}", node_id),
         ];
 
         for supervisor_actor in &supervisor_actors {
@@ -947,7 +1021,7 @@ async fn test_deeply_nested_supervisor_tree() {
                 "Supervisor {} should be spawned as an actor (Erlang-style)",
                 supervisor_actor
             );
-            
+
             let actor_type = get_actor_type(&node, supervisor_actor).await;
             let expected_type = supervisor_actor.split('@').next().unwrap();
             assert_eq!(
@@ -958,7 +1032,9 @@ async fn test_deeply_nested_supervisor_tree() {
                 expected_type
             );
         }
-    }).await.expect("Test should complete within 2 seconds");
+    })
+    .await
+    .expect("Test should complete within 2 seconds");
 }
 
 /// Test 4: Verify actors are tracked in WasmApplication
@@ -967,7 +1043,7 @@ async fn test_actors_tracked_in_application() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
         let application_manager = node.application_manager();
-            // Deploy directly via ApplicationServiceImpl (no gRPC server needed)
+        // Deploy directly via ApplicationServiceImpl (no gRPC server needed)
         let supervisor_spec = create_simple_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
@@ -980,37 +1056,61 @@ async fn test_actors_tracked_in_application() {
             supervisor: Some(supervisor_spec),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
         };
 
-        deploy_application_mock(&node, "actors_tracked_in_-app", app_spec).await
+        deploy_application_mock(&node, "actors_tracked_in_-app", app_spec)
+            .await
             .expect("Deployment should succeed");
-        let app_running = wait_for_application_state(&node, "actors_tracked_in_-app", ApplicationState::ApplicationStateRunning, Duration::from_secs(1)).await;
-        assert!(app_running, "Application should be running within 5 seconds");
+        let app_running = wait_for_application_state(
+            &node,
+            "actors_tracked_in_-app",
+            ApplicationState::ApplicationStateRunning,
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(
+            app_running,
+            "Application should be running within 5 seconds"
+        );
 
         // Wait for actors to be activated using lifecycle events
-        let actors_activated = wait_for_min_actors_activated(&node, 1, Duration::from_secs(1)).await;
-        assert!(actors_activated, "At least 1 actor should be activated within 5 seconds");
+        let actors_activated =
+            wait_for_min_actors_activated(&node, 1, Duration::from_secs(1)).await;
+        assert!(
+            actors_activated,
+            "At least 1 actor should be activated within 5 seconds"
+        );
 
         // Verify application is running
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "actors_tracked_in_-app").await;
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+            app_manager.as_ref(),
+            "actors_tracked_in_-app",
+        )
+        .await;
         assert_eq!(
-        app_state,
-        Some(ApplicationState::ApplicationStateRunning),
-        "Application should be running"
+            app_state,
+            Some(ApplicationState::ApplicationStateRunning),
+            "Application should be running"
         );
 
         // Verify actors are spawned in ActorRegistry (ApplicationManager doesn't auto-track)
         let actor_ids = get_all_actor_ids(&node).await;
         assert_eq!(
-            actor_ids.len(), 3,
+            actor_ids.len(),
+            3,
             "Application should have 3 actors spawned. Found: {:?}",
             actor_ids
         );
-    }).await.expect("Test should complete within 2 seconds");
+    })
+    .await
+    .expect("Test should complete within 2 seconds");
 }
 
 /// Test 5: Complex hierarchy - supervisor->supervisor->supervisor->workers
@@ -1018,7 +1118,7 @@ async fn test_actors_tracked_in_application() {
 async fn test_complex_supervisor_hierarchy() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
-        
+
         // Create complex supervisor hierarchy
         let supervisor_spec = create_complex_supervisor_hierarchy_spec();
         let app_spec = ApplicationSpec {
@@ -1032,44 +1132,70 @@ async fn test_complex_supervisor_hierarchy() {
             supervisor: Some(supervisor_spec),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
         };
 
-        deploy_application_mock(&node, "complex-app", app_spec).await
+        deploy_application_mock(&node, "complex-app", app_spec)
+            .await
             .expect("Deployment should succeed");
-        let app_running = wait_for_application_state(&node, "complex-app", ApplicationState::ApplicationStateRunning, Duration::from_secs(1)).await;
-        assert!(app_running, "Application should be running within 5 seconds");
+        let app_running = wait_for_application_state(
+            &node,
+            "complex-app",
+            ApplicationState::ApplicationStateRunning,
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(
+            app_running,
+            "Application should be running within 5 seconds"
+        );
 
         // Wait for all actors to be activated using lifecycle events
         // Complex hierarchy: 1 root-worker + 1 level1-supervisor + 1 level2-worker + 1 level2-supervisor + 1 level3-supervisor + 1 level3-worker = 6 actors
         // Get actual count first to debug
         let actor_ids = get_all_actor_ids(&node).await;
-        tracing::debug!("Complex hierarchy test: Found {} actors: {:?}", actor_ids.len(), actor_ids);
-        
+        tracing::debug!(
+            "Complex hierarchy test: Found {} actors: {:?}",
+            actor_ids.len(),
+            actor_ids
+        );
+
         // Wait for at least 6 actors (may take a moment for recursive spawning)
-        let actors_activated = wait_for_min_actors_activated(&node, 6, Duration::from_secs(1)).await;
+        let actors_activated =
+            wait_for_min_actors_activated(&node, 6, Duration::from_secs(1)).await;
         if !actors_activated {
             // Get final count for better error message
             let final_actor_ids = get_all_actor_ids(&node).await;
-            panic!("At least 6 actors should be activated within 5 seconds. Found {} actors: {:?}", final_actor_ids.len(), final_actor_ids);
+            panic!(
+                "At least 6 actors should be activated within 5 seconds. Found {} actors: {:?}",
+                final_actor_ids.len(),
+                final_actor_ids
+            );
         }
 
         // Verify application is running
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "complex-app").await;
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+            app_manager.as_ref(),
+            "complex-app",
+        )
+        .await;
         assert_eq!(
-        app_state,
-        Some(ApplicationState::ApplicationStateRunning),
-        "Application should be running"
+            app_state,
+            Some(ApplicationState::ApplicationStateRunning),
+            "Application should be running"
         );
 
         // Get all actor IDs
         let actor_ids = get_all_actor_ids(&node).await;
-        
+
         let node_id = node.id().as_str();
-        
+
         // Expected actors (all supervisors and workers):
         // Level 1 (root):
         //   - root-worker (worker)
@@ -1081,80 +1207,82 @@ async fn test_complex_supervisor_hierarchy() {
         //   - level3-supervisor (supervisor actor)
         //   - level3-worker (worker)
         let expected_actors = vec![
-        // Level 1
-        format!("root-worker@{}", node_id),
-        format!("level1-supervisor@{}", node_id),
-        // Level 2
-        format!("level2-worker@{}", node_id),
-        format!("level2-supervisor@{}", node_id),
-        // Level 3
-        format!("level3-supervisor@{}", node_id),
-        format!("level3-worker@{}", node_id),
+            // Level 1
+            format!("root-worker@{}", node_id),
+            format!("level1-supervisor@{}", node_id),
+            // Level 2
+            format!("level2-worker@{}", node_id),
+            format!("level2-supervisor@{}", node_id),
+            // Level 3
+            format!("level3-supervisor@{}", node_id),
+            format!("level3-worker@{}", node_id),
         ];
 
         // Verify all actors are spawned
         for expected_actor in &expected_actors {
-        assert!(
-            actor_ids.contains(expected_actor),
-            "Actor {} should be spawned. Found actors: {:?}",
-            expected_actor,
-            actor_ids
-        );
+            assert!(
+                actor_ids.contains(expected_actor),
+                "Actor {} should be spawned. Found actors: {:?}",
+                expected_actor,
+                actor_ids
+            );
         }
 
         // Verify all supervisors are spawned as actors (Erlang-style)
         let supervisor_actors = vec![
-        format!("level1-supervisor@{}", node_id),
-        format!("level2-supervisor@{}", node_id),
-        format!("level3-supervisor@{}", node_id),
+            format!("level1-supervisor@{}", node_id),
+            format!("level2-supervisor@{}", node_id),
+            format!("level3-supervisor@{}", node_id),
         ];
 
         for supervisor_actor in &supervisor_actors {
-        assert!(
-            actor_ids.contains(supervisor_actor),
-            "Supervisor {} should be spawned as an actor (Erlang-style)",
-            supervisor_actor
-        );
-        
-        let actor_type = get_actor_type(&node, supervisor_actor).await;
-        let expected_type = supervisor_actor.split('@').next().unwrap();
-        assert_eq!(
-            actor_type,
-            Some(expected_type.to_string()),
-            "Supervisor actor {} should have type {}",
-            supervisor_actor,
-            expected_type
-        );
+            assert!(
+                actor_ids.contains(supervisor_actor),
+                "Supervisor {} should be spawned as an actor (Erlang-style)",
+                supervisor_actor
+            );
+
+            let actor_type = get_actor_type(&node, supervisor_actor).await;
+            let expected_type = supervisor_actor.split('@').next().unwrap();
+            assert_eq!(
+                actor_type,
+                Some(expected_type.to_string()),
+                "Supervisor actor {} should have type {}",
+                supervisor_actor,
+                expected_type
+            );
         }
 
         // Verify total count matches expected (10 actors total: 3 supervisors + 7 workers)
         assert_eq!(
-        actor_ids.len(),
-        expected_actors.len(),
-        "Should have exactly {} actors spawned (found {})",
-        expected_actors.len(),
-        actor_ids.len()
+            actor_ids.len(),
+            expected_actors.len(),
+            "Should have exactly {} actors spawned (found {})",
+            expected_actors.len(),
+            actor_ids.len()
         );
 
         // Verify actor types for all workers
         let worker_actors = vec![
-        format!("root-worker@{}", node_id),
-        format!("level2-worker@{}", node_id),
-        format!("level3-worker@{}", node_id),
+            format!("root-worker@{}", node_id),
+            format!("level2-worker@{}", node_id),
+            format!("level3-worker@{}", node_id),
         ];
 
         for worker_actor in &worker_actors {
-        let actor_type = get_actor_type(&node, worker_actor).await;
-        let expected_type = worker_actor.split('@').next().unwrap();
-        assert_eq!(
-            actor_type,
-            Some(expected_type.to_string()),
-            "Worker actor {} should have type {}",
-            worker_actor,
-            expected_type
-        );
+            let actor_type = get_actor_type(&node, worker_actor).await;
+            let expected_type = worker_actor.split('@').next().unwrap();
+            assert_eq!(
+                actor_type,
+                Some(expected_type.to_string()),
+                "Worker actor {} should have type {}",
+                worker_actor,
+                expected_type
+            );
         }
-    }).await.expect("Test should complete within 2 seconds");
+    })
+    .await
+    .expect("Test should complete within 2 seconds");
 }
 
 /// Test 6: Multiple supervisors at same level (sibling supervisors)
@@ -1162,7 +1290,7 @@ async fn test_complex_supervisor_hierarchy() {
 async fn test_multiple_sibling_supervisors() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
-        
+
         // Create supervisor tree with multiple sibling supervisors
         let supervisor_spec = create_multiple_sibling_supervisors_spec();
         let app_spec = ApplicationSpec {
@@ -1176,21 +1304,29 @@ async fn test_multiple_sibling_supervisors() {
             supervisor: Some(supervisor_spec),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
         };
 
-        deploy_application_mock(&node, "actors_tracked_in_-app", app_spec).await
+        deploy_application_mock(&node, "actors_tracked_in_-app", app_spec)
+            .await
             .expect("Deployment should succeed");
-        let actors_activated = wait_for_min_actors_activated(&node, 3, Duration::from_secs(1)).await;
-        assert!(actors_activated, "At least 3 actors should be activated within 5 seconds");
+        let actors_activated =
+            wait_for_min_actors_activated(&node, 3, Duration::from_secs(1)).await;
+        assert!(
+            actors_activated,
+            "At least 3 actors should be activated within 5 seconds"
+        );
 
         // Get all actor IDs
         let actor_ids = get_all_actor_ids(&node).await;
-        
+
         let node_id = node.id().as_str();
-        
+
         // Expected actors:
         // - supervisor-a (supervisor actor)
         //   - supervisor-a-worker-1 (worker)
@@ -1199,50 +1335,52 @@ async fn test_multiple_sibling_supervisors() {
         //   - supervisor-b-worker-1 (worker)
         // - root-worker (worker)
         let expected_actors = vec![
-        format!("supervisor-a@{}", node_id),
-        format!("supervisor-a-worker-1@{}", node_id),
-        format!("supervisor-a-worker-2@{}", node_id),
-        format!("supervisor-b@{}", node_id),
-        format!("supervisor-b-worker-1@{}", node_id),
-        format!("root-worker@{}", node_id),
+            format!("supervisor-a@{}", node_id),
+            format!("supervisor-a-worker-1@{}", node_id),
+            format!("supervisor-a-worker-2@{}", node_id),
+            format!("supervisor-b@{}", node_id),
+            format!("supervisor-b-worker-1@{}", node_id),
+            format!("root-worker@{}", node_id),
         ];
 
         // Verify all actors are spawned
         for expected_actor in &expected_actors {
-        assert!(
-            actor_ids.contains(expected_actor),
-            "Actor {} should be spawned. Found actors: {:?}",
-            expected_actor,
-            actor_ids
-        );
+            assert!(
+                actor_ids.contains(expected_actor),
+                "Actor {} should be spawned. Found actors: {:?}",
+                expected_actor,
+                actor_ids
+            );
         }
 
         // Verify both sibling supervisors are spawned as actors
         let supervisor_actors = vec![
-        format!("supervisor-a@{}", node_id),
-        format!("supervisor-b@{}", node_id),
+            format!("supervisor-a@{}", node_id),
+            format!("supervisor-b@{}", node_id),
         ];
 
         for supervisor_actor in &supervisor_actors {
-        assert!(
-            actor_ids.contains(supervisor_actor),
-            "Sibling supervisor {} should be spawned as an actor",
-            supervisor_actor
-        );
+            assert!(
+                actor_ids.contains(supervisor_actor),
+                "Sibling supervisor {} should be spawned as an actor",
+                supervisor_actor
+            );
         }
 
         // Verify total count
         assert_eq!(
-        actor_ids.len(),
-        expected_actors.len(),
-        "Should have exactly {} actors spawned",
-        expected_actors.len()
+            actor_ids.len(),
+            expected_actors.len(),
+            "Should have exactly {} actors spawned",
+            expected_actors.len()
         );
-    }).await.expect("Test should complete within 2 seconds");
+    })
+    .await
+    .expect("Test should complete within 2 seconds");
 }
 
 /// Test 7: Auto-generated supervisor tree (deployment without supervisor spec)
-/// 
+///
 /// ## Expected Behavior
 /// - When supervisor is None, application should still work (auto-generated supervisor)
 /// - For now, we test with a simple supervisor tree since auto-generation is not fully implemented
@@ -1250,7 +1388,7 @@ async fn test_multiple_sibling_supervisors() {
 async fn test_auto_generated_supervisor_tree() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
-        
+
         // Deploy without supervisor spec - should use simple tree for now
         // TODO: When auto-generation is implemented, set supervisor: None
         let supervisor_spec = create_simple_supervisor_tree();
@@ -1265,32 +1403,53 @@ async fn test_auto_generated_supervisor_tree() {
             supervisor: Some(supervisor_spec),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
         };
 
-        deploy_application_mock(&node, "auto-app", app_spec).await
+        deploy_application_mock(&node, "auto-app", app_spec)
+            .await
             .expect("Deployment should succeed");
-        let app_running = wait_for_application_state(&node, "auto-app", ApplicationState::ApplicationStateRunning, Duration::from_secs(1)).await;
-        assert!(app_running, "Application should be running within 5 seconds");
+        let app_running = wait_for_application_state(
+            &node,
+            "auto-app",
+            ApplicationState::ApplicationStateRunning,
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(
+            app_running,
+            "Application should be running within 5 seconds"
+        );
 
         // Wait for actors to be activated using lifecycle events
-        let actors_activated = wait_for_min_actors_activated(&node, 3, Duration::from_secs(1)).await;
-        assert!(actors_activated, "At least 3 actors should be activated within 5 seconds");
+        let actors_activated =
+            wait_for_min_actors_activated(&node, 3, Duration::from_secs(1)).await;
+        assert!(
+            actors_activated,
+            "At least 3 actors should be activated within 5 seconds"
+        );
 
         // Verify application is running
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "auto-app").await;
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+            app_manager.as_ref(),
+            "auto-app",
+        )
+        .await;
         assert_eq!(
-        app_state,
-        Some(ApplicationState::ApplicationStateRunning),
-        "Application should be running"
+            app_state,
+            Some(ApplicationState::ApplicationStateRunning),
+            "Application should be running"
         );
 
         // Get all actor IDs
         let actor_ids = get_all_actor_ids(&node).await;
-        
+
         // With simple supervisor tree, we expect 3 workers
         let node_id = node.id().as_str();
         let expected_actors = vec![
@@ -1298,7 +1457,7 @@ async fn test_auto_generated_supervisor_tree() {
             format!("worker-2@{}", node_id),
             format!("worker-3@{}", node_id),
         ];
-        
+
         for expected_actor in &expected_actors {
             assert!(
                 actor_ids.contains(expected_actor),
@@ -1307,7 +1466,9 @@ async fn test_auto_generated_supervisor_tree() {
                 actor_ids
             );
         }
-    }).await.expect("Test should complete within 2 seconds");
+    })
+    .await
+    .expect("Test should complete within 2 seconds");
 }
 
 /// Test 8: Verify graceful shutdown of entire supervisor tree
@@ -1315,7 +1476,7 @@ async fn test_auto_generated_supervisor_tree() {
 async fn test_graceful_shutdown_of_supervisor_tree() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
-        
+
         // Create nested supervisor tree for shutdown test
         let supervisor_spec = create_nested_supervisor_tree();
         let app_spec = ApplicationSpec {
@@ -1329,15 +1490,23 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
             supervisor: Some(supervisor_spec),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
         };
 
-        deploy_application_mock(&node, "shutdown-app", app_spec).await
+        deploy_application_mock(&node, "shutdown-app", app_spec)
+            .await
             .expect("Deployment should succeed");
-        let actors_activated = wait_for_min_actors_activated(&node, 4, Duration::from_secs(1)).await;
-        assert!(actors_activated, "At least 4 actors should be activated within 5 seconds");
+        let actors_activated =
+            wait_for_min_actors_activated(&node, 4, Duration::from_secs(1)).await;
+        assert!(
+            actors_activated,
+            "At least 4 actors should be activated within 5 seconds"
+        );
 
         // Verify all actors are spawned
         let actor_ids_before = get_all_actor_ids(&node).await;
@@ -1349,16 +1518,28 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
 
         // Stop application directly (mock/simulated setup - no WASM runtime needed)
         let app_manager = node.application_manager();
-        app_manager.stop("shutdown-app", Duration::from_secs(1)).await
+        app_manager
+            .stop("shutdown-app", Duration::from_secs(1))
+            .await
             .expect("Application stop should succeed");
 
         // Wait for graceful shutdown
-        let app_stopped = wait_for_application_state(&node, "shutdown-app", ApplicationState::ApplicationStateStopped, Duration::from_secs(2)).await;
+        let app_stopped = wait_for_application_state(
+            &node,
+            "shutdown-app",
+            ApplicationState::ApplicationStateStopped,
+            Duration::from_secs(2),
+        )
+        .await;
         assert!(app_stopped, "Application should stop within 10 seconds");
 
         // Verify application is stopped
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "shutdown-app").await;
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+            app_manager.as_ref(),
+            "shutdown-app",
+        )
+        .await;
         assert_eq!(
             app_state,
             Some(ApplicationState::ApplicationStateStopped),
@@ -1373,7 +1554,9 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
             actor_ids_before.len(),
             actor_ids_after.len()
         );
-    }).await.expect("Test should complete within 2 seconds");
+    })
+    .await
+    .expect("Test should complete within 2 seconds");
 }
 
 /// Test 9: Verify actor type tracking for all actors in complex tree
@@ -1382,7 +1565,7 @@ async fn test_actor_type_tracking_complex_tree() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
         let application_manager = node.application_manager();
-            // Deploy directly via ApplicationServiceImpl (no gRPC server needed)
+        // Deploy directly via ApplicationServiceImpl (no gRPC server needed)
         let supervisor_spec = create_complex_supervisor_hierarchy_spec();
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
@@ -1395,15 +1578,23 @@ async fn test_actor_type_tracking_complex_tree() {
             supervisor: Some(supervisor_spec),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
         };
 
-        deploy_application_mock(&node, "actors_tracked_in_-app", app_spec).await
+        deploy_application_mock(&node, "actors_tracked_in_-app", app_spec)
+            .await
             .expect("Deployment should succeed");
-        let actors_activated = wait_for_min_actors_activated(&node, 1, Duration::from_secs(1)).await;
-        assert!(actors_activated, "At least 1 actor should be activated within 5 seconds");
+        let actors_activated =
+            wait_for_min_actors_activated(&node, 1, Duration::from_secs(1)).await;
+        assert!(
+            actors_activated,
+            "At least 1 actor should be activated within 5 seconds"
+        );
 
         // Get all actor IDs
         let actor_ids = get_all_actor_ids(&node).await;
@@ -1428,7 +1619,9 @@ async fn test_actor_type_tracking_complex_tree() {
                 );
             }
         }
-    }).await.expect("Test should complete within 2 seconds");
+    })
+    .await
+    .expect("Test should complete within 2 seconds");
 }
 
 /// Create Erlang-style supervision structure
@@ -1452,8 +1645,8 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
             ChildSpec {
                 id: "worker_c".to_string(),
                 r#type: ChildType::ChildTypeWorker.into(),
@@ -1462,8 +1655,8 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
         ],
     };
 
@@ -1481,8 +1674,8 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
             ChildSpec {
                 id: "sub_sup".to_string(),
                 r#type: ChildType::ChildTypeSupervisor.into(),
@@ -1491,8 +1684,8 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(sub_sup),
                 facets: vec![],
-            behavior_kind: None,
-        },
+                behavior_kind: None,
+            },
         ],
     }
 }
@@ -1504,7 +1697,7 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
 ///     └── sub_sup (supervisor)
 ///         ├── worker_b (worker)
 ///         └── worker_c (worker)
-/// 
+///
 /// Verifies:
 /// 1. Tree is built bottom-up (workers first, then supervisors)
 /// 2. Supervisors are spawned as actors (Erlang-style)
@@ -1514,7 +1707,7 @@ fn create_erlang_style_supervision_structure() -> SupervisorSpec {
 async fn test_erlang_style_supervision_structure() {
     timeout(Duration::from_secs(2), async {
         let node = create_test_node().await;
-        
+
         // Create Erlang-style supervision structure
         let supervisor_spec = create_erlang_style_supervision_structure();
         let app_spec = ApplicationSpec {
@@ -1528,27 +1721,48 @@ async fn test_erlang_style_supervision_structure() {
             supervisor: Some(supervisor_spec),
             enabled: true,
             auto_start: true,
-            shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+            shutdown_timeout: Some(ProstDuration {
+                seconds: 60,
+                nanos: 0,
+            }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
         };
 
-        deploy_application_mock(&node, "my_app", app_spec).await
+        deploy_application_mock(&node, "my_app", app_spec)
+            .await
             .expect("Deployment should succeed");
-        let app_running = wait_for_application_state(&node, "my_app", ApplicationState::ApplicationStateRunning, Duration::from_secs(1)).await;
-        assert!(app_running, "Application should be running within 5 seconds");
+        let app_running = wait_for_application_state(
+            &node,
+            "my_app",
+            ApplicationState::ApplicationStateRunning,
+            Duration::from_secs(1),
+        )
+        .await;
+        assert!(
+            app_running,
+            "Application should be running within 5 seconds"
+        );
 
         // Wait for actors to be activated using lifecycle events (bottom-up: workers first, then supervisors)
-        let actors_activated = wait_for_min_actors_activated(&node, 4, Duration::from_secs(1)).await;
-        assert!(actors_activated, "At least 4 actors should be activated within 5 seconds");
+        let actors_activated =
+            wait_for_min_actors_activated(&node, 4, Duration::from_secs(1)).await;
+        assert!(
+            actors_activated,
+            "At least 4 actors should be activated within 5 seconds"
+        );
 
         // Verify application is running
         let app_manager = node.application_manager();
-        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(app_manager.as_ref(), "my_app").await;
+        let app_state = plexspaces_core::service_locator_trait::ApplicationManager::get_state(
+            app_manager.as_ref(),
+            "my_app",
+        )
+        .await;
         assert_eq!(
-        app_state,
-        Some(ApplicationState::ApplicationStateRunning),
-        "Application should be running"
+            app_state,
+            Some(ApplicationState::ApplicationStateRunning),
+            "Application should be running"
         );
 
         // Get all actor IDs
@@ -1561,48 +1775,48 @@ async fn test_erlang_style_supervision_structure() {
         // - worker_b (worker under sub_sup)
         // - worker_c (worker under sub_sup)
         let expected_actors = vec![
-        format!("worker_a@{}", node_id),
-        format!("sub_sup@{}", node_id), // Supervisor must be spawned as actor
-        format!("worker_b@{}", node_id),
-        format!("worker_c@{}", node_id),
+            format!("worker_a@{}", node_id),
+            format!("sub_sup@{}", node_id), // Supervisor must be spawned as actor
+            format!("worker_b@{}", node_id),
+            format!("worker_c@{}", node_id),
         ];
 
         // Verify all actors are spawned
         for expected_actor in &expected_actors {
-        assert!(
-            actor_ids.contains(expected_actor),
-            "Actor {} should be spawned (Erlang-style supervision). Found actors: {:?}",
-            expected_actor,
-            actor_ids
-        );
+            assert!(
+                actor_ids.contains(expected_actor),
+                "Actor {} should be spawned (Erlang-style supervision). Found actors: {:?}",
+                expected_actor,
+                actor_ids
+            );
         }
 
         // Verify supervisors are spawned as actors (Erlang-style)
         let supervisor_actor = format!("sub_sup@{}", node_id);
         assert!(
-        actor_ids.contains(&supervisor_actor),
-        "Supervisor 'sub_sup' should be spawned as an actor (Erlang-style)"
+            actor_ids.contains(&supervisor_actor),
+            "Supervisor 'sub_sup' should be spawned as an actor (Erlang-style)"
         );
 
         // Verify actor types match ChildSpec.id (for dashboard visibility)
         for expected_actor in &expected_actors {
-        let actor_type = get_actor_type(&node, expected_actor).await;
-        let expected_type = expected_actor.split('@').next().unwrap();
-        assert_eq!(
-            actor_type,
-            Some(expected_type.to_string()),
-            "Actor {} should have type '{}' (matching ChildSpec.id)",
-            expected_actor,
-            expected_type
-        );
+            let actor_type = get_actor_type(&node, expected_actor).await;
+            let expected_type = expected_actor.split('@').next().unwrap();
+            assert_eq!(
+                actor_type,
+                Some(expected_type.to_string()),
+                "Actor {} should have type '{}' (matching ChildSpec.id)",
+                expected_actor,
+                expected_type
+            );
         }
 
         // Verify total count matches expected (4 actors: 1 supervisor + 3 workers)
         assert_eq!(
-        actor_ids.len(),
-        expected_actors.len(),
-        "Should have exactly {} actors spawned (1 supervisor + 3 workers)",
-        expected_actors.len()
+            actor_ids.len(),
+            expected_actors.len(),
+            "Should have exactly {} actors spawned (1 supervisor + 3 workers)",
+            expected_actors.len()
         );
 
         // Verify application tracks all actors
@@ -1611,37 +1825,42 @@ async fn test_erlang_style_supervision_structure() {
         let app_info = app_manager.get_application_info("my_app").await;
         assert!(app_info.is_some(), "Application info should be available");
         let info = app_info.unwrap();
-        
+
         // Verify actors are actually spawned (check ActorRegistry directly)
-        let actor_registry = node.service_locator()
-        .actor_registry()
-        .await
-        .expect("ActorRegistry not found");
-        
+        let actor_registry = node
+            .service_locator()
+            .actor_registry()
+            .await
+            .expect("ActorRegistry not found");
+
         let registered_ids = actor_registry.registered_actor_ids().read().await;
-        let spawned_count = expected_actors.iter()
-        .filter(|expected| registered_ids.contains(expected.as_str()))
-        .count();
-        
+        let spawned_count = expected_actors
+            .iter()
+            .filter(|expected| registered_ids.contains(expected.as_str()))
+            .count();
+
         assert_eq!(
-        spawned_count,
-        expected_actors.len(),
-        "All {} actors should be spawned and registered in ActorRegistry (found {})",
-        expected_actors.len(),
-        spawned_count
+            spawned_count,
+            expected_actors.len(),
+            "All {} actors should be spawned and registered in ActorRegistry (found {})",
+            expected_actors.len(),
+            spawned_count
         );
-        
+
         // Also verify metrics if available (may be 0 if not tracked, but actors should exist)
         if let Some(metrics) = info.metrics {
-        // Note: tracked_actor_count might not be updated automatically
-        // The important thing is that actors are spawned and registered
+            // Note: tracked_actor_count might not be updated automatically
+            // The important thing is that actors are spawned and registered
+            let tracked_actor_count = metrics.actor_counts.get("total").copied().unwrap_or(0);
             tracing::debug!(
                 "Application metrics: actor_count={}, but {} actors are actually registered",
-                metrics.actor_count,
+                tracked_actor_count,
                 spawned_count
             );
         }
-    }).await.expect("Test should complete within 2 seconds");
+    })
+    .await
+    .expect("Test should complete within 2 seconds");
 }
 
 /// Helper: Create complex supervisor hierarchy spec (reusable)
@@ -1651,17 +1870,15 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
         strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
         max_restarts: 3,
         max_restart_window: None,
-        children: vec![
-            ChildSpec {
-                id: "level3-worker".to_string(),
-                r#type: ChildType::ChildTypeWorker.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: None,
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-            },
-        ],
+        children: vec![ChildSpec {
+            id: "level3-worker".to_string(),
+            r#type: ChildType::ChildTypeWorker.into(),
+            args: HashMap::new(),
+            restart: RestartPolicy::RestartPolicyPermanent.into(),
+            shutdown_timeout: None,
+            supervisor: None,
+            facets: vec![], // Phase 1: Unified Lifecycle - facets support
+        }],
     };
 
     // Level 2: Middle supervisor
@@ -1672,19 +1889,17 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
         strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
         max_restarts: 3,
         max_restart_window: None,
-        children: vec![
-            ChildSpec {
-                id: "level3-supervisor".to_string(),
-                r#type: ChildType::ChildTypeSupervisor.into(),
-                args: HashMap::new(),
-                restart: RestartPolicy::RestartPolicyPermanent.into(),
-                shutdown_timeout: None,
-                supervisor: Some(level3_supervisor), // level3_supervisor is the nested spec for level3-supervisor
-                facets: vec![], // Phase 1: Unified Lifecycle - facets support
-            },
-        ],
+        children: vec![ChildSpec {
+            id: "level3-supervisor".to_string(),
+            r#type: ChildType::ChildTypeSupervisor.into(),
+            args: HashMap::new(),
+            restart: RestartPolicy::RestartPolicyPermanent.into(),
+            shutdown_timeout: None,
+            supervisor: Some(level3_supervisor), // level3_supervisor is the nested spec for level3-supervisor
+            facets: vec![],                      // Phase 1: Unified Lifecycle - facets support
+        }],
     };
-    
+
     let level2_supervisor_spec = SupervisorSpec {
         strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
         max_restarts: 3,
@@ -1738,4 +1953,3 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
         ],
     }
 }
-

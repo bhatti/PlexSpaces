@@ -26,15 +26,13 @@
 
 #[cfg(feature = "udp-backend")]
 mod tests {
-use plexspaces_channel::{create_channel, Channel};
-use plexspaces_proto::channel::v1::{
-    ChannelProvider, ChannelConfig, UdpConfig,
-};
-use plexspaces_proto::common::v1::Message;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
-use tokio::time::timeout;
-use futures::StreamExt;
+    use futures::StreamExt;
+    use plexspaces_channel::{create_channel, Channel};
+    use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, UdpConfig};
+    use plexspaces_proto::common::v1::Message;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+    use tokio::time::timeout;
 
     // Static counter for generating unique ports per test
     // Starts from 20000 to avoid conflicts with system ports
@@ -61,9 +59,13 @@ use futures::StreamExt;
             name: name.to_string(),
             provider: ChannelProvider::ChannelProviderUdp as i32,
             capacity: 0,
-            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
-            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeNone as i32,
-            backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Udp(udp_config)),
+            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtMostOnce
+                as i32,
+            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeNone
+                as i32,
+            backend_config: Some(
+                plexspaces_proto::channel::v1::channel_config::BackendConfig::Udp(udp_config),
+            ),
             ..Default::default()
         };
 
@@ -74,7 +76,7 @@ use futures::StreamExt;
     async fn test_udp_channel_creation() {
         let port = get_unique_port();
         let channel = create_udp_channel("test-udp-1", "test-cluster", port).await;
-        
+
         assert_eq!(channel.get_config().name, "test-udp-1");
         assert!(!channel.is_closed());
     }
@@ -93,16 +95,23 @@ use futures::StreamExt;
             name: "test-udp".to_string(),
             provider: ChannelProvider::ChannelProviderUdp as i32,
             capacity: 0,
-            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
-            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeNone as i32,
-            backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Udp(udp_config)),
+            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtMostOnce
+                as i32,
+            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeNone
+                as i32,
+            backend_config: Some(
+                plexspaces_proto::channel::v1::channel_config::BackendConfig::Udp(udp_config),
+            ),
             ..Default::default()
         };
 
         // UDP channel should be created successfully with valid config
         // (cluster_name is no longer required - cluster membership determined by multicast address/port)
         let result = create_channel(channel_config).await;
-        assert!(result.is_ok(), "UDP channel should be created with valid multicast config");
+        assert!(
+            result.is_ok(),
+            "UDP channel should be created with valid multicast config"
+        );
     }
 
     #[tokio::test]
@@ -182,9 +191,9 @@ use futures::StreamExt;
         let channel = create_udp_channel("test-udp-5", "test-cluster-5", port).await;
 
         assert!(!channel.is_closed());
-        
+
         channel.close().await.unwrap();
-        
+
         assert!(channel.is_closed());
     }
 
@@ -209,7 +218,7 @@ use futures::StreamExt;
         assert_eq!(stats.name, "test-udp-6");
         assert_eq!(stats.provider, ChannelProvider::ChannelProviderUdp as i32);
         assert!(stats.messages_sent >= 5);
-        
+
         // Check backend stats (cluster_name is no longer in stats, removed from UdpConfig)
         assert!(stats.backend_stats.contains_key("multicast_address"));
     }
@@ -228,9 +237,13 @@ use futures::StreamExt;
             name: "test-udp".to_string(),
             provider: ChannelProvider::ChannelProviderUdp as i32,
             capacity: 0,
-            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtMostOnce as i32,
-            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeNone as i32,
-            backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Udp(udp_config)),
+            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtMostOnce
+                as i32,
+            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeNone
+                as i32,
+            backend_config: Some(
+                plexspaces_proto::channel::v1::channel_config::BackendConfig::Udp(udp_config),
+            ),
             ..Default::default()
         };
 

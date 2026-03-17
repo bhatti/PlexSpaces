@@ -3,16 +3,20 @@
 //
 // Tests for VM Object Registry Integration
 
+use plexspaces_core::RequestContext;
 use plexspaces_firecracker::{VmRegistry, VmRegistryEntry, VmState};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::object_registry::v1::ObjectType;
-use plexspaces_core::RequestContext;
 use std::sync::Arc;
 
 #[tokio::test]
 async fn test_register_vm_in_object_registry() {
     // Test: Register VM in object registry
-    let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let object_registry = ObjectRegistryImpl::new(repo);
 
     // Create a VM entry (simulated - not actually running)
@@ -40,13 +44,20 @@ async fn test_register_vm_in_object_registry() {
     assert_eq!(registration.object_id, "vm-test-001");
     assert_eq!(registration.object_type, ObjectType::ObjectTypeVm as i32);
     assert_eq!(registration.object_category, "firecracker");
-    assert_eq!(registration.grpc_address, "/tmp/firecracker-vm-test-001.sock");
+    assert_eq!(
+        registration.grpc_address,
+        "/tmp/firecracker-vm-test-001.sock"
+    );
 }
 
 #[tokio::test]
 async fn test_discover_vms_from_object_registry() {
     // Test: Discover VMs using object registry
-    let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let object_registry = ObjectRegistryImpl::new(repo);
 
     // Register multiple VMs
@@ -74,7 +85,16 @@ async fn test_discover_vms_from_object_registry() {
 
     // Discover all VMs
     let vms = object_registry
-        .discover(&ctx, Some(ObjectType::ObjectTypeVm), None, None, None, None, 0, 100)
+        .discover(
+            &ctx,
+            Some(ObjectType::ObjectTypeVm),
+            None,
+            None,
+            None,
+            None,
+            0,
+            100,
+        )
         .await
         .unwrap();
 
@@ -86,7 +106,11 @@ async fn test_discover_vms_from_object_registry() {
 #[tokio::test]
 async fn test_vm_health_status_mapping() {
     // Test: VM state correctly maps to health status
-    let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    let repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let object_registry = ObjectRegistryImpl::new(repo);
 
     // Test Running -> Healthy
@@ -109,6 +133,8 @@ async fn test_vm_health_status_mapping() {
         .unwrap();
 
     use plexspaces_proto::object_registry::v1::HealthStatus;
-    assert_eq!(found.health_status, HealthStatus::HealthStatusHealthy as i32);
+    assert_eq!(
+        found.health_status,
+        HealthStatus::HealthStatusHealthy as i32
+    );
 }
-

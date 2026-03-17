@@ -45,11 +45,11 @@ pub enum HealthCheckError {
     /// Health check explicitly failed
     #[error("Health check failed: {0}")]
     CheckFailed(String),
-    
+
     /// Health check timed out
     #[error("Health check timeout: {0}")]
     Timeout(String),
-    
+
     /// Other health check error
     #[error("Health check error: {0}")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
@@ -110,7 +110,7 @@ pub trait HealthChecker: Send + Sync {
     /// * `Ok(())` - Dependency is healthy
     /// * `Err(HealthCheckError)` - Dependency is unhealthy
     async fn check(&self, ctx: &HealthCheckContext) -> HealthCheckResult;
-    
+
     /// Get circuit breaker info if this checker is wrapped with a circuit breaker
     ///
     /// ## Returns
@@ -118,7 +118,9 @@ pub trait HealthChecker: Send + Sync {
     ///
     /// ## Default Implementation
     /// Returns `None` by default. Circuit breaker wrappers should override this.
-    async fn get_circuit_breaker_info(&self) -> Option<plexspaces_proto::system::v1::DependencyCircuitBreakerInfo> {
+    async fn get_circuit_breaker_info(
+        &self,
+    ) -> Option<plexspaces_proto::system::v1::DependencyCircuitBreakerInfo> {
         None
     }
 }
@@ -160,9 +162,7 @@ pub async fn run_health_check(
 
     let result = checker.check(ctx).await;
     let checked_at = SystemTime::now();
-    let response_time = checked_at
-        .duration_since(start)
-        .unwrap_or_default();
+    let response_time = checked_at.duration_since(start).unwrap_or_default();
 
     // Get circuit breaker info if checker is wrapped with circuit breaker
     // Uses trait method which returns None for non-circuit-breaker checkers
@@ -212,11 +212,11 @@ impl HealthChecker for PingChecker {
     }
 
     fn is_critical(&self) -> bool {
-        false  // Ping is not critical
+        false // Ping is not critical
     }
 
     async fn check(&self, _ctx: &HealthCheckContext) -> HealthCheckResult {
-        Ok(())  // Always succeeds
+        Ok(()) // Always succeeds
     }
 
     // PingChecker doesn't have circuit breaker, so default implementation returns None
@@ -247,7 +247,7 @@ impl HealthChecker for ShutdownChecker {
     }
 
     fn is_critical(&self) -> bool {
-        true  // Shutdown blocks readiness
+        true // Shutdown blocks readiness
     }
 
     async fn check(&self, _ctx: &HealthCheckContext) -> HealthCheckResult {
@@ -329,4 +329,3 @@ mod tests {
         assert!(result.checked_at.is_some());
     }
 }
-

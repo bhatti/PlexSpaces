@@ -6,15 +6,16 @@
 // Integration test for WASM component deployment via HTTP API
 // This test reproduces the WASI binding issue and verifies the fix
 
+use plexspaces_core::ApplicationManager;
+use plexspaces_node::{Node, NodeBuilder};
+use reqwest::multipart;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
-use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_core::ApplicationManager;
-use reqwest::multipart;
 
 /// Shared WASM bytes cache (loaded once, reused for all tests)
-static SHARED_WASM_BYTES: std::sync::OnceLock<tokio::sync::Mutex<Option<Vec<u8>>>> = std::sync::OnceLock::new();
+static SHARED_WASM_BYTES: std::sync::OnceLock<tokio::sync::Mutex<Option<Vec<u8>>>> =
+    std::sync::OnceLock::new();
 static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Helper to get the calculator WASM file path
@@ -29,7 +30,7 @@ fn get_calculator_wasm_path() -> PathBuf {
     if path.exists() {
         return path;
     }
-    
+
     // Second try: examples directory (fallback)
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("../../examples/simple/wasm_calculator/wasm-modules/calculator_actor.wasm");
@@ -40,7 +41,7 @@ fn get_calculator_wasm_path() -> PathBuf {
 /// Loads the 40MB WASM file once and caches it for all tests
 async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
     let cache = SHARED_WASM_BYTES.get_or_init(|| tokio::sync::Mutex::new(None));
-    
+
     // Fast path: already loaded
     {
         let guard = cache.lock().await;
@@ -48,10 +49,10 @@ async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
             return Some(bytes.clone());
         }
     }
-    
+
     // Slow path: need to load (use lock to ensure only one thread loads)
     let _guard = INIT_LOCK.lock().unwrap();
-    
+
     // Double-check after acquiring lock
     {
         let guard = cache.lock().await;
@@ -59,28 +60,31 @@ async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
             return Some(bytes.clone());
         }
     }
-    
+
     // Load WASM file (first time only)
     let wasm_path = get_calculator_wasm_path();
     if !wasm_path.exists() {
         return None;
     }
-    
-    eprintln!("📦 Loading WASM file (first time, ~40MB): {} (this may take a moment)", wasm_path.display());
-    
+
+    eprintln!(
+        "📦 Loading WASM file (first time, ~40MB): {} (this may take a moment)",
+        wasm_path.display()
+    );
+
     let bytes = tokio::task::spawn_blocking(move || std::fs::read(&wasm_path))
         .await
         .ok()
         .and_then(|r| r.ok())?;
-    
+
     eprintln!("✅ WASM file loaded: {} bytes", bytes.len());
-    
+
     // Cache the bytes
     {
         let mut guard = cache.lock().await;
         *guard = Some(bytes.clone());
     }
-    
+
     Some(bytes)
 }
 
@@ -92,15 +96,17 @@ async fn create_test_node(node_id: &str) -> Arc<Node> {
     let mut hasher = DefaultHasher::new();
     node_id.hash(&mut hasher);
     let port = 9000 + (hasher.finish() % 1000) as u16;
-    
+
     let node = Arc::new(
         NodeBuilder::new(node_id)
             .with_listen_addr(format!("127.0.0.1:{}", port))
             .build()
-            .await
+            .await,
     );
-    
-    node.initialize_services().await.expect("Failed to initialize services");
+
+    node.initialize_services()
+        .await
+        .expect("Failed to initialize services");
     node
 }
 
@@ -108,7 +114,7 @@ async fn create_test_node(node_id: &str) -> Arc<Node> {
 async fn test_wasm_component_deployment_reproduces_wasi_error() {
     // ARRANGE: Create node and start it
     let node = create_test_node("test-node-wasi").await;
-    
+
     // Start node programmatically
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
@@ -116,17 +122,21 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
             eprintln!("Node start error: {}", e);
         }
     });
-    
+
     // Wait for node to start
     sleep(Duration::from_millis(2000)).await;
-    
+
     // Get HTTP port
-    let grpc_port = node.config().listen_addr.split(':').last()
+    let grpc_port = node
+        .config()
+        .listen_addr
+        .split(':')
+        .last()
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(8000);
     let http_port = grpc_port + 1;
     let http_url = format!("http://127.0.0.1:{}", http_port);
-    
+
     // Check if WASM file exists
     let wasm_path = get_calculator_wasm_path();
     if !wasm_path.exists() {
@@ -134,58 +144,67 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
         start_handle.abort();
         return;
     }
-    
+
     // ACT: Deploy WASM component via HTTP (use shared module for performance)
-    let wasm_bytes = get_shared_wasm_bytes().await
+    let wasm_bytes = get_shared_wasm_bytes()
+        .await
         .expect("WASM file not found. Please ensure calculator_actor.wasm is available.");
-    eprintln!("📦 Deploying WASM component: {} ({} bytes)", wasm_path.display(), wasm_bytes.len());
-    
+    eprintln!(
+        "📦 Deploying WASM component: {} ({} bytes)",
+        wasm_path.display(),
+        wasm_bytes.len()
+    );
+
     let form = multipart::Form::new()
         .text("application_id", "calculator-app")
         .text("name", "calculator")
         .text("version", "1.0.0")
-        .part("wasm_file",
+        .part(
+            "wasm_file",
             multipart::Part::bytes(wasm_bytes)
                 .file_name("calculator_actor.wasm")
                 .mime_str("application/wasm")
-                .unwrap()
+                .unwrap(),
         );
-    
+
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
         .expect("Failed to create HTTP client");
-    
+
     let response = client
         .post(&format!("{}/api/v1/applications/deploy", http_url))
         .multipart(form)
         .send()
         .await;
-    
+
     // ASSERT: Verify deployment result
     match response {
         Ok(resp) => {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            
+
             eprintln!("📊 Deployment response status: {}", status);
             eprintln!("📊 Deployment response body: {}", body);
-            
+
             if status.is_success() {
                 eprintln!("✅ WASM component deployment succeeded!");
-                
+
                 // Verify application is registered
-                use plexspaces_core::ApplicationManager;
                 use plexspaces_core::service_names;
-                let app_manager: Arc<dyn ApplicationManager> = node.service_locator()
+                use plexspaces_core::ApplicationManager;
+                let app_manager: Arc<dyn ApplicationManager> = node
+                    .service_locator()
                     .application_manager()
                     .await
                     .expect("ApplicationManager should be available");
-                
+
                 let apps = app_manager.list_applications().await;
-                assert!(apps.contains(&"calculator-app".to_string()), 
-                    "Application should be registered after deployment");
-                
+                assert!(
+                    apps.contains(&"calculator-app".to_string()),
+                    "Application should be registered after deployment"
+                );
+
                 // Cleanup: undeploy
                 let _ = client
                     .delete(&format!("{}/api/v1/applications/calculator-app", http_url))
@@ -193,7 +212,8 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
                     .await;
             } else {
                 // Check if error is about WASI bindings
-                if body.contains("wasi:cli/environment") || body.contains("WASI interface bindings") {
+                if body.contains("wasi:cli/environment") || body.contains("WASI interface bindings")
+                {
                     eprintln!("❌ WASI binding error reproduced: {}", body);
                     panic!("WASI binding error not fixed: {}", body);
                 } else {
@@ -210,7 +230,7 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
             }
         }
     }
-    
+
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
@@ -220,7 +240,7 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
 async fn test_wasm_component_deployment_with_supervisor_tree() {
     // ARRANGE: Create node and start it
     let node = create_test_node("test-node-supervisor").await;
-    
+
     // Start node programmatically
     let node_clone = node.clone();
     let start_handle = tokio::spawn(async move {
@@ -228,17 +248,21 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
             eprintln!("Node start error: {}", e);
         }
     });
-    
+
     // Wait for node to start
     sleep(Duration::from_millis(2000)).await;
-    
+
     // Get HTTP port
-    let grpc_port = node.config().listen_addr.split(':').last()
+    let grpc_port = node
+        .config()
+        .listen_addr
+        .split(':')
+        .last()
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(8000);
     let http_port = grpc_port + 1;
     let http_url = format!("http://127.0.0.1:{}", http_port);
-    
+
     // Check if WASM file exists
     let wasm_path = get_calculator_wasm_path();
     if !wasm_path.exists() {
@@ -246,19 +270,20 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
         start_handle.abort();
         return;
     }
-    
+
     // ACT: Deploy WASM component with ApplicationSpec containing supervisor tree
-    let wasm_bytes = get_shared_wasm_bytes().await
+    let wasm_bytes = get_shared_wasm_bytes()
+        .await
         .expect("WASM file not found. Please ensure calculator_actor.wasm is available.");
-    
+
     // Note: The HTTP handler auto-generates ApplicationSpec with a default supervisor tree
     // For this test, we'll deploy without explicit config and verify that:
     // 1. The application deploys successfully
     // 2. The supervisor tree spawns actors
     // 3. The actors appear in the dashboard
-    // 
+    //
     // The auto-generated ApplicationSpec creates one worker actor with the application name as actor ID
-    
+
     // Note: For now, we'll deploy without explicit config
     // The HTTP handler will auto-generate ApplicationSpec with default supervisor tree
     // TODO: Add support for passing ApplicationSpec via config field in HTTP API
@@ -266,77 +291,94 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
         .text("application_id", "calculator-supervisor-app")
         .text("name", "calculator")
         .text("version", "1.0.0")
-        .part("wasm_file",
+        .part(
+            "wasm_file",
             multipart::Part::bytes(wasm_bytes)
                 .file_name("calculator_actor.wasm")
                 .mime_str("application/wasm")
-                .unwrap()
+                .unwrap(),
         );
-    
+
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
         .expect("Failed to create HTTP client");
-    
+
     eprintln!("📤 Deploying WASM component with supervisor tree");
     let response = client
         .post(&format!("{}/api/v1/applications/deploy", http_url))
         .multipart(form)
         .send()
         .await;
-    
+
     // ASSERT: Verify deployment succeeds
     match response {
         Ok(resp) => {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            
+
             if status.is_success() {
                 eprintln!("✅ WASM component deployment with supervisor tree succeeded!");
-                
+
                 // Verify application is registered
-                use plexspaces_core::ApplicationManager;
                 use plexspaces_core::service_names;
-                let app_manager: Arc<dyn ApplicationManager> = node.service_locator()
+                use plexspaces_core::ApplicationManager;
+                let app_manager: Arc<dyn ApplicationManager> = node
+                    .service_locator()
                     .application_manager()
                     .await
                     .expect("ApplicationManager should be available");
-                
+
                 let apps = app_manager.list_applications().await;
-                assert!(apps.contains(&"calculator-supervisor-app".to_string()), 
-                    "Application should be registered after deployment");
-                
+                assert!(
+                    apps.contains(&"calculator-supervisor-app".to_string()),
+                    "Application should be registered after deployment"
+                );
+
                 // Wait for supervisor tree to spawn
                 sleep(Duration::from_millis(1000)).await;
-                
+
                 // Verify actors were spawned by supervisor tree
                 // The auto-generated ApplicationSpec creates one worker actor with the application name as actor ID
                 use plexspaces_core::ActorRegistry;
-                let actor_registry: Arc<ActorRegistry> = node.service_locator()
+                let actor_registry: Arc<ActorRegistry> = node
+                    .service_locator()
                     .actor_registry()
                     .await
                     .expect("ActorRegistry should be available");
-                
+
                 let registered_ids = actor_registry.registered_actor_ids().read().await;
-                let calculator_actor_count = registered_ids.iter()
+                let calculator_actor_count = registered_ids
+                    .iter()
                     .filter(|id| id.contains("calculator"))
                     .count();
-                
-                eprintln!("📊 Found {} calculator actors spawned by supervisor tree", calculator_actor_count);
-                assert!(calculator_actor_count >= 1, "Supervisor tree should spawn at least 1 calculator actor");
-                
+
+                eprintln!(
+                    "📊 Found {} calculator actors spawned by supervisor tree",
+                    calculator_actor_count
+                );
+                assert!(
+                    calculator_actor_count >= 1,
+                    "Supervisor tree should spawn at least 1 calculator actor"
+                );
+
                 // Cleanup: undeploy
                 let _ = client
-                    .delete(&format!("{}/api/v1/applications/calculator-supervisor-app", http_url))
+                    .delete(&format!(
+                        "{}/api/v1/applications/calculator-supervisor-app",
+                        http_url
+                    ))
                     .send()
                     .await;
-                
+
                 sleep(Duration::from_millis(500)).await;
-                
+
                 // Verify application is removed
                 let apps_after = app_manager.list_applications().await;
-                assert!(!apps_after.contains(&"calculator-supervisor-app".to_string()), 
-                    "Application should be removed after undeploy");
+                assert!(
+                    !apps_after.contains(&"calculator-supervisor-app".to_string()),
+                    "Application should be removed after undeploy"
+                );
             } else {
                 eprintln!("❌ Deployment failed: status={}, body={}", status, body);
                 if body.contains("wasi:cli/environment") || body.contains("wasi:io/") {
@@ -344,7 +386,9 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
                 } else if body.contains("plexspaces:actor/host") {
                     // This is expected - components requiring plexspaces host functions need WIT bindings
                     eprintln!("⚠️ Component requires plexspaces host functions (expected - requires WIT bindings)");
-                    eprintln!("   Skipping test - this is expected until WIT bindings are generated");
+                    eprintln!(
+                        "   Skipping test - this is expected until WIT bindings are generated"
+                    );
                     start_handle.abort();
                     return;
                 } else {
@@ -363,9 +407,8 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
             panic!("HTTP request failed: {:?}", e);
         }
     }
-    
+
     // Cleanup
     let _ = node.shutdown(Duration::from_secs(5)).await;
     start_handle.abort();
 }
-

@@ -24,13 +24,16 @@
 //! - Facet lifecycle hooks during supervisor operations
 //! - Multiple facets per actor in supervisor context
 
-use plexspaces_actor::supervisor::{Supervisor, SupervisionStrategy, SupervisorEvent};
-use plexspaces_actor::{Actor, ChildSpec, TestServiceLocatorStub};
+use async_trait::async_trait;
 use plexspaces_actor::child_spec::StartedChild;
-use plexspaces_core::{Actor as ActorTrait, ActorRef as CoreActorRef, ActorContext, ActorError, BehaviorError, Message, ServiceLocator};
+use plexspaces_actor::supervisor::{SupervisionStrategy, Supervisor, SupervisorEvent};
+use plexspaces_actor::{Actor, ChildSpec, TestServiceLocatorStub};
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, ActorError, ActorRef as CoreActorRef, BehaviorError,
+    Message, ServiceLocator,
+};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
-use async_trait::async_trait;
 
 /// Test actor for supervisor tests
 struct TestActor {
@@ -63,7 +66,8 @@ impl plexspaces_core::Actor for TestActor {
 }
 
 async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
     Supervisor::new(
         "test-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -78,10 +82,10 @@ async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<Su
 #[tokio::test]
 async fn test_supervisor_start_child_with_facets() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     let child_id = "worker1".to_string();
     let actor_id = format!("{}@test-node", child_id);
-    
+
     let actor_id_for_closure = actor_id.clone();
     let spec = ChildSpec::worker(
         child_id.clone(),
@@ -89,7 +93,12 @@ async fn test_supervisor_start_child_with_facets() {
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
-                let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone())).await.unwrap();
+                let mailbox = Mailbox::new(
+                    MailboxConfig::default(),
+                    format!("mailbox-{}", actor_id.clone()),
+                )
+                .await
+                .unwrap();
                 let actor = Actor::new(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
@@ -104,7 +113,7 @@ async fn test_supervisor_start_child_with_facets() {
             })
         }),
     );
-    
+
     // Add facets to ChildSpec (Phase 1: Unified Lifecycle)
     // Note: For now, facets should be attached in the factory function
     // This test verifies that ChildSpec can store facets
@@ -118,15 +127,15 @@ async fn test_supervisor_start_child_with_facets() {
         metadata: None,
     };
     let spec = spec.with_facet(proto_facet);
-    
+
     // Verify facets are stored in ChildSpec
     assert_eq!(spec.facets.len(), 1);
     assert_eq!(spec.facets[0].r#type, "test");
-    
+
     let result = supervisor.start_child(spec).await;
     assert!(result.is_ok(), "start_child should succeed");
     assert_eq!(result.unwrap(), actor_id);
-    
+
     // Verify child is in supervisor
     let count = supervisor.count_children().await;
     assert_eq!(count.actors, 1);
@@ -134,13 +143,14 @@ async fn test_supervisor_start_child_with_facets() {
 }
 
 /// Test S-I-2: Supervisor restart preserves facets
-/// 
+///
 /// This test verifies that when a supervisor restarts a child actor,
 /// the facets from the ChildSpec are preserved and reattached to the new actor.
 #[tokio::test]
 async fn test_supervisor_restart_preserves_facets() {
     // Create supervisor
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "test-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -149,11 +159,11 @@ async fn test_supervisor_restart_preserves_facets() {
         },
         service_locator,
     );
-    
+
     // Create ChildSpec with facets
     let child_id = "faceted-worker".to_string();
     let actor_id = format!("{}@test-node", child_id);
-    
+
     let spec = ChildSpec::worker(
         child_id.clone(),
         actor_id.clone(),
@@ -162,7 +172,12 @@ async fn test_supervisor_restart_preserves_facets() {
             move || {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
-                    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone())).await.unwrap();
+                    let mailbox = Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id.clone()),
+                    )
+                    .await
+                    .unwrap();
                     let actor = Actor::new(
                         actor_id.clone(),
                         Box::new(TestActor::new(actor_id.clone())),
@@ -178,7 +193,7 @@ async fn test_supervisor_restart_preserves_facets() {
             }
         }),
     );
-    
+
     // Add facet to spec (using proto Facet type)
     let facet = plexspaces_proto::common::v1::Facet {
         r#type: "test_facet".to_string(),
@@ -188,45 +203,67 @@ async fn test_supervisor_restart_preserves_facets() {
         state: std::collections::HashMap::new(),
     };
     let spec = spec.with_facet(facet.clone());
-    
+
     // Start child
     let result = supervisor.start_child(spec).await;
     assert!(result.is_ok(), "start_child should succeed");
-    
+
     // Consume ChildStarted event
     let _ = event_rx.recv().await;
-    
+
     // Verify child is present
     let count = supervisor.count_children().await;
     assert_eq!(count.actors, 1, "Should have 1 actor child");
-    
+
     // Get the child spec to verify facets are stored
     let retrieved_spec = supervisor.get_childspec(&actor_id).await;
     assert!(retrieved_spec.is_some(), "Should be able to get child spec");
     let retrieved_spec = retrieved_spec.unwrap();
-    assert_eq!(retrieved_spec.facets.len(), 1, "Spec should have 1 facet stored");
-    assert_eq!(retrieved_spec.facets[0].r#type, "test_facet", "Facet type should match");
-    
+    assert_eq!(
+        retrieved_spec.facets.len(),
+        1,
+        "Spec should have 1 facet stored"
+    );
+    assert_eq!(
+        retrieved_spec.facets[0].r#type, "test_facet",
+        "Facet type should match"
+    );
+
     // Trigger restart via handle_failure
-    let result = supervisor.handle_failure(
-        &actor_id,
-        "simulated crash".to_string(),
-        Some(plexspaces_core::ExitReason::Error("test error".to_string())),
-    ).await;
+    let result = supervisor
+        .handle_failure(
+            &actor_id,
+            "simulated crash".to_string(),
+            Some(plexspaces_core::ExitReason::Error("test error".to_string())),
+        )
+        .await;
     assert!(result.is_ok(), "handle_failure should succeed");
-    
+
     // Consume events (ChildFailed, ChildRestarted)
     let _ = event_rx.recv().await;
     let _ = event_rx.recv().await;
-    
+
     // Verify child was restarted (still present)
     let count = supervisor.count_children().await;
-    assert_eq!(count.actors, 1, "Should still have 1 actor child after restart");
-    
+    assert_eq!(
+        count.actors, 1,
+        "Should still have 1 actor child after restart"
+    );
+
     // Verify facets are still in the spec (preserved during restart)
     let retrieved_spec = supervisor.get_childspec(&actor_id).await;
-    assert!(retrieved_spec.is_some(), "Should be able to get child spec after restart");
+    assert!(
+        retrieved_spec.is_some(),
+        "Should be able to get child spec after restart"
+    );
     let retrieved_spec = retrieved_spec.unwrap();
-    assert_eq!(retrieved_spec.facets.len(), 1, "Spec should still have 1 facet after restart");
-    assert_eq!(retrieved_spec.facets[0].r#type, "test_facet", "Facet type should still match after restart");
+    assert_eq!(
+        retrieved_spec.facets.len(),
+        1,
+        "Spec should still have 1 facet after restart"
+    );
+    assert_eq!(
+        retrieved_spec.facets[0].r#type, "test_facet",
+        "Facet type should still match after restart"
+    );
 }

@@ -5,9 +5,12 @@
 // Verifies that spawning an actor with virtual_actor facet automatically registers the type
 // and that type-level registration enables get_or_activate for other actor IDs of the same type.
 
-use plexspaces_sdk::{gen_server_actor, plexspaces_handlers, spawn, call_message, ActorContext, BehaviorError, Message, Value, json};
 use plexspaces_core::{ActorId, RequestContext};
 use plexspaces_node::NodeBuilder;
+use plexspaces_sdk::{
+    call_message, gen_server_actor, json, plexspaces_handlers, spawn, ActorContext, BehaviorError,
+    Message, Value,
+};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,16 +32,19 @@ impl TestVirtualActor {
     async fn get(&mut self, _ctx: &ActorContext, _msg: &Message) -> Result<Value, BehaviorError> {
         Ok(json!({ "value": self.value }))
     }
-    
+
     #[handler("set")]
     async fn set(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> {
-        let payload: Value = serde_json::from_slice(&msg.payload)
-            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse payload: {}", e)))?;
+        let payload: Value = serde_json::from_slice(&msg.payload).map_err(|e| {
+            BehaviorError::ProcessingError(format!("Failed to parse payload: {}", e))
+        })?;
         if let Some(v) = payload.get("value").and_then(|v: &Value| v.as_i64()) {
             self.value = v as i32;
             Ok(json!({ "value": self.value }))
         } else {
-            Err(BehaviorError::ProcessingError("Missing 'value' field".to_string()))
+            Err(BehaviorError::ProcessingError(
+                "Missing 'value' field".to_string(),
+            ))
         }
     }
 }
@@ -50,84 +56,112 @@ async fn test_virtual_actor_type_registration_on_spawn() {
         NodeBuilder::new("test-node-sdk-virtual")
             .with_in_memory_backends()
             .build()
-            .await
+            .await,
     );
-    
+
     let service_locator = node.service_locator();
     let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-namespace".into());
-    
+
     // Spawn first actor with virtual_actor facet
     // This should automatically register the actor type
     let actor_id1: ActorId = format!("test-actor-1@{}", node.id()).parse().unwrap();
     let actor1 = TestVirtualActor::new(42);
-    
+
     let actor_ref1 = spawn(
         &ctx,
         service_locator.clone(),
         actor_id1.clone(),
         "test-namespace",
         actor1,
-    ).await.expect("Failed to spawn actor");
-    
+    )
+    .await
+    .expect("Failed to spawn actor");
+
     // Verify actor was spawned
     assert!(actor_ref1.is_local());
-    
+
     // Verify virtual actor type was registered
-    let virtual_actor_manager = service_locator.virtual_actor_manager().await
+    let virtual_actor_manager = service_locator
+        .virtual_actor_manager()
+        .await
         .expect("VirtualActorManager should be available");
-    
+
     // Check if actor type is registered (GenServer for gen_server_actor)
-    assert!(virtual_actor_manager.is_virtual_actor_type("GenServer").await,
-        "GenServer type should be registered as virtual actor");
-    
+    assert!(
+        virtual_actor_manager
+            .is_virtual_actor_type("GenServer")
+            .await,
+        "GenServer type should be registered as virtual actor"
+    );
+
     // Get type metadata
-    let type_metadata = virtual_actor_manager.get_virtual_actor_type("GenServer").await;
+    let type_metadata = virtual_actor_manager
+        .get_virtual_actor_type("GenServer")
+        .await;
     assert!(type_metadata.is_some(), "Type metadata should exist");
     let metadata = type_metadata.unwrap();
     assert_eq!(metadata.actor_type, "GenServer");
     assert_eq!(metadata.namespace, "test-namespace");
-    assert!(metadata.facet_config.is_some(), "facet_config should be set");
-    
+    assert!(
+        metadata.facet_config.is_some(),
+        "facet_config should be set"
+    );
+
     // Verify facet_config is in keyed format
     let facet_config = metadata.facet_config.unwrap();
-    assert!(facet_config.is_object(), "facet_config should be a JSON object");
-    assert!(facet_config.get("virtual_actor").is_some(), 
-        "facet_config should contain 'virtual_actor' key");
-    
+    assert!(
+        facet_config.is_object(),
+        "facet_config should be a JSON object"
+    );
+    assert!(
+        facet_config.get("virtual_actor").is_some(),
+        "facet_config should contain 'virtual_actor' key"
+    );
+
     // Now spawn a different actor ID of the same type
     // This should work because the type is registered
     let actor_id2: ActorId = format!("test-actor-2@{}", node.id()).parse().unwrap();
     let actor2 = TestVirtualActor::new(100);
-    
+
     let actor_ref2 = spawn(
         &ctx,
         service_locator.clone(),
         actor_id2.clone(),
         "test-namespace",
         actor2,
-    ).await.expect("Failed to spawn second actor");
-    
+    )
+    .await
+    .expect("Failed to spawn second actor");
+
     // Verify second actor was spawned
     assert!(actor_ref2.is_local());
-    
+
     // Type-level registration enables virtual actor behavior for any actor ID of this type
     // Individual instances may or may not be registered at instance level, but type-level
     // registration enables automatic activation for any actor ID matching the type pattern
     // (e.g., {id}//GenServer::namespace@node)
-    
+
     // Test that we can activate a new actor ID of the same type
     // (This tests that type-level registration enables activation)
     let _actor_id3: ActorId = format!("test-actor-3@{}", node.id()).parse().unwrap();
-    
+
     // Check if actor type is virtual (should be, because we registered it)
-    assert!(virtual_actor_manager.is_virtual_actor_type("GenServer").await,
-        "GenServer type should still be registered");
-    
+    assert!(
+        virtual_actor_manager
+            .is_virtual_actor_type("GenServer")
+            .await,
+        "GenServer type should still be registered"
+    );
+
     // Verify we can get type metadata for activation
-    let type_metadata_for_activation = virtual_actor_manager.get_virtual_actor_type("GenServer").await;
-    assert!(type_metadata_for_activation.is_some(),
-        "Should be able to get type metadata for activation");
-    
+    let type_metadata_for_activation = virtual_actor_manager
+        .get_virtual_actor_type("GenServer")
+        .await;
+    assert!(
+        type_metadata_for_activation.is_some(),
+        "Should be able to get type metadata for activation"
+    );
+
     // Verify type-level registration enables activation for a different actor ID of the same type.
     // Build actor_id3 in full format so the node can resolve type and namespace for get_or_activate.
     let actor_id3_str = format!("test-actor-3//GenServer::test-namespace@{}", node.id());
@@ -144,7 +178,10 @@ async fn test_virtual_actor_type_registration_on_spawn() {
     match &reply {
         Ok(reply_msg) => {
             let body: Value = serde_json::from_slice(&reply_msg.payload).unwrap_or(json!({}));
-            assert!(body.get("value").is_some(), "reply should contain value (activation succeeded)");
+            assert!(
+                body.get("value").is_some(),
+                "reply should contain value (activation succeeded)"
+            );
         }
         Err(e) => {
             // If activation fails (e.g. behavior not registered in BehaviorRegistry), type registration is still verified above
@@ -160,43 +197,53 @@ async fn test_virtual_actor_type_registration_idempotent() {
         NodeBuilder::new("test-node-sdk-idempotent")
             .with_in_memory_backends()
             .build()
-            .await
+            .await,
     );
-    
+
     let service_locator = node.service_locator();
     let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-namespace".into());
-    
+
     // Spawn first actor - registers type
     let actor_id1: ActorId = format!("actor-1@{}", node.id()).parse().unwrap();
     let actor1 = TestVirtualActor::new(1);
-    
+
     spawn(
         &ctx,
         service_locator.clone(),
         actor_id1.clone(),
         "test-namespace",
         actor1,
-    ).await.expect("Failed to spawn first actor");
-    
+    )
+    .await
+    .expect("Failed to spawn first actor");
+
     // Get initial metadata
     let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
-    let metadata1 = virtual_actor_manager.get_virtual_actor_type("GenServer").await.unwrap();
-    
+    let metadata1 = virtual_actor_manager
+        .get_virtual_actor_type("GenServer")
+        .await
+        .unwrap();
+
     // Spawn second actor of same type - should overwrite (idempotent)
     let actor_id2: ActorId = format!("actor-2@{}", node.id()).parse().unwrap();
     let actor2 = TestVirtualActor::new(2);
-    
+
     spawn(
         &ctx,
         service_locator.clone(),
         actor_id2.clone(),
         "test-namespace",
         actor2,
-    ).await.expect("Failed to spawn second actor");
-    
+    )
+    .await
+    .expect("Failed to spawn second actor");
+
     // Get metadata again - should still exist (idempotent registration)
-    let metadata2 = virtual_actor_manager.get_virtual_actor_type("GenServer").await.unwrap();
-    
+    let metadata2 = virtual_actor_manager
+        .get_virtual_actor_type("GenServer")
+        .await
+        .unwrap();
+
     // Both should have same type and namespace
     assert_eq!(metadata1.actor_type, metadata2.actor_type);
     assert_eq!(metadata1.namespace, metadata2.namespace);

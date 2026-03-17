@@ -61,7 +61,11 @@ impl FacetManager {
     /// ## Arguments
     /// * `actor_id` - Actor ID
     /// * `facets` - Facet container to store
-    pub async fn store_facets(&self, actor_id: impl AsRef<str>, facets: Arc<RwLock<FacetContainer>>) {
+    pub async fn store_facets(
+        &self,
+        actor_id: impl AsRef<str>,
+        facets: Arc<RwLock<FacetContainer>>,
+    ) {
         let mut storage = self.facet_storage.write().await;
         storage.insert(actor_id.as_ref().to_string(), facets);
     }
@@ -73,7 +77,10 @@ impl FacetManager {
     ///
     /// ## Returns
     /// Some(facets) if found, None otherwise
-    pub async fn get_facets(&self, actor_id: impl AsRef<str>) -> Option<Arc<RwLock<FacetContainer>>> {
+    pub async fn get_facets(
+        &self,
+        actor_id: impl AsRef<str>,
+    ) -> Option<Arc<RwLock<FacetContainer>>> {
         let storage = self.facet_storage.read().await;
         storage.get(actor_id.as_ref()).cloned()
     }
@@ -113,10 +120,7 @@ impl FacetManager {
     /// This method is a placeholder - actual setup should be done in Node or ActorFactory
     /// which have access to journaling crate and core types.
     /// This method exists for API completeness but doesn't require core dependency.
-    pub async fn setup_facets_for_actor(
-        &self,
-        _actor_id: impl AsRef<str>,
-    ) {
+    pub async fn setup_facets_for_actor(&self, _actor_id: impl AsRef<str>) {
         // Note: TimerFacet setup requires journaling crate, which core doesn't depend on.
         // This method is a placeholder - actual setup should be done in Node or ActorFactory
         // which have access to journaling crate.
@@ -144,17 +148,26 @@ impl FacetManager {
         reason: &crate::ExitReason,
     ) -> Result<Vec<crate::FacetError>, String> {
         // Get facets for the monitoring actor
-        let facets = self.get_facets(monitoring_actor_id.as_ref()).await
-            .ok_or_else(|| format!("Facets not found for actor: {}", monitoring_actor_id.as_ref()))?;
-        
+        let facets = self
+            .get_facets(monitoring_actor_id.as_ref())
+            .await
+            .ok_or_else(|| {
+                format!(
+                    "Facets not found for actor: {}",
+                    monitoring_actor_id.as_ref()
+                )
+            })?;
+
         // Call facet.on_down() for all facets (reason is already facet::ExitReason)
         let mut facets_guard = facets.write().await;
-        let errors = facets_guard.call_on_down(
-            monitoring_actor_id.as_ref(),
-            monitored_actor_id.as_ref(),
-            reason,
-        ).await;
-        
+        let errors = facets_guard
+            .call_on_down(
+                monitoring_actor_id.as_ref(),
+                monitored_actor_id.as_ref(),
+                reason,
+            )
+            .await;
+
         Ok(errors)
     }
 
@@ -175,6 +188,3 @@ impl Default for FacetManager {
 }
 
 // FacetManager doesn't implement Service here - core provides a wrapper if needed
-
-
-

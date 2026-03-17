@@ -47,7 +47,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
-use syn::{parse_macro_input, Attribute, ItemImpl, ItemStruct, ImplItem};
+use syn::{parse_macro_input, Attribute, ImplItem, ItemImpl, ItemStruct};
 
 // ============================================================================
 // Helper: Parse facets from attribute like `facets = ["durability", "timer"]`
@@ -58,7 +58,7 @@ fn parse_facets(attr: TokenStream) -> Vec<String> {
     if attr.is_empty() {
         return facets;
     }
-    
+
     // Parse as Meta
     let attr_str = attr.to_string();
     if attr_str.contains("facets") {
@@ -105,7 +105,7 @@ fn gen_facets_const(name: &syn::Ident, facets: &[String]) -> TokenStream2 {
                 /// Facets declared for this actor (empty if none)
                 pub const FACETS: &'static [&'static str] = &[];
             }
-            
+
             impl plexspaces_sdk::DeclaredFacets for #name {
                 fn declared_facets() -> &'static [&'static str] {
                     &[]
@@ -120,7 +120,7 @@ fn gen_facets_const(name: &syn::Ident, facets: &[String]) -> TokenStream2 {
                 /// Facets declared for this actor
                 pub const FACETS: &'static [&'static str] = &[#(#facet_strs),*];
             }
-            
+
             impl plexspaces_sdk::DeclaredFacets for #name {
                 fn declared_facets() -> &'static [&'static str] {
                     &[#(#facet_strs2),*]
@@ -135,23 +135,23 @@ fn gen_facets_const(name: &syn::Ident, facets: &[String]) -> TokenStream2 {
 // ============================================================================
 
 /// Marks a struct as a PlexSpaces actor with Custom behavior type.
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// #[actor]
 /// struct MyActor { ... }
-/// 
+///
 /// #[actor(facets = ["durability", "timer"])]
 /// struct DurableActor { ... }
-/// 
+///
 /// #[actor(name = "custom_name")]
 /// struct NamedActor { ... }
 /// ```
-/// 
+///
 /// ## Generated
 /// - `const FACETS` with declared facets
 /// - Note: Use `#[plexspaces_handlers(custom)]` on impl block to generate `impl Actor`
-/// 
+///
 /// ## Facets
 /// Facets extend actor capabilities without changing behavior type:
 /// - `timer`: In-memory timers (lost on deactivation)
@@ -170,15 +170,15 @@ pub fn actor(attr: TokenStream, item: TokenStream) -> TokenStream {
     let name = &input.ident;
     let facets = parse_facets(attr.clone());
     let _custom_name = parse_name_attr(attr).unwrap_or_else(|| name.to_string());
-    
+
     let facets_impl = gen_facets_const(name, &facets);
-    
+
     let expanded = quote! {
         #input
-        
+
         #facets_impl
     };
-    
+
     TokenStream::from(expanded)
 }
 
@@ -187,28 +187,28 @@ pub fn actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 // ============================================================================
 
 /// Marks a struct as a PlexSpaces GenServer actor.
-/// 
+///
 /// GenServer is the most common behavior pattern - request/reply (like Erlang gen_server).
 /// Handlers default to "call" semantics (synchronous, expects reply).
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// #[gen_server_actor]
 /// struct WebhookHandler { ... }
-/// 
+///
 /// #[gen_server_actor(facets = ["durability"])]
 /// struct DurableHandler { ... }
-/// 
+///
 /// #[gen_server_actor(name = "webhook_handler")]
 /// struct WebhookHandlerActor { ... }  // Registers as "webhook_handler" type
 /// ```
-/// 
+///
 /// ## Generated
 /// - `impl Actor` with `behavior_type() = GenServer` (or Custom(name) if name specified)
 /// - `handle_message` -> `route_message` (delegates to GenServer trait)
 /// - `const FACETS` with declared facets
 /// - Use `#[plexspaces_handlers]` on impl block to generate `impl GenServer` dispatch
-/// 
+///
 /// ## Handler Semantics
 /// GenServer handlers default to "call" (request-reply):
 /// - Handler receives message, processes it, returns Result<Value, BehaviorError>
@@ -220,27 +220,27 @@ pub fn gen_server_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
     let name = &input.ident;
     let facets = parse_facets(attr.clone());
     let custom_name = parse_name_attr(attr);
-    
+
     let facets_impl = gen_facets_const(name, &facets);
-    
+
     // If custom name is provided, use Custom(name) behavior type for HTTP gateway routing
     let behavior_type_expr = if let Some(ref custom) = custom_name {
         quote! { plexspaces_core::BehaviorType::Custom(#custom.to_string()) }
     } else {
         quote! { plexspaces_core::BehaviorType::GenServer }
     };
-    
+
     let expanded = quote! {
         #input
-        
+
         #facets_impl
-        
+
         #[plexspaces_sdk::async_trait]
         impl plexspaces_core::Actor for #name {
             fn behavior_type(&self) -> plexspaces_core::BehaviorType {
                 #behavior_type_expr
             }
-            
+
             async fn handle_message(
                 &mut self,
                 ctx: &plexspaces_core::ActorContext,
@@ -250,7 +250,7 @@ pub fn gen_server_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
     };
-    
+
     TokenStream::from(expanded)
 }
 
@@ -259,28 +259,28 @@ pub fn gen_server_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 // ============================================================================
 
 /// Marks a struct as a PlexSpaces GenEvent actor (fire-and-forget events).
-/// 
+///
 /// GenEvent is for event-driven actors that don't need to reply.
 /// Handlers default to "cast" semantics (asynchronous, no reply expected).
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// #[event_actor]
 /// struct AuditLogger { ... }
-/// 
+///
 /// #[event_actor(facets = ["durability"])]
 /// struct DurableLogger { ... }
-/// 
+///
 /// #[event_actor(name = "audit_logger")]
 /// struct AuditLoggerActor { ... }
 /// ```
-/// 
+///
 /// ## Generated
 /// - `impl Actor` with `behavior_type() = GenEvent`
 /// - `handle_message` dispatches to handlers (no reply sent)
 /// - `const FACETS` with declared facets
 /// - Use `#[plexspaces_handlers(event)]` on impl block to generate dispatch
-/// 
+///
 /// ## Handler Semantics
 /// GenEvent handlers default to "cast" (fire-and-forget):
 /// - Handler receives message, processes it, returns Result<(), BehaviorError>
@@ -292,27 +292,27 @@ pub fn event_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
     let name = &input.ident;
     let facets = parse_facets(attr.clone());
     let custom_name = parse_name_attr(attr);
-    
+
     let facets_impl = gen_facets_const(name, &facets);
-    
+
     // If custom name is provided, use Custom(name) behavior type
     let behavior_type_expr = if let Some(ref custom) = custom_name {
         quote! { plexspaces_core::BehaviorType::Custom(#custom.to_string()) }
     } else {
         quote! { plexspaces_core::BehaviorType::GenEvent }
     };
-    
+
     let expanded = quote! {
         #input
-        
+
         #facets_impl
-        
+
         #[plexspaces_sdk::async_trait]
         impl plexspaces_core::Actor for #name {
             fn behavior_type(&self) -> plexspaces_core::BehaviorType {
                 #behavior_type_expr
             }
-            
+
             async fn handle_message(
                 &mut self,
                 ctx: &plexspaces_core::ActorContext,
@@ -324,7 +324,7 @@ pub fn event_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
     };
-    
+
     TokenStream::from(expanded)
 }
 
@@ -333,30 +333,30 @@ pub fn event_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 // ============================================================================
 
 /// Marks a struct as a PlexSpaces FSM actor (finite state machine).
-/// 
+///
 /// FSM actors manage state transitions based on events.
 /// Useful for order workflows, payment processing, approval flows, etc.
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// #[fsm_actor]
-/// struct OrderWorkflow { 
+/// struct OrderWorkflow {
 ///     state: OrderState,
 /// }
-/// 
+///
 /// #[fsm_actor(facets = ["durability"])]
 /// struct DurableWorkflow { ... }
-/// 
+///
 /// #[fsm_actor(name = "order_workflow")]
 /// struct OrderWorkflowActor { ... }
 /// ```
-/// 
+///
 /// ## Generated
 /// - `impl Actor` with `behavior_type() = GenStateMachine`
 /// - `handle_message` dispatches to state handlers
 /// - `const FACETS` with declared facets
 /// - Use `#[plexspaces_handlers(fsm)]` on impl block to generate dispatch
-/// 
+///
 /// ## Handler Semantics
 /// FSM handlers receive events and can trigger state transitions:
 /// - `#[handler("event_name")]` - handle specific event
@@ -368,27 +368,27 @@ pub fn fsm_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
     let name = &input.ident;
     let facets = parse_facets(attr.clone());
     let custom_name = parse_name_attr(attr);
-    
+
     let facets_impl = gen_facets_const(name, &facets);
-    
+
     // If custom name is provided, use Custom(name) behavior type
     let behavior_type_expr = if let Some(ref custom) = custom_name {
         quote! { plexspaces_core::BehaviorType::Custom(#custom.to_string()) }
     } else {
         quote! { plexspaces_core::BehaviorType::GenStateMachine }
     };
-    
+
     let expanded = quote! {
         #input
-        
+
         #facets_impl
-        
+
         #[plexspaces_sdk::async_trait]
         impl plexspaces_core::Actor for #name {
             fn behavior_type(&self) -> plexspaces_core::BehaviorType {
                 #behavior_type_expr
             }
-            
+
             async fn handle_message(
                 &mut self,
                 ctx: &plexspaces_core::ActorContext,
@@ -400,7 +400,7 @@ pub fn fsm_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
     };
-    
+
     TokenStream::from(expanded)
 }
 
@@ -409,34 +409,34 @@ pub fn fsm_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 // ============================================================================
 
 /// Marks a struct as a PlexSpaces Workflow actor (durable workflows).
-/// 
+///
 /// Workflow actors implement the Restate-inspired run/signal/query pattern
 /// for durable, long-running workflows.
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// #[workflow_actor]
 /// struct PaymentPipeline { ... }
-/// 
+///
 /// #[workflow_actor(facets = ["durability"])]
 /// struct DurablePipeline { ... }
-/// 
+///
 /// #[workflow_actor(name = "payment_pipeline")]
 /// struct PaymentPipelineActor { ... }
 /// ```
-/// 
+///
 /// ## Generated
 /// - `impl Actor` with `behavior_type() = Workflow`
 /// - `handle_message` -> `route_workflow_message`
 /// - `const FACETS` with declared facets
 /// - Use `#[plexspaces_handlers(workflow)]` on impl block to generate dispatch
-/// 
+///
 /// ## Handler Types
 /// Workflow actors have three handler types:
 /// - `#[run_handler]` - Main workflow execution (exclusive, one at a time)
 /// - `#[signal_handler("name")]` - External events that modify state
 /// - `#[query_handler("name")]` - Read-only queries (can be concurrent)
-/// 
+///
 /// ## ExecutionContext
 /// Workflow handlers receive an ExecutionContext with durable operations:
 /// - `ctx.run(name, retry, || ...)` - Execute side-effect durably (retry = None or RetryConfig)
@@ -449,27 +449,27 @@ pub fn workflow_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
     let name = &input.ident;
     let facets = parse_facets(attr.clone());
     let custom_name = parse_name_attr(attr);
-    
+
     let facets_impl = gen_facets_const(name, &facets);
-    
+
     // If custom name is provided, use Custom(name) behavior type
     let behavior_type_expr = if let Some(ref custom) = custom_name {
         quote! { plexspaces_core::BehaviorType::Custom(#custom.to_string()) }
     } else {
         quote! { plexspaces_core::BehaviorType::Workflow }
     };
-    
+
     let expanded = quote! {
         #input
-        
+
         #facets_impl
-        
+
         #[plexspaces_sdk::async_trait]
         impl plexspaces_core::Actor for #name {
             fn behavior_type(&self) -> plexspaces_core::BehaviorType {
                 #behavior_type_expr
             }
-            
+
             async fn handle_message(
                 &mut self,
                 ctx: &plexspaces_core::ActorContext,
@@ -479,7 +479,7 @@ pub fn workflow_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
     };
-    
+
     TokenStream::from(expanded)
 }
 
@@ -488,13 +488,13 @@ pub fn workflow_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 // ============================================================================
 
 /// Marks a method as a message handler for the given operation.
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// // GenServer handlers - "call" is default, no second param needed
 /// #[gen_server_actor]
 /// struct BankAccount { ... }
-/// 
+///
 /// #[plexspaces_handlers]
 /// impl BankAccount {
 ///     #[handler("deposit")]   // GenServer defaults to call (request-reply)
@@ -503,18 +503,18 @@ pub fn workflow_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     #[handler("withdraw")]  // GenServer defaults to call
 ///     async fn withdraw(&mut self, ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> { ... }
 /// }
-/// 
+///
 /// // Custom/Event actors - specify "cast" for fire-and-forget
 /// #[actor]
 /// struct AuditLogger { ... }
-/// 
+///
 /// #[plexspaces_handlers(custom)]
 /// impl AuditLogger {
 ///     #[handler("log", cast)]  // explicit cast (fire-and-forget)
 ///     async fn log(&mut self, ctx: &ActorContext, msg: &Message) -> Result<(), BehaviorError> { ... }
 /// }
 /// ```
-/// 
+///
 /// Note: This attribute is a marker; actual dispatch is generated by `#[plexspaces_handlers]`.
 #[proc_macro_attribute]
 pub fn handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -527,12 +527,12 @@ pub fn handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
 // ============================================================================
 
 /// Marks a method as the initialization handler, called when actor starts.
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// #[gen_server_actor]
 /// struct MyActor { ... }
-/// 
+///
 /// #[plexspaces_handlers]
 /// impl MyActor {
 ///     #[init_handler]
@@ -545,7 +545,7 @@ pub fn handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     async fn process(&mut self, ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> { ... }
 /// }
 /// ```
-/// 
+///
 /// ## Semantics
 /// - Called once when actor is first activated
 /// - Can be async and access ActorContext
@@ -562,12 +562,12 @@ pub fn init_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
 // ============================================================================
 
 /// Marks a method as the workflow run handler (main execution).
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// #[workflow_actor]
 /// struct PaymentWorkflow { ... }
-/// 
+///
 /// #[plexspaces_handlers(workflow)]
 /// impl PaymentWorkflow {
 ///     #[run_handler]
@@ -586,12 +586,12 @@ pub fn run_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
 // ============================================================================
 
 /// Marks a method as a workflow signal handler.
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// #[workflow_actor]
 /// struct PaymentWorkflow { ... }
-/// 
+///
 /// #[plexspaces_handlers(workflow)]
 /// impl PaymentWorkflow {
 ///     #[signal_handler("cancel")]
@@ -610,12 +610,12 @@ pub fn signal_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
 // ============================================================================
 
 /// Marks a method as a workflow query handler (read-only).
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// #[workflow_actor]
 /// struct PaymentWorkflow { ... }
-/// 
+///
 /// #[plexspaces_handlers(workflow)]
 /// impl PaymentWorkflow {
 ///     #[query_handler("status")]
@@ -653,29 +653,33 @@ fn parse_handler_attr(attr: &Attribute) -> Option<(String, String)> {
     if !attr.path().is_ident("handler") {
         return None;
     }
-    
+
     let mut op = String::new();
     let mut invocation = "call".to_string(); // default
-    
+
     // Parse #[handler("op")] or #[handler("op", call)] or #[handler("op", cast)]
     let tokens = attr.meta.require_list().ok()?.tokens.to_string();
     let parts: Vec<&str> = tokens.split(',').collect();
-    
+
     if let Some(first) = parts.first() {
-        op = first.trim().trim_matches('"').trim_matches('\'').to_string();
+        op = first
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
     }
-    
+
     if let Some(second) = parts.get(1) {
         let inv = second.trim();
         if inv == "call" || inv == "cast" {
             invocation = inv.to_string();
         }
     }
-    
+
     if op.is_empty() {
         return None;
     }
-    
+
     Some((op, invocation))
 }
 
@@ -687,31 +691,37 @@ fn parse_workflow_handler_attr(attr: &Attribute) -> Option<(String, Option<Strin
     if attr.path().is_ident("run_handler") {
         return Some(("run".to_string(), None));
     }
-    
+
     if attr.path().is_ident("signal_handler") {
-        let name = attr.meta.require_list().ok()
-            .map(|list| {
-                let tokens = list.tokens.to_string();
-                tokens.trim().trim_matches('"').trim_matches('\'').to_string()
-            });
+        let name = attr.meta.require_list().ok().map(|list| {
+            let tokens = list.tokens.to_string();
+            tokens
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string()
+        });
         return Some(("signal".to_string(), name));
     }
-    
+
     if attr.path().is_ident("query_handler") {
-        let name = attr.meta.require_list().ok()
-            .map(|list| {
-                let tokens = list.tokens.to_string();
-                tokens.trim().trim_matches('"').trim_matches('\'').to_string()
-            });
+        let name = attr.meta.require_list().ok().map(|list| {
+            let tokens = list.tokens.to_string();
+            tokens
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string()
+        });
         return Some(("query".to_string(), name));
     }
-    
+
     None
 }
 
 fn collect_handlers(impl_block: &ItemImpl) -> Vec<HandlerInfo> {
     let mut handlers = Vec::new();
-    
+
     for item in &impl_block.items {
         if let ImplItem::Fn(method) = item {
             for attr in &method.attrs {
@@ -725,7 +735,7 @@ fn collect_handlers(impl_block: &ItemImpl) -> Vec<HandlerInfo> {
             }
         }
     }
-    
+
     handlers
 }
 
@@ -746,7 +756,7 @@ fn collect_init_handler(impl_block: &ItemImpl) -> Option<InitHandlerInfo> {
 
 fn collect_workflow_handlers(impl_block: &ItemImpl) -> Vec<WorkflowHandlerInfo> {
     let mut handlers = Vec::new();
-    
+
     for item in &impl_block.items {
         if let ImplItem::Fn(method) = item {
             for attr in &method.attrs {
@@ -760,7 +770,7 @@ fn collect_workflow_handlers(impl_block: &ItemImpl) -> Vec<WorkflowHandlerInfo> 
             }
         }
     }
-    
+
     handlers
 }
 
@@ -769,34 +779,34 @@ fn collect_workflow_handlers(impl_block: &ItemImpl) -> Vec<WorkflowHandlerInfo> 
 // ============================================================================
 
 /// Scans an impl block for `#[handler]` methods and generates dispatch code.
-/// 
+///
 /// ## Behavior Modes
 /// - `#[plexspaces_handlers]` or `#[plexspaces_handlers(gen_server)]` - GenServer dispatch
 /// - `#[plexspaces_handlers(event)]` - GenEvent dispatch (fire-and-forget)
 /// - `#[plexspaces_handlers(custom)]` - Custom Actor dispatch
 /// - `#[plexspaces_handlers(fsm)]` - FSM dispatch with state transitions
 /// - `#[plexspaces_handlers(workflow)]` - Workflow dispatch (run/signal/query)
-/// 
+///
 /// ## For GenServer actors
 /// Generates `impl GenServer` with `handle_request` that dispatches to handlers.
-/// 
+///
 /// ## For GenEvent actors
 /// Generates `impl EventHandler` with `handle_event` that dispatches to handlers.
-/// 
+///
 /// ## For Custom actors
 /// Generates `impl Actor` with `handle_message` that dispatches to handlers.
-/// 
+///
 /// ## For FSM actors
 /// Generates `handle_fsm_message` that dispatches based on state and event.
-/// 
+///
 /// ## For Workflow actors
 /// Generates `impl Workflow` with `run`, `signal`, `query` handlers.
-/// 
+///
 /// ## Usage
 /// ```ignore
 /// #[gen_server_actor]
 /// struct WebhookHandler { ... }
-/// 
+///
 /// #[plexspaces_handlers]
 /// impl WebhookHandler {
 ///     #[handler("deliver")]  // GenServer defaults to call - no second param needed
@@ -816,30 +826,30 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
     let handlers = collect_handlers(&impl_block);
     let init_handler = collect_init_handler(&impl_block);
     let workflow_handlers = collect_workflow_handlers(&impl_block);
-    
+
     // Get the type name
     let self_ty = &impl_block.self_ty;
-    
+
     // Determine behavior type from attr: gen_server (default), event, custom, fsm, workflow
     let attr_str = attr.to_string();
     let is_gen_server = attr_str.is_empty() || attr_str.contains("gen_server");
     let is_event = attr_str.contains("event");
     let is_fsm = attr_str.contains("fsm");
     let is_workflow = attr_str.contains("workflow");
-    
+
     // Remove handler attributes from methods (they're processed)
     for item in &mut impl_block.items {
         if let ImplItem::Fn(method) = item {
             method.attrs.retain(|attr| {
-                !attr.path().is_ident("handler") &&
-                !attr.path().is_ident("init_handler") &&
-                !attr.path().is_ident("run_handler") &&
-                !attr.path().is_ident("signal_handler") &&
-                !attr.path().is_ident("query_handler")
+                !attr.path().is_ident("handler")
+                    && !attr.path().is_ident("init_handler")
+                    && !attr.path().is_ident("run_handler")
+                    && !attr.path().is_ident("signal_handler")
+                    && !attr.path().is_ident("query_handler")
             });
         }
     }
-    
+
     // Generate init call if present
     let init_call = if let Some(ref init) = init_handler {
         let method = &init.method_name;
@@ -854,13 +864,13 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
     } else {
         quote! {}
     };
-    
+
     // Generate workflow impl if workflow mode
     if is_workflow {
         let mut run_handler_method = None;
         let mut signal_handlers: Vec<(&str, &syn::Ident)> = Vec::new();
         let mut query_handlers: Vec<(&str, &syn::Ident)> = Vec::new();
-        
+
         for h in &workflow_handlers {
             match h.handler_type.as_str() {
                 "run" => run_handler_method = Some(&h.method_name),
@@ -877,7 +887,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                 _ => {}
             }
         }
-        
+
         let run_impl = if let Some(method) = run_handler_method {
             quote! {
                 self.#method(ctx, input).await
@@ -887,24 +897,30 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                 Err(plexspaces_core::BehaviorError::UnsupportedMessage)
             }
         };
-        
-        let signal_arms: Vec<TokenStream2> = signal_handlers.iter().map(|(name, method)| {
-            quote! {
-                #name => self.#method(ctx, data).await,
-            }
-        }).collect();
-        
-        let query_arms: Vec<TokenStream2> = query_handlers.iter().map(|(name, method)| {
-            quote! {
-                #name => self.#method(ctx, params).await,
-            }
-        }).collect();
-        
+
+        let signal_arms: Vec<TokenStream2> = signal_handlers
+            .iter()
+            .map(|(name, method)| {
+                quote! {
+                    #name => self.#method(ctx, data).await,
+                }
+            })
+            .collect();
+
+        let query_arms: Vec<TokenStream2> = query_handlers
+            .iter()
+            .map(|(name, method)| {
+                quote! {
+                    #name => self.#method(ctx, params).await,
+                }
+            })
+            .collect();
+
         let expanded = quote! {
             #impl_block
-            
+
             #init_call
-            
+
             #[plexspaces_sdk::async_trait]
             impl plexspaces_behavior::Workflow for #self_ty {
                 async fn run(
@@ -914,7 +930,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                 ) -> Result<plexspaces_core::Message, plexspaces_core::BehaviorError> {
                     #run_impl
                 }
-                
+
                 async fn signal(
                     &mut self,
                     ctx: &plexspaces_core::ActorContext,
@@ -926,7 +942,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                         _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
                     }
                 }
-                
+
                 async fn query(
                     &self,
                     ctx: &plexspaces_core::ActorContext,
@@ -940,10 +956,10 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                 }
             }
         };
-        
+
         return TokenStream::from(expanded);
     }
-    
+
     if handlers.is_empty() && !is_fsm {
         // No handlers, just return the impl block with init
         let expanded = quote! {
@@ -952,11 +968,11 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
         };
         return TokenStream::from(expanded);
     }
-    
+
     // Generate dispatch match arms
     // Check for catch-all handler ("*" or "_")
     let catch_all_handler = handlers.iter().find(|h| h.op == "*" || h.op == "_");
-    
+
     let match_arms: Vec<TokenStream2> = handlers.iter()
         .filter(|h| h.op != "*" && h.op != "_") // Exclude catch-all from match arms
         .map(|h| {
@@ -1005,12 +1021,12 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                 }
             }
         }).collect();
-    
+
     // Add catch-all handler as default case if present
     let default_arm = if let Some(catch_all) = catch_all_handler {
         let method = &catch_all.method_name;
         let is_call = catch_all.invocation == "call";
-        
+
         if is_call {
             quote! {
                 _ => {
@@ -1060,7 +1076,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
             _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
         }
     };
-    
+
     // Generate the trait impl
     let gen_server_impl = if is_gen_server {
         quote! {
@@ -1074,7 +1090,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                     // Parse payload to determine operation
                     let payload: serde_json::Value = serde_json::from_slice(&msg.payload)
                         .unwrap_or_else(|_| serde_json::json!({}));
-                    
+
                     // Get operation from payload.action, payload.op, payload.msg_type, or msg.message_type
                     let op = payload.get("action")
                         .or_else(|| payload.get("op"))
@@ -1088,7 +1104,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                                 &msg.message_type
                             }
                         });
-                    
+
                     // Log operation extraction at debug level (guarded)
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
@@ -1097,7 +1113,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                             payload.as_object().map(|o| o.keys().collect::<Vec<_>>())
                         );
                     }
-                    
+
                     match op {
                         #(#match_arms)*
                         #default_arm
@@ -1118,13 +1134,13 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                     // Parse payload to determine operation
                     let payload: serde_json::Value = serde_json::from_slice(&msg.payload)
                         .unwrap_or_else(|_| serde_json::json!({}));
-                    
+
                     let op = payload.get("action")
                         .or_else(|| payload.get("op"))
                         .or_else(|| payload.get("event_type"))
                         .and_then(|v| v.as_str())
                         .unwrap_or(&msg.message_type);
-                    
+
                     match op {
                         #(#match_arms)*
                         #default_arm
@@ -1145,13 +1161,13 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                     // Parse payload to determine event
                     let payload: serde_json::Value = serde_json::from_slice(&msg.payload)
                         .unwrap_or_else(|_| serde_json::json!({}));
-                    
+
                     let event = payload.get("event")
                         .or_else(|| payload.get("action"))
                         .or_else(|| payload.get("op"))
                         .and_then(|v| v.as_str())
                         .unwrap_or(&msg.message_type);
-                    
+
                     match event {
                         #(#match_arms)*
                         _ => Err(plexspaces_core::BehaviorError::UnsupportedMessage)
@@ -1167,7 +1183,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                 fn behavior_type(&self) -> plexspaces_core::BehaviorType {
                     plexspaces_core::BehaviorType::Custom(stringify!(#self_ty).to_string())
                 }
-                
+
                 async fn handle_message(
                     &mut self,
                     ctx: &plexspaces_core::ActorContext,
@@ -1176,13 +1192,13 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                     // Parse payload to determine operation
                     let payload: serde_json::Value = serde_json::from_slice(&msg.payload)
                         .unwrap_or_else(|_| serde_json::json!({}));
-                    
+
                     let op = payload.get("action")
                         .or_else(|| payload.get("op"))
                         .or_else(|| payload.get("msg_type"))
                         .and_then(|v| v.as_str())
                         .unwrap_or(&msg.message_type);
-                    
+
                     match op {
                         #(#match_arms)*
                         #default_arm
@@ -1191,15 +1207,14 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
             }
         }
     };
-    
+
     let expanded = quote! {
         #impl_block
-        
+
         #init_call
-        
+
         #gen_server_impl
     };
-    
+
     TokenStream::from(expanded)
 }
-

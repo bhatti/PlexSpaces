@@ -68,7 +68,6 @@
 
 use crate::state_store::SchedulingStateStore;
 use async_trait::async_trait;
-use plexspaces_core::RequestContext;
 use aws_sdk_dynamodb::{
     types::{
         AttributeDefinition, AttributeValue, BillingMode, GlobalSecondaryIndex, KeySchemaElement,
@@ -78,6 +77,7 @@ use aws_sdk_dynamodb::{
 };
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
+use plexspaces_core::RequestContext;
 use plexspaces_proto::scheduling::v1::{SchedulingRequest, SchedulingStatus};
 use prost::Message;
 use std::collections::HashMap;
@@ -194,14 +194,12 @@ impl DynamoDBSchedulingStateStore {
     /// - Sort Key: `sk` (String) - Always "REQUEST" for now (extensibility)
     /// - GSI: `status_created_index` for efficient status queries
     #[instrument(skip(client), fields(table_name = %table_name))]
-    async fn ensure_table_exists(client: &DynamoDbClient, table_name: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn ensure_table_exists(
+        client: &DynamoDbClient,
+        table_name: &str,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // Check if table exists
-        match client
-            .describe_table()
-            .table_name(table_name)
-            .send()
-            .await
-        {
+        match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
                 debug!(table_name = %table_name, "DynamoDB table already exists");
                 return Ok(());
@@ -313,7 +311,10 @@ impl DynamoDBSchedulingStateStore {
 
     /// Wait for table to become active.
     #[instrument(skip(client), fields(table_name = %table_name))]
-    async fn wait_for_table_active(client: &DynamoDbClient, table_name: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn wait_for_table_active(
+        client: &DynamoDbClient,
+        table_name: &str,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         use aws_sdk_dynamodb::types::TableStatus;
 
         let mut attempts = 0;
@@ -362,7 +363,9 @@ impl DynamoDBSchedulingStateStore {
     }
 
     /// Convert DynamoDB item to SchedulingRequest.
-    fn item_to_request(item: &HashMap<String, AttributeValue>) -> Result<SchedulingRequest, Box<dyn Error + Send + Sync>> {
+    fn item_to_request(
+        item: &HashMap<String, AttributeValue>,
+    ) -> Result<SchedulingRequest, Box<dyn Error + Send + Sync>> {
         let request_id = item
             .get("request_id")
             .and_then(|v| v.as_s().ok())
@@ -501,16 +504,34 @@ impl DynamoDBSchedulingStateStore {
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S("REQUEST".to_string()));
-        item.insert("request_id".to_string(), AttributeValue::S(request.request_id.clone()));
-        item.insert("status".to_string(), AttributeValue::S(status_str.to_string()));
-        item.insert("requirements_json".to_string(), AttributeValue::S(requirements_json));
-        item.insert("namespace".to_string(), AttributeValue::S(request.namespace.clone()));
-        item.insert("tenant_id".to_string(), AttributeValue::S(request.tenant_id.clone()));
+        item.insert(
+            "request_id".to_string(),
+            AttributeValue::S(request.request_id.clone()),
+        );
+        item.insert(
+            "status".to_string(),
+            AttributeValue::S(status_str.to_string()),
+        );
+        item.insert(
+            "requirements_json".to_string(),
+            AttributeValue::S(requirements_json),
+        );
+        item.insert(
+            "namespace".to_string(),
+            AttributeValue::S(request.namespace.clone()),
+        );
+        item.insert(
+            "tenant_id".to_string(),
+            AttributeValue::S(request.tenant_id.clone()),
+        );
         item.insert(
             "selected_node_id".to_string(),
             AttributeValue::S(request.selected_node_id.clone()),
         );
-        item.insert("actor_id".to_string(), AttributeValue::S(request.actor_id.clone()));
+        item.insert(
+            "actor_id".to_string(),
+            AttributeValue::S(request.actor_id.clone()),
+        );
         item.insert(
             "error_message".to_string(),
             AttributeValue::S(request.error_message.clone()),
@@ -520,12 +541,21 @@ impl DynamoDBSchedulingStateStore {
             AttributeValue::N(created_at_secs.to_string()),
         );
         if let Some(secs) = scheduled_at_secs {
-            item.insert("scheduled_at".to_string(), AttributeValue::N(secs.to_string()));
+            item.insert(
+                "scheduled_at".to_string(),
+                AttributeValue::N(secs.to_string()),
+            );
         }
         if let Some(secs) = completed_at_secs {
-            item.insert("completed_at".to_string(), AttributeValue::N(secs.to_string()));
+            item.insert(
+                "completed_at".to_string(),
+                AttributeValue::N(secs.to_string()),
+            );
         }
-        item.insert("updated_at".to_string(), AttributeValue::N(updated_at_secs.to_string()));
+        item.insert(
+            "updated_at".to_string(),
+            AttributeValue::N(updated_at_secs.to_string()),
+        );
         item.insert(
             "schema_version".to_string(),
             AttributeValue::N(self.schema_version.to_string()),
@@ -663,7 +693,8 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
                 if let Some(item) = result.item().cloned() {
                     let request = Self::item_to_request(&item)?;
                     // Double-check tenant/namespace match (defense in depth)
-                    if request.tenant_id == ctx.tenant_id() && request.namespace == ctx.namespace() {
+                    if request.tenant_id == ctx.tenant_id() && request.namespace == ctx.namespace()
+                    {
                         metrics::counter!(
                             "plexspaces_scheduler_ddb_get_total",
                             "backend" => "dynamodb",
@@ -811,20 +842,25 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
             .index_name("status_created_index")
             .key_condition_expression("status = :status")
             .expression_attribute_values(":status", AttributeValue::S("PENDING".to_string()))
-            .expression_attribute_values(":tenant_id", AttributeValue::S(ctx.tenant_id().to_string()))
+            .expression_attribute_values(
+                ":tenant_id",
+                AttributeValue::S(ctx.tenant_id().to_string()),
+            )
             .scan_index_forward(true); // Sort by created_at ascending
-        
+
         // Add namespace filter only if not admin/internal with empty namespace
         if !ctx.should_skip_namespace_filter() {
             query = query
                 .filter_expression("tenant_id = :tenant_id AND namespace = :namespace")
-                .expression_attribute_values(":namespace", AttributeValue::S(ctx.namespace().to_string()));
+                .expression_attribute_values(
+                    ":namespace",
+                    AttributeValue::S(ctx.namespace().to_string()),
+                );
         } else {
             query = query.filter_expression("tenant_id = :tenant_id");
         }
-        
-        match query.send().await
-        {
+
+        match query.send().await {
             Ok(result) => {
                 let duration = start_time.elapsed();
                 metrics::histogram!(
@@ -845,14 +881,10 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
                                 } else if request.namespace == ctx.namespace() {
                                     requests.push(request);
                                 } else {
-                                    warn!(
-                                        "Request namespace mismatch - skipping (security check)"
-                                    );
+                                    warn!("Request namespace mismatch - skipping (security check)");
                                 }
                             } else {
-                                warn!(
-                                    "Request tenant mismatch - skipping (security check)"
-                                );
+                                warn!("Request tenant mismatch - skipping (security check)");
                             }
                         }
                         Err(e) => {
@@ -896,4 +928,3 @@ impl SchedulingStateStore for DynamoDBSchedulingStateStore {
         }
     }
 }
-

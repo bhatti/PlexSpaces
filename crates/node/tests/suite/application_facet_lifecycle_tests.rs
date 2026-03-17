@@ -25,18 +25,21 @@
 //! - Facet lifecycle hooks during application operations
 //! - Observability/metrics for application lifecycle
 
-use plexspaces_application::{Application, ApplicationNode, ApplicationError};
-use plexspaces_proto::application::v1::{ApplicationSpec, ShutdownStrategy, SupervisorSpec, ChildSpec, ChildType, SupervisionStrategy, RestartPolicy};
-use prost_types::Duration as ProstDuration;
-use plexspaces_proto::common::v1::Facet as ProtoFacet;
-use std::sync::Arc;
-use std::collections::HashMap;
 use async_trait::async_trait;
-use std::sync::atomic::{AtomicU32, Ordering};
+use plexspaces_application::{Application, ApplicationError, ApplicationNode};
+use plexspaces_core::{ActorId, ApplicationManager};
+use plexspaces_facet::{ExitReason, Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_core::{ApplicationManager, ActorId};
-use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata, ExitReason};
+use plexspaces_proto::application::v1::{
+    ApplicationSpec, ChildSpec, ChildType, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
+    SupervisorSpec,
+};
+use plexspaces_proto::common::v1::Facet as ProtoFacet;
+use prost_types::Duration as ProstDuration;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
 /// Test facet that tracks lifecycle calls
@@ -67,11 +70,11 @@ impl Facet for TestLifecycleFacet {
     fn facet_type(&self) -> &str {
         "test_lifecycle"
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -94,7 +97,11 @@ impl Facet for TestLifecycleFacet {
         Ok(())
     }
 
-    async fn on_terminate_start(&mut self, actor_id: &str, reason: &ExitReason) -> Result<(), FacetError> {
+    async fn on_terminate_start(
+        &mut self,
+        actor_id: &str,
+        reason: &ExitReason,
+    ) -> Result<(), FacetError> {
         let mut calls = self.terminate_start_calls.write().await;
         calls.push((actor_id.to_string(), reason.clone()));
         Ok(())
@@ -142,70 +149,78 @@ impl FacetFactory for TestLifecycleFacetFactory {
 async fn test_application_deploy_with_facets() {
     // ARRANGE: Create node with FacetRegistry registered
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    node.initialize_services().await.expect("Failed to initialize services");
-    
+    node.initialize_services()
+        .await
+        .expect("Failed to initialize services");
+
     // Register test facet factory in FacetRegistry
     let service_locator = node.service_locator();
-    
-    
+
     // Create a new registry with the test facet factory registered
     let factory = Arc::new(TestLifecycleFacetFactory);
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
     new_registry.register("test_lifecycle".to_string(), factory);
-    
+
     // Replace the registry in ServiceLocator
     use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
     let new_wrapper = Arc::new(FacetRegistryServiceWrapper::new(Arc::new(new_registry)));
     service_locator.register_facet_registry(new_wrapper).await;
-    
+
     // Create ApplicationSpec with facets
     let app_spec = create_application_spec_with_facets("test-app", "1.0.0");
-    
+
     // ACT: Deploy application
     let app_manager = node.application_manager();
-    
+
     // Create SpecApplication from spec
     use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
-    
+
     // Register application
-    app_manager.register(app).await.expect("Failed to register application");
-    
+    app_manager
+        .register(app)
+        .await
+        .expect("Failed to register application");
+
     // Get node as ApplicationNode
     struct NodeApplicationNode {
         node: Arc<Node>,
     }
-    
+
     #[async_trait]
     impl ApplicationNode for NodeApplicationNode {
         fn id(&self) -> &str {
             self.node.id().as_str()
         }
-        
+
         fn listen_addr(&self) -> &str {
             "127.0.0.1:50051"
         }
-        
+
         fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
-    
+
     // Set node context for ApplicationManager
-    let node_app_node: Arc<dyn ApplicationNode> = Arc::new(NodeApplicationNode { node: node.clone() });
+    let node_app_node: Arc<dyn ApplicationNode> =
+        Arc::new(NodeApplicationNode { node: node.clone() });
     app_manager.set_node_context(node_app_node.clone()).await;
-    
+
     // Start application
-    app_manager.start("test-app").await.expect("Failed to start application");
-    
+    app_manager
+        .start("test-app")
+        .await
+        .expect("Failed to start application");
+
     // Wait for application to start
     sleep(Duration::from_millis(500)).await;
-    
+
     // ASSERT: Verify application is running
     let app_state = app_manager.get_state("test-app").await;
     assert!(app_state.is_some(), "Application should be registered");
-    
+
     // Note: Full facet verification requires checking actors, which needs behavior factory
     // For now, we verify the application deployed successfully
     // Full facet lifecycle verification is in supervisor tests
@@ -220,80 +235,92 @@ async fn test_application_deploy_with_facets() {
 async fn test_application_undeploy_with_facets() {
     // ARRANGE: Create node with FacetRegistry registered
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    node.initialize_services().await.expect("Failed to initialize services");
-    
+    node.initialize_services()
+        .await
+        .expect("Failed to initialize services");
+
     // Register test facet factory in FacetRegistry
     let service_locator = node.service_locator();
-    
-    
+
     // Create a new registry with the test facet factory registered
     let factory = Arc::new(TestLifecycleFacetFactory);
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
     new_registry.register("test_lifecycle".to_string(), factory);
-    
+
     // Replace the registry in ServiceLocator
     use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
     let new_wrapper = Arc::new(FacetRegistryServiceWrapper::new(Arc::new(new_registry)));
     service_locator.register_facet_registry(new_wrapper).await;
-    
+
     // Create ApplicationSpec with facets
     let app_spec = create_application_spec_with_facets("test-app-undeploy", "1.0.0");
-    
+
     // ACT: Deploy application
     let app_manager = node.application_manager();
-    
+
     // Create SpecApplication from spec
     use plexspaces_application::SpecApplication;
     let spec_app = SpecApplication::new(app_spec);
     let app: Box<dyn Application> = Box::new(spec_app);
-    
+
     // Register application
-    app_manager.register(app).await.expect("Failed to register application");
-    
+    app_manager
+        .register(app)
+        .await
+        .expect("Failed to register application");
+
     // Get node as ApplicationNode
     struct NodeApplicationNode {
         node: Arc<Node>,
     }
-    
+
     #[async_trait]
     impl ApplicationNode for NodeApplicationNode {
         fn id(&self) -> &str {
             self.node.id().as_str()
         }
-        
+
         fn listen_addr(&self) -> &str {
             "127.0.0.1:50051"
         }
-        
+
         fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.node.service_locator())
         }
     }
-    
+
     // Set node context for ApplicationManager
-    let node_app_node: Arc<dyn ApplicationNode> = Arc::new(NodeApplicationNode { node: node.clone() });
+    let node_app_node: Arc<dyn ApplicationNode> =
+        Arc::new(NodeApplicationNode { node: node.clone() });
     app_manager.set_node_context(node_app_node.clone()).await;
-    
+
     // Start application
-    app_manager.start("test-app-undeploy").await.expect("Failed to start application");
-    
+    app_manager
+        .start("test-app-undeploy")
+        .await
+        .expect("Failed to start application");
+
     // Wait for application to start
     sleep(Duration::from_millis(500)).await;
-    
+
     // ACT: Stop application (undeploy)
-    app_manager.stop("test-app-undeploy", Duration::from_secs(5)).await.expect("Failed to stop application");
-    
+    app_manager
+        .stop("test-app-undeploy", Duration::from_secs(5))
+        .await
+        .expect("Failed to stop application");
+
     // Wait for shutdown to complete
     sleep(Duration::from_millis(500)).await;
-    
+
     // ASSERT: Verify application is stopped
     let app_state = app_manager.get_state("test-app-undeploy").await;
     // Application may be removed or in stopped state
     assert!(
-        app_state.is_none() || matches!(app_state, Some(state) if state == plexspaces_proto::application::v1::ApplicationState::ApplicationStateStopped),
+        app_state.is_none()
+            || matches!(app_state, Some(state) if state == plexspaces_proto::application::v1::ApplicationState::ApplicationStateStopped),
         "Application should be stopped or removed after undeploy"
     );
-    
+
     // Note: Full facet detachment verification requires checking actors, which needs behavior factory
     // For now, we verify the application undeployed successfully
     // Full facet lifecycle verification is in supervisor tests
@@ -314,11 +341,11 @@ async fn test_supervisor_graceful_shutdown_with_facets() {
     // This test is covered by:
     // - Supervisor tests in crates/supervisor/tests/
     // - Unified lifecycle tests in crates/actor/tests/unified_lifecycle_tests.rs
-    // 
+    //
     // The application-level integration is verified by:
     // - test_application_deploy_with_facets (deploy)
     // - test_application_undeploy_with_facets (undeploy)
-    // 
+    //
     // These tests verify that FacetRegistry is properly integrated and facets
     // are created from proto configurations during application deployment.
 }
@@ -328,7 +355,7 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
     // Create facet configurations (use test_lifecycle facet type)
     let mut facet_config = HashMap::new();
     facet_config.insert("priority".to_string(), "100".to_string());
-    
+
     let proto_facet = ProtoFacet {
         r#type: "test_lifecycle".to_string(),
         config: facet_config,
@@ -336,7 +363,7 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
         state: HashMap::new(),
         metadata: None,
     };
-    
+
     // Create ChildSpec with facets
     let child_spec = ChildSpec {
         id: format!("{}-worker", name),
@@ -347,7 +374,7 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
         supervisor: None,
         facets: vec![proto_facet], // Facets from ChildSpec
     };
-    
+
     // Create SupervisorSpec with ChildSpec
     let supervisor_spec = SupervisorSpec {
         strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
@@ -355,7 +382,7 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
         max_restart_window: None,
         children: vec![child_spec],
     };
-    
+
     // Create ApplicationSpec
     ApplicationSpec {
         name: name.to_string(),
@@ -368,12 +395,11 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
         dependencies: vec![],
         enabled: true,
         auto_start: true,
-        shutdown_timeout: Some(ProstDuration { seconds: 60, nanos: 0 }),
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         metadata: None,
     }
 }
-
-
-
-

@@ -28,7 +28,11 @@
 //! - Database-agnostic SQL where possible; sqlx for type-safe queries.
 
 use serde_json::Value;
-use sqlx::{postgres::PgPool, sqlite::{SqlitePool, SqlitePoolOptions}, Row};
+use sqlx::{
+    postgres::PgPool,
+    sqlite::{SqlitePool, SqlitePoolOptions},
+    Row,
+};
 use std::collections::HashMap;
 
 use crate::types::*;
@@ -77,8 +81,12 @@ async fn run_workflow_memory_schema_sqlite(pool: &SqlitePool) -> Result<(), Work
     .execute(pool)
     .await
     .map_err(|e| WorkflowError::Storage(e.to_string()))?;
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_workflow_definitions_name ON workflow_definitions(name)")
-        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_definitions_name ON workflow_definitions(name)",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| WorkflowError::Storage(e.to_string()))?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_workflow_definitions_created ON workflow_definitions(created_at DESC)")
         .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
     sqlx::query(
@@ -121,10 +129,16 @@ async fn run_workflow_memory_schema_sqlite(pool: &SqlitePool) -> Result<(), Work
     .execute(pool)
     .await
     .map_err(|e| WorkflowError::Storage(e.to_string()))?;
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_step_executions_execution ON step_executions(execution_id)")
-        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_step_executions_execution ON step_executions(execution_id)",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| WorkflowError::Storage(e.to_string()))?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_step_executions_status ON step_executions(status)")
-        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+        .execute(pool)
+        .await
+        .map_err(|e| WorkflowError::Storage(e.to_string()))?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_step_executions_started ON step_executions(started_at DESC)")
         .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
     sqlx::query(
@@ -138,7 +152,9 @@ async fn run_workflow_memory_schema_sqlite(pool: &SqlitePool) -> Result<(), Work
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_signals_execution_name ON signals(execution_id, signal_name, received_at)")
         .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_signals_execution ON signals(execution_id)")
-        .execute(pool).await.map_err(|e| WorkflowError::Storage(e.to_string()))?;
+        .execute(pool)
+        .await
+        .map_err(|e| WorkflowError::Storage(e.to_string()))?;
     Ok(())
 }
 
@@ -168,8 +184,9 @@ impl WorkflowStorage {
                 // Ensure parent directory exists
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {
-                        std::fs::create_dir_all(parent)
-                            .map_err(|e| WorkflowError::Storage(format!("Failed to create directory: {}", e)))?;
+                        std::fs::create_dir_all(parent).map_err(|e| {
+                            WorkflowError::Storage(format!("Failed to create directory: {}", e))
+                        })?;
                     }
                 }
             }
@@ -201,21 +218,29 @@ impl WorkflowStorage {
         };
 
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!("Connecting to SQLite with connection string: {}", conn_str);
+            tracing::debug!("Connecting to SQLite with connection string: {}", conn_str);
         }
         // Ensure parent directory exists for file-based databases
         if !conn_str.starts_with("sqlite::memory:") {
             if let Some(db_path) = conn_str.strip_prefix("sqlite:") {
                 if let Some(parent) = std::path::Path::new(db_path).parent() {
                     if !parent.as_os_str().is_empty() && !parent.exists() {
-                        std::fs::create_dir_all(parent)
-                            .map_err(|e| WorkflowError::Storage(format!("Failed to create directory for database: {}", e)))?;
+                        std::fs::create_dir_all(parent).map_err(|e| {
+                            WorkflowError::Storage(format!(
+                                "Failed to create directory for database: {}",
+                                e
+                            ))
+                        })?;
                     }
                 }
                 // Touch the file to ensure it exists (sqlx should create it, but this helps debug)
                 if !std::path::Path::new(db_path).exists() {
-                    std::fs::File::create(db_path)
-                        .map_err(|e| WorkflowError::Storage(format!("Failed to create database file {}: {}", db_path, e)))?;
+                    std::fs::File::create(db_path).map_err(|e| {
+                        WorkflowError::Storage(format!(
+                            "Failed to create database file {}: {}",
+                            db_path, e
+                        ))
+                    })?;
                 }
             }
         }
@@ -223,7 +248,12 @@ impl WorkflowStorage {
             .max_connections(5)
             .connect(&conn_str)
             .await
-            .map_err(|e| WorkflowError::Storage(format!("Failed to connect to SQLite (conn_str: {}): {}", conn_str, e)))?;
+            .map_err(|e| {
+                WorkflowError::Storage(format!(
+                    "Failed to connect to SQLite (conn_str: {}): {}",
+                    conn_str, e
+                ))
+            })?;
 
         // For :memory: create schema inline; file-based uses unified db/migrations at init.
         if conn_str.starts_with("sqlite::memory:") {
@@ -246,9 +276,9 @@ impl WorkflowStorage {
     /// ## Returns
     /// WorkflowStorage instance connected to PostgreSQL database
     pub async fn new_postgres(connection_string: &str) -> Result<Self, WorkflowError> {
-        let pool = PgPool::connect(connection_string)
-            .await
-            .map_err(|e| WorkflowError::Storage(format!("Failed to connect to PostgreSQL: {}", e)))?;
+        let pool = PgPool::connect(connection_string).await.map_err(|e| {
+            WorkflowError::Storage(format!("Failed to connect to PostgreSQL: {}", e))
+        })?;
 
         let storage = Self {
             pool: SqlPool::Postgres(pool),
@@ -292,8 +322,8 @@ impl WorkflowStorage {
         // Database-agnostic query (works for both SQLite and PostgreSQL)
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-        sqlx::query(
-            r#"
+                sqlx::query(
+                    r#"
             INSERT INTO workflow_definitions (id, version, name, definition_proto)
             VALUES (?, ?, ?, ?)
             ON CONFLICT (id, version) DO UPDATE SET
@@ -301,14 +331,14 @@ impl WorkflowStorage {
                 definition_proto = excluded.definition_proto,
                 updated_at = CURRENT_TIMESTAMP
             "#,
-        )
-        .bind(&def.id)
-        .bind(&def.version)
-        .bind(&def.name)
-        .bind(definition_json.as_bytes())
+                )
+                .bind(&def.id)
+                .bind(&def.version)
+                .bind(&def.name)
+                .bind(definition_json.as_bytes())
                 .execute(pool)
-        .await
-        .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+                .await
+                .map_err(|e| WorkflowError::Storage(e.to_string()))?;
             }
             SqlPool::Postgres(pool) => {
                 sqlx::query(
@@ -342,19 +372,22 @@ impl WorkflowStorage {
     ) -> Result<WorkflowDefinition, WorkflowError> {
         let definition_bytes: Vec<u8> = match &self.pool {
             SqlPool::Sqlite(pool) => {
-        let row = sqlx::query(
-            r#"
+                let row = sqlx::query(
+                    r#"
             SELECT definition_proto FROM workflow_definitions
             WHERE id = ? AND version = ?
             "#,
-        )
-        .bind(id)
-        .bind(version)
+                )
+                .bind(id)
+                .bind(version)
                 .fetch_one(pool)
-        .await
-        .map_err(|e| {
-            WorkflowError::NotFound(format!("Definition {}:{} not found: {}", id, version, e))
-        })?;
+                .await
+                .map_err(|e| {
+                    WorkflowError::NotFound(format!(
+                        "Definition {}:{} not found: {}",
+                        id, version, e
+                    ))
+                })?;
                 row.get(0)
             }
             SqlPool::Postgres(pool) => {
@@ -369,7 +402,10 @@ impl WorkflowStorage {
                 .fetch_one(pool)
                 .await
                 .map_err(|e| {
-                    WorkflowError::NotFound(format!("Definition {}:{} not found: {}", id, version, e))
+                    WorkflowError::NotFound(format!(
+                        "Definition {}:{} not found: {}",
+                        id, version, e
+                    ))
                 })?;
                 row.get(0)
             }
@@ -470,11 +506,7 @@ impl WorkflowStorage {
     ///
     /// ## Returns
     /// Ok if deleted successfully
-    pub async fn delete_definition(
-        &self,
-        id: &str,
-        version: &str,
-    ) -> Result<(), WorkflowError> {
+    pub async fn delete_definition(&self, id: &str, version: &str) -> Result<(), WorkflowError> {
         match &self.pool {
             SqlPool::Sqlite(pool) => {
                 if version.is_empty() {
@@ -545,7 +577,7 @@ impl WorkflowStorage {
         // Insert execution with version=1 and optional node_id
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-        sqlx::query(
+                sqlx::query(
             r#"
             INSERT INTO workflow_executions
                     (execution_id, definition_id, definition_version, status, input_json, node_id, version, last_heartbeat)
@@ -586,18 +618,18 @@ impl WorkflowStorage {
         for (key, value) in labels {
             match &self.pool {
                 SqlPool::Sqlite(pool) => {
-            sqlx::query(
-                r#"
+                    sqlx::query(
+                        r#"
                 INSERT INTO workflow_execution_labels (execution_id, label_key, label_value)
                 VALUES (?, ?, ?)
                 "#,
-            )
-            .bind(&execution_id)
-            .bind(&key)
-            .bind(&value)
+                    )
+                    .bind(&execution_id)
+                    .bind(&key)
+                    .bind(&value)
                     .execute(pool)
-            .await
-            .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+                    .await
+                    .map_err(|e| WorkflowError::Storage(e.to_string()))?;
                 }
                 SqlPool::Postgres(pool) => {
                     sqlx::query(
@@ -624,10 +656,34 @@ impl WorkflowStorage {
         &self,
         execution_id: &str,
     ) -> Result<WorkflowExecution, WorkflowError> {
-        let (execution_id_val, definition_id, definition_version, status_str, current_step_id, input_json, output_json, error, node_id, version, last_heartbeat): (String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, i64, Option<chrono::DateTime<chrono::Utc>>) = match &self.pool {
+        let (
+            execution_id_val,
+            definition_id,
+            definition_version,
+            status_str,
+            current_step_id,
+            input_json,
+            output_json,
+            error,
+            node_id,
+            version,
+            last_heartbeat,
+        ): (
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            i64,
+            Option<chrono::DateTime<chrono::Utc>>,
+        ) = match &self.pool {
             SqlPool::Sqlite(pool) => {
-        let row = sqlx::query(
-            r#"
+                let row = sqlx::query(
+                    r#"
             SELECT execution_id, definition_id, definition_version, status,
                    current_step_id, input_json, output_json, error,
                            node_id, version, last_heartbeat,
@@ -635,13 +691,13 @@ impl WorkflowStorage {
             FROM workflow_executions
             WHERE execution_id = ?
             "#,
-        )
-        .bind(execution_id)
+                )
+                .bind(execution_id)
                 .fetch_one(pool)
-        .await
-        .map_err(|e| {
-            WorkflowError::NotFound(format!("Execution {} not found: {}", execution_id, e))
-        })?;
+                .await
+                .map_err(|e| {
+                    WorkflowError::NotFound(format!("Execution {} not found: {}", execution_id, e))
+                })?;
                 (
                     row.get::<String, _>(0),
                     row.get::<String, _>(1),
@@ -697,8 +753,12 @@ impl WorkflowStorage {
             definition_version,
             status,
             current_step_id,
-            input: input_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-            output: output_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+            input: input_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok()),
+            output: output_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok()),
             error,
             node_id,
             version: version as u64,
@@ -712,7 +772,8 @@ impl WorkflowStorage {
         execution_id: &str,
         status: ExecutionStatus,
     ) -> Result<(), WorkflowError> {
-        self.update_execution_status_with_version(execution_id, status, None).await
+        self.update_execution_status_with_version(execution_id, status, None)
+            .await
     }
 
     /// Update execution status with version check (optimistic locking)
@@ -740,7 +801,7 @@ impl WorkflowStorage {
             SqlPool::Sqlite(pool) => {
                 let result = if let Some(version) = expected_version {
                     // Version-based optimistic locking
-        sqlx::query(
+                    sqlx::query(
             r#"
             UPDATE workflow_executions
             SET status = ?,
@@ -782,7 +843,9 @@ impl WorkflowStorage {
                     .execute(pool)
                     .await
                 };
-                result.map_err(|e| WorkflowError::Storage(e.to_string()))?.rows_affected()
+                result
+                    .map_err(|e| WorkflowError::Storage(e.to_string()))?
+                    .rows_affected()
             }
             SqlPool::Postgres(pool) => {
                 let result = if let Some(version) = expected_version {
@@ -829,7 +892,9 @@ impl WorkflowStorage {
                     .execute(pool)
                     .await
                 };
-                result.map_err(|e| WorkflowError::Storage(e.to_string()))?.rows_affected()
+                result
+                    .map_err(|e| WorkflowError::Storage(e.to_string()))?
+                    .rows_affected()
             }
         };
 
@@ -864,9 +929,8 @@ impl WorkflowStorage {
         expected_version: u64,
     ) -> Result<(), WorkflowError> {
         let rows_affected = match &self.pool {
-            SqlPool::Sqlite(pool) => {
-                sqlx::query(
-                    r#"
+            SqlPool::Sqlite(pool) => sqlx::query(
+                r#"
                     UPDATE workflow_executions
                     SET node_id = ?,
                         version = version + 1,
@@ -874,18 +938,16 @@ impl WorkflowStorage {
                         updated_at = CURRENT_TIMESTAMP
                     WHERE execution_id = ? AND version = ?
                     "#,
-                )
-                .bind(new_node_id)
-                .bind(execution_id)
-                .bind(expected_version as i64)
-                .execute(pool)
-                .await
-                .map_err(|e| WorkflowError::Storage(e.to_string()))?
-                .rows_affected()
-            }
-            SqlPool::Postgres(pool) => {
-                sqlx::query(
-                    r#"
+            )
+            .bind(new_node_id)
+            .bind(execution_id)
+            .bind(expected_version as i64)
+            .execute(pool)
+            .await
+            .map_err(|e| WorkflowError::Storage(e.to_string()))?
+            .rows_affected(),
+            SqlPool::Postgres(pool) => sqlx::query(
+                r#"
                     UPDATE workflow_executions
                     SET node_id = $1,
                         version = version + 1,
@@ -893,15 +955,14 @@ impl WorkflowStorage {
                         updated_at = CURRENT_TIMESTAMP
                     WHERE execution_id = $2 AND version = $3
                     "#,
-                )
-                .bind(new_node_id)
-                .bind(execution_id)
-                .bind(expected_version as i64)
-                .execute(pool)
-                .await
-                .map_err(|e| WorkflowError::Storage(e.to_string()))?
-                .rows_affected()
-            }
+            )
+            .bind(new_node_id)
+            .bind(execution_id)
+            .bind(expected_version as i64)
+            .execute(pool)
+            .await
+            .map_err(|e| WorkflowError::Storage(e.to_string()))?
+            .rows_affected(),
         };
 
         if rows_affected == 0 {
@@ -937,8 +998,8 @@ impl WorkflowStorage {
                 .bind(execution_id)
                 .bind(node_id)
                 .execute(pool)
-        .await
-        .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+                .await
+                .map_err(|e| WorkflowError::Storage(e.to_string()))?;
             }
             SqlPool::Postgres(pool) => {
                 sqlx::query(
@@ -966,7 +1027,8 @@ impl WorkflowStorage {
         execution_id: &str,
         output: Value,
     ) -> Result<(), WorkflowError> {
-        self.update_execution_output_with_version(execution_id, output, None).await
+        self.update_execution_output_with_version(execution_id, output, None)
+            .await
     }
 
     /// Update execution output with version check (optimistic locking)
@@ -982,8 +1044,8 @@ impl WorkflowStorage {
         let rows_affected = match &self.pool {
             SqlPool::Sqlite(pool) => {
                 let result = if let Some(version) = expected_version {
-        sqlx::query(
-            r#"
+                    sqlx::query(
+                        r#"
             UPDATE workflow_executions
             SET output_json = ?,
                             version = version + 1,
@@ -1005,13 +1067,15 @@ impl WorkflowStorage {
                 updated_at = CURRENT_TIMESTAMP
             WHERE execution_id = ?
             "#,
-        )
-        .bind(&output_json)
-        .bind(execution_id)
+                    )
+                    .bind(&output_json)
+                    .bind(execution_id)
                     .execute(pool)
-        .await
+                    .await
                 };
-                result.map_err(|e| WorkflowError::Storage(e.to_string()))?.rows_affected()
+                result
+                    .map_err(|e| WorkflowError::Storage(e.to_string()))?
+                    .rows_affected()
             }
             SqlPool::Postgres(pool) => {
                 let result = if let Some(version) = expected_version {
@@ -1044,7 +1108,9 @@ impl WorkflowStorage {
                     .execute(pool)
                     .await
                 };
-                result.map_err(|e| WorkflowError::Storage(e.to_string()))?.rows_affected()
+                result
+                    .map_err(|e| WorkflowError::Storage(e.to_string()))?
+                    .rows_affected()
             }
         };
 
@@ -1083,22 +1149,22 @@ impl WorkflowStorage {
 
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-        sqlx::query(
-            r#"
+                sqlx::query(
+                    r#"
             INSERT INTO step_executions
             (step_execution_id, execution_id, step_id, status, input_json, attempt, started_at)
             VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             "#,
-        )
-        .bind(&step_exec_id)
-        .bind(execution_id)
-        .bind(step_id)
-        .bind("RUNNING")
-        .bind(&input_json)
-        .bind(attempt as i64)
+                )
+                .bind(&step_exec_id)
+                .bind(execution_id)
+                .bind(step_id)
+                .bind("RUNNING")
+                .bind(&input_json)
+                .bind(attempt as i64)
                 .execute(pool)
-        .await
-        .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+                .await
+                .map_err(|e| WorkflowError::Storage(e.to_string()))?;
             }
             SqlPool::Postgres(pool) => {
                 sqlx::query(
@@ -1128,22 +1194,43 @@ impl WorkflowStorage {
         &self,
         step_exec_id: &str,
     ) -> Result<StepExecution, WorkflowError> {
-        let (step_execution_id, execution_id, step_id, status_str, input_json, output_json, error, attempt): (String, String, String, String, Option<String>, Option<String>, Option<String>, i64) = match &self.pool {
+        let (
+            step_execution_id,
+            execution_id,
+            step_id,
+            status_str,
+            input_json,
+            output_json,
+            error,
+            attempt,
+        ): (
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            i64,
+        ) = match &self.pool {
             SqlPool::Sqlite(pool) => {
-        let row = sqlx::query(
-            r#"
+                let row = sqlx::query(
+                    r#"
             SELECT step_execution_id, execution_id, step_id, status,
                    input_json, output_json, error, attempt
             FROM step_executions
             WHERE step_execution_id = ?
             "#,
-        )
-        .bind(step_exec_id)
+                )
+                .bind(step_exec_id)
                 .fetch_one(pool)
-        .await
-        .map_err(|e| {
-            WorkflowError::NotFound(format!("Step execution {} not found: {}", step_exec_id, e))
-        })?;
+                .await
+                .map_err(|e| {
+                    WorkflowError::NotFound(format!(
+                        "Step execution {} not found: {}",
+                        step_exec_id, e
+                    ))
+                })?;
                 (
                     row.get::<String, _>(0),
                     row.get::<String, _>(1),
@@ -1168,7 +1255,10 @@ impl WorkflowStorage {
                 .fetch_one(pool)
                 .await
                 .map_err(|e| {
-                    WorkflowError::NotFound(format!("Step execution {} not found: {}", step_exec_id, e))
+                    WorkflowError::NotFound(format!(
+                        "Step execution {} not found: {}",
+                        step_exec_id, e
+                    ))
                 })?;
                 (
                     row.get::<String, _>(0),
@@ -1190,8 +1280,12 @@ impl WorkflowStorage {
             execution_id,
             step_id,
             status,
-            input: input_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-            output: output_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+            input: input_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok()),
+            output: output_json
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok()),
             error,
             attempt: attempt as u32,
         })
@@ -1213,8 +1307,8 @@ impl WorkflowStorage {
 
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-        sqlx::query(
-            r#"
+                sqlx::query(
+                    r#"
             UPDATE step_executions
             SET status = ?,
                 output_json = ?,
@@ -1222,14 +1316,14 @@ impl WorkflowStorage {
                 completed_at = CURRENT_TIMESTAMP
             WHERE step_execution_id = ?
             "#,
-        )
-        .bind(&status_str)
-        .bind(output_json.as_ref())
-        .bind(error.as_ref())
-        .bind(step_exec_id)
+                )
+                .bind(&status_str)
+                .bind(output_json.as_ref())
+                .bind(error.as_ref())
+                .bind(step_exec_id)
                 .execute(pool)
-        .await
-        .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+                .await
+                .map_err(|e| WorkflowError::Storage(e.to_string()))?;
             }
             SqlPool::Postgres(pool) => {
                 sqlx::query(
@@ -1264,38 +1358,42 @@ impl WorkflowStorage {
 
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-        let rows = sqlx::query(
-            r#"
+                let rows = sqlx::query(
+                    r#"
             SELECT step_execution_id, execution_id, step_id, status,
                    input_json, output_json, error, attempt
             FROM step_executions
             WHERE execution_id = ?
             ORDER BY started_at ASC
             "#,
-        )
-        .bind(execution_id)
+                )
+                .bind(execution_id)
                 .fetch_all(pool)
-        .await
-        .map_err(|e| WorkflowError::Storage(e.to_string()))?;
+                .await
+                .map_err(|e| WorkflowError::Storage(e.to_string()))?;
 
-        for row in rows {
-            let status_str: String = row.get(3);
-            let status = StepExecutionStatus::from_string(&status_str)?;
+                for row in rows {
+                    let status_str: String = row.get(3);
+                    let status = StepExecutionStatus::from_string(&status_str)?;
 
-            let input_json: Option<String> = row.get(4);
-            let output_json: Option<String> = row.get(5);
-            let attempt: i64 = row.get(7);
+                    let input_json: Option<String> = row.get(4);
+                    let output_json: Option<String> = row.get(5);
+                    let attempt: i64 = row.get(7);
 
-            executions.push(StepExecution {
-                step_execution_id: row.get(0),
-                execution_id: row.get(1),
-                step_id: row.get(2),
-                status,
-                        input: input_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                        output: output_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                error: row.get(6),
-                attempt: attempt as u32,
-            });
+                    executions.push(StepExecution {
+                        step_execution_id: row.get(0),
+                        execution_id: row.get(1),
+                        step_id: row.get(2),
+                        status,
+                        input: input_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
+                        output: output_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
+                        error: row.get(6),
+                        attempt: attempt as u32,
+                    });
                 }
             }
             SqlPool::Postgres(pool) => {
@@ -1326,8 +1424,12 @@ impl WorkflowStorage {
                         execution_id: row.get(1),
                         step_id: row.get(2),
                         status,
-                        input: input_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                        output: output_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                        input: input_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
+                        output: output_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
                         error: row.get(6),
                         attempt: attempt as u32,
                     });
@@ -1366,7 +1468,7 @@ impl WorkflowStorage {
 
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-        sqlx::query(
+                sqlx::query(
             "INSERT INTO signals (signal_id, execution_id, signal_name, payload, received_at)
                      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
         )
@@ -1419,16 +1521,16 @@ impl WorkflowStorage {
         let payload_json_opt: Option<String> = match &self.pool {
             SqlPool::Sqlite(pool) => {
                 let row_opt = sqlx::query(
-            "SELECT payload FROM signals
+                    "SELECT payload FROM signals
              WHERE execution_id = ? AND signal_name = ?
              ORDER BY received_at ASC
              LIMIT 1",
-        )
-        .bind(execution_id)
-        .bind(signal_name)
+                )
+                .bind(execution_id)
+                .bind(signal_name)
                 .fetch_optional(pool)
-        .await
-        .map_err(|e| WorkflowError::Storage(format!("Failed to check signal: {}", e)))?;
+                .await
+                .map_err(|e| WorkflowError::Storage(format!("Failed to check signal: {}", e)))?;
                 row_opt.map(|row| row.get(0))
             }
             SqlPool::Postgres(pool) => {
@@ -1455,8 +1557,8 @@ impl WorkflowStorage {
             match &self.pool {
                 SqlPool::Sqlite(pool) => {
                     // SQLite uses rowid
-            sqlx::query(
-                "DELETE FROM signals
+                    sqlx::query(
+                        "DELETE FROM signals
                  WHERE execution_id = ? AND signal_name = ?
                  AND rowid = (
                      SELECT rowid FROM signals
@@ -1464,14 +1566,16 @@ impl WorkflowStorage {
                      ORDER BY received_at ASC
                      LIMIT 1
                  )",
-            )
-            .bind(execution_id)
-            .bind(signal_name)
-            .bind(execution_id)
-            .bind(signal_name)
+                    )
+                    .bind(execution_id)
+                    .bind(signal_name)
+                    .bind(execution_id)
+                    .bind(signal_name)
                     .execute(pool)
-            .await
-            .map_err(|e| WorkflowError::Storage(format!("Failed to delete signal: {}", e)))?;
+                    .await
+                    .map_err(|e| {
+                        WorkflowError::Storage(format!("Failed to delete signal: {}", e))
+                    })?;
                 }
                 SqlPool::Postgres(pool) => {
                     // PostgreSQL uses CTID or subquery
@@ -1488,7 +1592,9 @@ impl WorkflowStorage {
                     .bind(signal_name)
                     .execute(pool)
                     .await
-                    .map_err(|e| WorkflowError::Storage(format!("Failed to delete signal: {}", e)))?;
+                    .map_err(|e| {
+                        WorkflowError::Storage(format!("Failed to delete signal: {}", e))
+                    })?;
                 }
             }
 
@@ -1523,7 +1629,11 @@ impl WorkflowStorage {
 
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-                let status_placeholders: String = status_strings.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                let status_placeholders: String = status_strings
+                    .iter()
+                    .map(|_| "?")
+                    .collect::<Vec<_>>()
+                    .join(",");
                 let mut query = format!(
                     r#"
                     SELECT execution_id, definition_id, definition_version, status,
@@ -1554,7 +1664,9 @@ impl WorkflowStorage {
                     query_builder = query_builder.bind(nid);
                 }
 
-                let rows = query_builder.fetch_all(pool).await
+                let rows = query_builder
+                    .fetch_all(pool)
+                    .await
                     .map_err(|e| WorkflowError::Storage(e.to_string()))?;
 
                 for row in rows {
@@ -1572,8 +1684,12 @@ impl WorkflowStorage {
                         definition_version: row.get(2),
                         status,
                         current_step_id: row.get(4),
-                        input: input_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                        output: output_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                        input: input_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
+                        output: output_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
                         error: row.get(7),
                         node_id: row.get(8),
                         version: version as u64,
@@ -1618,7 +1734,9 @@ impl WorkflowStorage {
                     query_builder = query_builder.bind(nid);
                 }
 
-                let rows = query_builder.fetch_all(pool).await
+                let rows = query_builder
+                    .fetch_all(pool)
+                    .await
                     .map_err(|e| WorkflowError::Storage(e.to_string()))?;
 
                 for row in rows {
@@ -1636,8 +1754,12 @@ impl WorkflowStorage {
                         definition_version: row.get(2),
                         status,
                         current_step_id: row.get(4),
-                        input: input_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                        output: output_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                        input: input_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
+                        output: output_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
                         error: row.get(7),
                         node_id: row.get(8),
                         version: version as u64,
@@ -1676,7 +1798,11 @@ impl WorkflowStorage {
         // Database-specific date difference calculation
         match &self.pool {
             SqlPool::Sqlite(pool) => {
-                let status_placeholders: String = status_strings.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                let status_placeholders: String = status_strings
+                    .iter()
+                    .map(|_| "?")
+                    .collect::<Vec<_>>()
+                    .join(",");
                 let query = format!(
                     r#"
                     SELECT execution_id, definition_id, definition_version, status,
@@ -1701,7 +1827,9 @@ impl WorkflowStorage {
                 // Bind stale threshold
                 query_builder = query_builder.bind(stale_threshold_seconds as i64);
 
-                let rows = query_builder.fetch_all(pool).await
+                let rows = query_builder
+                    .fetch_all(pool)
+                    .await
                     .map_err(|e| WorkflowError::Storage(e.to_string()))?;
 
                 for row in rows {
@@ -1719,8 +1847,12 @@ impl WorkflowStorage {
                         definition_version: row.get(2),
                         status,
                         current_step_id: row.get(4),
-                        input: input_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                        output: output_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                        input: input_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
+                        output: output_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
                         error: row.get(7),
                         node_id: row.get(8),
                         version: version as u64,
@@ -1758,7 +1890,9 @@ impl WorkflowStorage {
                 // Bind stale threshold
                 query_builder = query_builder.bind(stale_threshold_seconds as i64);
 
-                let rows = query_builder.fetch_all(pool).await
+                let rows = query_builder
+                    .fetch_all(pool)
+                    .await
                     .map_err(|e| WorkflowError::Storage(e.to_string()))?;
 
                 for row in rows {
@@ -1776,8 +1910,12 @@ impl WorkflowStorage {
                         definition_version: row.get(2),
                         status,
                         current_step_id: row.get(4),
-                        input: input_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
-                        output: output_json.as_ref().and_then(|s| serde_json::from_str(s).ok()),
+                        input: input_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
+                        output: output_json
+                            .as_ref()
+                            .and_then(|s| serde_json::from_str(s).ok()),
                         error: row.get(7),
                         node_id: row.get(8),
                         version: version as u64,
@@ -1790,4 +1928,3 @@ impl WorkflowStorage {
         Ok(executions)
     }
 }
-

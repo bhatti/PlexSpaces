@@ -96,7 +96,11 @@ pub trait MessageSender: Send + Sync {
     /// ## Default Implementation
     /// Returns an error by default. Implementations like `ActorRef` override this
     /// with proper ask semantics (correlation-based reply routing).
-    async fn ask(&self, _message: Message, _timeout: std::time::Duration) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
+    async fn ask(
+        &self,
+        _message: Message,
+        _timeout: std::time::Duration,
+    ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
         Err("ask() not supported by this MessageSender implementation".into())
     }
 

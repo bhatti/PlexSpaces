@@ -24,8 +24,8 @@
 
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
-    use plexspaces_keyvalue::{KeyValueStore, DynamoDBKVStore};
     use plexspaces_common::RequestContext;
+    use plexspaces_keyvalue::{DynamoDBKVStore, KeyValueStore};
     use std::time::Duration;
     use ulid::Ulid;
 
@@ -64,7 +64,7 @@ mod ddb_tests {
         let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
             .or_else(|_| std::env::var("PLEXSPACES_DDB_ENDPOINT_URL"))
             .unwrap_or_else(|_| "http://localhost:8000".to_string());
-        
+
         DynamoDBKVStore::new(
             "us-east-1".to_string(),
             "plexspaces-keyvalue-test".to_string(),
@@ -338,7 +338,9 @@ mod ddb_tests {
         let kv = create_ddb_store().await;
         let ctx = tenant1_ctx();
 
-        let result = kv.refresh_ttl(&ctx, "nonexistent", Duration::from_secs(60)).await;
+        let result = kv
+            .refresh_ttl(&ctx, "nonexistent", Duration::from_secs(60))
+            .await;
         assert!(result.is_err());
     }
 
@@ -390,7 +392,10 @@ mod ddb_tests {
             .unwrap();
         assert!(success);
 
-        assert_eq!(kv.get(&ctx, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
 
         // CAS with non-matching value
         let success = kv
@@ -459,13 +464,22 @@ mod ddb_tests {
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Each tenant should see their own value
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
 
         // Delete from tenant1 should not affect tenant2
         kv.delete(&ctx1, "key1").await.unwrap();
         assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), None);
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 
     #[tokio::test]
@@ -482,8 +496,14 @@ mod ddb_tests {
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Each namespace should see their own value
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 
     #[tokio::test]
@@ -626,7 +646,11 @@ mod ddb_tests {
             let ctx_clone = ctx.clone();
             let handle = tokio::spawn(async move {
                 kv_clone
-                    .put(&ctx_clone, &format!("key{}", i), format!("value{}", i).into_bytes())
+                    .put(
+                        &ctx_clone,
+                        &format!("key{}", i),
+                        format!("value{}", i).into_bytes(),
+                    )
                     .await
                     .unwrap();
             });
@@ -665,7 +689,10 @@ mod ddb_tests {
             let handle = tokio::spawn(async move {
                 // Use increment for atomic operations instead of CAS
                 // This tests that concurrent operations work correctly
-                kv_clone.increment(&ctx_clone, &counter_key_clone, 1).await.unwrap();
+                kv_clone
+                    .increment(&ctx_clone, &counter_key_clone, 1)
+                    .await
+                    .unwrap();
             });
             handles.push(handle);
         }
@@ -682,4 +709,3 @@ mod ddb_tests {
         assert_eq!(final_value, 10);
     }
 }
-

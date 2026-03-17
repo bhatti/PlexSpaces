@@ -161,10 +161,18 @@ impl DynamoDBStorage {
             Err(e) => {
                 // Table doesn't exist, create it
                 let error_msg = format!("{}", e);
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_msg.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_msg.clone());
 
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         error = %e,
                         error_code = %error_code,
@@ -185,25 +193,39 @@ impl DynamoDBStorage {
             .attribute_name("pk")
             .key_type(KeyType::Hash)
             .build()
-            .map_err(|e| TupleSpaceError::BackendError(format!("Failed to build key schema: {}", e)))?;
+            .map_err(|e| {
+                TupleSpaceError::BackendError(format!("Failed to build key schema: {}", e))
+            })?;
 
         let sk_key_schema = KeySchemaElement::builder()
             .attribute_name("sk")
             .key_type(KeyType::Range)
             .build()
-            .map_err(|e| TupleSpaceError::BackendError(format!("Failed to build key schema: {}", e)))?;
+            .map_err(|e| {
+                TupleSpaceError::BackendError(format!("Failed to build key schema: {}", e))
+            })?;
 
         let pk_attr = AttributeDefinition::builder()
             .attribute_name("pk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| TupleSpaceError::BackendError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                TupleSpaceError::BackendError(format!(
+                    "Failed to build attribute definition: {}",
+                    e
+                ))
+            })?;
 
         let sk_attr = AttributeDefinition::builder()
             .attribute_name("sk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| TupleSpaceError::BackendError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                TupleSpaceError::BackendError(format!(
+                    "Failed to build attribute definition: {}",
+                    e
+                ))
+            })?;
 
         let create_table_result = client
             .create_table()
@@ -244,7 +266,9 @@ impl DynamoDBStorage {
             .enabled(true)
             .attribute_name("ttl")
             .build()
-            .map_err(|e| TupleSpaceError::BackendError(format!("Failed to build TTL spec: {}", e)))?;
+            .map_err(|e| {
+                TupleSpaceError::BackendError(format!("Failed to build TTL spec: {}", e))
+            })?;
 
         match client
             .update_time_to_live()
@@ -287,7 +311,9 @@ impl DynamoDBStorage {
                 .table_name(table_name)
                 .send()
                 .await
-                .map_err(|e| TupleSpaceError::BackendError(format!("Failed to describe table: {}", e)))?;
+                .map_err(|e| {
+                    TupleSpaceError::BackendError(format!("Failed to describe table: {}", e))
+                })?;
 
             if let Some(status) = describe_result.table().and_then(|t| t.table_status()) {
                 match status {
@@ -314,7 +340,9 @@ impl DynamoDBStorage {
                     }
                 }
             } else {
-                return Err(TupleSpaceError::BackendError("Table status not available".to_string()));
+                return Err(TupleSpaceError::BackendError(
+                    "Table status not available".to_string(),
+                ));
             }
         }
     }
@@ -327,21 +355,34 @@ impl DynamoDBStorage {
         now_secs: i64,
     ) -> HashMap<String, AttributeValue> {
         let tuple_json = serde_json::to_string(tuple).unwrap_or_else(|_| "{}".to_string());
-        let fields_json = serde_json::to_string(tuple.fields()).unwrap_or_else(|_| "[]".to_string());
+        let fields_json =
+            serde_json::to_string(tuple.fields()).unwrap_or_else(|_| "[]".to_string());
 
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(tuple_id.to_string()));
         item.insert("sk".to_string(), AttributeValue::S("TUPLE".to_string()));
-        item.insert("tuple_id".to_string(), AttributeValue::S(tuple_id.to_string()));
+        item.insert(
+            "tuple_id".to_string(),
+            AttributeValue::S(tuple_id.to_string()),
+        );
         item.insert("tuple_json".to_string(), AttributeValue::S(tuple_json));
         item.insert("fields_json".to_string(), AttributeValue::S(fields_json));
-        item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
+        item.insert(
+            "created_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
 
         // Handle lease
         if let Some(lease) = &tuple.lease() {
             let expires_at_secs = lease.expires_at().timestamp();
-            item.insert("expires_at".to_string(), AttributeValue::N(expires_at_secs.to_string()));
-            item.insert("renewable".to_string(), AttributeValue::N(if lease.is_renewable() { "1" } else { "0" }.to_string()));
+            item.insert(
+                "expires_at".to_string(),
+                AttributeValue::N(expires_at_secs.to_string()),
+            );
+            item.insert(
+                "renewable".to_string(),
+                AttributeValue::N(if lease.is_renewable() { "1" } else { "0" }.to_string()),
+            );
 
             // TTL is expires_at + 1 day (DynamoDB TTL requires future timestamp)
             let ttl_secs = expires_at_secs + 86400;
@@ -358,17 +399,15 @@ impl DynamoDBStorage {
             .and_then(|v| v.as_s().ok())
             .ok_or_else(|| TupleSpaceError::BackendError("Missing tuple_json".to_string()))?;
 
-        let tuple: Tuple = serde_json::from_str(tuple_json)
-            .map_err(|e| TupleSpaceError::SerializationError(format!("Failed to deserialize tuple: {}", e)))?;
+        let tuple: Tuple = serde_json::from_str(tuple_json).map_err(|e| {
+            TupleSpaceError::SerializationError(format!("Failed to deserialize tuple: {}", e))
+        })?;
 
         Ok(tuple)
     }
 
     /// Find tuples matching pattern.
-    async fn find_matching(
-        &self,
-        pattern: &Pattern,
-    ) -> Result<Vec<Tuple>, TupleSpaceError> {
+    async fn find_matching(&self, pattern: &Pattern) -> Result<Vec<Tuple>, TupleSpaceError> {
         let mut tuples = Vec::new();
         let mut last_evaluated_key = None;
 
@@ -384,28 +423,32 @@ impl DynamoDBStorage {
             match scan.send().await {
                 Ok(result) => {
                     for item in result.items() {
-                            // Check if expired
-                            if let Some(expires_at_attr) = item.get("expires_at") {
-                                if let Some(expires_at_secs) = expires_at_attr.as_n().ok().and_then(|s| s.parse::<i64>().ok()) {
-                                    let now_secs = Utc::now().timestamp();
-                                    if expires_at_secs <= now_secs {
-                                        continue; // Skip expired tuples
-                                    }
-                                }
-                            }
-
-                            // Deserialize and match
-                            match Self::item_to_tuple(&item) {
-                                Ok(tuple) => {
-                                    if tuple.matches(pattern) && !tuple.is_expired() {
-                                        tuples.push(tuple);
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!(error = %e, "Failed to parse tuple, skipping");
+                        // Check if expired
+                        if let Some(expires_at_attr) = item.get("expires_at") {
+                            if let Some(expires_at_secs) = expires_at_attr
+                                .as_n()
+                                .ok()
+                                .and_then(|s| s.parse::<i64>().ok())
+                            {
+                                let now_secs = Utc::now().timestamp();
+                                if expires_at_secs <= now_secs {
+                                    continue; // Skip expired tuples
                                 }
                             }
                         }
+
+                        // Deserialize and match
+                        match Self::item_to_tuple(&item) {
+                            Ok(tuple) => {
+                                if tuple.matches(pattern) && !tuple.is_expired() {
+                                    tuples.push(tuple);
+                                }
+                            }
+                            Err(e) => {
+                                warn!(error = %e, "Failed to parse tuple, skipping");
+                            }
+                        }
+                    }
 
                     last_evaluated_key = result.last_evaluated_key().cloned();
                     if last_evaluated_key.is_none() {
@@ -413,7 +456,10 @@ impl DynamoDBStorage {
                     }
                 }
                 Err(e) => {
-                    return Err(TupleSpaceError::BackendError(format!("DynamoDB scan failed: {}", e)));
+                    return Err(TupleSpaceError::BackendError(format!(
+                        "DynamoDB scan failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -479,7 +525,10 @@ impl TupleSpaceStorage for DynamoDBStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(TupleSpaceError::BackendError(format!("DynamoDB put_item failed: {}", e)))
+                Err(TupleSpaceError::BackendError(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -504,12 +553,14 @@ impl TupleSpaceStorage for DynamoDBStorage {
                 let put_request = aws_sdk_dynamodb::types::PutRequest::builder()
                     .set_item(Some(item))
                     .build()
-                    .map_err(|e| TupleSpaceError::BackendError(format!("Failed to build put request: {}", e)))?;
-                
+                    .map_err(|e| {
+                        TupleSpaceError::BackendError(format!("Failed to build put request: {}", e))
+                    })?;
+
                 let write_request = aws_sdk_dynamodb::types::WriteRequest::builder()
                     .put_request(put_request)
                     .build();
-                
+
                 write_requests.push(write_request);
 
                 tuple_ids.push(tuple_id);
@@ -668,8 +719,16 @@ impl TupleSpaceStorage for DynamoDBStorage {
                                                             .client
                                                             .delete_item()
                                                             .table_name(&self.table_name)
-                                                            .key("pk", AttributeValue::S(pk.clone()))
-                                                            .key("sk", AttributeValue::S("TUPLE".to_string()))
+                                                            .key(
+                                                                "pk",
+                                                                AttributeValue::S(pk.clone()),
+                                                            )
+                                                            .key(
+                                                                "sk",
+                                                                AttributeValue::S(
+                                                                    "TUPLE".to_string(),
+                                                                ),
+                                                            )
                                                             .send()
                                                             .await;
                                                         found = true;
@@ -756,7 +815,11 @@ impl TupleSpaceStorage for DynamoDBStorage {
                 if let Some(item) = result.item().cloned() {
                     // Check if renewable
                     if let Some(renewable_attr) = item.get("renewable") {
-                        if let Some(renewable_str) = renewable_attr.as_n().ok().and_then(|s| s.parse::<i64>().ok()) {
+                        if let Some(renewable_str) = renewable_attr
+                            .as_n()
+                            .ok()
+                            .and_then(|s| s.parse::<i64>().ok())
+                        {
                             if renewable_str == 0 {
                                 return Err(TupleSpaceError::LeaseError(
                                     "Tuple lease is not renewable".to_string(),
@@ -767,8 +830,10 @@ impl TupleSpaceStorage for DynamoDBStorage {
 
                     // Calculate new expiry
                     let ttl_duration = new_ttl.unwrap_or(Duration::from_secs(60));
-                    let new_expires_at = Utc::now() + chrono::Duration::from_std(ttl_duration)
-                        .map_err(|e| TupleSpaceError::BackendError(format!("Invalid duration: {}", e)))?;
+                    let new_expires_at = Utc::now()
+                        + chrono::Duration::from_std(ttl_duration).map_err(|e| {
+                            TupleSpaceError::BackendError(format!("Invalid duration: {}", e))
+                        })?;
 
                     // Update expires_at and ttl
                     let expires_at_secs = new_expires_at.timestamp();
@@ -782,8 +847,14 @@ impl TupleSpaceStorage for DynamoDBStorage {
                         .key("sk", AttributeValue::S("TUPLE".to_string()))
                         .update_expression("SET expires_at = :expires_at, #ttl = :ttl")
                         .expression_attribute_names("#ttl", "ttl")
-                        .expression_attribute_values(":expires_at", AttributeValue::N(expires_at_secs.to_string()))
-                        .expression_attribute_values(":ttl", AttributeValue::N(ttl_secs.to_string()))
+                        .expression_attribute_values(
+                            ":expires_at",
+                            AttributeValue::N(expires_at_secs.to_string()),
+                        )
+                        .expression_attribute_values(
+                            ":ttl",
+                            AttributeValue::N(ttl_secs.to_string()),
+                        )
                         .send()
                         .await
                     {
@@ -804,8 +875,14 @@ impl TupleSpaceStorage for DynamoDBStorage {
                         }
                         Err(e) => {
                             let error_str = e.to_string();
-                            let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                            let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_str.clone());
+                            let error_code = e
+                                .code()
+                                .map(|c| c.to_string())
+                                .unwrap_or_else(|| "unknown".to_string());
+                            let error_message = e
+                                .message()
+                                .map(|m| m.to_string())
+                                .unwrap_or_else(|| error_str.clone());
                             error!(
                                 error = %e,
                                 tuple_id = %tuple_id,
@@ -825,7 +902,10 @@ impl TupleSpaceStorage for DynamoDBStorage {
             }
             Err(e) => {
                 error!(error = %e, tuple_id = %tuple_id, "Failed to get tuple for lease renewal");
-                Err(TupleSpaceError::BackendError(format!("DynamoDB get_item failed: {}", e)))
+                Err(TupleSpaceError::BackendError(format!(
+                    "DynamoDB get_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -847,7 +927,10 @@ impl TupleSpaceStorage for DynamoDBStorage {
             let result = match scan.send().await {
                 Ok(r) => r,
                 Err(e) => {
-                    return Err(TupleSpaceError::BackendError(format!("DynamoDB scan failed: {}", e)));
+                    return Err(TupleSpaceError::BackendError(format!(
+                        "DynamoDB scan failed: {}",
+                        e
+                    )));
                 }
             };
 
@@ -863,12 +946,17 @@ impl TupleSpaceStorage for DynamoDBStorage {
                                 .key("pk", AttributeValue::S(pk.clone()))
                                 .key("sk", AttributeValue::S("TUPLE".to_string()))
                                 .build()
-                                .map_err(|e| TupleSpaceError::BackendError(format!("Failed to build delete request: {}", e)))?;
-                            
+                                .map_err(|e| {
+                                    TupleSpaceError::BackendError(format!(
+                                        "Failed to build delete request: {}",
+                                        e
+                                    ))
+                                })?;
+
                             let write_request = aws_sdk_dynamodb::types::WriteRequest::builder()
                                 .delete_request(delete_request)
                                 .build();
-                            
+
                             write_requests.push(write_request);
                         }
                     }
@@ -925,4 +1013,3 @@ impl TupleSpaceStorage for DynamoDBStorage {
         Ok(stats)
     }
 }
-

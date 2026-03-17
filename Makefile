@@ -1,10 +1,19 @@
-.PHONY: all build build-examples build-wasm run-examples test test-examples test-wasm clean clean-examples clean-all proto proto-build proto-buf fmt lint doc install-tools coverage coverage-report test-coverage check-coverage coverage-crate bench help
+SHELL := /bin/bash
+
+.PHONY: all build build-fast build-examples build-wasm run-examples test test-fast test-examples test-wasm clean clean-examples clean-all proto proto-build proto-buf fmt fmt-rust fmt-proto fmt-paths fmt-check lint doc install-tools coverage coverage-report test-coverage check-coverage coverage-crate bench help check
 
 # Variables
 CARGO = cargo
 BUF = buf
 RUSTFMT = rustfmt
 CLIPPY = clippy
+WORKSPACE_ROOT := $(CURDIR)
+WORKSPACE_TARGET_DIR := $(WORKSPACE_ROOT)/target
+NEXTTEST_PROFILE ?= local
+CARGO_BUILD_FEATURES ?= --all-features
+CARGO_TEST_FEATURES ?= --all-features
+CARGO_BUILD_JOBS ?= 0
+CARGO_TEST_JOBS ?= $(CARGO_BUILD_JOBS)
 
 # Default target
 all: proto build build-examples test test-examples
@@ -19,6 +28,7 @@ help:
 	@echo "  make proto-buf        - Generate proto using buf (RECOMMENDED - handles deps)"
 	@echo "  make proto-build      - Generate proto using tonic-build (no external deps)"
 	@echo "  make build            - Build all crates (including wasm-runtime, firecracker, cli, dashboard)"
+	@echo "  make build-fast       - Fast Rust compile check for the workspace"
 	@echo "  make build-examples   - Build all examples"
 	@echo "  make build-wasm       - Build all WASM actors"
 	@echo "  make run-examples     - Run all examples (workspace + standalone)"
@@ -29,6 +39,7 @@ help:
 	@echo ""
 	@echo "🧪 Testing:"
 	@echo "  make test             - Run all tests (unit + integration)"
+	@echo "  make test-fast        - Fast Rust test loop (nextest when available)"
 	@echo "  make test-filter FILTER='pattern' - Run tests matching pattern"
 	@echo "  make test-package PACKAGE='name' - Run tests for specific package"
 	@echo "  make test-examples    - Run all example tests"
@@ -44,8 +55,12 @@ help:
 	@echo ""
 	@echo "🎯 Quality Checks:"
 	@echo "  make fmt              - Format all code"
+	@echo "  make fmt-rust         - Format Rust code only"
+	@echo "  make fmt-proto        - Format proto files only"
+	@echo "  make fmt-paths PATHS='a.rs b.proto' - Format only selected files"
 	@echo "  make fmt-check        - Check formatting without changes"
 	@echo "  make lint             - Run linters (clippy and buf)"
+	@echo "  make check            - Fast compile verification for the workspace"
 	@echo "  make audit            - Run security audit"
 	@echo "  make pre-commit       - Run pre-commit checks"
 	@echo "  make validate         - Full validation before push"
@@ -113,6 +128,8 @@ install-tools:
 	@cargo install cargo-watch || true
 	@cargo install cargo-edit || true
 	@cargo install cargo-audit || true
+	@cargo install cargo-nextest || true
+	@cargo install sccache || true
 	@echo "Installing buf..."
 	@if ! command -v buf >/dev/null 2>&1; then \
 		curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.28.1/buf-$$(uname -s)-$$(uname -m)" -o /tmp/buf && \
@@ -183,7 +200,7 @@ proto: proto-buf
 # Build all crates (including wasm-runtime, firecracker, cli, dashboard)
 build:
 	@echo "Building all crates..."
-	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-0}; \
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
 	fi; \
@@ -191,8 +208,11 @@ build:
 	if [ "$$VERBOSE" = "0" ]; then \
 		MESSAGE_FORMAT=short; \
 	fi; \
+	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
+	export CARGO_INCREMENTAL=1; \
+	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
-	$(CARGO) build --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
+	$(CARGO) build $(CARGO_BUILD_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
 	@echo "Building SDKs..."
 	@if [ -d "sdks/typescript" ] && [ -f "sdks/typescript/package.json" ]; then \
 		echo "  Building TypeScript SDK..."; \
@@ -208,29 +228,26 @@ build:
 	fi
 	@if [ -d "sdks/python" ] && [ -f "sdks/python/pyproject.toml" ]; then \
 		echo "  Building Python SDK..."; \
-		PYTHON_CMD=""; \
-		if command -v pip3 >/dev/null 2>&1; then \
-			PYTHON_CMD="pip3"; \
-		elif command -v pip >/dev/null 2>&1; then \
-			PYTHON_CMD="pip"; \
+		PYTHON_SDK_BUILD_CMD=""; \
+		if [ -f "$$HOME/venv/bin/activate" ]; then \
+			PYTHON_SDK_BUILD_CMD=". $$HOME/venv/bin/activate && python -m pip install -e . --quiet --no-build-isolation"; \
 		elif command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then \
-			PYTHON_CMD="python3 -m pip"; \
+			PYTHON_SDK_BUILD_CMD="python3 -m pip install -e . --quiet --no-build-isolation"; \
 		fi; \
-		if [ -n "$$PYTHON_CMD" ]; then \
-			if (cd sdks/python && $$PYTHON_CMD install -e . --quiet --break-system-packages >/dev/null 2>&1) || \
-			   (cd sdks/python && $$PYTHON_CMD install -e . --quiet >/dev/null 2>&1); then \
+		if [ -n "$$PYTHON_SDK_BUILD_CMD" ]; then \
+			if (cd sdks/python && sh -c "$$PYTHON_SDK_BUILD_CMD" >/dev/null 2>&1); then \
 				echo "  ✓ Python SDK built"; \
 			else \
-				echo "  ⚠️  Python SDK build failed (non-critical - may need venv)"; \
+				echo "  ⚠️  Python SDK build failed (non-critical - setuptools missing in current Python environment)"; \
 			fi; \
 		else \
-			echo "  ⚠️  pip not found, skipping Python SDK"; \
+			echo "  ⚠️  Python not found, skipping Python SDK"; \
 		fi; \
 	fi
 	@if [ -d "sdks/go" ] && [ -f "sdks/go/go.mod" ]; then \
 		echo "  Building Go SDK..."; \
 		if command -v go >/dev/null 2>&1; then \
-			if (cd sdks/go && go build ./... >/dev/null 2>&1); then \
+			if (cd sdks/go && GOCACHE="$(CURDIR)/target/go-build-cache" go build ./... >/dev/null 2>&1); then \
 				echo "  ✓ Go SDK built"; \
 			else \
 				echo "  ⚠️  Go SDK build failed (non-critical)"; \
@@ -241,13 +258,33 @@ build:
 	fi
 	@echo "Build complete!"
 
+build-fast:
+	@echo "Running fast workspace compile check..."
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
+	fi; \
+	MESSAGE_FORMAT=$${VERBOSE:-human}; \
+	if [ "$$VERBOSE" = "0" ]; then \
+		MESSAGE_FORMAT=short; \
+	fi; \
+	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
+	export CARGO_INCREMENTAL=1; \
+	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
+	$(CARGO) check $(CARGO_BUILD_FEATURES) --workspace --lib --bins --tests --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
+
+check: build-fast
+
 # Build release version
 release:
 	@echo "Building release version..."
-	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
 	fi; \
+	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
+	export CARGO_INCREMENTAL=1; \
+	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
 	$(CARGO) build --release --all-features --workspace --jobs $$CARGO_JOBS --message-format=short
 	@echo "Release build complete!"
@@ -257,10 +294,13 @@ release:
 build-examples:
 	@echo "Building examples (using shared target directory)..."
 	@echo "Target directory: $$(pwd)/target (shared across all examples)"
-	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-4}; \
+	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
 	fi; \
+	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
+	export CARGO_INCREMENTAL=1; \
+	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
 	echo "Pre-building workspace dependencies for faster example builds..."; \
 	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
@@ -427,7 +467,7 @@ test:
 		find data -type f \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" \) -delete 2>/dev/null || true; \
 	fi; \
 	echo "SQLite database files cleaned up." | tee -a test-out; \
-	CARGO_JOBS=$${CARGO_BUILD_JOBS:-0}; \
+	CARGO_JOBS=$${CARGO_TEST_JOBS:-$(CARGO_TEST_JOBS)}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
 	fi; \
@@ -435,6 +475,8 @@ test:
 	if [ "$$VERBOSE" = "0" ]; then \
 		MESSAGE_FORMAT=short; \
 	fi; \
+	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
+	export CARGO_INCREMENTAL=1; \
 	echo "Configuration: Using $$CARGO_JOBS CPU cores for building (override with CARGO_BUILD_JOBS env var)" | tee -a test-out; \
 	CERT_FILE=""; \
 	if [ -f "$$(pwd)/archived_docs/cert.pem" ]; then \
@@ -452,16 +494,16 @@ test:
 		export RUSTC_WRAPPER=sccache; \
 	fi; \
 	echo "Building workspace first for faster test execution (incremental build enabled)..." | tee -a test-out; \
-	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
+	$(CARGO) build --lib $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
 	echo "Building node_runner binary (required by plexspaces-services integration_tests)..." | tee -a test-out; \
-	$(CARGO) build --bin node_runner --all-features -p plexspaces-services --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
+	$(CARGO) build --bin node_runner $(CARGO_TEST_FEATURES) -p plexspaces-services --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
 	echo "" | tee -a test-out; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
 		echo "Using cargo-nextest for faster test execution (single run)..." | tee -a test-out; \
 		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
 		echo "Note: tuplespace tests run with single thread (configured in nextest.toml)" | tee -a test-out; \
 		echo "Running all tests including those marked #[ignore] (--run-ignored all)" | tee -a test-out; \
-		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --run-ignored all 2>&1 | tee -a test-out || exit 1; \
+		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --run-ignored all 2>&1 | tee -a test-out || exit 1; \
 	else \
 		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..." | tee -a test-out; \
 		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
@@ -474,18 +516,37 @@ test:
 			TIMEOUT_CMD="gtimeout 900"; \
 		fi; \
 		if [ -n "$$TIMEOUT_CMD" ]; then \
-			$$TIMEOUT_CMD $(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
-			$$TIMEOUT_CMD $(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			$$TIMEOUT_CMD $(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
+			$$TIMEOUT_CMD $(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
 				--exclude plexspaces-tuplespace -- --include-ignored 2>&1 | tee -a test-out || exit 1; \
 		else \
 			echo "Warning: timeout command not found, running without timeout (install coreutils for timeout: brew install coreutils)" | tee -a test-out; \
-			$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
-			$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			$(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
+			$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
 				--exclude plexspaces-tuplespace -- --include-ignored 2>&1 | tee -a test-out || exit 1; \
 		fi; \
 	fi; \
 	echo "" | tee -a test-out; \
 	echo "All tests passed!" | tee -a test-out
+
+test-fast:
+	@echo "Running fast Rust test loop..."
+	@CARGO_JOBS=$${CARGO_TEST_JOBS:-$(CARGO_TEST_JOBS)}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
+	fi; \
+	MESSAGE_FORMAT=$${VERBOSE:-human}; \
+	if [ "$$VERBOSE" = "0" ]; then \
+		MESSAGE_FORMAT=short; \
+	fi; \
+	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
+	export CARGO_INCREMENTAL=1; \
+	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
+	if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
+	else \
+		$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
+	fi
 
 # Run tests matching a filter pattern
 # Usage: make test-filter FILTER="test_name_pattern"
@@ -754,15 +815,48 @@ test-quick:
 # Run benchmarks
 bench:
 	@echo "Running benchmarks..."
-	@$(CARGO) bench --workspace
+	@export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
+	export CARGO_INCREMENTAL=1; \
+	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
+	$(CARGO) bench --workspace
 
 # Format all code
-fmt:
+fmt: fmt-rust fmt-proto
+	@echo "Formatting complete!"
+
+fmt-rust:
 	@echo "Formatting Rust code..."
 	@$(CARGO) fmt --all
+
+fmt-proto:
 	@echo "Formatting proto files..."
 	@$(BUF) format -w
-	@echo "Formatting complete!"
+
+fmt-paths:
+	@if [ -z "$(PATHS)" ]; then \
+		echo "ERROR: PATHS is required. Example: make fmt-paths PATHS='crates/foo/src/lib.rs proto/bar.proto'"; \
+		exit 1; \
+	fi
+	@RUST_PATHS=""; \
+	PROTO_PATHS=""; \
+	for path in $(PATHS); do \
+		case "$$path" in \
+			*.rs) RUST_PATHS="$$RUST_PATHS $$path" ;; \
+			*.proto) PROTO_PATHS="$$PROTO_PATHS $$path" ;; \
+		esac; \
+	done; \
+	if [ -n "$$RUST_PATHS" ]; then \
+		echo "Formatting Rust paths:$$RUST_PATHS"; \
+		$(RUSTFMT) $$RUST_PATHS; \
+	fi; \
+	if [ -n "$$PROTO_PATHS" ]; then \
+		echo "Formatting proto paths:$$PROTO_PATHS"; \
+		$(BUF) format -w $$PROTO_PATHS; \
+	fi; \
+	if [ -z "$$RUST_PATHS$$PROTO_PATHS" ]; then \
+		echo "ERROR: PATHS must include at least one .rs or .proto file"; \
+		exit 1; \
+	fi
 
 # Check formatting without changing files
 fmt-check:
@@ -1226,4 +1320,3 @@ restore:
 		echo "TupleSpace database restored"; \
 	fi
 	@echo "Restore complete!"
-

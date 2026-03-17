@@ -3,9 +3,9 @@
 //
 // Additional tests for Application trait to improve coverage
 
-use plexspaces_application::{Application, ApplicationNode, ApplicationError};
-use plexspaces_proto::v1::application::{ApplicationSpec, HealthStatus, ShutdownStrategy};
 use async_trait::async_trait;
+use plexspaces_application::{Application, ApplicationError, ApplicationNode};
+use plexspaces_proto::v1::application::{ApplicationSpec, HealthStatus, ShutdownStrategy};
 use std::sync::Arc;
 
 struct MockNode {
@@ -24,7 +24,6 @@ impl ApplicationNode for MockNode {
     fn listen_addr(&self) -> &str {
         &self.addr
     }
-
 }
 
 struct TestApplication {
@@ -131,4 +130,3 @@ async fn test_application_health_status() {
     let health = app.health_check().await;
     assert_eq!(health, HealthStatus::HealthStatusHealthy);
 }
-

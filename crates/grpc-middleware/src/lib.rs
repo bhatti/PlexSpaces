@@ -114,15 +114,17 @@ pub mod security_validation;
 pub mod tracing_interceptor;
 
 pub use auth::AuthInterceptor;
-pub use jwt::{JwtClaims, validate_bearer_token, validate_jwt_token, resolve_tenant_id, AUTH_REQUIRED_HINT};
-pub use cert_gen::{CertificateGenerator, CertificatePaths, CertGenError};
+pub use cert_gen::{CertGenError, CertificateGenerator, CertificatePaths};
 pub use chain::{Interceptor, InterceptorChain, InterceptorError};
 pub use compression::CompressionInterceptor;
+pub use jwt::{
+    resolve_tenant_id, validate_bearer_token, validate_jwt_token, JwtClaims, AUTH_REQUIRED_HINT,
+};
 pub use metrics::MetricsInterceptor;
-pub use observability::{ObservabilityManager, ObservabilityError, LogLevel, metrics_handler};
+pub use observability::{metrics_handler, LogLevel, ObservabilityError, ObservabilityManager};
 pub use rate_limit::RateLimitInterceptor;
 pub use retry::RetryInterceptor;
-pub use security_validation::{SecurityValidator, SecurityValidationError};
+pub use security_validation::{SecurityValidationError, SecurityValidator};
 pub use tracing_interceptor::TracingInterceptor;
 
 /// Result type for interceptor operations

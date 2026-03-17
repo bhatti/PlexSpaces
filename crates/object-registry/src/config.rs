@@ -147,7 +147,9 @@ impl ObjectRegistryConfig {
             }
             "postgres" | "postgresql" => {
                 let connection_string = std::env::var("PLEXSPACES_OBJECT_REGISTRY_POSTGRES_URL")
-                    .expect("PLEXSPACES_OBJECT_REGISTRY_POSTGRES_URL must be set for PostgreSQL backend");
+                    .expect(
+                    "PLEXSPACES_OBJECT_REGISTRY_POSTGRES_URL must be set for PostgreSQL backend",
+                );
                 ObjectRegistryBackendType::PostgreSQL { connection_string }
             }
             "dynamodb" | "ddb" => {
@@ -232,14 +234,18 @@ pub async fn create_repository_from_config(
             #[cfg(feature = "sql-backend")]
             {
                 use crate::repository::SqliteObjectRegistryRepository;
-                tracing::info!(backend = "SQLite :memory:", "Object Registry using in-memory SQLite backend");
+                tracing::info!(
+                    backend = "SQLite :memory:",
+                    "Object Registry using in-memory SQLite backend"
+                );
                 let repo = SqliteObjectRegistryRepository::new(":memory:").await?;
                 Ok(Arc::new(repo))
             }
             #[cfg(not(feature = "sql-backend"))]
             {
                 Err(RepositoryError::Storage(
-                    "InMemory backend requires 'sql-backend' feature (uses SQLite :memory:).".to_string(),
+                    "InMemory backend requires 'sql-backend' feature (uses SQLite :memory:)."
+                        .to_string(),
                 ))
             }
         }
@@ -262,7 +268,10 @@ pub async fn create_repository_from_config(
             #[cfg(feature = "sql-backend")]
             {
                 use crate::repository::PostgresObjectRegistryRepository;
-                tracing::info!(backend = "PostgreSQL", "Object Registry using PostgreSQL backend");
+                tracing::info!(
+                    backend = "PostgreSQL",
+                    "Object Registry using PostgreSQL backend"
+                );
                 let repo = PostgresObjectRegistryRepository::new(connection_string).await?;
                 Ok(Arc::new(repo))
             }
@@ -320,7 +329,10 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ObjectRegistryConfig::default();
-        assert!(matches!(config.backend, ObjectRegistryBackendType::InMemory));
+        assert!(matches!(
+            config.backend,
+            ObjectRegistryBackendType::InMemory
+        ));
     }
 
     #[test]

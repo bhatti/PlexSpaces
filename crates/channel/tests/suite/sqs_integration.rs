@@ -35,8 +35,7 @@
 mod tests {
     use plexspaces_channel::{Channel, SQSChannel};
     use plexspaces_proto::channel::v1::{
-        ChannelProvider, ChannelConfig, DeliveryGuarantee,
-        OrderingGuarantee,
+        ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
     };
     use plexspaces_proto::common::v1::Message;
     use std::sync::Arc;
@@ -53,8 +52,8 @@ mod tests {
         #[cfg(not(feature = "test-helpers"))]
         {
             // Fallback: check LocalStack health endpoint directly
-            use tokio::time::timeout;
             use std::time::Duration;
+            use tokio::time::timeout;
             let client = match reqwest::Client::builder()
                 .timeout(Duration::from_millis(500))
                 .build()
@@ -62,7 +61,14 @@ mod tests {
                 Ok(c) => c,
                 Err(_) => return false,
             };
-            match timeout(Duration::from_millis(500), client.get("http://localhost:4566/_localstack/health").send()).await {
+            match timeout(
+                Duration::from_millis(500),
+                client
+                    .get("http://localhost:4566/_localstack/health")
+                    .send(),
+            )
+            .await
+            {
                 Ok(Ok(resp)) => resp.status().is_success(),
                 _ => false,
             }
@@ -108,7 +114,9 @@ mod tests {
     async fn test_sqs_send_receive() {
         if !check_sqs_available().await {
             eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
-            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            eprintln!(
+                "To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack"
+            );
             return;
         }
         let channel = create_channel("test-send-receive").await;
@@ -137,7 +145,9 @@ mod tests {
     async fn test_sqs_send_multiple_receive() {
         if !check_sqs_available().await {
             eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
-            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            eprintln!(
+                "To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack"
+            );
             return;
         }
         let channel = create_channel("test-multiple").await;
@@ -167,7 +177,9 @@ mod tests {
     async fn test_sqs_ack() {
         if !check_sqs_available().await {
             eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
-            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            eprintln!(
+                "To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack"
+            );
             return;
         }
         let channel = create_channel("test-ack").await;
@@ -197,7 +209,9 @@ mod tests {
     async fn test_sqs_nack_requeue() {
         if !check_sqs_available().await {
             eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
-            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            eprintln!(
+                "To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack"
+            );
             return;
         }
         let channel = create_channel("test-nack-requeue").await;
@@ -232,7 +246,9 @@ mod tests {
     async fn test_sqs_nack_dlq() {
         if !check_sqs_available().await {
             eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
-            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            eprintln!(
+                "To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack"
+            );
             return;
         }
         let channel = create_channel("test-nack-dlq").await;
@@ -266,7 +282,9 @@ mod tests {
     async fn test_sqs_visibility_timeout() {
         if !check_sqs_available().await {
             eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
-            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            eprintln!(
+                "To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack"
+            );
             return;
         }
         let channel = create_channel("test-visibility").await;
@@ -302,7 +320,9 @@ mod tests {
     async fn test_sqs_try_receive() {
         if !check_sqs_available().await {
             eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
-            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            eprintln!(
+                "To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack"
+            );
             return;
         }
         let channel = create_channel("test-try-receive").await;
@@ -332,7 +352,9 @@ mod tests {
     async fn test_sqs_concurrent_send_receive() {
         if !check_sqs_available().await {
             eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
-            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            eprintln!(
+                "To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack"
+            );
             return;
         }
         let channel = Arc::new(create_channel("test-concurrent").await);
@@ -377,7 +399,9 @@ mod tests {
     async fn test_sqs_get_stats() {
         if !check_sqs_available().await {
             eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
-            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            eprintln!(
+                "To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack"
+            );
             return;
         }
         let channel = create_channel("test-stats").await;
@@ -402,7 +426,9 @@ mod tests {
     async fn test_sqs_close() {
         if !check_sqs_available().await {
             eprintln!("⚠️  WARNING: SQS simulator (LocalStack) is not running. Skipping SQS test.");
-            eprintln!("To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack");
+            eprintln!(
+                "To run SQS tests, start LocalStack: docker run -p 4566:4566 localstack/localstack"
+            );
             return;
         }
         let channel = create_channel("test-close").await;
@@ -436,4 +462,3 @@ mod tests {
         channel.ack(&received[0].id).await.unwrap();
     }
 }
-

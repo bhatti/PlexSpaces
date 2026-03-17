@@ -57,7 +57,7 @@ All gRPC service implementations are consolidated here:
 - **SystemService**: System information and health checks (`crates/services/src/system_service/`)
 - **MetricsService**: Metrics collection and export (`crates/services/src/metrics_service/`)
 - **FirecrackerService**: Firecracker VM management (`crates/services/src/firecracker_service/`) - Optional feature
-- **NodeService**: Node management, metrics, and capacity (`crates/services/src/node_service/`)
+- **NodeService**: Node management, metrics, and capacity (`crates/services/src/node_service/`). Implements `NodeConnectivity` for seed-node connection (cluster_seed_nodes at startup, ApplicationSpec.seed_nodes on deploy); see [Node connectivity and seed nodes](../../docs/services.md#node-connectivity-and-seed-nodes).
 - **NodeRegistry**: TTL-cached node discovery with gossip (`crates/services/src/node_registry/`)
 - **DashboardService**: Aggregated cluster dashboard (`crates/services/src/dashboard_service/`)
 

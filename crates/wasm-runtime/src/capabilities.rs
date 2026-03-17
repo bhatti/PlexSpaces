@@ -23,8 +23,8 @@ pub mod profiles {
             filesystem_root: String::new(),
             allow_network: false,
             allow_env: false,
-            allow_random: true, // Safe to allow
-            allow_clocks: true, // Safe to allow
+            allow_random: true,        // Safe to allow
+            allow_clocks: true,        // Safe to allow
             allow_tuplespace: true,    // Most actors need coordination
             allow_spawn_actors: false, // Only supervisors need this
             allow_send_messages: true, // Most actors send messages

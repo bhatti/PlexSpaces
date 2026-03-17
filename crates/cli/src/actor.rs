@@ -25,11 +25,11 @@
 //! - `list` - List deployed actors
 
 use anyhow::{Context, Result};
-use plexspaces_proto::wasm::v1::{
-    wasm_runtime_service_client::WasmRuntimeServiceClient,
-    DeployWasmModuleRequest, InstantiateActorRequest, WasmModule,
-};
 use plexspaces_proto::v1::actor::actor_service_client::ActorServiceClient;
+use plexspaces_proto::wasm::v1::{
+    wasm_runtime_service_client::WasmRuntimeServiceClient, DeployWasmModuleRequest,
+    InstantiateActorRequest, WasmModule,
+};
 use std::fs;
 use tonic::transport::Channel;
 
@@ -55,7 +55,12 @@ pub async fn deploy(
     let mut wasm_client = WasmRuntimeServiceClient::new(channel.clone());
 
     // For WASM actors, deploy module first
-    let module_ref = if actor_type == "wasm" || actor_type == "rust" || actor_type == "js" || actor_type == "go" || actor_type == "python" {
+    let module_ref = if actor_type == "wasm"
+        || actor_type == "rust"
+        || actor_type == "js"
+        || actor_type == "go"
+        || actor_type == "python"
+    {
         let wasm_path = wasm_file.context("WASM file required for WASM actors")?;
         let wasm_bytes = fs::read(wasm_path)
             .with_context(|| format!("Failed to read WASM file: {}", wasm_path))?;
@@ -144,7 +149,7 @@ pub async fn invoke(node_addr: &str, actor_id: &str, payload: &str) -> Result<()
     msg.receiver_id = actor_id.to_string();
     msg.message_type = "application/json".to_string();
     msg.payload = payload.as_bytes().to_vec();
-    
+
     let request = SendMessageRequest {
         message: Some(msg),
         wait_for_response: false,
@@ -168,4 +173,3 @@ pub async fn list(node_addr: &str) -> Result<()> {
     println!("   (Not yet implemented)");
     Ok(())
 }
-

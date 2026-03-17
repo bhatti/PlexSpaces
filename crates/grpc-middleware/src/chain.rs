@@ -221,7 +221,9 @@ impl InterceptorChain {
         // Add other interceptors based on config
         for spec in &config.middleware {
             // Skip if disabled (except metrics which is always enabled)
-            if !spec.enabled && spec.middleware_type != (MiddlewareType::MiddlewareTypeMetrics as i32) {
+            if !spec.enabled
+                && spec.middleware_type != (MiddlewareType::MiddlewareTypeMetrics as i32)
+            {
                 continue;
             }
 

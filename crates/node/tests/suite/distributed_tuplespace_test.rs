@@ -35,8 +35,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_core::TupleSpaceProvider;
+use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_proto::{tuplespace::v1::*, TupleSpaceServiceClient};
 use plexspaces_tuplespace::{
     Pattern, PatternField, Tuple as InternalTuple, TupleField as InternalTupleField,
@@ -52,7 +52,7 @@ async fn create_test_node(node_id: &str, port: u16) -> Arc<Node> {
         NodeBuilder::new(node_id)
             .with_listen_addr(&format!("127.0.0.1:{}", port))
             .build()
-            .await
+            .await,
     )
 }
 
@@ -107,7 +107,10 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
 
     // Register node2 in ObjectRegistry (node discovery now goes through ObjectRegistry/NodeRegistry)
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    let ctx = node1.service_locator().request_context_for_system_operations().await;
+    let ctx = node1
+        .service_locator()
+        .request_context_for_system_operations()
+        .await;
     let registration = ObjectRegistration {
         object_type: ObjectType::ObjectTypeNode as i32,
         object_id: "node2".to_string(),
@@ -116,7 +119,10 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
         ..Default::default()
     };
     if let Some(object_registry) = node1.service_locator().get_object_registry().await {
-        object_registry.register(&ctx, registration).await.expect("Failed to register node2");
+        object_registry
+            .register(&ctx, registration)
+            .await
+            .expect("Failed to register node2");
     }
 
     // Test 1: Write tuple on node1, read from node2 via gRPC
@@ -126,7 +132,10 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
             InternalTupleField::String("test".to_string()),
             InternalTupleField::Integer(42),
         ]);
-        let tuplespace_provider = node1.service_locator().get_tuplespace_provider().await
+        let tuplespace_provider = node1
+            .service_locator()
+            .get_tuplespace_provider()
+            .await
             .expect("TupleSpaceProvider not available");
         let _: Result<(), _> = tuplespace_provider.write(tuple).await;
 
@@ -187,9 +196,14 @@ async fn test_distributed_tuplespace_write_read_across_nodes() {
             PatternField::Wildcard,
         ]);
 
-        let tuplespace_provider = node2.service_locator().get_tuplespace_provider().await
+        let tuplespace_provider = node2
+            .service_locator()
+            .get_tuplespace_provider()
+            .await
             .expect("TupleSpaceProvider not available");
-        let results: Vec<InternalTuple> = tuplespace_provider.read(&pattern).await
+        let results: Vec<InternalTuple> = tuplespace_provider
+            .read(&pattern)
+            .await
             .expect("Failed to read tuple");
         assert!(!results.is_empty());
     }
@@ -257,7 +271,10 @@ async fn test_distributed_tuplespace_count_and_exists() {
     sleep(Duration::from_millis(500)).await;
 
     // Write multiple tuples to node1
-    let tuplespace_provider = node1.service_locator().get_tuplespace_provider().await
+    let tuplespace_provider = node1
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
         .expect("TupleSpaceProvider not available");
     for i in 0..5 {
         let tuple = InternalTuple::new(vec![
@@ -345,24 +362,30 @@ async fn test_distributed_tuplespace_pattern_matching() {
     sleep(Duration::from_millis(500)).await;
 
     // Write tuples with different patterns
-    let tuplespace_provider = node.service_locator().get_tuplespace_provider().await
+    let tuplespace_provider = node
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
         .expect("TupleSpaceProvider not available");
-    
-    let _: Result<(), _> = tuplespace_provider.write(InternalTuple::new(vec![
+
+    let _: Result<(), _> = tuplespace_provider
+        .write(InternalTuple::new(vec![
             InternalTupleField::String("user".to_string()),
             InternalTupleField::Integer(1),
             InternalTupleField::String("login".to_string()),
         ]))
         .await;
 
-    let _: Result<(), _> = tuplespace_provider.write(InternalTuple::new(vec![
+    let _: Result<(), _> = tuplespace_provider
+        .write(InternalTuple::new(vec![
             InternalTupleField::String("user".to_string()),
             InternalTupleField::Integer(2),
             InternalTupleField::String("logout".to_string()),
         ]))
         .await;
 
-    let _: Result<(), _> = tuplespace_provider.write(InternalTuple::new(vec![
+    let _: Result<(), _> = tuplespace_provider
+        .write(InternalTuple::new(vec![
             InternalTupleField::String("admin".to_string()),
             InternalTupleField::Integer(1),
             InternalTupleField::String("login".to_string()),

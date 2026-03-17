@@ -138,7 +138,7 @@ impl WasmRuntime {
 
         // Enable async support for tokio integration
         wasmtime_config.async_support(true);
-        
+
         // Set async stack size (must be >= max_wasm_stack)
         // Python components need larger stacks
         wasmtime_config.async_stack_size(config.limits.max_stack_bytes as usize);
@@ -162,30 +162,29 @@ impl WasmRuntime {
         // we don't need pooling's memory management benefits, and disabling it removes
         // the hard concurrent limit that was causing "maximum concurrent limit of 10
         // for memory stripe 0 reached" errors.
-        // 
+        //
         // Note: This may have performance implications (no pre-allocated memory pools),
         // but it allows unlimited concurrent instantiations as long as per-actor locks
         // serialize re-instantiations per actor.
-        // 
+        //
         // TODO: Make this configurable via WasmConfig if needed for performance tuning.
         // EXPLICITLY set OnDemand allocation strategy to ensure pooling is disabled.
         // Wasmtime defaults to OnDemand, but we set it explicitly to be certain.
         // OnDemand has no concurrent limit, allowing unlimited concurrent instantiations.
-        wasmtime_config
-            .allocation_strategy(wasmtime::InstanceAllocationStrategy::OnDemand);
-        
+        wasmtime_config.allocation_strategy(wasmtime::InstanceAllocationStrategy::OnDemand);
+
         // Pooling is disabled - the condition below never executes
         if config.enable_pooling && false {
             let mut pooling = wasmtime::PoolingAllocationConfig::default();
             pooling.max_memory_size(config.limits.max_memory_bytes as usize);
             pooling.total_memories(config.limits.max_pooled_instances);
-            
+
             // Note: Wasmtime's PoolingAllocationConfig doesn't expose InstanceLimits directly
             // in the public API. The concurrent limit is managed internally by Wasmtime.
             // We handle concurrency at the application level using per-actor re-instantiation
             // locks (Semaphore) to serialize re-instantiations per actor, preventing concurrent
             // re-instantiations that hit Wasmtime's internal memory stripe concurrent limit.
-            
+
             wasmtime_config
                 .allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(pooling));
         }
@@ -239,7 +238,8 @@ impl WasmRuntime {
             let mut cache = self.module_cache.write().await;
             if let Some(cached) = cache.get(&hash) {
                 let cache_hit_duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_module_load_duration_seconds").record(cache_hit_duration.as_secs_f64());
+                metrics::histogram!("plexspaces_wasm_module_load_duration_seconds")
+                    .record(cache_hit_duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_module_cache_hits_total").increment(1);
                 return Ok((*cached).clone());
             }
@@ -247,7 +247,7 @@ impl WasmRuntime {
 
         // Compile module
         let compile_start = std::time::Instant::now();
-        
+
         // Verify WASM magic number before attempting to parse
         if bytes.len() < 4 {
             metrics::counter!("plexspaces_wasm_module_load_errors_total").increment(1);
@@ -256,7 +256,7 @@ impl WasmRuntime {
                 bytes.len()
             )));
         }
-        
+
         let magic = &bytes[0..4];
         if magic != b"\0asm" {
             metrics::counter!("plexspaces_wasm_module_load_errors_total").increment(1);
@@ -265,7 +265,7 @@ impl WasmRuntime {
                 magic
             )));
         }
-        
+
         // Try to parse as standard module first
         // If that fails and component-model is enabled, try as component
         let module = match Module::new(&self.engine, bytes) {
@@ -291,8 +291,10 @@ impl WasmRuntime {
                 }
 
                 let total_duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_wasm_module_load_duration_seconds").record(total_duration.as_secs_f64());
-                metrics::histogram!("plexspaces_wasm_module_compile_duration_seconds").record(compile_duration.as_secs_f64());
+                metrics::histogram!("plexspaces_wasm_module_load_duration_seconds")
+                    .record(total_duration.as_secs_f64());
+                metrics::histogram!("plexspaces_wasm_module_compile_duration_seconds")
+                    .record(compile_duration.as_secs_f64());
                 metrics::counter!("plexspaces_wasm_modules_loaded_total").increment(1);
 
                 tracing::info!(
@@ -338,10 +340,13 @@ impl WasmRuntime {
                             }
 
                             let total_duration = start_time.elapsed();
-                            metrics::histogram!("plexspaces_wasm_module_load_duration_seconds").record(total_duration.as_secs_f64());
-                            metrics::histogram!("plexspaces_wasm_module_compile_duration_seconds").record(compile_duration.as_secs_f64());
+                            metrics::histogram!("plexspaces_wasm_module_load_duration_seconds")
+                                .record(total_duration.as_secs_f64());
+                            metrics::histogram!("plexspaces_wasm_module_compile_duration_seconds")
+                                .record(compile_duration.as_secs_f64());
                             metrics::counter!("plexspaces_wasm_modules_loaded_total").increment(1);
-                            metrics::counter!("plexspaces_wasm_components_loaded_total").increment(1);
+                            metrics::counter!("plexspaces_wasm_components_loaded_total")
+                                .increment(1);
 
                             if tracing::enabled!(tracing::Level::TRACE) {
                                 tracing::trace!(
@@ -357,7 +362,8 @@ impl WasmRuntime {
                             return Ok(wasm_module);
                         }
                         Err(component_err) => {
-                            metrics::counter!("plexspaces_wasm_module_load_errors_total").increment(1);
+                            metrics::counter!("plexspaces_wasm_module_load_errors_total")
+                                .increment(1);
                             tracing::error!(
                                 module_name = name,
                                 module_version = version,
@@ -417,8 +423,10 @@ impl WasmRuntime {
         }
 
         let total_duration = start_time.elapsed();
-        metrics::histogram!("plexspaces_wasm_module_load_duration_seconds").record(total_duration.as_secs_f64());
-        metrics::histogram!("plexspaces_wasm_module_compile_duration_seconds").record(compile_duration.as_secs_f64());
+        metrics::histogram!("plexspaces_wasm_module_load_duration_seconds")
+            .record(total_duration.as_secs_f64());
+        metrics::histogram!("plexspaces_wasm_module_compile_duration_seconds")
+            .record(compile_duration.as_secs_f64());
         metrics::histogram!("plexspaces_wasm_module_size_bytes").record(bytes.len() as f64);
         metrics::counter!("plexspaces_wasm_module_load_success_total").increment(1);
 
@@ -526,7 +534,9 @@ impl WasmRuntime {
         message_sender: Option<std::sync::Arc<dyn crate::MessageSender>>,
         tuplespace_provider: Option<std::sync::Arc<dyn plexspaces_core::TupleSpaceProvider>>,
         keyvalue_store: Option<std::sync::Arc<dyn plexspaces_core::KeyValueStore>>,
-        process_group_registry: Option<std::sync::Arc<plexspaces_process_groups::ProcessGroupRegistry>>,
+        process_group_registry: Option<
+            std::sync::Arc<plexspaces_process_groups::ProcessGroupRegistry>,
+        >,
         lock_manager: Option<std::sync::Arc<dyn plexspaces_core::LockManager + Send + Sync>>,
         object_registry: Option<std::sync::Arc<dyn plexspaces_core::actor_context::ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn plexspaces_journaling::JournalStorage>>,
@@ -536,19 +546,14 @@ impl WasmRuntime {
         use wasmtime::StoreLimitsBuilder;
 
         let _global_permit = if let Some(ref sem) = self.global_reinstantiation_semaphore {
-            Some(
-                sem.clone()
-                    .acquire_owned()
-                    .await
-                    .map_err(|_| WasmError::ActorFunctionError(
-                        format!(
-                            "Concurrent instantiation limit reached (max_concurrent_instantiations={}). \
+            Some(sem.clone().acquire_owned().await.map_err(|_| {
+                WasmError::ActorFunctionError(format!(
+                    "Concurrent instantiation limit reached (max_concurrent_instantiations={}). \
                             Reduce load or increase WasmConfig.max_concurrent_instantiations. \
                             Global instantiation semaphore closed.",
-                            sem.available_permits()
-                        )
-                    ))?,
-            )
+                    sem.available_permits()
+                ))
+            })?)
         } else {
             None
         };
@@ -669,43 +674,54 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
     async fn module_count(&self) -> usize {
         self.module_count().await
     }
-    
+
     async fn clear_cache(&self) {
         self.clear_cache().await
     }
-    
+
     async fn load_module(
         &self,
         name: &str,
         version: &str,
         bytes: &[u8],
-    ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         let module = WasmRuntime::load_module(self, name, version, bytes).await?;
         Ok(Arc::new(module) as Arc<dyn std::any::Any + Send + Sync>)
     }
-    
-    async fn get_module(&self, hash: &str) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
-        self.get_module(hash).await
+
+    async fn get_module(
+        &self,
+        hash: &str,
+    ) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        self.get_module(hash)
+            .await
             .map(|m| Arc::new(m) as Arc<dyn std::any::Any + Send + Sync>)
     }
-    
-    async fn resolve_module(&self, module_ref: &str) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
-        self.resolve_module(module_ref).await
+
+    async fn resolve_module(
+        &self,
+        module_ref: &str,
+    ) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+        self.resolve_module(module_ref)
+            .await
             .map(|m| Arc::new(m) as Arc<dyn std::any::Any + Send + Sync>)
     }
-    
+
     async fn contains_module(&self, hash: &str) -> bool {
         self.contains_module(hash).await
     }
-    
+
     async fn list_modules(&self) -> Vec<(String, String, String)> {
         self.list_modules().await
     }
-    
+
     async fn evict_module(&self, hash: &str) -> bool {
         self.evict_module(hash).await
     }
-    
+
     async fn instantiate(
         &self,
         module: std::sync::Arc<dyn std::any::Any + Send + Sync>,
@@ -721,59 +737,55 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
         object_registry: Option<std::sync::Arc<dyn plexspaces_core::ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn plexspaces_core::JournalStorage>>,
         blob_service: Option<std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>>,
-    ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         use wasmtime::StoreLimitsBuilder;
 
         // Gate all Wasmtime instantiations (initial + re-) so we stay under the memory-stripe limit.
         // Without this, initial activations (e.g. 10 virtual actors) + re-instantiations can exceed 10 concurrent.
         let _global_permit = if let Some(ref sem) = self.global_reinstantiation_semaphore {
-            Some(
-                sem.clone()
-                    .acquire_owned()
-                    .await
-                    .map_err(|_| {
-                        Box::new(WasmError::ActorFunctionError(
-                            format!(
-                                "Concurrent instantiation limit reached (max_concurrent_instantiations={}). \
+            Some(sem.clone().acquire_owned().await.map_err(|_| {
+                Box::new(WasmError::ActorFunctionError(format!(
+                    "Concurrent instantiation limit reached (max_concurrent_instantiations={}). \
                                 Reduce load or increase WasmConfig.max_concurrent_instantiations. \
                                 Global instantiation semaphore closed.",
-                                sem.available_permits()
-                            )
-                        )) as Box<dyn std::error::Error + Send + Sync>
-                    })?,
-            )
+                    sem.available_permits()
+                ))) as Box<dyn std::error::Error + Send + Sync>
+            })?)
         } else {
             None
         };
 
         // Downcast module from Arc<dyn Any> to WasmModule
         let wasm_module = crate::wasm_runtime_helpers::extract_wasm_module(module)?;
-        
+
         // Downcast config or use default
         let wasm_config = config
             .downcast::<WasmConfig>()
             .map(|c| (*c).clone())
             .unwrap_or_default();
-        
+
         // TODO(instance-pool): When wasm_config.use_instance_pool is true, get or create per-module
         // InstancePool and checkout instead of WasmInstance::new. Requires binding actor_id and
         // services on checkout. See PROJECT_TRACKER.md and instance_pool.rs.
-        
+
         // Convert config to capabilities (use default capabilities)
         let capabilities = crate::capabilities::profiles::default();
-        
+
         // Create store limits from config
         let limits = StoreLimitsBuilder::new()
             .memory_size(wasm_config.limits.max_memory_bytes as usize)
             .table_elements(wasm_config.limits.max_table_elements as u32)
             .build();
-        
+
         // Downcast process_group_registry if provided
         let pg_registry = process_group_registry.and_then(|pg| {
             pg.downcast::<plexspaces_process_groups::ProcessGroupRegistry>()
                 .ok()
         });
-        
+
         // Downcast message_sender from Arc<dyn Any> to Arc<dyn MessageSender>
         // The caller passes Arc<dyn wasm_runtime::MessageSender> wrapped in Arc<dyn Any>
         let wasm_message_sender: Option<std::sync::Arc<dyn crate::MessageSender>> =
@@ -788,15 +800,16 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
                 }
                 result
             });
-        
+
         // Convert BlobServiceTrait to concrete BlobService via as_any + downcast
-        let concrete_blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>> = blob_service
-            .map(|bs| {
-                use plexspaces_core::BlobServiceTrait;
-                bs.as_any()
-            })
-            .and_then(|any| any.downcast::<plexspaces_blob::BlobService>().ok());
-        
+        let concrete_blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>> =
+            blob_service
+                .map(|bs| {
+                    use plexspaces_core::BlobServiceTrait;
+                    bs.as_any()
+                })
+                .and_then(|any| any.downcast::<plexspaces_blob::BlobService>().ok());
+
         // Create the instance using WasmInstance::new
         let instance = crate::WasmInstance::new(
             &self.engine,
@@ -815,17 +828,18 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
             object_registry,
             journal_storage,
             concrete_blob_service,
-            None, // elastic_pool_service - caller can add via create_instance when using pool
+            None,  // elastic_pool_service - caller can add via create_instance when using pool
             false, // durability_enabled - caller controls via config when using instantiate()
             #[cfg(feature = "component-model")]
             self.global_reinstantiation_semaphore.clone(),
             #[cfg(not(feature = "component-model"))]
             None,
-        ).await?;
-        
+        )
+        .await?;
+
         Ok(Arc::new(instance) as Arc<dyn std::any::Any + Send + Sync>)
     }
-    
+
     fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync> {
         self
     }

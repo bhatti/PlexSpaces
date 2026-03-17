@@ -74,7 +74,7 @@ impl ExitReason {
         // This is a workaround - in practice, we'd use a trait or shared enum
         // For now, we'll match on the debug representation
         let debug_str = format!("{:?}", core_reason);
-        
+
         // Parse from debug string (not ideal, but avoids circular dependency)
         if debug_str.contains("Normal") {
             ExitReason::Normal
@@ -88,14 +88,14 @@ impl ExitReason {
             let actor_id = if let Some(start) = debug_str.find("actor_id: \"") {
                 let start = start + 11;
                 if let Some(end) = debug_str[start..].find("\"") {
-                    debug_str[start..start+end].to_string()
+                    debug_str[start..start + end].to_string()
                 } else {
                     "unknown".to_string()
                 }
             } else {
                 "unknown".to_string()
             };
-            
+
             // For linked reasons, we'll use a simplified representation
             ExitReason::Linked {
                 actor_id,
@@ -106,7 +106,7 @@ impl ExitReason {
             if let Some(start) = debug_str.find("Error(\"") {
                 let start = start + 7;
                 if let Some(end) = debug_str[start..].find("\"") {
-                    ExitReason::Error(debug_str[start..start+end].to_string())
+                    ExitReason::Error(debug_str[start..start + end].to_string())
                 } else {
                     ExitReason::Error(debug_str)
                 }
@@ -122,10 +122,10 @@ impl ExitReason {
 pub trait Facet: Send + Sync + Any {
     /// Unique identifier for this facet type
     fn facet_type(&self) -> &str;
-    
+
     /// Get reference to self as Any (for downcasting)
     fn as_any(&self) -> &dyn Any;
-    
+
     /// Get mutable reference to self as Any (for downcasting)
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
@@ -174,7 +174,7 @@ pub trait Facet: Send + Sync + Any {
 
     /// Get facet priority
     fn get_priority(&self) -> i32;
-    
+
     /// Check if this facet requires actor_ref and actor_service configuration.
     ///
 
@@ -311,7 +311,7 @@ pub enum FacetError {
     /// Facet with given type not found
     #[error("Facet not found: {0}")]
     NotFound(String),
-    
+
     /// Configuration error (e.g., failed to downcast types)
     #[error("Configuration error: {0}")]
     ConfigurationError(String),
@@ -377,7 +377,8 @@ impl FacetContainer {
         mut facet: Box<dyn Facet>,
         actor_id: &str,
     ) -> Result<String, FacetError> {
-        self.attach_with_tenant_context(facet, actor_id, None, None).await
+        self.attach_with_tenant_context(facet, actor_id, None, None)
+            .await
     }
 
     /// Attach a facet with tenant_id/namespace from API request
@@ -391,7 +392,7 @@ impl FacetContainer {
     ) -> Result<String, FacetError> {
         let span = tracing::span!(tracing::Level::DEBUG, "facet.attach", facet_type = %facet.facet_type(), actor_id = %actor_id);
         let _enter = span.enter();
-        
+
         let facet_type = facet.facet_type().to_string();
         metrics::counter!("plexspaces_facet_attach_attempts_total", "facet_type" => facet_type.clone()).increment(1);
         let start = std::time::Instant::now();
@@ -406,7 +407,7 @@ impl FacetContainer {
         // Extract config and priority from facet
         let mut config = facet.get_config();
         let priority = facet.get_priority();
-        
+
         // For RegistryFacet, merge tenant_id/namespace from API request if provided
         // This allows RegistryFacet to use API-provided tenant_id/namespace instead of defaults
         if facet_type == "registry" {
@@ -425,7 +426,7 @@ impl FacetContainer {
         // Store metadata FIRST (before creating Arc, so we can use it for sorting)
         let facet_type_clone = facet_type.clone();
         let priority_clone = priority;
-        
+
         // Create locked facet
         let facet_arc = Arc::new(RwLock::new(facet));
 
@@ -455,7 +456,7 @@ impl FacetContainer {
                         return false; // Skip if locked
                     }
                 };
-                
+
                 // Check priority from metadata
                 if let Some(existing_metadata) = self.metadata.get(&facet_type) {
                     existing_metadata.priority < priority_clone
@@ -466,13 +467,14 @@ impl FacetContainer {
             .unwrap_or(self.facets.len());
 
         self.facets.insert(insert_pos, facet_arc);
-        
+
         // Sort facets by priority (descending) to ensure correct order
         // This is a safety measure in case metadata is out of sync
         self.facets.sort_by(|a, b| {
             let priority_a = {
                 if let Ok(guard) = a.try_read() {
-                    self.metadata.get(guard.facet_type())
+                    self.metadata
+                        .get(guard.facet_type())
                         .map(|m| m.priority)
                         .unwrap_or(0)
                 } else {
@@ -481,7 +483,8 @@ impl FacetContainer {
             };
             let priority_b = {
                 if let Ok(guard) = b.try_read() {
-                    self.metadata.get(guard.facet_type())
+                    self.metadata
+                        .get(guard.facet_type())
                         .map(|m| m.priority)
                         .unwrap_or(0)
                 } else {
@@ -504,8 +507,10 @@ impl FacetContainer {
 
         let duration = start.elapsed();
         metrics::histogram!("plexspaces_facet_attach_duration_seconds", "facet_type" => facet_type.clone()).record(duration.as_secs_f64());
-        metrics::counter!("plexspaces_facet_attached_total", "facet_type" => facet_type.clone()).increment(1);
-        metrics::gauge!("plexspaces_facet_active_total", "facet_type" => facet_type.clone()).increment(1.0);
+        metrics::counter!("plexspaces_facet_attached_total", "facet_type" => facet_type.clone())
+            .increment(1);
+        metrics::gauge!("plexspaces_facet_active_total", "facet_type" => facet_type.clone())
+            .increment(1.0);
         tracing::debug!(facet_type = %facet_type, actor_id = %actor_id, priority = priority, "Facet attached");
 
         Ok(facet_type)
@@ -515,7 +520,7 @@ impl FacetContainer {
     pub async fn detach(&mut self, facet_type: &str, actor_id: &str) -> Result<(), FacetError> {
         let span = tracing::span!(tracing::Level::DEBUG, "facet.detach", facet_type = %facet_type, actor_id = %actor_id);
         let _enter = span.enter();
-        
+
         metrics::counter!("plexspaces_facet_detach_attempts_total", "facet_type" => facet_type.to_string()).increment(1);
         let start = std::time::Instant::now();
 
@@ -527,18 +532,15 @@ impl FacetContainer {
         }
 
         // Find facet in list (use try_read to avoid blocking)
-        let pos = self
-            .facets
-            .iter()
-            .position(|f| {
-                // Use try_read to avoid blocking the async runtime
-                if let Ok(guard) = f.try_read() {
-                    guard.facet_type() == facet_type
-                } else {
-                    // If locked, we can't check - this is rare and we'll handle it gracefully
-                    false
-                }
-            });
+        let pos = self.facets.iter().position(|f| {
+            // Use try_read to avoid blocking the async runtime
+            if let Ok(guard) = f.try_read() {
+                guard.facet_type() == facet_type
+            } else {
+                // If locked, we can't check - this is rare and we'll handle it gracefully
+                false
+            }
+        });
 
         if let Some(pos) = pos {
             let facet = self.facets.remove(pos);
@@ -549,7 +551,8 @@ impl FacetContainer {
         let duration = start.elapsed();
         metrics::histogram!("plexspaces_facet_detach_duration_seconds", "facet_type" => facet_type.to_string()).record(duration.as_secs_f64());
         metrics::counter!("plexspaces_facet_detached_total", "facet_type" => facet_type.to_string()).increment(1);
-        metrics::gauge!("plexspaces_facet_active_total", "facet_type" => facet_type.to_string()).decrement(1.0);
+        metrics::gauge!("plexspaces_facet_active_total", "facet_type" => facet_type.to_string())
+            .decrement(1.0);
         tracing::info!(facet_type = %facet_type, actor_id = %actor_id, "Facet detached");
 
         Ok(())
@@ -565,18 +568,23 @@ impl FacetContainer {
     /// ## Design
     /// This method returns an explicit enum instead of a hacky `(Vec<u8>, bool)` tuple.
     /// The enum clearly communicates intent and eliminates ambiguity about what should happen next.
-    pub async fn intercept_before(&self, method: &str, args: &[u8]) -> Result<BeforeInterceptOutcome, FacetError> {
-        let span = tracing::span!(tracing::Level::TRACE, "facet.intercept_before", method = %method);
+    pub async fn intercept_before(
+        &self,
+        method: &str,
+        args: &[u8],
+    ) -> Result<BeforeInterceptOutcome, FacetError> {
+        let span =
+            tracing::span!(tracing::Level::TRACE, "facet.intercept_before", method = %method);
         let _enter = span.enter();
-        
+
         metrics::counter!("plexspaces_facet_intercept_before_total", "method" => method.to_string()).increment(1);
         let start = std::time::Instant::now();
-        
+
         let facet_count = self.get_facet_count();
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(method = %method, facet_count = facet_count, "FacetContainer: Checking facets for interception");
         }
-        
+
         let mut current_args = args.to_vec();
 
         for facet in &self.facets {
@@ -609,7 +617,7 @@ impl FacetContainer {
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(method = %method, facet_count = facet_count, duration_ms = duration.as_millis(), "FacetContainer: No facet intercepted, passing to actor");
         }
-        
+
         Ok(BeforeInterceptOutcome::CallActor(current_args))
     }
 
@@ -622,10 +630,11 @@ impl FacetContainer {
     ) -> Result<Vec<u8>, FacetError> {
         let span = tracing::span!(tracing::Level::TRACE, "facet.intercept_after", method = %method);
         let _enter = span.enter();
-        
-        metrics::counter!("plexspaces_facet_intercept_after_total", "method" => method.to_string()).increment(1);
+
+        metrics::counter!("plexspaces_facet_intercept_after_total", "method" => method.to_string())
+            .increment(1);
         let start = std::time::Instant::now();
-        
+
         let mut current_result = result.to_vec();
 
         // Run in reverse order for after interceptors
@@ -645,7 +654,7 @@ impl FacetContainer {
 
         let duration = start.elapsed();
         metrics::histogram!("plexspaces_facet_intercept_after_duration_seconds", "method" => method.to_string()).record(duration.as_secs_f64());
-        
+
         Ok(current_result)
     }
 
@@ -658,7 +667,7 @@ impl FacetContainer {
     pub fn list_facets(&self) -> Vec<String> {
         self.metadata.keys().cloned().collect()
     }
-    
+
     /// Get a facet by type (for FacetService - Option B)
     ///
     /// ## Arguments
@@ -708,21 +717,22 @@ impl FacetContainer {
     /// Detaches in reverse priority order (low priority first, reverse of attach)
     pub async fn detach_all(&mut self, actor_id: &str) -> Vec<FacetError> {
         let mut errors = Vec::new();
-        
+
         // Detach in reverse priority order (ascending priority, reverse of attach)
         // Sort by priority ascending for reverse order
-        let mut facets_to_detach: Vec<(String, i32)> = self.metadata
+        let mut facets_to_detach: Vec<(String, i32)> = self
+            .metadata
             .iter()
             .map(|(facet_type, metadata)| (facet_type.clone(), metadata.priority))
             .collect();
         facets_to_detach.sort_by_key(|(_, priority)| *priority); // Ascending order
-        
+
         for (facet_type, _) in facets_to_detach {
             if let Err(e) = self.detach(&facet_type, actor_id).await {
                 errors.push(e);
             }
         }
-        
+
         errors
     }
 
@@ -742,7 +752,7 @@ impl FacetContainer {
         reason: &ExitReason,
     ) -> Vec<FacetError> {
         let mut errors = Vec::new();
-        
+
         // Call on all facets in priority order (high priority first)
         for facet_arc in &self.facets {
             let mut facet = facet_arc.write().await;
@@ -751,7 +761,7 @@ impl FacetContainer {
                 // Continue with other facets even if one fails
             }
         }
-        
+
         errors
     }
 
@@ -771,7 +781,7 @@ impl FacetContainer {
         reason: &ExitReason,
     ) -> Vec<FacetError> {
         let mut errors = Vec::new();
-        
+
         // Call on all facets in priority order (high priority first)
         for facet_arc in &self.facets {
             let mut facet = facet_arc.write().await;
@@ -780,7 +790,7 @@ impl FacetContainer {
                 // Continue with other facets even if one fails
             }
         }
-        
+
         errors
     }
 
@@ -793,7 +803,7 @@ impl FacetContainer {
     /// Result with any errors encountered (continues calling even if one fails)
     pub async fn call_on_init_complete(&mut self, actor_id: &str) -> Vec<FacetError> {
         let mut errors = Vec::new();
-        
+
         // Call on all facets in priority order (high priority first)
         for facet_arc in &self.facets {
             let mut facet = facet_arc.write().await;
@@ -802,7 +812,7 @@ impl FacetContainer {
                 // Continue with other facets even if one fails
             }
         }
-        
+
         errors
     }
 
@@ -820,7 +830,7 @@ impl FacetContainer {
         reason: &ExitReason,
     ) -> Vec<FacetError> {
         let mut errors = Vec::new();
-        
+
         // Call on all facets in priority order (high priority first)
         for facet_arc in &self.facets {
             let mut facet = facet_arc.write().await;
@@ -829,7 +839,7 @@ impl FacetContainer {
                 // Continue with other facets even if one fails
             }
         }
-        
+
         errors
     }
 }
@@ -923,11 +933,11 @@ impl Facet for LoggingFacet {
     fn facet_type(&self) -> &str {
         "logging"
     }
-    
+
     fn as_any(&self) -> &dyn Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
@@ -975,11 +985,11 @@ impl Facet for LoggingFacet {
         );
         Ok(InterceptResult::Continue)
     }
-    
+
     fn get_config(&self) -> Value {
         self.config.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }
@@ -1018,11 +1028,11 @@ impl Facet for CachingFacet {
     fn facet_type(&self) -> &str {
         "caching"
     }
-    
+
     fn as_any(&self) -> &dyn Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
@@ -1069,11 +1079,11 @@ impl Facet for CachingFacet {
 
         Ok(InterceptResult::Continue)
     }
-    
+
     fn get_config(&self) -> Value {
         self.config.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }
@@ -1112,11 +1122,11 @@ impl Facet for MetricsFacet {
     fn facet_type(&self) -> &str {
         "metrics"
     }
-    
+
     fn as_any(&self) -> &dyn Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
@@ -1171,11 +1181,11 @@ impl Facet for MetricsFacet {
         tracing::debug!(method = %method, "Error in method");
         Ok(ErrorHandling::Propagate)
     }
-    
+
     fn get_config(&self) -> Value {
         self.config.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }
@@ -1195,10 +1205,7 @@ mod tests {
         });
         let facet = Box::new(LoggingFacet::new(config.clone(), 10));
 
-        let facet_id = container
-            .attach(facet, "test_actor")
-            .await
-            .unwrap();
+        let facet_id = container.attach(facet, "test_actor").await.unwrap();
 
         assert_eq!(facet_id, "logging");
         assert_eq!(container.list_facets(), vec!["logging"]);
@@ -1211,7 +1218,10 @@ mod tests {
             .unwrap();
         match outcome {
             BeforeInterceptOutcome::CallActor(result) => {
-                assert_eq!(result, args, "Should return original args when no facets intercept");
+                assert_eq!(
+                    result, args,
+                    "Should return original args when no facets intercept"
+                );
             }
             BeforeInterceptOutcome::ShortCircuit(_) => {
                 panic!("Should not be short-circuited when no facets intercept");

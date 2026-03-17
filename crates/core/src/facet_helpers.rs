@@ -29,25 +29,25 @@
 //! - **Production-Grade**: Handles errors gracefully, supports all facet types
 //! - **Runtime Config**: Factories use ServiceLocator to get runtime configuration
 
+use crate::{ProcessGroupService, RequestContext};
+use async_trait::async_trait;
+use plexspaces_facet::{
+    Facet, FacetContainer, FacetError, FacetFactory, FacetMetadata, FacetRegistry,
+};
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
+use plexspaces_proto::locks::prv::{
+    AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions,
+};
+use plexspaces_proto::object_registry::v1::ObjectRegistration;
 use serde_json::Value;
 use std::collections::HashMap;
-use plexspaces_facet::{Facet, FacetError, FacetRegistry, FacetFactory, FacetMetadata, FacetContainer};
-use crate::{RequestContext, ProcessGroupService};
-use plexspaces_proto::locks::prv::{AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions};
-use plexspaces_proto::object_registry::v1::ObjectRegistration;
 use std::sync::Arc;
-use async_trait::async_trait;
 use tracing;
 
 // Re-export facet helpers from facet crate (for consistency)
 pub use plexspaces_facet::facet_helpers::{
-    extract_facet_config,
-    has_facet_type,
-    extract_all_facet_configs,
-    create_facet_from_json,
-    create_facets_from_config,
-    has_facet_attached,
+    create_facet_from_json, create_facets_from_config, extract_all_facet_configs,
+    extract_facet_config, has_facet_attached, has_facet_type,
 };
 
 /// Convert proto Facet configuration to facet instance
@@ -68,10 +68,10 @@ pub async fn create_facet_from_proto(
     facet_registry: &FacetRegistry,
 ) -> Result<Box<dyn Facet>, FacetError> {
     let facet_type = &proto_facet.r#type;
-    
+
     // Convert proto config (map<string, string>) to serde_json::Value
     let config_value = proto_config_to_value(&proto_facet.config);
-    
+
     let facet = facet_registry
         .create_facet(facet_type, config_value)
         .await?;
@@ -153,8 +153,8 @@ pub async fn create_facets_from_proto(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_facet::{FacetFactory, FacetMetadata};
     use async_trait::async_trait;
+    use plexspaces_facet::{FacetFactory, FacetMetadata};
     use std::sync::Arc;
 
     // Test facet for unit tests

@@ -51,7 +51,7 @@ impl TupleSpaceProviderWrapper {
     pub fn new(inner: Arc<plexspaces_tuplespace::TupleSpace>) -> Self {
         Self { inner }
     }
-    
+
     /// Create a new TupleSpace from RequestContext
     ///
     /// ## Purpose
@@ -91,4 +91,3 @@ impl TupleSpaceProvider for TupleSpaceProviderWrapper {
 }
 
 // NodeOperationsWrapper has been removed - ActorFactory uses ActorRegistry and VirtualActorManager directly.
-

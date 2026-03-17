@@ -176,7 +176,10 @@ async fn test_mock_channel_poisonous_message_dlq() {
 
     // Poisonous message should be in DLQ immediately (not requeued)
     let dlq_messages: Vec<Message> = channel.get_dlq_messages().await;
-    assert!(!dlq_messages.is_empty(), "Poisonous message should be in DLQ immediately");
+    assert!(
+        !dlq_messages.is_empty(),
+        "Poisonous message should be in DLQ immediately"
+    );
     let poison_in_dlq = dlq_messages.iter().any(|m| m.id == "poison-1");
     assert!(poison_in_dlq, "Poisonous message should be in DLQ");
 }
@@ -202,31 +205,45 @@ async fn test_mock_channel_max_retries_dlq() {
     let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
     assert_eq!(received.len(), 1, "Should receive message on first attempt");
     let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
-    
+
     // Second failure: delivery_count = 2, requeue (2 < 2 is false, but we check < max_retries)
     // Actually, delivery_count starts at 0, increments to 1 on first receive, so:
     // First receive: delivery_count = 1, nack with requeue=true -> requeue (1 < 2)
     // Second receive: delivery_count = 2, nack with requeue=true -> requeue (2 < 2 is false, so should DLQ)
     let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
-    assert_eq!(received.len(), 1, "Should receive message on second attempt");
+    assert_eq!(
+        received.len(),
+        1,
+        "Should receive message on second attempt"
+    );
     let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
-    
+
     // After second nack, delivery_count = 2, which equals max_retries (2), so should go to DLQ
     // But we need to check if it was actually requeued or sent to DLQ
     // Let's check DLQ - if delivery_count >= max_retries, it should be in DLQ
     let dlq_messages: Vec<Message> = channel.get_dlq_messages().await;
     if !dlq_messages.is_empty() {
         // Message is in DLQ (delivery_count >= max_retries)
-        assert!(dlq_messages.iter().any(|m| m.id == "msg-1"), "Message should be in DLQ after max retries");
+        assert!(
+            dlq_messages.iter().any(|m| m.id == "msg-1"),
+            "Message should be in DLQ after max retries"
+        );
     } else {
         // Message was requeued, try one more time
         let received: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
-        assert_eq!(received.len(), 1, "Should receive message on third attempt if requeued");
+        assert_eq!(
+            received.len(),
+            1,
+            "Should receive message on third attempt if requeued"
+        );
         let _: () = Channel::nack(&channel, "msg-1", true).await.unwrap();
-        
+
         // Now it should definitely be in DLQ
         let dlq_messages: Vec<Message> = channel.get_dlq_messages().await;
-        assert!(!dlq_messages.is_empty(), "Message should be in DLQ after exceeding max retries");
+        assert!(
+            !dlq_messages.is_empty(),
+            "Message should be in DLQ after exceeding max retries"
+        );
     }
 }
 
@@ -264,7 +281,10 @@ async fn test_mock_channel_shutdown_graceful() {
     // After shutdown, receive should fail (channel is closed)
     // In a real scenario, in-progress messages would complete, but for mock we test the closed state
     let remaining_result: ChannelResult<Vec<Message>> = Channel::receive(&channel, 10).await;
-    assert!(remaining_result.is_err() || remaining_result.unwrap().is_empty(), "Should not receive after shutdown");
+    assert!(
+        remaining_result.is_err() || remaining_result.unwrap().is_empty(),
+        "Should not receive after shutdown"
+    );
 }
 
 #[tokio::test]
@@ -280,7 +300,9 @@ async fn test_mock_channel_crash_simulation() {
     let channel: MockChannel = MockChannel::new(config);
 
     // Set crash on specific message
-    channel.set_crash_on_message(Some("crash-msg".to_string())).await;
+    channel
+        .set_crash_on_message(Some("crash-msg".to_string()))
+        .await;
 
     // Send message that will crash
     let msg = create_test_message("crash-msg", "crash payload");
@@ -311,10 +333,15 @@ mod redis_tests {
         #[cfg(not(feature = "test-helpers"))]
         {
             // Fallback: fast TCP connection check
+            use std::time::Duration;
             use tokio::net::TcpStream;
             use tokio::time::timeout;
-            use std::time::Duration;
-            timeout(Duration::from_millis(500), TcpStream::connect("localhost:6379")).await.is_ok()
+            timeout(
+                Duration::from_millis(500),
+                TcpStream::connect("localhost:6379"),
+            )
+            .await
+            .is_ok()
         }
     }
 
@@ -463,7 +490,10 @@ async fn test_poisonous_message_scenario() {
 
     // Verify poisonous message in DLQ (poisonous messages skip retries)
     let dlq: Vec<Message> = channel.get_dlq_messages().await;
-    assert!(dlq.iter().any(|m| m.id == "poison-1"), "Poisonous message should be in DLQ");
+    assert!(
+        dlq.iter().any(|m| m.id == "poison-1"),
+        "Poisonous message should be in DLQ"
+    );
 }
 
 #[tokio::test]
@@ -530,7 +560,10 @@ async fn test_shutdown_during_processing() {
     // After shutdown, receive should fail (channel is closed)
     // In a real scenario, in-progress messages would complete, but for mock we test the closed state
     let remaining_result: ChannelResult<Vec<Message>> = Channel::receive(&channel, 10).await;
-    assert!(remaining_result.is_err() || remaining_result.unwrap().is_empty(), "Should not receive after shutdown");
+    assert!(
+        remaining_result.is_err() || remaining_result.unwrap().is_empty(),
+        "Should not receive after shutdown"
+    );
 
     // ACK in-progress messages (simulating completion)
     for msg in in_progress {
@@ -557,7 +590,10 @@ async fn test_ack_message_not_found_never_received() {
     // Try to ACK a message that was never sent/received
     let result: ChannelResult<()> = Channel::ack(&channel, "non-existent-message-id").await;
     assert!(result.is_err(), "ACK should fail for non-existent message");
-    assert!(matches!(result.unwrap_err(), ChannelError::MessageNotFound(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        ChannelError::MessageNotFound(_)
+    ));
 }
 
 #[tokio::test]
@@ -584,7 +620,10 @@ async fn test_ack_message_already_acked() {
     // ACK second time (should fail - message not found)
     let result: ChannelResult<()> = Channel::ack(&channel, "msg-1").await;
     assert!(result.is_err(), "ACK should fail for already-acked message");
-    assert!(matches!(result.unwrap_err(), ChannelError::MessageNotFound(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        ChannelError::MessageNotFound(_)
+    ));
 }
 
 #[tokio::test]
@@ -602,7 +641,10 @@ async fn test_nack_message_not_found_never_received() {
     // Try to NACK a message that was never sent/received
     let result: ChannelResult<()> = Channel::nack(&channel, "non-existent-message-id", true).await;
     assert!(result.is_err(), "NACK should fail for non-existent message");
-    assert!(matches!(result.unwrap_err(), ChannelError::MessageNotFound(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        ChannelError::MessageNotFound(_)
+    ));
 }
 
 #[tokio::test]
@@ -628,8 +670,14 @@ async fn test_nack_message_already_acked() {
 
     // NACK after ACK (should fail - message not found)
     let result: ChannelResult<()> = Channel::nack(&channel, "msg-1", true).await;
-    assert!(result.is_err(), "NACK should fail for already-acked message");
-    assert!(matches!(result.unwrap_err(), ChannelError::MessageNotFound(_)));
+    assert!(
+        result.is_err(),
+        "NACK should fail for already-acked message"
+    );
+    assert!(matches!(
+        result.unwrap_err(),
+        ChannelError::MessageNotFound(_)
+    ));
 }
 
 #[tokio::test]
@@ -677,13 +725,9 @@ async fn test_concurrent_ack_same_message() {
     // Try to ACK the same message concurrently
     let channel1 = channel.clone();
     let channel2 = channel.clone();
-    
-    let handle1 = task::spawn(async move {
-        channel1.ack("msg-1").await as ChannelResult<()>
-    });
-    let handle2 = task::spawn(async move {
-        channel2.ack("msg-1").await as ChannelResult<()>
-    });
+
+    let handle1 = task::spawn(async move { channel1.ack("msg-1").await as ChannelResult<()> });
+    let handle2 = task::spawn(async move { channel2.ack("msg-1").await as ChannelResult<()> });
 
     let results = tokio::join!(handle1, handle2);
     let result1: ChannelResult<()> = results.0.unwrap();
@@ -692,13 +736,19 @@ async fn test_concurrent_ack_same_message() {
     // One should succeed, one should fail
     let success_count = result1.is_ok() as u32 + result2.is_ok() as u32;
     assert_eq!(success_count, 1, "Exactly one ACK should succeed");
-    
+
     // The failed one should be MessageNotFound
     if result1.is_err() {
-        assert!(matches!(result1.unwrap_err(), ChannelError::MessageNotFound(_)));
+        assert!(matches!(
+            result1.unwrap_err(),
+            ChannelError::MessageNotFound(_)
+        ));
     }
     if result2.is_err() {
-        assert!(matches!(result2.unwrap_err(), ChannelError::MessageNotFound(_)));
+        assert!(matches!(
+            result2.unwrap_err(),
+            ChannelError::MessageNotFound(_)
+        ));
     }
 }
 
@@ -727,7 +777,10 @@ async fn test_ack_after_nack() {
     // (message is no longer in pending_acks, it's back in the queue)
     let result: ChannelResult<()> = Channel::ack(&channel, "msg-1").await;
     assert!(result.is_err(), "ACK should fail after NACK with requeue");
-    assert!(matches!(result.unwrap_err(), ChannelError::MessageNotFound(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        ChannelError::MessageNotFound(_)
+    ));
 
     // Receive again (message was requeued)
     let received_again: Vec<Message> = Channel::receive(&channel, 1).await.unwrap();
@@ -737,7 +790,6 @@ async fn test_ack_after_nack() {
     // Now ACK should succeed
     let _: () = Channel::ack(&channel, "msg-1").await.unwrap();
 }
-
 
 // Test for SQLite backend if available
 #[cfg(feature = "sqlite-backend")]
@@ -771,15 +823,18 @@ async fn test_sqlite_ack_message_not_found() {
     // Try to ACK a message that was never sent/received
     let result: ChannelResult<()> = Channel::ack(channel.as_ref(), "non-existent-message-id").await;
     assert!(result.is_err(), "ACK should fail for non-existent message");
-    assert!(matches!(result.unwrap_err(), ChannelError::MessageNotFound(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        ChannelError::MessageNotFound(_)
+    ));
 }
 
 // Test for Redis backend if available
 #[cfg(feature = "redis-backend")]
 #[tokio::test]
 async fn test_redis_ack_message_not_found() {
-    use redis_tests::{cleanup_redis, create_redis_config, is_redis_available};
     use plexspaces_channel::RedisChannel;
+    use redis_tests::{cleanup_redis, create_redis_config, is_redis_available};
 
     if !is_redis_available().await {
         eprintln!("Skipping test: Redis not available");
@@ -798,10 +853,3 @@ async fn test_redis_ack_message_not_found() {
 
     cleanup_redis(&format!("test-stream:{}", config.name)).await;
 }
-
-
-
-
-
-
-

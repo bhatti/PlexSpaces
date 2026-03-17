@@ -324,6 +324,8 @@ pub trait JournalStorage: Send + Sync {
     async fn update_reminder(&self, reminder_state: &ReminderState) -> JournalResult<()>;
 
     /// Query reminders that are due to fire
-    async fn query_due_reminders(&self, before_time: SystemTime) -> JournalResult<Vec<ReminderState>>;
+    async fn query_due_reminders(
+        &self,
+        before_time: SystemTime,
+    ) -> JournalResult<Vec<ReminderState>>;
 }
-

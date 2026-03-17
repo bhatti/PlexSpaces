@@ -5,12 +5,12 @@
 //
 // Tests the high-level WorkflowRef API with a real workflow actor.
 
-use plexspaces_workflow::WorkflowRef;
-use plexspaces_node::{NodeBuilder, Node};
-use plexspaces_core::{RequestContext, Message, ActorContext, BehaviorError, Actor, BehaviorType};
+use async_trait::async_trait;
 use plexspaces_actor::ActorBuilder;
 use plexspaces_behavior::Workflow;
-use async_trait::async_trait;
+use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContext};
+use plexspaces_node::{Node, NodeBuilder};
+use plexspaces_workflow::WorkflowRef;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -87,11 +87,7 @@ impl Actor for TestApprovalWorkflow {
 
 #[async_trait]
 impl Workflow for TestApprovalWorkflow {
-    async fn run(
-        &mut self,
-        _ctx: &ActorContext,
-        input: Message,
-    ) -> Result<Message, BehaviorError> {
+    async fn run(&mut self, _ctx: &ActorContext, input: Message) -> Result<Message, BehaviorError> {
         // Parse request
         let request: ApprovalRequest = serde_json::from_slice(&input.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Invalid request: {}", e)))?;
@@ -119,8 +115,10 @@ impl Workflow for TestApprovalWorkflow {
     ) -> Result<(), BehaviorError> {
         match name.as_str() {
             "approve" => {
-                let payload: ApprovePayload = serde_json::from_slice(&data.payload)
-                    .map_err(|e| BehaviorError::ProcessingError(format!("Invalid payload: {}", e)))?;
+                let payload: ApprovePayload =
+                    serde_json::from_slice(&data.payload).map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Invalid payload: {}", e))
+                    })?;
 
                 self.state.approvals.push(payload.approver_id);
                 self.state.current_approver_index += 1;
@@ -149,7 +147,11 @@ impl Workflow for TestApprovalWorkflow {
     ) -> Result<Message, BehaviorError> {
         match name.as_str() {
             "status" => {
-                let total = self.request.as_ref().map(|r| r.approvers.len()).unwrap_or(0);
+                let total = self
+                    .request
+                    .as_ref()
+                    .map(|r| r.approvers.len())
+                    .unwrap_or(0);
                 let response = StatusResponse {
                     document_id: self.state.document_id.clone(),
                     status: self.state.status.clone(),
@@ -181,7 +183,8 @@ async fn test_workflow_ref_run() {
     // Create node
     let node: Node = NodeBuilder::new("test-node")
         .with_clustering_enabled(false)
-        .build().await;
+        .build()
+        .await;
     let node: Arc<Node> = Arc::new(node);
 
     let node_for_start = node.clone();
@@ -191,10 +194,8 @@ async fn test_workflow_ref_run() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Spawn workflow actor
-    let ctx = RequestContext::new_without_auth(
-        "test-tenant".to_string(),
-        "test-namespace".to_string(),
-    );
+    let ctx =
+        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
 
     let actor_ref = ActorBuilder::new(Box::new(TestApprovalWorkflow::new()))
         .with_id("test-workflow@test-node")
@@ -212,7 +213,9 @@ async fn test_workflow_ref_run() {
         approvers: vec!["alice".to_string(), "bob".to_string()],
     };
 
-    let result: ApprovalState = workflow.run(&request).await
+    let result: ApprovalState = workflow
+        .run(&request)
+        .await
         .expect("Failed to run workflow");
 
     assert_eq!(result.document_id, "DOC-001");
@@ -228,7 +231,8 @@ async fn test_workflow_ref_signal_and_query() {
     // Create node
     let node: Node = NodeBuilder::new("test-node-2")
         .with_clustering_enabled(false)
-        .build().await;
+        .build()
+        .await;
     let node: Arc<Node> = Arc::new(node);
 
     let node_for_start = node.clone();
@@ -238,10 +242,8 @@ async fn test_workflow_ref_signal_and_query() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Spawn workflow actor
-    let ctx = RequestContext::new_without_auth(
-        "test-tenant".to_string(),
-        "test-namespace".to_string(),
-    );
+    let ctx =
+        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
 
     let actor_ref = ActorBuilder::new(Box::new(TestApprovalWorkflow::new()))
         .with_id("test-workflow-2@test-node-2")
@@ -259,19 +261,29 @@ async fn test_workflow_ref_signal_and_query() {
         approvers: vec!["alice".to_string(), "bob".to_string()],
     };
 
-    let _: ApprovalState = workflow.run(&request).await
+    let _: ApprovalState = workflow
+        .run(&request)
+        .await
         .expect("Failed to run workflow");
 
     // Send approval signal
-    workflow.signal("approve", &ApprovePayload {
-        approver_id: "alice".to_string(),
-    }).await.expect("Failed to send signal");
+    workflow
+        .signal(
+            "approve",
+            &ApprovePayload {
+                approver_id: "alice".to_string(),
+            },
+        )
+        .await
+        .expect("Failed to send signal");
 
     // Wait for signal to be processed
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Query status
-    let status: StatusResponse = workflow.query("status").await
+    let status: StatusResponse = workflow
+        .query("status")
+        .await
         .expect("Failed to query status");
 
     assert_eq!(status.document_id, "DOC-002");
@@ -279,14 +291,22 @@ async fn test_workflow_ref_signal_and_query() {
     assert_eq!(status.approvals_total, 2);
 
     // Send second approval
-    workflow.signal("approve", &ApprovePayload {
-        approver_id: "bob".to_string(),
-    }).await.expect("Failed to send signal");
+    workflow
+        .signal(
+            "approve",
+            &ApprovePayload {
+                approver_id: "bob".to_string(),
+            },
+        )
+        .await
+        .expect("Failed to send signal");
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Query final status
-    let final_status: StatusResponse = workflow.query("status").await
+    let final_status: StatusResponse = workflow
+        .query("status")
+        .await
         .expect("Failed to query status");
 
     assert_eq!(final_status.status, "approved");
@@ -302,7 +322,8 @@ async fn test_workflow_ref_with_timeout() {
     // Create node
     let node: Node = NodeBuilder::new("test-node-3")
         .with_clustering_enabled(false)
-        .build().await;
+        .build()
+        .await;
     let node: Arc<Node> = Arc::new(node);
 
     let node_for_start = node.clone();
@@ -312,10 +333,8 @@ async fn test_workflow_ref_with_timeout() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Spawn workflow actor
-    let ctx = RequestContext::new_without_auth(
-        "test-tenant".to_string(),
-        "test-namespace".to_string(),
-    );
+    let ctx =
+        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
 
     let actor_ref = ActorBuilder::new(Box::new(TestApprovalWorkflow::new()))
         .with_id("test-workflow-3@test-node-3")
@@ -336,13 +355,17 @@ async fn test_workflow_ref_with_timeout() {
     };
 
     // Use run_with_timeout for custom timeout
-    let result: ApprovalState = workflow.run_with_timeout(&request, Duration::from_secs(60)).await
+    let result: ApprovalState = workflow
+        .run_with_timeout(&request, Duration::from_secs(60))
+        .await
         .expect("Failed to run workflow");
 
     assert_eq!(result.document_id, "DOC-003");
 
     // Query with custom timeout
-    let status: StatusResponse = workflow.query_with_timeout("status", Duration::from_secs(10)).await
+    let status: StatusResponse = workflow
+        .query_with_timeout("status", Duration::from_secs(10))
+        .await
         .expect("Failed to query status");
 
     assert_eq!(status.document_id, "DOC-003");
@@ -357,7 +380,8 @@ async fn test_workflow_ref_error_handling() {
     // Create node
     let node: Node = NodeBuilder::new("test-node-4")
         .with_clustering_enabled(false)
-        .build().await;
+        .build()
+        .await;
     let node: Arc<Node> = Arc::new(node);
 
     let node_for_start = node.clone();
@@ -367,10 +391,8 @@ async fn test_workflow_ref_error_handling() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     // Spawn workflow actor
-    let ctx = RequestContext::new_without_auth(
-        "test-tenant".to_string(),
-        "test-namespace".to_string(),
-    );
+    let ctx =
+        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
 
     let actor_ref = ActorBuilder::new(Box::new(TestApprovalWorkflow::new()))
         .with_id("test-workflow-4@test-node-4")
@@ -382,9 +404,8 @@ async fn test_workflow_ref_error_handling() {
     let workflow = WorkflowRef::new(actor_ref);
 
     // Query without running first should work but return empty state
-    let status: StatusResponse = workflow.query("status").await
-        .expect("Query should work");
-    
+    let status: StatusResponse = workflow.query("status").await.expect("Query should work");
+
     assert_eq!(status.document_id, "");
     assert_eq!(status.status, "");
 

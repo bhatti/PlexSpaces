@@ -72,10 +72,10 @@
 //! ```
 
 use async_trait::async_trait;
+use plexspaces_core::BlobServiceTrait;
+use prost_types;
 use std::sync::Arc;
 use thiserror::Error;
-use prost_types;
-use plexspaces_core::BlobServiceTrait;
 
 // Re-export proto types for convenience
 pub use plexspaces_proto::v1::application::{
@@ -174,7 +174,7 @@ pub trait Application: Send + Sync {
     async fn health_check(&self) -> HealthStatus {
         HealthStatus::HealthStatusHealthy
     }
-    
+
     /// Get reference to Any for downcasting
     ///
     /// ## Purpose
@@ -226,7 +226,7 @@ pub trait ApplicationNode: Send + Sync {
     fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
         None
     }
-    
+
     /// Get ActorFactory (optional - only Node implements this)
     ///
     /// ## Purpose
@@ -239,9 +239,9 @@ pub trait ApplicationNode: Send + Sync {
     async fn actor_factory(&self) -> Option<Arc<dyn plexspaces_actor::ActorFactory>> {
         None
     }
-    
+
     /// Get BlobService if available.
-    /// 
+    ///
     /// ## Purpose
     /// WASM actors need BlobService for blob_upload, blob_download, blob_list, etc.
     /// Node implementations return Some(blob_service), mocks return None.

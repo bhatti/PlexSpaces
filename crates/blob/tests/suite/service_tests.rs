@@ -18,13 +18,15 @@
 
 //! Unit tests for blob service using local filesystem backend
 
-use plexspaces_blob::{BlobService, BlobError, repository::sql::SqlBlobRepository, repository::ListFilters};
-use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
-use plexspaces_core::RequestContext;
 use object_store::local::LocalFileSystem;
+use plexspaces_blob::{
+    repository::sql::SqlBlobRepository, repository::ListFilters, BlobError, BlobService,
+};
+use plexspaces_core::RequestContext;
+use plexspaces_proto::storage::v1::BlobConfig as ProtoBlobConfig;
 use std::sync::Arc;
-use tempfile::TempDir;
 use std::sync::Once;
+use tempfile::TempDir;
 
 static INIT: Once = Once::new();
 
@@ -40,25 +42,25 @@ fn init_sqlx_drivers() {
 async fn create_test_service() -> (Arc<BlobService>, TempDir) {
     // Ensure sqlx drivers are installed (idempotent, safe for parallel tests)
     init_sqlx_drivers();
-    
+
     // Create temp directory for local filesystem
     let temp_dir = TempDir::new().unwrap();
     let local_store = Arc::new(LocalFileSystem::new_with_prefix(temp_dir.path()).unwrap());
 
     // Use in-memory SQLite database for tests (fast, isolated, no file cleanup needed)
-    use sqlx::AnyPool;
     use sqlx::any::AnyPoolOptions;
-    
+    use sqlx::AnyPool;
+
     // Use in-memory database for tests (not recovery-related, so memory is appropriate)
     // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
     let db_url = "sqlite::memory:";
-    
+
     let any_pool = AnyPoolOptions::new()
         .max_connections(1)
         .connect(db_url)
         .await
         .unwrap();
-    
+
     // Migrations are auto-applied in new()
     let repository = Arc::new(SqlBlobRepository::new(any_pool).await.unwrap());
 
@@ -115,7 +117,10 @@ async fn test_upload_and_download() {
     assert_eq!(metadata.sha256.len(), 64);
 
     // Download
-    let downloaded = service.download_blob(&ctx, &metadata.blob_id).await.unwrap();
+    let downloaded = service
+        .download_blob(&ctx, &metadata.blob_id)
+        .await
+        .unwrap();
     assert_eq!(downloaded, data);
 }
 
@@ -236,10 +241,7 @@ async fn test_list_blobs() {
         blob_group: Some("even".to_string()),
         ..Default::default()
     };
-    let (blobs, total) = service
-        .list_blobs(&ctx, &filters, 10, 1)
-        .await
-        .unwrap();
+    let (blobs, total) = service.list_blobs(&ctx, &filters, 10, 1).await.unwrap();
 
     assert_eq!(total, 2);
     assert_eq!(blobs.len(), 2);
@@ -273,7 +275,10 @@ async fn test_delete_blob() {
 
     // Verify deleted
     assert!(service.get_metadata(&ctx, &metadata.blob_id).await.is_err());
-    assert!(service.download_blob(&ctx, &metadata.blob_id).await.is_err());
+    assert!(service
+        .download_blob(&ctx, &metadata.blob_id)
+        .await
+        .is_err());
 }
 
 #[tokio::test]
@@ -296,7 +301,10 @@ async fn test_empty_data_error() {
         .await;
 
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), plexspaces_blob::BlobError::InvalidInput(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        plexspaces_blob::BlobError::InvalidInput(_)
+    ));
 }
 
 #[tokio::test]
@@ -396,8 +404,14 @@ async fn test_multi_tenancy_isolation() {
     assert!(!blobs.iter().any(|b| b.blob_id == metadata1.blob_id));
 
     // Try to access tenant-1 blob from tenant-2 context (should fail)
-    assert!(service.get_metadata(&ctx2, &metadata1.blob_id).await.is_err());
-    assert!(service.download_blob(&ctx2, &metadata1.blob_id).await.is_err());
+    assert!(service
+        .get_metadata(&ctx2, &metadata1.blob_id)
+        .await
+        .is_err());
+    assert!(service
+        .download_blob(&ctx2, &metadata1.blob_id)
+        .await
+        .is_err());
 }
 
 // =============================================================================
@@ -440,7 +454,7 @@ fn test_error_display() {
 
 /// Test that stale metadata (blob in DB but not in object store) is detected
 /// and cleaned up during deduplication, allowing fresh upload to proceed.
-/// 
+///
 /// This simulates the scenario where:
 /// 1. A blob is uploaded and exists in both DB and object store
 /// 2. The object store is cleared (e.g., MinIO restart) but DB metadata remains
@@ -471,7 +485,10 @@ async fn test_stale_metadata_cleanup_during_deduplication() {
     let original_blob_id = metadata1.blob_id.clone();
 
     // Verify blob exists and can be downloaded
-    let downloaded = service.download_blob(&ctx, &original_blob_id).await.unwrap();
+    let downloaded = service
+        .download_blob(&ctx, &original_blob_id)
+        .await
+        .unwrap();
     assert_eq!(downloaded, data);
 
     // Step 2: Delete the blob file from object store DIRECTLY (simulating MinIO restart)
@@ -491,7 +508,10 @@ async fn test_stale_metadata_cleanup_during_deduplication() {
 
     // Download should now fail (blob missing from object store)
     let download_result = service.download_blob(&ctx, &original_blob_id).await;
-    assert!(download_result.is_err(), "Download should fail - blob missing from object store");
+    assert!(
+        download_result.is_err(),
+        "Download should fail - blob missing from object store"
+    );
 
     // Step 3: Upload same content again - should detect stale metadata and clean up
     let metadata2 = service
@@ -516,7 +536,10 @@ async fn test_stale_metadata_cleanup_during_deduplication() {
     );
 
     // Step 4: Verify the new blob works correctly
-    let downloaded2 = service.download_blob(&ctx, &metadata2.blob_id).await.unwrap();
+    let downloaded2 = service
+        .download_blob(&ctx, &metadata2.blob_id)
+        .await
+        .unwrap();
     assert_eq!(downloaded2, data);
 
     // Step 5: Verify the stale metadata was cleaned up
@@ -555,7 +578,10 @@ async fn test_blob_operations_by_name() {
     assert_eq!(metadata.name, blob_name);
 
     // Download by name
-    let downloaded = service.download_blob_by_name(&ctx, blob_name).await.unwrap();
+    let downloaded = service
+        .download_blob_by_name(&ctx, blob_name)
+        .await
+        .unwrap();
     assert_eq!(downloaded, data);
 
     // Get metadata by name

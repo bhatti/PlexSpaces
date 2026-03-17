@@ -32,15 +32,15 @@
 //!        └─ Health checks
 //! ```
 
-use crate::{Application, ApplicationError};
-use plexspaces_core::{Service, ApplicationManager as ApplicationManagerTrait};
 use crate::application_trait::ApplicationNode;
+use crate::{Application, ApplicationError};
+use async_trait::async_trait;
+use plexspaces_core::{ApplicationManager as ApplicationManagerTrait, Service};
 use plexspaces_proto::v1::application::{ApplicationState, HealthStatus};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{timeout, Duration};
-use async_trait::async_trait;
 
 /// Application instance wrapper
 struct ApplicationInstance {
@@ -86,6 +86,84 @@ impl Service for ApplicationManagerImpl {
 }
 
 impl ApplicationManagerImpl {
+    fn default_application_metrics(
+        tracked_actor_count: u32,
+        tracked_supervisor_count: u32,
+        uptime_seconds: u64,
+    ) -> plexspaces_proto::application::v1::ApplicationMetrics {
+        let mut actor_counts = HashMap::new();
+        if tracked_actor_count > 0 {
+            actor_counts.insert("total".to_string(), tracked_actor_count as u64);
+        }
+
+        plexspaces_proto::application::v1::ApplicationMetrics {
+            actor_counts,
+            supervisor_count: tracked_supervisor_count,
+            uptime_seconds,
+            message_count: 0,
+            error_count: 0,
+            counter_metrics: HashMap::new(),
+            latency_totals_ms: HashMap::new(),
+            latency_max_ms: HashMap::new(),
+            latency_samples: HashMap::new(),
+        }
+    }
+
+    fn sync_tracked_counts_into_metrics(
+        metrics: &mut plexspaces_proto::application::v1::ApplicationMetrics,
+        tracked_actor_count: u32,
+        tracked_supervisor_count: u32,
+    ) {
+        metrics.supervisor_count = tracked_supervisor_count;
+        if tracked_actor_count > 0 {
+            metrics
+                .actor_counts
+                .insert("total".to_string(), tracked_actor_count as u64);
+        } else {
+            metrics.actor_counts.remove("total");
+        }
+    }
+
+    fn merge_u64_maps(
+        target: &mut HashMap<String, u64>,
+        delta: &HashMap<String, u64>,
+        merge: impl Fn(u64, u64) -> u64,
+    ) {
+        for (key, value) in delta {
+            let entry = target.entry(key.clone()).or_insert(0);
+            *entry = merge(*entry, *value);
+        }
+    }
+
+    fn merge_application_metrics_in_place(
+        target: &mut plexspaces_proto::application::v1::ApplicationMetrics,
+        delta: &plexspaces_proto::application::v1::ApplicationMetrics,
+    ) {
+        Self::merge_u64_maps(&mut target.actor_counts, &delta.actor_counts, |a, b| a + b);
+        target.supervisor_count = target.supervisor_count.max(delta.supervisor_count);
+        target.uptime_seconds = target.uptime_seconds.max(delta.uptime_seconds);
+        target.message_count += delta.message_count;
+        target.error_count += delta.error_count;
+        Self::merge_u64_maps(
+            &mut target.counter_metrics,
+            &delta.counter_metrics,
+            |a, b| a + b,
+        );
+        Self::merge_u64_maps(
+            &mut target.latency_totals_ms,
+            &delta.latency_totals_ms,
+            |a, b| a + b,
+        );
+        Self::merge_u64_maps(&mut target.latency_max_ms, &delta.latency_max_ms, |a, b| {
+            a.max(b)
+        });
+        Self::merge_u64_maps(
+            &mut target.latency_samples,
+            &delta.latency_samples,
+            |a, b| a + b,
+        );
+    }
+
     /// Create new application manager
     pub fn new() -> Self {
         Self {
@@ -102,7 +180,6 @@ impl ApplicationManagerImpl {
         let mut ctx = self.node_context.write().await;
         *ctx = Some(node_context);
     }
-
 
     /// Check if node context is set
     pub async fn has_node_context(&self) -> bool {
@@ -145,9 +222,10 @@ impl ApplicationManagerImpl {
     /// * `Err(ApplicationError)` - Application with same name already registered
     pub async fn register(&self, app: Box<dyn Application>) -> Result<(), ApplicationError> {
         // Use empty tenant_id/namespace - should come from API request via register_with_metadata
-        self.register_with_metadata(app, String::new(), String::new()).await
+        self.register_with_metadata(app, String::new(), String::new())
+            .await
     }
-    
+
     /// Register an application with namespace and tenant_id
     ///
     /// ## Arguments
@@ -182,7 +260,7 @@ impl ApplicationManagerImpl {
         // Store tenant_id/namespace in WasmApplication if it's a WasmApplication
         // This allows actors to use API-provided tenant_id/namespace instead of defaults
         // We'll set it in start() instead since we can't mutate here
-        
+
         apps.insert(
             name.clone(),
             ApplicationInstance {
@@ -206,7 +284,7 @@ impl ApplicationManagerImpl {
                 // Unregistration will be handled by the node crate's object_registry_helpers.
                 // This is a placeholder - the actual unregistration happens in the node crate.
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(application = %name, "Application unregistered (object-registry unregistration handled by node crate)");
+                    tracing::debug!(application = %name, "Application unregistered (object-registry unregistration handled by node crate)");
                 }
             }
         }
@@ -246,8 +324,9 @@ impl ApplicationManagerImpl {
         let startup_start = std::time::Instant::now();
         metrics::counter!("plexspaces_application_startup_total",
             "application" => name.to_string()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         tracing::info!(
             application = %name,
             version = %instance.app.version(),
@@ -260,7 +339,7 @@ impl ApplicationManagerImpl {
         // Get tenant_id/namespace from ApplicationInstance (stored during registration)
         let tenant_id = instance.tenant_id.clone();
         let namespace = instance.namespace.clone();
-        
+
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
                 application = %name,
@@ -270,7 +349,7 @@ impl ApplicationManagerImpl {
                 "Application starting (tenant_id/namespace from registration); calling start()"
             );
         }
-        
+
         // Get node context (must be set before calling start)
         let node_context = {
             let ctx = self.node_context.read().await;
@@ -282,11 +361,11 @@ impl ApplicationManagerImpl {
             Ok(()) => {
                 instance.state = ApplicationState::ApplicationStateRunning;
                 instance.started_at = Some(std::time::Instant::now());
-                
+
                 // Get actor count for metrics logging
                 let actor_count = instance.tracked_actor_count;
                 let supervisor_count = instance.tracked_supervisor_count;
-                
+
                 // Phase 3: Application Facet Metrics - Aggregate facet metrics at application level
                 // Note: Facet counts are tracked at actor level, but we can aggregate here
                 // For now, we log that facets are tracked at actor level
@@ -298,29 +377,31 @@ impl ApplicationManagerImpl {
                     supervisor_count = supervisor_count,
                     "Application started successfully"
                 );
-                
+
                 // Phase 3: Application Facet Metrics - Record aggregated metrics
                 let startup_duration = startup_start.elapsed();
                 metrics::histogram!("plexspaces_application_startup_duration_seconds",
                     "application" => name.to_string()
-                ).record(startup_duration.as_secs_f64());
+                )
+                .record(startup_duration.as_secs_f64());
                 metrics::counter!("plexspaces_application_startup_success_total",
                     "application" => name.to_string()
-                ).increment(1);
-                
+                )
+                .increment(1);
+
                 // Log metrics
                 if actor_count > 0 || supervisor_count > 0 {
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        application = %name,
-                        actor_count = actor_count,
-                        supervisor_count = supervisor_count,
-                        duration_ms = startup_duration.as_millis(),
-                        "Application metrics after startup"
-                    );
+                        tracing::debug!(
+                            application = %name,
+                            actor_count = actor_count,
+                            supervisor_count = supervisor_count,
+                            duration_ms = startup_duration.as_millis(),
+                            "Application metrics after startup"
+                        );
                     }
                 }
-                
+
                 Ok(())
             }
             Err(e) => {
@@ -328,12 +409,14 @@ impl ApplicationManagerImpl {
                 let startup_duration = startup_start.elapsed();
                 metrics::histogram!("plexspaces_application_startup_duration_seconds",
                     "application" => name.to_string()
-                ).record(startup_duration.as_secs_f64());
+                )
+                .record(startup_duration.as_secs_f64());
                 metrics::counter!("plexspaces_application_startup_errors_total",
                     "application" => name.to_string(),
                     "error_type" => format!("{:?}", e)
-                ).increment(1);
-                
+                )
+                .increment(1);
+
                 tracing::error!(
                     application = %name,
                     error = %e,
@@ -377,7 +460,8 @@ impl ApplicationManagerImpl {
             if tracing::enabled!(tracing::Level::INFO) {
                 tracing::info!(
                     "Application '{}' is in state {:?}, expected Running",
-                    name, instance.state
+                    name,
+                    instance.state
                 );
             }
             return Ok(()); // Already stopped
@@ -391,42 +475,45 @@ impl ApplicationManagerImpl {
 
         // Transition to Stopping
         instance.state = ApplicationState::ApplicationStateStopping;
-        
+
         // Get metrics before stopping
         let actor_count = instance.tracked_actor_count;
         let supervisor_count = instance.tracked_supervisor_count;
-        
+
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            application = %name,
-            state = ?instance.state,
-            actor_count = actor_count,
-            supervisor_count = supervisor_count,
-            "Application state transition: Running -> Stopping"
-        );
+            tracing::debug!(
+                application = %name,
+                state = ?instance.state,
+                actor_count = actor_count,
+                supervisor_count = supervisor_count,
+                "Application state transition: Running -> Stopping"
+            );
         }
 
         // OBSERVABILITY: Record metrics for application shutdown (Phase 8)
         let shutdown_start = std::time::Instant::now();
         metrics::counter!("plexspaces_application_shutdown_total",
             "application" => name.to_string()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         // Call application's stop() method with timeout
         match timeout(timeout_duration, instance.app.stop()).await {
             Ok(Ok(())) => {
                 instance.state = ApplicationState::ApplicationStateStopped;
                 instance.stopped_at = Some(std::time::Instant::now());
-                
+
                 // Phase 3: Application Facet Metrics - Record aggregated shutdown metrics
                 let shutdown_duration = shutdown_start.elapsed();
                 metrics::histogram!("plexspaces_application_shutdown_duration_seconds",
                     "application" => name.to_string()
-                ).record(shutdown_duration.as_secs_f64());
+                )
+                .record(shutdown_duration.as_secs_f64());
                 metrics::counter!("plexspaces_application_shutdown_success_total",
                     "application" => name.to_string()
-                ).increment(1);
-                
+                )
+                .increment(1);
+
                 tracing::info!(
                     application = %name,
                     state = ?instance.state,
@@ -435,7 +522,7 @@ impl ApplicationManagerImpl {
                     duration_ms = shutdown_duration.as_millis(),
                     "Application stopped successfully"
                 );
-                
+
                 Ok(())
             }
             Ok(Err(e)) => {
@@ -443,12 +530,14 @@ impl ApplicationManagerImpl {
                 let shutdown_duration = shutdown_start.elapsed();
                 metrics::histogram!("plexspaces_application_shutdown_duration_seconds",
                     "application" => name.to_string()
-                ).record(shutdown_duration.as_secs_f64());
+                )
+                .record(shutdown_duration.as_secs_f64());
                 metrics::counter!("plexspaces_application_shutdown_errors_total",
                     "application" => name.to_string(),
                     "error_type" => format!("{:?}", e)
-                ).increment(1);
-                
+                )
+                .increment(1);
+
                 tracing::error!(
                     application = %name,
                     error = %e,
@@ -465,12 +554,14 @@ impl ApplicationManagerImpl {
                 let shutdown_duration = shutdown_start.elapsed();
                 metrics::histogram!("plexspaces_application_shutdown_duration_seconds",
                     "application" => name.to_string()
-                ).record(shutdown_duration.as_secs_f64());
+                )
+                .record(shutdown_duration.as_secs_f64());
                 metrics::counter!("plexspaces_application_shutdown_errors_total",
                     "application" => name.to_string(),
                     "error_type" => "timeout"
-                ).increment(1);
-                
+                )
+                .increment(1);
+
                 tracing::error!(
                     application = %name,
                     timeout_seconds = timeout_duration.as_secs(),
@@ -516,7 +607,12 @@ impl ApplicationManagerImpl {
                 let actor_count = inst.tracked_actor_count;
                 let supervisor_count = inst.tracked_supervisor_count;
                 if tracing::enabled!(tracing::Level::INFO) {
-                    tracing::info!("   → Stopping '{}' (actors: {}, supervisors: {})", name, actor_count, supervisor_count);
+                    tracing::info!(
+                        "   → Stopping '{}' (actors: {}, supervisors: {})",
+                        name,
+                        actor_count,
+                        supervisor_count
+                    );
                 }
                 name.clone()
             })
@@ -539,7 +635,12 @@ impl ApplicationManagerImpl {
                 Ok(()) => {
                     stopped_count += 1;
                     if tracing::enabled!(tracing::Level::INFO) {
-                        tracing::info!("   ✓ Stopped '{}' ({}/{})", name, stopped_count, app_names.len());
+                        tracing::info!(
+                            "   ✓ Stopped '{}' ({}/{})",
+                            name,
+                            stopped_count,
+                            app_names.len()
+                        );
                     }
                 }
                 Err(e) => {
@@ -583,7 +684,6 @@ impl ApplicationManagerImpl {
 
         Ok(instance.app.health_check().await)
     }
-
 
     /// Unregister an application
     ///
@@ -636,9 +736,6 @@ impl ApplicationManagerImpl {
     /// * `name` - Application name
     /// * `metrics` - Updated metrics
     ///
-    /// ## Note
-    /// ApplicationMetrics proto has: actor_count, supervisor_count, uptime_seconds
-    /// For message_count and error_count, use ApplicationStatistics instead (future enhancement)
     pub async fn update_metrics(
         &self,
         name: &str,
@@ -651,28 +748,81 @@ impl ApplicationManagerImpl {
             .ok_or_else(|| ApplicationError::Other(format!("Application '{}' not found", name)))?;
 
         // Update tracked counts from metrics
-        let old_actor_count = instance.tracked_actor_count;
         let old_supervisor_count = instance.tracked_supervisor_count;
-        instance.tracked_actor_count = metrics.actor_count;
+        let old_actor_count = instance.tracked_actor_count;
+        instance.tracked_actor_count = metrics
+            .actor_counts
+            .get("total")
+            .copied()
+            .unwrap_or_else(|| metrics.actor_counts.values().copied().sum::<u64>())
+            as u32;
         instance.tracked_supervisor_count = metrics.supervisor_count;
-        instance.metrics = Some(metrics.clone());
-        
+        let mut stored_metrics = metrics.clone();
+        Self::sync_tracked_counts_into_metrics(
+            &mut stored_metrics,
+            instance.tracked_actor_count,
+            instance.tracked_supervisor_count,
+        );
+        instance.metrics = Some(stored_metrics.clone());
+
         // Log metrics update
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            application = %name,
-            actor_count = metrics.actor_count,
-            supervisor_count = metrics.supervisor_count,
-            uptime_seconds = metrics.uptime_seconds,
-            actor_count_changed = old_actor_count != metrics.actor_count,
-            supervisor_count_changed = old_supervisor_count != metrics.supervisor_count,
-            "Application metrics updated"
-        );
+            tracing::debug!(
+                application = %name,
+                actor_count = instance.tracked_actor_count,
+                supervisor_count = stored_metrics.supervisor_count,
+                uptime_seconds = stored_metrics.uptime_seconds,
+                message_count = stored_metrics.message_count,
+                error_count = stored_metrics.error_count,
+                actor_count_changed = old_actor_count != instance.tracked_actor_count,
+                supervisor_count_changed = old_supervisor_count != stored_metrics.supervisor_count,
+                "Application metrics updated"
+            );
         }
-        
+
         Ok(())
     }
-    
+
+    /// Merge node-local application metrics into the stored snapshot.
+    pub async fn merge_metrics(
+        &self,
+        name: &str,
+        metrics: plexspaces_proto::application::v1::ApplicationMetrics,
+    ) -> Result<plexspaces_proto::application::v1::ApplicationMetrics, ApplicationError> {
+        let mut apps = self.applications.write().await;
+        let instance = apps
+            .get_mut(name)
+            .ok_or_else(|| ApplicationError::Other(format!("Application '{}' not found", name)))?;
+
+        let uptime_seconds = if let Some(started_at) = instance.started_at {
+            started_at.elapsed().as_secs()
+        } else {
+            instance.deployed_at.elapsed().as_secs()
+        };
+        let mut stored_metrics = instance.metrics.clone().unwrap_or_else(|| {
+            Self::default_application_metrics(
+                instance.tracked_actor_count,
+                instance.tracked_supervisor_count,
+                uptime_seconds,
+            )
+        });
+        Self::merge_application_metrics_in_place(&mut stored_metrics, &metrics);
+        stored_metrics.uptime_seconds = uptime_seconds;
+        instance.tracked_actor_count = stored_metrics
+            .actor_counts
+            .get("total")
+            .copied()
+            .unwrap_or_else(|| stored_metrics.actor_counts.values().copied().sum::<u64>())
+            as u32;
+        Self::sync_tracked_counts_into_metrics(
+            &mut stored_metrics,
+            instance.tracked_actor_count,
+            instance.tracked_supervisor_count,
+        );
+        instance.metrics = Some(stored_metrics.clone());
+        Ok(stored_metrics)
+    }
+
     /// Update tracked actor count for an application
     ///
     /// ## Purpose
@@ -681,35 +831,43 @@ impl ApplicationManagerImpl {
     /// ## Arguments
     /// * `name` - Application name
     /// * `actor_count` - New actor count
-    pub async fn update_actor_count(&self, name: &str, actor_count: u32) -> Result<(), ApplicationError> {
+    pub async fn update_actor_count(
+        &self,
+        name: &str,
+        actor_count: u32,
+    ) -> Result<(), ApplicationError> {
         let mut apps = self.applications.write().await;
         let instance = apps
             .get_mut(name)
             .ok_or_else(|| ApplicationError::Other(format!("Application '{}' not found", name)))?;
-        
+
         let old_count = instance.tracked_actor_count;
         instance.tracked_actor_count = actor_count;
-        
+
         // Update metrics if they exist
         if let Some(ref mut metrics) = instance.metrics {
-            metrics.actor_count = actor_count;
+            Self::sync_tracked_counts_into_metrics(
+                metrics,
+                instance.tracked_actor_count,
+                instance.tracked_supervisor_count,
+            );
         }
-        
+
         // Log metrics update
         if old_count != actor_count {
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                application = %name,
-                old_count = old_count,
-                new_count = actor_count,
-                "Actor count updated"
-            );
+                tracing::debug!(
+                    application = %name,
+                    old_count = old_count,
+                    new_count = actor_count,
+                    "Actor count updated"
+                );
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Update tracked supervisor count for an application
     ///
     /// ## Purpose
@@ -718,32 +876,40 @@ impl ApplicationManagerImpl {
     /// ## Arguments
     /// * `name` - Application name
     /// * `supervisor_count` - New supervisor count
-    pub async fn update_supervisor_count(&self, name: &str, supervisor_count: u32) -> Result<(), ApplicationError> {
+    pub async fn update_supervisor_count(
+        &self,
+        name: &str,
+        supervisor_count: u32,
+    ) -> Result<(), ApplicationError> {
         let mut apps = self.applications.write().await;
         let instance = apps
             .get_mut(name)
             .ok_or_else(|| ApplicationError::Other(format!("Application '{}' not found", name)))?;
-        
+
         let old_count = instance.tracked_supervisor_count;
         instance.tracked_supervisor_count = supervisor_count;
-        
+
         // Update metrics if they exist
         if let Some(ref mut metrics) = instance.metrics {
-            metrics.supervisor_count = supervisor_count;
+            Self::sync_tracked_counts_into_metrics(
+                metrics,
+                instance.tracked_actor_count,
+                instance.tracked_supervisor_count,
+            );
         }
-        
+
         // Log metrics update
         if old_count != supervisor_count {
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                application = %name,
-                old_count = old_count,
-                new_count = supervisor_count,
-                "Supervisor count updated"
-            );
+                tracing::debug!(
+                    application = %name,
+                    old_count = old_count,
+                    new_count = supervisor_count,
+                    "Supervisor count updated"
+                );
             }
         }
-        
+
         Ok(())
     }
 
@@ -760,7 +926,10 @@ impl ApplicationManagerImpl {
     /// This method requires node-specific types (SpecApplication, WasmApplication).
     /// For core crate, this always returns None. Node crate provides an extension
     /// method that handles the downcasting.
-    pub async fn get_application_spec(&self, _name: &str) -> Option<plexspaces_proto::application::v1::ApplicationSpec> {
+    pub async fn get_application_spec(
+        &self,
+        _name: &str,
+    ) -> Option<plexspaces_proto::application::v1::ApplicationSpec> {
         // Core crate doesn't know about node-specific application types
         // Node crate can provide an extension trait for this functionality
         None
@@ -807,9 +976,12 @@ impl ApplicationManagerImpl {
         let instance = apps.get(name)?;
         Some((instance.namespace.clone(), instance.tenant_id.clone()))
     }
-    
+
     /// Get application information (internal implementation)
-    async fn get_application_info_impl(&self, name: &str) -> Option<plexspaces_proto::application::v1::ApplicationInfo> {
+    async fn get_application_info_impl(
+        &self,
+        name: &str,
+    ) -> Option<plexspaces_proto::application::v1::ApplicationInfo> {
         use plexspaces_proto::application::v1::ApplicationInfo;
         use prost_types::Timestamp;
 
@@ -821,13 +993,27 @@ impl ApplicationManagerImpl {
         // Once an application is registered, it's in active state
         use plexspaces_proto::application::v1::ApplicationStatus as ProtoApplicationStatus;
         let status = match instance.state {
-            ApplicationState::ApplicationStateUnspecified => ProtoApplicationStatus::ApplicationStatusUnspecified,
-            ApplicationState::ApplicationStateCreated => ProtoApplicationStatus::ApplicationStatusRunning, // Created maps to Running (active by default)
-            ApplicationState::ApplicationStateStarting => ProtoApplicationStatus::ApplicationStatusStarting,
-            ApplicationState::ApplicationStateRunning => ProtoApplicationStatus::ApplicationStatusRunning,
-            ApplicationState::ApplicationStateStopping => ProtoApplicationStatus::ApplicationStatusStopping,
-            ApplicationState::ApplicationStateStopped => ProtoApplicationStatus::ApplicationStatusStopped,
-            ApplicationState::ApplicationStateFailed => ProtoApplicationStatus::ApplicationStatusFailed,
+            ApplicationState::ApplicationStateUnspecified => {
+                ProtoApplicationStatus::ApplicationStatusUnspecified
+            }
+            ApplicationState::ApplicationStateCreated => {
+                ProtoApplicationStatus::ApplicationStatusRunning
+            } // Created maps to Running (active by default)
+            ApplicationState::ApplicationStateStarting => {
+                ProtoApplicationStatus::ApplicationStatusStarting
+            }
+            ApplicationState::ApplicationStateRunning => {
+                ProtoApplicationStatus::ApplicationStatusRunning
+            }
+            ApplicationState::ApplicationStateStopping => {
+                ProtoApplicationStatus::ApplicationStatusStopping
+            }
+            ApplicationState::ApplicationStateStopped => {
+                ProtoApplicationStatus::ApplicationStatusStopped
+            }
+            ApplicationState::ApplicationStateFailed => {
+                ProtoApplicationStatus::ApplicationStatusFailed
+            }
         };
 
         // Calculate deployed_at timestamp
@@ -850,18 +1036,19 @@ impl ApplicationManagerImpl {
             } else {
                 instance.deployed_at.elapsed().as_secs()
             };
-            Some(plexspaces_proto::application::v1::ApplicationMetrics {
-                actor_count: instance.tracked_actor_count,
-                supervisor_count: instance.tracked_supervisor_count,
+            Some(Self::default_application_metrics(
+                instance.tracked_actor_count,
+                instance.tracked_supervisor_count,
                 uptime_seconds,
-            })
+            ))
         });
-        
+
         // Record metrics for application info retrieval
         let name_clone = name.to_string();
         metrics::counter!("plexspaces_node_application_info_requests_total",
             "application_name" => name_clone
-        ).increment(1);
+        )
+        .increment(1);
 
         Some(ApplicationInfo {
             application_id: name.to_string(), // Use name as ID for now
@@ -879,29 +1066,57 @@ impl ApplicationManagerImpl {
 // Implement ApplicationManager trait
 #[async_trait]
 impl ApplicationManagerTrait for ApplicationManagerImpl {
-    async fn get_state(&self, name: &str) -> Option<plexspaces_proto::v1::application::ApplicationState> {
+    async fn get_state(
+        &self,
+        name: &str,
+    ) -> Option<plexspaces_proto::v1::application::ApplicationState> {
         let apps = self.applications.read().await;
         apps.get(name).map(|inst| inst.state.clone())
     }
-    
+
     fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync> {
         self
     }
-    
+
     async fn list_applications(&self) -> Vec<String> {
         let apps = self.applications.read().await;
         apps.keys().cloned().collect()
     }
-    
+
     async fn is_shutdown_requested(&self) -> bool {
         *self.shutdown_requested.read().await
     }
-    
-    async fn get_application_info(&self, name: &str) -> Option<plexspaces_proto::application::v1::ApplicationInfo> {
+
+    async fn get_application_info(
+        &self,
+        name: &str,
+    ) -> Option<plexspaces_proto::application::v1::ApplicationInfo> {
         self.get_application_info_impl(name).await
     }
-    
-    async fn get_node_context(&self) -> Option<std::sync::Arc<dyn plexspaces_core::ApplicationNode>> {
+
+    async fn get_application_metrics(
+        &self,
+        name: &str,
+    ) -> Option<plexspaces_proto::application::v1::ApplicationMetrics> {
+        self.get_application_info_impl(name)
+            .await
+            .and_then(|info| info.metrics)
+    }
+
+    async fn merge_application_metrics(
+        &self,
+        name: &str,
+        metrics: plexspaces_proto::application::v1::ApplicationMetrics,
+    ) -> Result<(), String> {
+        self.merge_metrics(name, metrics)
+            .await
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    async fn get_node_context(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_core::ApplicationNode>> {
         // ApplicationNode trait is defined in both application_trait and core
         // They are the same trait, but Rust treats them as different types
         // We need to return the core version for the trait method
@@ -913,8 +1128,7 @@ impl ApplicationManagerTrait for ApplicationManagerImpl {
 }
 
 // Add helper method to ApplicationManagerImpl for re-registering behaviors
-impl ApplicationManagerImpl {
-}
+impl ApplicationManagerImpl {}
 
 impl Default for ApplicationManagerImpl {
     fn default() -> Self {
@@ -986,7 +1200,7 @@ mod tests {
         async fn health_check(&self) -> HealthStatus {
             HealthStatus::HealthStatusHealthy
         }
-        
+
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -1265,7 +1479,10 @@ mod tests {
 
         manager.register(app).await.unwrap();
         manager.start("test-app").await.unwrap();
-        manager.stop("test-app", Duration::from_secs(5)).await.unwrap();
+        manager
+            .stop("test-app", Duration::from_secs(5))
+            .await
+            .unwrap();
 
         // Unregister should succeed for stopped application
         manager.unregister("test-app").await.unwrap();
@@ -1319,10 +1536,7 @@ mod tests {
 
         let result = manager.unregister("nonexistent").await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("not found"));
+        assert!(result.unwrap_err().to_string().contains("not found"));
     }
 
     /// Test: Update application metrics
@@ -1349,20 +1563,161 @@ mod tests {
 
         // Update metrics
         let metrics = plexspaces_proto::application::v1::ApplicationMetrics {
-            actor_count: 5,
+            actor_counts: HashMap::from([("leader".to_string(), 1), ("worker".to_string(), 4)]),
             supervisor_count: 2,
             uptime_seconds: 100,
+            message_count: 42,
+            error_count: 3,
+            counter_metrics: HashMap::from([("tuple_operations".to_string(), 77)]),
+            latency_totals_ms: HashMap::from([("compute".to_string(), 123)]),
+            latency_max_ms: HashMap::from([("compute".to_string(), 17)]),
+            latency_samples: HashMap::from([("compute".to_string(), 9)]),
         };
 
-        manager.update_metrics("test-app", metrics.clone()).await.unwrap();
+        manager
+            .update_metrics("test-app", metrics.clone())
+            .await
+            .unwrap();
 
         // Verify metrics are stored
         let app_info = manager.get_application_info("test-app").await.unwrap();
         assert!(app_info.metrics.is_some());
         let stored_metrics = app_info.metrics.unwrap();
         assert_eq!(stored_metrics.uptime_seconds, 100);
-        assert_eq!(stored_metrics.actor_count, 5);
+        assert_eq!(stored_metrics.actor_counts.get("leader"), Some(&1));
+        assert_eq!(stored_metrics.actor_counts.get("worker"), Some(&4));
+        assert_eq!(stored_metrics.actor_counts.get("total"), Some(&5));
         assert_eq!(stored_metrics.supervisor_count, 2);
+        assert_eq!(stored_metrics.message_count, 42);
+        assert_eq!(stored_metrics.error_count, 3);
+        assert_eq!(
+            stored_metrics.counter_metrics.get("tuple_operations"),
+            Some(&77)
+        );
+    }
+
+    /// Test: Merge application metrics accumulates counters and preserves maxima.
+    #[tokio::test]
+    async fn test_merge_metrics_accumulates_extensible_metrics() {
+        let manager = ApplicationManagerImpl::new();
+        let node = Arc::new(MockNode {
+            id: "test-node".to_string(),
+            addr: "0.0.0.0:9000".to_string(),
+        });
+
+        manager.set_node_context(node).await;
+
+        let app = Box::new(MockApplication {
+            name: "test-app".to_string(),
+            version: "0.1.0".to_string(),
+            should_fail_start: false,
+            should_fail_stop: false,
+            stop_delay: Duration::from_secs(0),
+        });
+
+        manager.register(app).await.unwrap();
+        manager.start("test-app").await.unwrap();
+
+        let merged = manager
+            .merge_metrics(
+                "test-app",
+                plexspaces_proto::application::v1::ApplicationMetrics {
+                    actor_counts: HashMap::from([
+                        ("leader".to_string(), 1),
+                        ("worker".to_string(), 8),
+                    ]),
+                    supervisor_count: 1,
+                    uptime_seconds: 5,
+                    message_count: 12,
+                    error_count: 1,
+                    counter_metrics: HashMap::from([
+                        ("scatter_gather_rounds".to_string(), 3),
+                        ("tuple_operations".to_string(), 18),
+                    ]),
+                    latency_totals_ms: HashMap::from([
+                        ("worker".to_string(), 90),
+                        ("worker.compute".to_string(), 30),
+                    ]),
+                    latency_max_ms: HashMap::from([
+                        ("worker".to_string(), 20),
+                        ("worker.compute".to_string(), 9),
+                    ]),
+                    latency_samples: HashMap::from([
+                        ("worker".to_string(), 6),
+                        ("worker.compute".to_string(), 6),
+                    ]),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(merged.actor_counts.get("leader"), Some(&1));
+        assert_eq!(merged.actor_counts.get("worker"), Some(&8));
+        assert_eq!(merged.actor_counts.get("total"), Some(&9));
+        assert_eq!(merged.message_count, 12);
+        assert_eq!(merged.error_count, 1);
+        assert_eq!(
+            merged.counter_metrics.get("scatter_gather_rounds"),
+            Some(&3)
+        );
+        assert_eq!(merged.counter_metrics.get("tuple_operations"), Some(&18));
+        assert_eq!(merged.latency_totals_ms.get("worker"), Some(&90));
+        assert_eq!(merged.latency_max_ms.get("worker"), Some(&20));
+        assert_eq!(merged.latency_samples.get("worker"), Some(&6));
+
+        let merged = manager
+            .merge_metrics(
+                "test-app",
+                plexspaces_proto::application::v1::ApplicationMetrics {
+                    actor_counts: HashMap::new(),
+                    supervisor_count: 0,
+                    uptime_seconds: 7,
+                    message_count: 5,
+                    error_count: 2,
+                    counter_metrics: HashMap::from([
+                        ("scatter_gather_rounds".to_string(), 2),
+                        ("tuple_operations".to_string(), 4),
+                    ]),
+                    latency_totals_ms: HashMap::from([
+                        ("worker".to_string(), 40),
+                        ("worker.compute".to_string(), 11),
+                    ]),
+                    latency_max_ms: HashMap::from([
+                        ("worker".to_string(), 24),
+                        ("worker.compute".to_string(), 6),
+                    ]),
+                    latency_samples: HashMap::from([
+                        ("worker".to_string(), 2),
+                        ("worker.compute".to_string(), 2),
+                    ]),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(merged.actor_counts.get("leader"), Some(&1));
+        assert_eq!(merged.actor_counts.get("worker"), Some(&8));
+        assert_eq!(merged.actor_counts.get("total"), Some(&9));
+        assert_eq!(merged.message_count, 17);
+        assert_eq!(merged.error_count, 3);
+        assert_eq!(
+            merged.counter_metrics.get("scatter_gather_rounds"),
+            Some(&5)
+        );
+        assert_eq!(merged.counter_metrics.get("tuple_operations"), Some(&22));
+        assert_eq!(merged.latency_totals_ms.get("worker"), Some(&130));
+        assert_eq!(merged.latency_totals_ms.get("worker.compute"), Some(&41));
+        assert_eq!(merged.latency_max_ms.get("worker"), Some(&24));
+        assert_eq!(merged.latency_max_ms.get("worker.compute"), Some(&9));
+        assert_eq!(merged.latency_samples.get("worker"), Some(&8));
+        assert_eq!(merged.latency_samples.get("worker.compute"), Some(&8));
+
+        let stored = manager.get_application_metrics("test-app").await.unwrap();
+        assert_eq!(stored.message_count, 17);
+        assert_eq!(
+            stored.counter_metrics.get("scatter_gather_rounds"),
+            Some(&5)
+        );
     }
 
     /// Test: Get application info with full details
@@ -1404,7 +1759,7 @@ mod tests {
         // Get info for running application
         // Add small delay to ensure uptime is calculated
         tokio::time::sleep(Duration::from_millis(10)).await;
-        
+
         let app_info = manager.get_application_info("test-app").await.unwrap();
         assert_eq!(
             app_info.status,
@@ -1413,6 +1768,7 @@ mod tests {
         assert!(app_info.metrics.is_some());
         let metrics = app_info.metrics.unwrap();
         assert!(metrics.uptime_seconds >= 0); // May be 0 if very fast, but should be calculated
+        assert_eq!(metrics.actor_counts.get("total"), Some(&0));
     }
 
     /// Test: Get application info for non-existent application

@@ -19,8 +19,8 @@
 //! Helper functions for working with proto types
 
 use chrono::{DateTime, Utc};
-use prost_types::Timestamp;
 use plexspaces_proto::storage::v1::BlobMetadata;
+use prost_types::Timestamp;
 
 /// Convert chrono DateTime to prost Timestamp
 pub fn datetime_to_timestamp(dt: DateTime<Utc>) -> Timestamp {
@@ -32,10 +32,7 @@ pub fn datetime_to_timestamp(dt: DateTime<Utc>) -> Timestamp {
 
 /// Convert prost Timestamp to chrono DateTime
 pub fn timestamp_to_datetime(ts: Option<Timestamp>) -> Option<DateTime<Utc>> {
-    ts.map(|t| {
-        DateTime::from_timestamp(t.seconds, t.nanos as u32)
-            .unwrap_or_else(|| Utc::now())
-    })
+    ts.map(|t| DateTime::from_timestamp(t.seconds, t.nanos as u32).unwrap_or_else(|| Utc::now()))
 }
 
 /// Get storage path for blob
@@ -44,10 +41,7 @@ pub fn get_storage_path(metadata: &BlobMetadata, prefix: &str) -> String {
     let normalized_prefix = prefix.trim_end_matches('/');
     format!(
         "{}/{}/{}/{}",
-        normalized_prefix,
-        metadata.tenant_id,
-        metadata.namespace,
-        metadata.blob_id
+        normalized_prefix, metadata.tenant_id, metadata.namespace, metadata.blob_id
     )
 }
 

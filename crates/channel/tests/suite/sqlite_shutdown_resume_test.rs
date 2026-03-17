@@ -27,9 +27,7 @@
 #[cfg(feature = "sqlite-backend")]
 mod tests {
     use plexspaces_channel::create_channel;
-    use plexspaces_proto::channel::v1::{
-        ChannelProvider, ChannelConfig, SqliteConfig,
-    };
+    use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, SqliteConfig};
     use plexspaces_proto::common::v1::Message;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -48,9 +46,13 @@ mod tests {
             name: channel_name.to_string(),
             provider: ChannelProvider::ChannelProviderSqlite as i32,
             capacity: 1000,
-            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
-            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,
-            backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
+            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce
+                as i32,
+            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo
+                as i32,
+            backend_config: Some(
+                plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config),
+            ),
             max_retries: 3,
             dlq_enabled: true,
             ..Default::default()
@@ -67,18 +69,24 @@ mod tests {
         let channel = create_channel(channel_config.clone()).await.unwrap();
 
         // Send messages
-        channel.send(Message {
-            id: "msg1".to_string(),
-            channel: "shutdown-test-1".to_string(),
-            payload: b"message 1".to_vec(),
-            ..Default::default()
-        }).await.unwrap();
-        channel.send(Message {
-            id: "msg2".to_string(),
-            channel: "shutdown-test-1".to_string(),
-            payload: b"message 2".to_vec(),
-            ..Default::default()
-        }).await.unwrap();
+        channel
+            .send(Message {
+                id: "msg1".to_string(),
+                channel: "shutdown-test-1".to_string(),
+                payload: b"message 1".to_vec(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        channel
+            .send(Message {
+                id: "msg2".to_string(),
+                channel: "shutdown-test-1".to_string(),
+                payload: b"message 2".to_vec(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
 
         // Wait for messages to be persisted
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -92,7 +100,10 @@ mod tests {
         let received = timeout(Duration::from_secs(2), channel.receive(2)).await;
         match received {
             Ok(Ok(messages)) => {
-                assert!(messages.len() >= 1, "Should receive messages before shutdown");
+                assert!(
+                    messages.len() >= 1,
+                    "Should receive messages before shutdown"
+                );
             }
             _ => {
                 // Timeout is acceptable - messages might have been processed
@@ -111,12 +122,15 @@ mod tests {
 
         // Send 3 messages
         for i in 1..=3 {
-            channel1.send(Message {
-                id: format!("msg{}", i),
-                channel: "resume-test-1".to_string(),
-                payload: format!("message {}", i).into_bytes(),
-                ..Default::default()
-            }).await.unwrap();
+            channel1
+                .send(Message {
+                    id: format!("msg{}", i),
+                    channel: "resume-test-1".to_string(),
+                    payload: format!("message {}", i).into_bytes(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
         }
 
         // Wait for messages to be persisted
@@ -139,7 +153,10 @@ mod tests {
             Ok(Ok(messages)) => {
                 // Should get msg2 and msg3, not msg1 (msg1 was acked)
                 let msg_ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
-                assert!(!msg_ids.contains(&"msg1".to_string()), "msg1 should not be redelivered (was acked)");
+                assert!(
+                    !msg_ids.contains(&"msg1".to_string()),
+                    "msg1 should not be redelivered (was acked)"
+                );
             }
             _ => {
                 // Timeout or error - acceptable for test
@@ -157,12 +174,15 @@ mod tests {
         let channel1 = create_channel(channel_config.clone()).await.unwrap();
 
         // Send message
-        channel1.send(Message {
-            id: "nack-msg".to_string(),
-            channel: "nack-resume-test-1".to_string(),
-            payload: b"nacked message".to_vec(),
-            ..Default::default()
-        }).await.unwrap();
+        channel1
+            .send(Message {
+                id: "nack-msg".to_string(),
+                channel: "nack-resume-test-1".to_string(),
+                payload: b"nacked message".to_vec(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
 
         // Wait for message to be persisted
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -201,12 +221,15 @@ mod tests {
         let channel = create_channel(channel_config).await.unwrap();
 
         // Send message
-        channel.send(Message {
-            id: "graceful-msg".to_string(),
-            channel: "graceful-test-1".to_string(),
-            payload: b"graceful message".to_vec(),
-            ..Default::default()
-        }).await.unwrap();
+        channel
+            .send(Message {
+                id: "graceful-msg".to_string(),
+                channel: "graceful-test-1".to_string(),
+                payload: b"graceful message".to_vec(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
 
         // Wait for message to be persisted
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -229,14 +252,17 @@ mod tests {
         // For in-memory SQLite, test multiple operations on same channel
         // Note: True persistence across restarts requires file-based SQLite
         let channel = create_channel(channel_config).await.unwrap();
-        
+
         // First cycle: send, receive, ack
-        channel.send(Message {
-            id: "cycle1-msg".to_string(),
-            channel: "multi-restart-test-1".to_string(),
-            payload: b"cycle 1".to_vec(),
-            ..Default::default()
-        }).await.unwrap();
+        channel
+            .send(Message {
+                id: "cycle1-msg".to_string(),
+                channel: "multi-restart-test-1".to_string(),
+                payload: b"cycle 1".to_vec(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -248,12 +274,15 @@ mod tests {
         }
 
         // Second cycle: send more, receive
-        channel.send(Message {
-            id: "cycle2-msg".to_string(),
-            channel: "multi-restart-test-1".to_string(),
-            payload: b"cycle 2".to_vec(),
-            ..Default::default()
-        }).await.unwrap();
+        channel
+            .send(Message {
+                id: "cycle2-msg".to_string(),
+                channel: "multi-restart-test-1".to_string(),
+                payload: b"cycle 2".to_vec(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -273,6 +302,9 @@ mod tests {
         // Verify stats
         let stats = channel.get_stats().await.unwrap();
         // For in-memory SQLite, messages are sent and received within same instance
-        assert!(stats.messages_sent >= 1, "Should have sent at least one message");
+        assert!(
+            stats.messages_sent >= 1,
+            "Should have sent at least one message"
+        );
     }
 }

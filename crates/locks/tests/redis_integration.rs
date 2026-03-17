@@ -38,10 +38,11 @@
 
 #[cfg(feature = "redis-backend")]
 mod tests {
-    use plexspaces_locks::{
-        redis::RedisLockManager, AcquireLockOptions, LockManager, ReleaseLockOptions, RenewLockOptions,
-    };
     use plexspaces_common::RequestContext;
+    use plexspaces_locks::{
+        redis::RedisLockManager, AcquireLockOptions, LockManager, ReleaseLockOptions,
+        RenewLockOptions,
+    };
     use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::time::{sleep, Duration};
@@ -53,12 +54,15 @@ mod tests {
 
     /// Helper to check if Redis is available and skip test with warning if not
     async fn check_redis_available() -> bool {
-        let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/".to_string());
+        let redis_url =
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/".to_string());
         match RedisLockManager::new(&redis_url).await {
             Ok(_) => true,
             Err(_) => {
                 eprintln!("⚠️  WARNING: Redis is not available. Skipping Redis test.");
-                eprintln!("   To run Redis tests, start Redis: docker run -p 6379:6379 redis:latest");
+                eprintln!(
+                    "   To run Redis tests, start Redis: docker run -p 6379:6379 redis:latest"
+                );
                 false
             }
         }
@@ -66,7 +70,8 @@ mod tests {
 
     /// Create Redis lock manager for testing
     async fn create_manager() -> RedisLockManager {
-        let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/".to_string());
+        let redis_url =
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/".to_string());
         RedisLockManager::new(&redis_url)
             .await
             .expect("Failed to create Redis lock manager")

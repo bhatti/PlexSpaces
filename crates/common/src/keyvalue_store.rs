@@ -29,8 +29,8 @@
 //! backend implementors (SQL, Redis, DynamoDB). This trait is the consumer-facing
 //! interface for actors and the WASM host runtime.
 
-use async_trait::async_trait;
 use crate::RequestContext;
+use async_trait::async_trait;
 use std::time::Duration;
 
 /// Errors from key-value store operations.
@@ -72,7 +72,8 @@ pub trait KeyValueStore: Send + Sync {
     async fn get(&self, ctx: &RequestContext, key: &str) -> KeyValueStoreResult<Option<Vec<u8>>>;
 
     /// Put key-value pair. Overwrites existing value.
-    async fn put(&self, ctx: &RequestContext, key: &str, value: Vec<u8>) -> KeyValueStoreResult<()>;
+    async fn put(&self, ctx: &RequestContext, key: &str, value: Vec<u8>)
+        -> KeyValueStoreResult<()>;
 
     /// Put key-value pair with TTL. Overwrites existing value.
     async fn put_with_ttl(
@@ -90,7 +91,11 @@ pub trait KeyValueStore: Send + Sync {
     async fn exists(&self, ctx: &RequestContext, key: &str) -> KeyValueStoreResult<bool>;
 
     /// List all keys matching prefix.
-    async fn list_keys(&self, ctx: &RequestContext, prefix: &str) -> KeyValueStoreResult<Vec<String>>;
+    async fn list_keys(
+        &self,
+        ctx: &RequestContext,
+        prefix: &str,
+    ) -> KeyValueStoreResult<Vec<String>>;
 
     /// Alias for `list_keys` (convenience method).
     async fn list(&self, ctx: &RequestContext, prefix: &str) -> KeyValueStoreResult<Vec<String>> {
@@ -108,5 +113,10 @@ pub trait KeyValueStore: Send + Sync {
     ) -> KeyValueStoreResult<bool>;
 
     /// Atomic increment by delta. Creates key with delta value if not exists.
-    async fn increment(&self, ctx: &RequestContext, key: &str, delta: i64) -> KeyValueStoreResult<i64>;
+    async fn increment(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        delta: i64,
+    ) -> KeyValueStoreResult<i64>;
 }

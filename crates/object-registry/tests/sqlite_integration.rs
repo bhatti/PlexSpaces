@@ -6,15 +6,19 @@
 
 #[cfg(feature = "sql-backend")]
 mod tests {
+    use plexspaces_common::RequestContext;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
-    use plexspaces_common::RequestContext;
     use std::sync::Arc;
 
     /// Helper to create a SQLite repository for testing
     /// Uses in-memory database for simplicity (all tests share same DB instance)
     async fn create_test_repo() -> Arc<SqliteObjectRegistryRepository> {
-        Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap())
+        Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        )
     }
 
     /// Helper to create test registration
@@ -62,7 +66,16 @@ mod tests {
 
         // Node 1 can discover all actors (cross-node discovery)
         let actors = registry1
-            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
+            .discover(
+                &ctx,
+                Some(ObjectType::ObjectTypeActor),
+                None,
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
             .await
             .unwrap();
         assert_eq!(actors.len(), 2);
@@ -71,7 +84,16 @@ mod tests {
 
         // Node 2 can discover tuplespaces
         let tuplespaces = registry2
-            .discover(&ctx, Some(ObjectType::ObjectTypeTuplespace), None, None, None, None, 0, 100)
+            .discover(
+                &ctx,
+                Some(ObjectType::ObjectTypeTuplespace),
+                None,
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
             .await
             .unwrap();
         assert_eq!(tuplespaces.len(), 1);
@@ -133,7 +155,16 @@ mod tests {
         // Verify all were registered
         let registry = ObjectRegistryImpl::new(repo.clone());
         let actors = registry
-            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
+            .discover(
+                &ctx,
+                Some(ObjectType::ObjectTypeActor),
+                None,
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
             .await
             .unwrap();
         assert_eq!(actors.len(), 3);
@@ -204,17 +235,28 @@ mod tests {
         // Register actors with different capabilities
         let registry = ObjectRegistryImpl::new(repo.clone());
 
-        let mut reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
+        let mut reg1 =
+            create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
         reg1.capabilities.push("wasm".to_string());
         registry.register(&ctx, reg1).await.unwrap();
 
-        let mut reg2 = create_test_registration("actor2@node2", ObjectType::ObjectTypeActor, "node2");
+        let mut reg2 =
+            create_test_registration("actor2@node2", ObjectType::ObjectTypeActor, "node2");
         reg2.capabilities.push("firecracker".to_string());
         registry.register(&ctx, reg2).await.unwrap();
 
         // Discover all actors (should find both)
         let all_actors = registry
-            .discover(&ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
+            .discover(
+                &ctx,
+                Some(ObjectType::ObjectTypeActor),
+                None,
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
             .await
             .unwrap();
         assert_eq!(all_actors.len(), 2);
@@ -236,19 +278,30 @@ mod tests {
         let registry = ObjectRegistryImpl::new(repo.clone());
 
         // Register in tenant1:namespace1
-        let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "namespace1".to_string());
+        let ctx1 =
+            RequestContext::new_without_auth("tenant1".to_string(), "namespace1".to_string());
         let reg1 = create_test_registration("actor1@node1", ObjectType::ObjectTypeActor, "node1");
         registry.register(&ctx1, reg1).await.unwrap();
 
         // Register in tenant2:namespace2
-        let ctx2 = RequestContext::new_without_auth("tenant2".to_string(), "namespace2".to_string());
+        let ctx2 =
+            RequestContext::new_without_auth("tenant2".to_string(), "namespace2".to_string());
         let reg2 = create_test_registration("actor2@node2", ObjectType::ObjectTypeActor, "node2");
         registry.register(&ctx2, reg2).await.unwrap();
 
         // Discover in default namespace (should not find either)
         let default_ctx = default_ctx();
         let default_actors = registry
-            .discover(&default_ctx, Some(ObjectType::ObjectTypeActor), None, None, None, None, 0, 100)
+            .discover(
+                &default_ctx,
+                Some(ObjectType::ObjectTypeActor),
+                None,
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
             .await
             .unwrap();
         assert_eq!(default_actors.len(), 0);

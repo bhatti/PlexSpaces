@@ -22,16 +22,15 @@
 //! Implements the BlobService gRPC interface for blob storage operations.
 //! This enables clients to upload, download, and manage blobs via gRPC and HTTP/REST.
 
+use crate::{helpers::datetime_to_timestamp, repository::ListFilters, BlobService};
 use chrono::{Duration, Utc};
-use crate::{BlobService, repository::ListFilters, helpers::datetime_to_timestamp};
-use plexspaces_proto::storage::v1::{
-    blob_service_server::BlobService as BlobServiceTrait,
-    DeleteBlobRequest, DeleteBlobResponse, DownloadBlobRequest, DownloadBlobResponse,
-    GeneratePresignedUrlRequest, GeneratePresignedUrlResponse, GetBlobMetadataRequest,
-    GetBlobMetadataResponse, ListBlobsRequest, ListBlobsResponse, UploadBlobRequest,
-    UploadBlobResponse,
-};
 use plexspaces_core::RequestContext;
+use plexspaces_proto::storage::v1::{
+    blob_service_server::BlobService as BlobServiceTrait, DeleteBlobRequest, DeleteBlobResponse,
+    DownloadBlobRequest, DownloadBlobResponse, GeneratePresignedUrlRequest,
+    GeneratePresignedUrlResponse, GetBlobMetadataRequest, GetBlobMetadataResponse,
+    ListBlobsRequest, ListBlobsResponse, UploadBlobRequest, UploadBlobResponse,
+};
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -49,55 +48,62 @@ impl BlobServiceImpl {
     }
 
     /// Extract RequestContext from gRPC request metadata
-    /// 
+    ///
     /// ## Security Note
     /// When JWT authentication is enabled, the AuthInterceptor removes any user-provided
     /// x-tenant-id, x-user-id, and x-user-roles headers and sets them ONLY from JWT claims.
     /// This prevents header injection attacks. These headers must come from JWT, not from client.
-    /// 
+    ///
     /// Extracts tenant_id from:
     /// 1. `x-tenant-id` header (set by JWT middleware, NOT from client)
     /// 2. `tenant_id` in request labels (fallback, only if auth disabled)
     /// 3. Error if not found (production should always have JWT)
     fn extract_context<T>(request: &Request<T>) -> Result<RequestContext, Status> {
         let metadata = request.metadata();
-        
+
         // Extract tenant_id from headers (set by JWT middleware, not from client)
         // AuthInterceptor ensures these headers come from JWT, not user input
-        let tenant_id = metadata.get("x-tenant-id")
+        let tenant_id = metadata
+            .get("x-tenant-id")
             .and_then(|v| v.to_str().ok())
-            .filter(|s| !s.is_empty())  // Reject empty strings
+            .filter(|s| !s.is_empty()) // Reject empty strings
             .or_else(|| {
                 // Fallback: check request labels (for backward compatibility when auth disabled)
                 // This is the HTTP API boundary exception
-                None  // For now, require x-tenant-id header from JWT
+                None // For now, require x-tenant-id header from JWT
             })
-            .ok_or_else(|| Status::unauthenticated("Missing x-tenant-id header. JWT authentication required."))?;
-        
+            .ok_or_else(|| {
+                Status::unauthenticated("Missing x-tenant-id header. JWT authentication required.")
+            })?;
+
         // namespace is required - must be provided in header or use default from config
-        let namespace = metadata.get("x-namespace")
+        let namespace = metadata
+            .get("x-namespace")
             .and_then(|v| v.to_str().ok())
             .filter(|s| !s.is_empty())
             .unwrap_or(""); // Default namespace (can be empty)
-        
+
         // Extract user_id from headers (set by JWT middleware, not from client)
-        let user_id = metadata.get("x-user-id")
+        let user_id = metadata
+            .get("x-user-id")
             .and_then(|v| v.to_str().ok())
             .filter(|s| !s.is_empty());
-        
-        let mut ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
-        
+
+        let mut ctx =
+            RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+
         if let Some(uid) = user_id {
             ctx = ctx.with_user_id(uid.to_string());
         }
-        
+
         Ok(ctx)
     }
 }
 
 #[tonic::async_trait]
 impl BlobServiceTrait for BlobServiceImpl {
-    type DownloadBlobStream = tokio_stream::wrappers::ReceiverStream<Result<DownloadBlobResponse, Status>>;
+    type DownloadBlobStream =
+        tokio_stream::wrappers::ReceiverStream<Result<DownloadBlobResponse, Status>>;
     /// Upload a blob
     async fn upload_blob(
         &self,
@@ -116,9 +122,9 @@ impl BlobServiceTrait for BlobServiceImpl {
         }
 
         // Convert expires_after Duration to chrono Duration
-        let expires_after = req.expires_after.map(|d| {
-            Duration::seconds(d.seconds) + Duration::nanoseconds(d.nanos as i64)
-        });
+        let expires_after = req
+            .expires_after
+            .map(|d| Duration::seconds(d.seconds) + Duration::nanoseconds(d.nanos as i64));
 
         // Upload blob (tenant_id and namespace from RequestContext)
         let metadata = self
@@ -280,11 +286,7 @@ impl BlobServiceTrait for BlobServiceImpl {
         };
 
         // Get pagination params
-        let offset = req
-            .page
-            .as_ref()
-            .map(|p| p.offset.max(0))
-            .unwrap_or(0) as i64;
+        let offset = req.page.as_ref().map(|p| p.offset.max(0)).unwrap_or(0) as i64;
         let limit = req
             .page
             .as_ref()
@@ -359,13 +361,16 @@ impl BlobServiceTrait for BlobServiceImpl {
             .unwrap_or_else(|| Duration::hours(1));
 
         // Generate presigned URL (automatically filtered by tenant_id)
-        let url = self.blob_service
+        let url = self
+            .blob_service
             .generate_presigned_url(&ctx, &req.blob_id, &req.operation, expires_after)
             .await
             .map_err(|e| Status::internal(format!("Failed to generate presigned URL: {}", e)))?;
 
         // Calculate expiration time
-        let expires_at = Some(crate::helpers::datetime_to_timestamp(Utc::now() + expires_after));
+        let expires_at = Some(crate::helpers::datetime_to_timestamp(
+            Utc::now() + expires_after,
+        ));
 
         Ok(Response::new(GeneratePresignedUrlResponse {
             url,

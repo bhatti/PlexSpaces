@@ -32,4 +32,3 @@ pub use sql::WorkflowStorage;
 
 #[cfg(feature = "ddb-backend")]
 pub use ddb::{DynamoDBWorkflowStorage, WorkflowStorageTrait};
-

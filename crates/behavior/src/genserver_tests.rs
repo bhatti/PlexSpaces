@@ -23,13 +23,11 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use plexspaces_core::{
-        Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType,
-    };
+    use plexspaces_core::{Actor, ActorContext, BehaviorContext, BehaviorError, BehaviorType};
     use plexspaces_proto::common::v1::Message;
     use std::sync::Arc;
     use ulid::Ulid;
-    
+
     /// Helper to create a test message
     fn create_test_message(payload: Vec<u8>) -> Message {
         Message {
@@ -38,7 +36,7 @@ mod tests {
             ..Default::default()
         }
     }
-    
+
     /// Helper to create a test message with message type
     fn create_test_message_with_type(payload: Vec<u8>, message_type: &str) -> Message {
         let mut msg = create_test_message(payload);
@@ -98,16 +96,24 @@ mod tests {
                         let reply_data = format!("value={}", self.value);
                         let reply = create_test_message(reply_data.into_bytes());
                         // Use ctx.send_reply() to send reply
-                        let _ = ctx.send_reply(
-                            if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) },
-                            &msg.sender_id,
-                            msg.receiver_id.clone(),
-                            reply,
-                        ).await; // Ignore errors in tests
+                        let _ = ctx
+                            .send_reply(
+                                if msg.correlation_id.is_empty() {
+                                    None
+                                } else {
+                                    Some(msg.correlation_id.as_str())
+                                },
+                                &msg.sender_id,
+                                msg.receiver_id.clone(),
+                                reply,
+                            )
+                            .await; // Ignore errors in tests
                     }
                     return Ok(());
                 } else if s == "fail" {
-                    return Err(BehaviorError::ProcessingError("Simulated error".to_string()));
+                    return Err(BehaviorError::ProcessingError(
+                        "Simulated error".to_string(),
+                    ));
                 }
             }
 
@@ -115,12 +121,18 @@ mod tests {
             if !msg.sender_id.is_empty() {
                 let reply_data = format!("Reply to: {:?}", msg.payload);
                 let reply = create_test_message(reply_data.into_bytes());
-                let _ = ctx.send_reply(
-                    if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) },
-                    &msg.sender_id,
-                    msg.receiver_id.clone(), // This actor's ID (the receiver of the original message)
-                    reply,
-                ).await; // Ignore errors in tests
+                let _ = ctx
+                    .send_reply(
+                        if msg.correlation_id.is_empty() {
+                            None
+                        } else {
+                            Some(msg.correlation_id.as_str())
+                        },
+                        &msg.sender_id,
+                        msg.receiver_id.clone(), // This actor's ID (the receiver of the original message)
+                        reply,
+                    )
+                    .await; // Ignore errors in tests
             }
             Ok(())
         }
@@ -129,22 +141,26 @@ mod tests {
         // For events, use GenEvent instead
     }
 
-
     // Helper to create test context and message
     async fn create_test_context_and_message(
         mut message: Message,
         correlation_id: Option<String>,
     ) -> (Arc<ActorContext>, Message, Arc<plexspaces_mailbox::Mailbox>) {
+        use plexspaces_core::{ActorRegistry, ServiceLocator};
         use plexspaces_mailbox::{Mailbox, MailboxConfig};
-        use plexspaces_core::{ServiceLocator, ActorRegistry};
 
         // Create a mailbox for the reply channel
-        let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string()).await.expect("Failed to create mailbox"));
+        let mailbox = Arc::new(
+            Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string())
+                .await
+                .expect("Failed to create mailbox"),
+        );
 
         // Create ServiceLocator with ActorRegistry for envelope.send_reply() to work
         use plexspaces_core::ObjectRegistry;
         use plexspaces_node::create_default_service_locator;
-        let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        let service_locator =
+            create_default_service_locator(Some("test-node".to_string()), None, None).await;
         // Create a stub ObjectRegistry for ActorRegistry (from actor_context module)
         // Note: We can't easily create a real ObjectRegistry in tests, so we'll skip ActorRegistry for now
         // and handle the case where envelope.send_reply() fails gracefully in tests
@@ -161,7 +177,7 @@ mod tests {
 
         // Set sender_id so envelope can send replies (required for GenServer handle_request)
         message.sender_id = "test-sender@test-node".to_string();
-        
+
         // Add correlation ID if provided
         if let Some(corr_id) = correlation_id {
             message.correlation_id = corr_id;
@@ -269,7 +285,8 @@ mod tests {
 
         let msg = create_test_message_with_type(b"test".to_vec(), "call");
         let correlation_id = "trace-abc-123".to_string();
-        let (ctx, msg_actual, _mailbox) = create_test_context_and_message(msg, Some(correlation_id.clone())).await;
+        let (ctx, msg_actual, _mailbox) =
+            create_test_context_and_message(msg, Some(correlation_id.clone())).await;
 
         behavior.handle_message(&*ctx, msg_actual).await.unwrap();
 
@@ -333,7 +350,7 @@ mod tests {
 
         let result = behavior.handle_message(&*ctx, msg_actual).await;
         assert!(result.is_ok()); // Cast messages are now accepted
-        
+
         // State should be mutated (cast message was processed)
         assert_eq!(behavior.value, 10);
     }

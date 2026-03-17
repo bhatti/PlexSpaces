@@ -34,10 +34,9 @@
 //! - This crate provides the management and controller implementations
 //! - Uses proto-generated types from `plexspaces_proto`
 
-
 // Application trait is defined in this crate (application_trait.rs)
 pub mod application_trait;
-pub use application_trait::{Application, ApplicationNode, ApplicationError};
+pub use application_trait::{Application, ApplicationError, ApplicationNode};
 
 // Application management modules
 pub mod application_manager;
@@ -55,23 +54,24 @@ pub use controller::ApplicationController;
 pub use plexspaces_actor::ProtoSupervisorBuilder as SupervisorBuilder;
 
 // Application implementations
-pub mod wasm_application;
 pub mod application_impl;
 pub mod application_manager_ext;
 pub mod service_wrappers;
+pub mod wasm_application;
 pub mod wasm_message_sender;
 
 // Re-export application implementations
-pub use wasm_application::WasmApplication;
 pub use application_impl::SpecApplication;
 pub use application_manager_ext::ApplicationManagerExt;
+pub use wasm_application::WasmApplication;
 
 // Re-export proto types for convenience
 pub use plexspaces_proto::application::v1::{
     ApplicationRuntimeState, ApplicationSpec, ApplicationStatus, ApplicationType,
 };
-pub use plexspaces_proto::v1::application::{ApplicationState, ApplicationStatistics, HealthStatus, ShutdownStrategy};
+pub use plexspaces_proto::v1::application::{
+    ApplicationState, ApplicationStatistics, HealthStatus, ShutdownStrategy,
+};
 
 // ApplicationManager is NOT registered in ServiceLocator.
 // It is managed directly by the application crate and accessed through Node or other application-specific APIs.
-

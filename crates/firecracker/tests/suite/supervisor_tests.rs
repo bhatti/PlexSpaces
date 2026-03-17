@@ -3,7 +3,9 @@
 //
 // Tests for VM Supervisor
 
-use plexspaces_firecracker::supervisor::{BackoffConfig, RestartPolicy, SupervisionStrategy, VmSupervisor};
+use plexspaces_firecracker::supervisor::{
+    BackoffConfig, RestartPolicy, SupervisionStrategy, VmSupervisor,
+};
 use plexspaces_firecracker::{FirecrackerVm, VmConfig};
 use std::sync::Arc;
 use std::time::Duration;
@@ -234,4 +236,3 @@ async fn test_supervision_strategy_one_for_all() {
 
     assert_eq!(supervisor.supervised_vm_count().await, 1);
 }
-

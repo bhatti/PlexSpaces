@@ -26,13 +26,18 @@
 //! - normalize_actor_id: with @ format, without @ format, different node ID
 
 use async_trait::async_trait;
-use plexspaces_actor::{Actor, ActorBuilder, ActorFactory, actor_factory_impl::ActorFactoryImpl, ActorRef};
-use plexspaces_core::{ActorId, ActorRegistry, ServiceLocator, VirtualActorManager, FacetManager, Actor as ActorTrait, BehaviorType, BehaviorError, ActorContext, MessageSender, RequestContext};
-use plexspaces_journaling::VirtualActorFacet;
+use plexspaces_actor::{
+    actor_factory_impl::ActorFactoryImpl, Actor, ActorBuilder, ActorFactory, ActorRef,
+};
 use plexspaces_core::Message;
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
+    FacetManager, MessageSender, RequestContext, ServiceLocator, VirtualActorManager,
+};
+use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::time::Duration;
 
 /// Test behavior for actor factory tests
@@ -72,11 +77,21 @@ struct ObjectRegistryAdapter {
 #[async_trait::async_trait]
 #[async_trait::async_trait]
 impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
-    async fn unregister(&self, _ctx: &plexspaces_core::RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn unregister(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
 
-    async fn heartbeat(&self, _ctx: &plexspaces_core::RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn heartbeat(
+        &self,
+        _ctx: &plexspaces_core::RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
     async fn lookup(
@@ -84,12 +99,21 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         ctx: &RequestContext,
         object_id: &str,
         object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
-    ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-        let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+    ) -> Result<
+        Option<plexspaces_proto::object_registry::v1::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let obj_type = object_type
+            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
         self.inner
             .lookup(ctx, obj_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn lookup_full(
@@ -97,11 +121,19 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         ctx: &RequestContext,
         object_type: plexspaces_proto::object_registry::v1::ObjectType,
         object_id: &str,
-    ) -> Result<Option<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        Option<plexspaces_proto::object_registry::v1::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         self.inner
             .lookup_full(ctx, object_type, object_id)
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 
     async fn register(
@@ -109,10 +141,12 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         ctx: &RequestContext,
         registration: plexspaces_proto::object_registry::v1::ObjectRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.inner
-            .register(ctx, registration)
-            .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+        self.inner.register(ctx, registration).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn discover(
@@ -125,11 +159,28 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryAdapter {
         health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
         limit: usize,
         offset: usize,
-    ) -> Result<Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         self.inner
-            .discover(ctx, object_type, object_category, capabilities, labels, health_status, limit, offset)
+            .discover(
+                ctx,
+                object_type,
+                object_category,
+                capabilities,
+                labels,
+                health_status,
+                limit,
+                offset,
+            )
             .await
-            .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
     }
 }
 
@@ -154,13 +205,13 @@ async fn test_activate_virtual_actor_success() {
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
     let test_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
     let actor_id = format!("test-actor-{}@test-node", test_id);
-    
+
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    
+
     // Get services
     let manager: Arc<VirtualActorManager> = service_locator.virtual_actor_manager().await.unwrap();
-    
+
     // Create actor with VirtualActorFacet
     let behavior = Box::new(TestBehavior::new());
     let mut actor = ActorBuilder::new(behavior)
@@ -168,7 +219,7 @@ async fn test_activate_virtual_actor_success() {
         .build()
         .await
         .unwrap();
-    
+
     // Attach VirtualActorFacet
     let facet_config = serde_json::json!({
         "idle_timeout": "5m",
@@ -176,20 +227,25 @@ async fn test_activate_virtual_actor_success() {
     });
     let virtual_facet = Box::new(VirtualActorFacet::new(facet_config.clone(), 100));
     actor.attach_facet(virtual_facet).await.unwrap();
-    
+
     // Register as virtual actor first (needed for activate_virtual_actor to recognize it)
-    let facet_box = Arc::new(tokio::sync::RwLock::new(
-        Box::new(VirtualActorFacet::new(facet_config, 100)) as Box<dyn std::any::Any + Send + Sync>
-    ));
-    manager.register(
-        actor_id.clone(),
-        facet_box,
-        Some("GenServer".to_string()), // actor_type
-        None, // config
-        "default".to_string(), // tenant_id
-        "default".to_string(), // namespace
-    ).await.unwrap();
-    
+    let facet_box = Arc::new(tokio::sync::RwLock::new(Box::new(VirtualActorFacet::new(
+        facet_config,
+        100,
+    ))
+        as Box<dyn std::any::Any + Send + Sync>));
+    manager
+        .register(
+            actor_id.clone(),
+            facet_box,
+            Some("GenServer".to_string()), // actor_type
+            None,                          // config
+            "default".to_string(),         // tenant_id
+            "default".to_string(),         // namespace
+        )
+        .await
+        .unwrap();
+
     // Store actor instance in registry (needed for lazy activation)
     // For virtual actors with lazy activation, we just store the instance
     // Activation will happen when the first message arrives
@@ -203,7 +259,10 @@ async fn test_activate_virtual_actor_success() {
         // This is test-only - production code uses register_actor() with instance parameter
         // Note: We can't directly access actor_instances anymore, so we use a workaround
         // by registering the actor with the instance
-        let ctx = plexspaces_core::RequestContext::new_without_auth("test".to_string(), "test".to_string());
+        let ctx = plexspaces_core::RequestContext::new_without_auth(
+            "test".to_string(),
+            "test".to_string(),
+        );
         let actor_ref = plexspaces_actor::ActorRef::local(
             actor_id.clone(),
             "test".to_string(), // tenant_id
@@ -211,17 +270,19 @@ async fn test_activate_virtual_actor_success() {
             actor.mailbox().clone(),
             service_locator.clone(),
         );
-        registry.register_actor(
-            &ctx,
-            actor_id.clone(),
-            Arc::new(actor_ref) as Arc<dyn plexspaces_core::MessageSender>,
-            None,
-            None,
-            Some(Arc::new(actor) as Arc<dyn std::any::Any + Send + Sync>),
-            None, // behavior_kind
-        ).await;
+        registry
+            .register_actor(
+                &ctx,
+                actor_id.clone(),
+                Arc::new(actor_ref) as Arc<dyn plexspaces_core::MessageSender>,
+                None,
+                None,
+                Some(Arc::new(actor) as Arc<dyn std::any::Any + Send + Sync>),
+                None, // behavior_kind
+            )
+            .await;
     }
-    
+
     // Activate - this should spawn the actor from the stored instance
     let result = factory.activate_virtual_actor(&actor_id).await;
     if let Err(e) = &result {
@@ -234,30 +295,35 @@ async fn test_activate_virtual_actor_success() {
 async fn test_activate_virtual_actor_already_active() {
     // Register state fetcher callback (needed for is_active() to work)
     plexspaces_actor::register_state_fetcher_callback();
-    
+
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    
+
     // Get services
     let manager: Arc<VirtualActorManager> = service_locator.virtual_actor_manager().await.unwrap();
     let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
-    
+
     // Register as virtual actor
-    let facet_box = Arc::new(tokio::sync::RwLock::new(
-        Box::new(VirtualActorFacet::new(serde_json::json!({
+    let facet_box = Arc::new(tokio::sync::RwLock::new(Box::new(VirtualActorFacet::new(
+        serde_json::json!({
             "idle_timeout": "5m",
             "activation_strategy": "lazy"
-        }), 100)) as Box<dyn std::any::Any + Send + Sync>
-    ));
-    manager.register(
-        "test-actor@test-node".to_string(),
-        facet_box,
-        Some("GenServer".to_string()), // actor_type
-        None, // config
-        "default".to_string(), // tenant_id
-        "default".to_string(), // namespace
-    ).await.unwrap();
-    
+        }),
+        100,
+    ))
+        as Box<dyn std::any::Any + Send + Sync>));
+    manager
+        .register(
+            "test-actor@test-node".to_string(),
+            facet_box,
+            Some("GenServer".to_string()), // actor_type
+            None,                          // config
+            "default".to_string(),         // tenant_id
+            "default".to_string(),         // namespace
+        )
+        .await
+        .unwrap();
+
     // Actually create and start a real actor (not just a mock)
     // This is needed for is_active() to return true
     let behavior = Box::new(TestBehavior::new());
@@ -266,10 +332,10 @@ async fn test_activate_virtual_actor_already_active() {
         .build()
         .await
         .unwrap();
-    
+
     // Start the actor (this registers it and sets state to Active)
     actor.start().await.unwrap();
-    
+
     // Register the actor instance in the registry
     use plexspaces_core::MessageSender;
     let actor_id = "test-actor@test-node".to_string();
@@ -281,13 +347,28 @@ async fn test_activate_virtual_actor_already_active() {
         service_locator.clone(),
     );
     let wrapper: Arc<dyn MessageSender> = Arc::new(actor_ref);
-    
+
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    registry.register_actor(&ctx, "test-actor@test-node".to_string(), wrapper, None, None, Some(Arc::new(actor) as Arc<dyn std::any::Any + Send + Sync>), None).await;
-    manager.mark_activated(&"test-actor@test-node".to_string()).await.unwrap();
-    
+    registry
+        .register_actor(
+            &ctx,
+            "test-actor@test-node".to_string(),
+            wrapper,
+            None,
+            None,
+            Some(Arc::new(actor) as Arc<dyn std::any::Any + Send + Sync>),
+            None,
+        )
+        .await;
+    manager
+        .mark_activated(&"test-actor@test-node".to_string())
+        .await
+        .unwrap();
+
     // Try to activate - should return Ok immediately (actor is already active)
-    let result = factory.activate_virtual_actor(&"test-actor@test-node".to_string()).await;
+    let result = factory
+        .activate_virtual_actor(&"test-actor@test-node".to_string())
+        .await;
     assert!(result.is_ok(), "Activation should succeed (already active)");
 }
 
@@ -295,33 +376,48 @@ async fn test_activate_virtual_actor_already_active() {
 async fn test_activate_virtual_actor_not_virtual() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     // Try to activate non-virtual actor
-    let result = factory.activate_virtual_actor(&"regular-actor@test-node".to_string()).await;
+    let result = factory
+        .activate_virtual_actor(&"regular-actor@test-node".to_string())
+        .await;
     assert!(result.is_err(), "Should fail for non-virtual actor");
-    assert!(result.unwrap_err().to_string().contains("not a virtual actor"));
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("not a virtual actor"));
 }
 
 #[tokio::test]
 async fn test_activate_virtual_actor_not_found() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    
+
     // Try to activate actor that was never registered - should fail because no metadata
-    let result = factory.activate_virtual_actor(&"test-actor@test-node".to_string()).await;
-    assert!(result.is_err(), "Should fail when virtual actor not found in VirtualActorManager");
+    let result = factory
+        .activate_virtual_actor(&"test-actor@test-node".to_string())
+        .await;
+    assert!(
+        result.is_err(),
+        "Should fail when virtual actor not found in VirtualActorManager"
+    );
     let err_msg = format!("{}", result.as_ref().unwrap_err());
-    assert!(err_msg.contains("not found") || err_msg.contains("not a virtual actor"), 
-            "Error should mention not found, got: {}", err_msg);
+    assert!(
+        err_msg.contains("not found") || err_msg.contains("not a virtual actor"),
+        "Error should mention not found, got: {}",
+        err_msg
+    );
 }
 
 #[tokio::test]
 async fn test_activate_virtual_actor_service_not_found() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     // Try to activate without services registered
-    let result = factory.activate_virtual_actor(&"test-actor@test-node".to_string()).await;
+    let result = factory
+        .activate_virtual_actor(&"test-actor@test-node".to_string())
+        .await;
     assert!(result.is_err(), "Should fail when ActorRegistry not found");
 }
 
@@ -329,19 +425,21 @@ async fn test_activate_virtual_actor_service_not_found() {
 async fn test_spawn_actor_success() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     let actor_id = "spawned-actor@test-node".to_string();
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "test-type",
-        vec![],
-        None,
-        HashMap::new(),
-        vec![], // facets
-    ).await;
-    
+    let result = factory
+        .spawn_actor(
+            &ctx,
+            &actor_id,
+            "test-type",
+            vec![],
+            None,
+            HashMap::new(),
+            vec![], // facets
+        )
+        .await;
+
     assert!(result.is_ok(), "Spawn should succeed");
     let _sender = result.unwrap();
 }
@@ -350,25 +448,27 @@ async fn test_spawn_actor_success() {
 async fn test_spawn_actor_with_config() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     let actor_id = "spawned-actor-config@test-node".to_string();
     let config = Some(plexspaces_proto::v1::actor::ActorConfig {
         max_mailbox_size: 1000,
         enable_persistence: false,
         ..Default::default()
     });
-    
+
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "test-type",
-        vec![],
-        config,
-        HashMap::new(),
-        vec![], // facets
-    ).await;
-    
+    let result = factory
+        .spawn_actor(
+            &ctx,
+            &actor_id,
+            "test-type",
+            vec![],
+            config,
+            HashMap::new(),
+            vec![], // facets
+        )
+        .await;
+
     assert!(result.is_ok(), "Spawn with config should succeed");
 }
 
@@ -376,23 +476,25 @@ async fn test_spawn_actor_with_config() {
 async fn test_spawn_actor_with_labels() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     let actor_id = "spawned-actor-labels@test-node".to_string();
     let mut labels = HashMap::new();
     labels.insert("namespace".to_string(), "production".to_string());
     labels.insert("env".to_string(), "prod".to_string());
-    
+
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "test-type",
-        vec![],
-        None,
-        labels,
-        vec![], // facets
-    ).await;
-    
+    let result = factory
+        .spawn_actor(
+            &ctx,
+            &actor_id,
+            "test-type",
+            vec![],
+            None,
+            labels,
+            vec![], // facets
+        )
+        .await;
+
     assert!(result.is_ok(), "Spawn with labels should succeed");
 }
 
@@ -400,20 +502,22 @@ async fn test_spawn_actor_with_labels() {
 async fn test_spawn_actor_normalize_id() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     // Test with actor ID without @ format
     let actor_id = "spawned-actor".to_string();
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "test-type",
-        vec![],
-        None,
-        HashMap::new(),
-        vec![], // facets
-    ).await;
-    
+    let result = factory
+        .spawn_actor(
+            &ctx,
+            &actor_id,
+            "test-type",
+            vec![],
+            None,
+            HashMap::new(),
+            vec![], // facets
+        )
+        .await;
+
     assert!(result.is_ok(), "Spawn should normalize actor ID");
 }
 
@@ -421,21 +525,26 @@ async fn test_spawn_actor_normalize_id() {
 async fn test_spawn_built_actor_regular() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     // Spawn regular actor using spawn_actor
     let actor_id = "regular-actor@test-node".to_string();
-    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "test", // actor_type from TestBehavior
-        vec![], // initial_state
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![], // facets
-    ).await;
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "internal".to_string(),
+        "system".to_string(),
+    );
+    let result = factory
+        .spawn_actor(
+            &ctx,
+            &actor_id,
+            "test",                           // actor_type from TestBehavior
+            vec![],                           // initial_state
+            None,                             // config
+            std::collections::HashMap::new(), // labels
+            vec![],                           // facets
+        )
+        .await;
     assert!(result.is_ok(), "Spawn regular actor should succeed");
-    
+
     // Wait a bit for actor to start
     tokio::time::sleep(Duration::from_millis(50)).await;
 }
@@ -444,7 +553,7 @@ async fn test_spawn_built_actor_regular() {
 async fn test_spawn_built_actor_virtual_eager() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     // Create virtual actor with eager activation
     let behavior = Box::new(TestBehavior::new());
     let mut actor = ActorBuilder::new(behavior)
@@ -452,7 +561,7 @@ async fn test_spawn_built_actor_virtual_eager() {
         .build()
         .await
         .unwrap();
-    
+
     // Attach VirtualActorFacet with eager activation
     let facet_config = serde_json::json!({
         "idle_timeout": "5m",
@@ -460,11 +569,16 @@ async fn test_spawn_built_actor_virtual_eager() {
     });
     let virtual_facet = Box::new(VirtualActorFacet::new(facet_config, 100));
     actor.attach_facet(virtual_facet).await.unwrap();
-    
+
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory.spawn_built_actor_impl(&ctx, Arc::new(actor), Some("test".to_string())).await;
-    assert!(result.is_ok(), "Spawn virtual actor with eager activation should succeed");
-    
+    let result = factory
+        .spawn_built_actor_impl(&ctx, Arc::new(actor), Some("test".to_string()))
+        .await;
+    assert!(
+        result.is_ok(),
+        "Spawn virtual actor with eager activation should succeed"
+    );
+
     // Wait a bit for actor to start
     tokio::time::sleep(Duration::from_millis(50)).await;
 }
@@ -475,10 +589,10 @@ async fn test_spawn_built_actor_virtual_lazy() {
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
     let test_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
     let actor_id = format!("virtual-lazy-{}@test-node", test_id);
-    
+
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     // Create virtual actor with lazy activation
     let behavior = Box::new(TestBehavior::new());
     let mut actor = ActorBuilder::new(behavior)
@@ -486,7 +600,7 @@ async fn test_spawn_built_actor_virtual_lazy() {
         .build()
         .await
         .unwrap();
-    
+
     // Attach VirtualActorFacet with lazy activation
     let facet_config = serde_json::json!({
         "idle_timeout": "5m",
@@ -494,10 +608,16 @@ async fn test_spawn_built_actor_virtual_lazy() {
     });
     let virtual_facet = Box::new(VirtualActorFacet::new(facet_config, 100));
     actor.attach_facet(virtual_facet).await.unwrap();
-    
-    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let result = factory.spawn_built_actor_impl(&ctx, Arc::new(actor), Some("test".to_string())).await;
-    assert!(result.is_ok(), "Spawn virtual actor with lazy activation should succeed");
+
+    let ctx =
+        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+    let result = factory
+        .spawn_built_actor_impl(&ctx, Arc::new(actor), Some("test".to_string()))
+        .await;
+    assert!(
+        result.is_ok(),
+        "Spawn virtual actor with lazy activation should succeed"
+    );
 }
 
 #[tokio::test]
@@ -506,10 +626,10 @@ async fn test_spawn_built_actor_virtual_prewarm() {
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
     let test_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
     let actor_id = format!("virtual-prewarm-{}@test-node", test_id);
-    
+
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     // Create virtual actor with prewarm activation
     let behavior = Box::new(TestBehavior::new());
     let mut actor = ActorBuilder::new(behavior)
@@ -517,7 +637,7 @@ async fn test_spawn_built_actor_virtual_prewarm() {
         .build()
         .await
         .unwrap();
-    
+
     // Attach VirtualActorFacet with prewarm activation
     let facet_config = serde_json::json!({
         "idle_timeout": "5m",
@@ -525,10 +645,16 @@ async fn test_spawn_built_actor_virtual_prewarm() {
     });
     let virtual_facet = Box::new(VirtualActorFacet::new(facet_config, 100));
     actor.attach_facet(virtual_facet).await.unwrap();
-    
-    let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let result = factory.spawn_built_actor_impl(&ctx, Arc::new(actor), Some("test".to_string())).await;
-    assert!(result.is_ok(), "Spawn virtual actor with prewarm activation should succeed");
+
+    let ctx =
+        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
+    let result = factory
+        .spawn_built_actor_impl(&ctx, Arc::new(actor), Some("test".to_string()))
+        .await;
+    assert!(
+        result.is_ok(),
+        "Spawn virtual actor with prewarm activation should succeed"
+    );
 }
 
 // Note: test_spawn_built_actor_downcast_error removed - no longer needed since
@@ -542,19 +668,24 @@ async fn test_spawn_built_actor_multiple_references() {
     // If we need to test multiple references, we'd need to test it differently.
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     // Use spawn_actor instead - it doesn't have the multiple references issue
     let actor_id = "multi-ref-actor@test-node".to_string();
-    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "test", // actor_type
-        vec![], // initial_state
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![], // facets
-    ).await;
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "internal".to_string(),
+        "system".to_string(),
+    );
+    let result = factory
+        .spawn_actor(
+            &ctx,
+            &actor_id,
+            "test",                           // actor_type
+            vec![],                           // initial_state
+            None,                             // config
+            std::collections::HashMap::new(), // labels
+            vec![],                           // facets
+        )
+        .await;
     // spawn_actor should succeed
     assert!(result.is_ok(), "spawn_actor should succeed");
 }
@@ -564,21 +695,27 @@ async fn test_spawn_built_actor_service_not_found() {
     // Create empty service locator WITHOUT initializing services (no ActorRegistry)
     // This tests error handling when ActorRegistry is not registered
     use plexspaces_services::ServiceLocatorImpl;
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(ServiceLocatorImpl::new());
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     // Use spawn_actor - should fail when ActorRegistry not found
     let actor_id = "test-actor@test-node".to_string();
-    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "test", // actor_type
-        vec![], // initial_state
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![], // facets
-    ).await;
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "internal".to_string(),
+        "system".to_string(),
+    );
+    let result = factory
+        .spawn_actor(
+            &ctx,
+            &actor_id,
+            "test",                           // actor_type
+            vec![],                           // initial_state
+            None,                             // config
+            std::collections::HashMap::new(), // labels
+            vec![],                           // facets
+        )
+        .await;
     assert!(result.is_err(), "Should fail when ActorRegistry not found");
 }
 
@@ -586,19 +723,24 @@ async fn test_spawn_built_actor_service_not_found() {
 async fn test_spawn_built_actor_virtual_facet_not_found() {
     let service_locator = create_test_service_locator().await;
     let factory = Arc::new(ActorFactoryImpl::new(service_locator));
-    
+
     // Use spawn_actor for regular actor (no virtual facet)
     let actor_id = "no-facet-actor@test-node".to_string();
-    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string());
-    let result = factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "test", // actor_type
-        vec![], // initial_state
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![], // facets
-    ).await;
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "internal".to_string(),
+        "system".to_string(),
+    );
+    let result = factory
+        .spawn_actor(
+            &ctx,
+            &actor_id,
+            "test",                           // actor_type
+            vec![],                           // initial_state
+            None,                             // config
+            std::collections::HashMap::new(), // labels
+            vec![],                           // facets
+        )
+        .await;
     // This should work fine since it's a regular actor
     assert!(result.is_ok(), "Regular actor should spawn successfully");
 }
@@ -610,4 +752,3 @@ async fn test_spawn_built_actor_virtual_facet_not_found() {
 // Note: normalize_actor_id and setup_facets are private methods
 // They are tested indirectly through public methods (spawn_actor, activate_virtual_actor)
 // This is acceptable for 95%+ coverage as they're implementation details
-

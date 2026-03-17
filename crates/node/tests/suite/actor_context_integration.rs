@@ -22,8 +22,7 @@ use async_trait::async_trait;
 use plexspaces_actor::Actor;
 use plexspaces_core::BehaviorType;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
-use plexspaces_node::{Node, NodeId, default_node_config};
-
+use plexspaces_node::{default_node_config, Node, NodeId};
 
 use super::test_helpers::{lookup_actor_ref, spawn_actor_helper};
 
@@ -35,7 +34,6 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         ..Default::default()
     }
 }
-
 
 /// Test behavior that uses ActorContext
 struct ContextAwareBehavior {
@@ -82,7 +80,7 @@ async fn test_node_spawns_actor_with_full_context() {
     let node_id = NodeId::new("test-node");
     let config = default_node_config();
     let node = Node::new(node_id, config);
-    
+
     // Initialize services (required for ActorFactory to be available)
     node.initialize_services().await.unwrap();
 
@@ -94,7 +92,9 @@ async fn test_node_spawns_actor_with_full_context() {
     // Create actor with just the actor name (no @node suffix)
     // spawn_actor_arc will fix the actor ID to include the node ID
     let actor_name = "test-actor";
-    let mailbox = Mailbox::new(mailbox_config, format!("{}@temp", actor_name)).await.unwrap();
+    let mailbox = Mailbox::new(mailbox_config, format!("{}@temp", actor_name))
+        .await
+        .unwrap();
     let actor = Actor::new(
         format!("{}@temp", actor_name), // Temporary ID, will be fixed by spawn_actor_arc
         behavior,
@@ -108,18 +108,23 @@ async fn test_node_spawns_actor_with_full_context() {
     use super::test_helpers::spawn_actor_helper;
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
     let actor_id = actor_ref.id().clone();
-    
+
     // The actor ID is fixed by spawn_actor_arc to include the correct node ID
     // The actor is registered synchronously in spawn_actor_arc:
     // 1. register_local is called which stores the mailbox in ActorRegistry (line 931, before start)
     // 2. register_actor is called which stores the actor_ref and config (line 994)
     // Both should happen before spawn_actor returns
-    
+
     // Wait for actor registration to complete (register_local is async)
     // Use a future that waits for the actor to be registered instead of sleep
     let registration_future = async {
         loop {
-            if lookup_actor_ref(&node, &actor_id).await.ok().flatten().is_some() {
+            if lookup_actor_ref(&node, &actor_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some()
+            {
                 break;
             }
             tokio::task::yield_now().await;
@@ -136,8 +141,14 @@ async fn test_node_spawns_actor_with_full_context() {
 
     let message = create_test_message(b"test".to_vec());
     // The actor should be registered - if not, the error will tell us what's wrong
-    let actor_ref = lookup_actor_ref(&node, &actor_id).await.expect("Actor should be registered").expect("Actor should exist");
-    actor_ref.tell(message).await.expect("Should send message successfully");
+    let actor_ref = lookup_actor_ref(&node, &actor_id)
+        .await
+        .expect("Actor should be registered")
+        .expect("Actor should exist");
+    actor_ref
+        .tell(message)
+        .await
+        .expect("Should send message successfully");
 
     // Wait for message to be processed (actor should receive it)
     // Use a future that waits for the message to be processed instead of sleep
@@ -150,7 +161,10 @@ async fn test_node_spawns_actor_with_full_context() {
         .expect("Message processing should complete quickly");
 
     // Verify actor was spawned - the ID should match the node ID
-    assert_eq!(actor_ref.id(), &format!("test-actor@{}", node.id().as_str()));
+    assert_eq!(
+        actor_ref.id(),
+        &format!("test-actor@{}", node.id().as_str())
+    );
 }
 
 #[tokio::test]
@@ -158,12 +172,14 @@ async fn test_actor_context_has_node_id() {
     let node_id = NodeId::new("test-node-2");
     let config = default_node_config();
     let node = Node::new(node_id.clone(), config);
-    
+
     // Initialize services (required for ActorFactory to be available)
     node.initialize_services().await.unwrap();
 
     let behavior = Box::new(ContextAwareBehavior::new());
-    let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string()).await.unwrap();
+    let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string())
+        .await
+        .unwrap();
     let actor = Actor::new(
         "test-actor-2@test-node-2".to_string(),
         behavior,
@@ -183,9 +199,8 @@ async fn test_actor_context_has_node_id() {
 
     // Verify actor was spawned successfully
     assert_eq!(actor_ref.id(), "test-actor-2@test-node-2");
-    
+
     // Note: We can't access actor's context after spawning (it's moved into the actor task)
     // But Node::spawn_actor() calls create_actor_context() which sets the correct node_id
     // The test above (test_node_spawns_actor_with_full_context) verifies the context is working
 }
-

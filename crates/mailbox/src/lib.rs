@@ -28,16 +28,16 @@
 #![warn(clippy::all)]
 
 // Export the mailbox module
-mod r#mod;
-mod messages;
 mod builder;
 mod lru_cache;
 mod message_helpers;
+mod messages;
+mod r#mod;
 
 // Re-export all public items
-pub use r#mod::*;
-pub use messages::*;
 pub use builder::MailboxBuilder;
+pub use messages::*;
+pub use r#mod::*;
 // message_helpers are re-exported from r#mod::* above, no need to re-export again
 
 // TTL tests

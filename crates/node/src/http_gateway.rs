@@ -44,11 +44,11 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Path, Query, DefaultBodyLimit},
+    extract::{DefaultBodyLimit, Path, Query},
     http::{HeaderMap, StatusCode},
     middleware::Next,
     response::{Json, Response},
-    routing::{get, post, delete},
+    routing::{delete, get, post},
     Router,
 };
 use serde_json::Value;
@@ -76,8 +76,8 @@ pub const MAX_WASM_FILE_SIZE: usize = 100 * 1024 * 1024;
 /// - `Option<DashboardServiceImpl>`: Dashboard service (if enabled)
 pub type HttpGatewayState = (
     Arc<ActorServiceImpl>,
-    bool,                                       // auth_disabled
-    Option<String>,                             // jwt_secret
+    bool,           // auth_disabled
+    Option<String>, // jwt_secret
     Arc<dyn plexspaces_core::ServiceLocator>,
     Option<Arc<DashboardServiceImpl>>,
 );
@@ -101,7 +101,13 @@ pub async fn create_gateway_state(
         .get_security_config()
         .await
         .and_then(|c| c.jwt)
-        .and_then(|j| if j.secret.is_empty() { None } else { Some(j.secret) });
+        .and_then(|j| {
+            if j.secret.is_empty() {
+                None
+            } else {
+                Some(j.secret)
+            }
+        });
 
     (
         actor_service,
@@ -146,7 +152,9 @@ pub fn effective_tenant_id_from_jwt_or_headers(
                 .get("authorization")
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
-            if let Ok(claims) = crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref()) {
+            if let Ok(claims) =
+                crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref())
+            {
                 return claims.tenant_id;
             }
         }
@@ -173,7 +181,9 @@ pub fn effective_tenant_id_from_jwt_or_headers(
 /// - Returns 401 if token validation fails
 /// - Sets JwtClaims extension on success
 pub async fn http_auth_middleware(
-    axum::extract::State((_svc, auth_disabled, jwt_secret, _sl, _ds)): axum::extract::State<HttpGatewayState>,
+    axum::extract::State((_svc, auth_disabled, jwt_secret, _sl, _ds)): axum::extract::State<
+        HttpGatewayState,
+    >,
     mut req: axum::extract::Request,
     next: Next,
 ) -> Response {
@@ -212,7 +222,10 @@ pub async fn http_auth_middleware(
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let has_bearer = auth_header.as_ref().map(|h| h.starts_with("Bearer ")).unwrap_or(false);
+    let has_bearer = auth_header
+        .as_ref()
+        .map(|h| h.starts_with("Bearer "))
+        .unwrap_or(false);
 
     match crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref()) {
         Ok(claims) => {
@@ -274,16 +287,22 @@ pub async fn invoke_actor_http(
     }
 
     let (_path_tenant_id, namespace, actor_type) = if path_parts.len() == 3 {
-        (path_parts[0].to_string(), path_parts[1].to_string(), path_parts[2].to_string())
+        (
+            path_parts[0].to_string(),
+            path_parts[1].to_string(),
+            path_parts[2].to_string(),
+        )
     } else {
-        (String::new(), path_parts[0].to_string(), path_parts[1].to_string())
+        (
+            String::new(),
+            path_parts[0].to_string(),
+            path_parts[1].to_string(),
+        )
     };
     let namespace_for_metadata = namespace.clone();
 
     // Extract query parameters
-    let query_params: HashMap<String, String> = query
-        .map(|q| q.0)
-        .unwrap_or_default();
+    let query_params: HashMap<String, String> = query.map(|q| q.0).unwrap_or_default();
 
     // Invocation pattern: use dedicated "invocation" query param (industry practice, e.g. AWS Lambda InvocationType).
     // - "msg_type" in query is always application-level (handler name: count, readings, ingest) and goes into payload.
@@ -296,7 +315,10 @@ pub async fn invoke_actor_http(
     let (ask, msg_type_override) = if is_get {
         (true, String::new())
     } else {
-        let override_val = query_params.get("invocation").map(|v| v.as_str()).unwrap_or("");
+        let override_val = query_params
+            .get("invocation")
+            .map(|v| v.as_str())
+            .unwrap_or("");
         let normalized = override_val.trim().to_lowercase();
         if !override_val.is_empty() && !ALLOWED_INVOCATION.contains(&normalized.as_str()) {
             return Err((
@@ -319,10 +341,14 @@ pub async fn invoke_actor_http(
 
     // Extract optional timeout from query param ?timeout=<seconds> (default: 5s for ask operations).
     // Allows clients to specify longer timeouts for long-running operations (e.g., training).
-    let timeout_duration = query_params.get("timeout")
+    let timeout_duration = query_params
+        .get("timeout")
         .and_then(|s| s.parse::<i64>().ok())
         .filter(|&secs| secs > 0 && secs <= 3600)
-        .map(|secs| prost_types::Duration { seconds: secs, nanos: 0 });
+        .map(|secs| prost_types::Duration {
+            seconds: secs,
+            nanos: 0,
+        });
 
     // Create InvokeActorRequest
     use plexspaces_proto::actor::v1::InvokeActorRequest;
@@ -349,9 +375,9 @@ pub async fn invoke_actor_http(
     };
 
     // Call InvokeActor via ActorService
-    use tonic::Request as TonicRequest;
-    use tonic::metadata::MetadataValue;
     use plexspaces_proto::actor::v1::actor_service_server::ActorService as ActorServiceTrait;
+    use tonic::metadata::MetadataValue;
+    use tonic::Request as TonicRequest;
 
     let mut grpc_req = TonicRequest::new(invoke_req);
     grpc_req.metadata_mut().insert(
@@ -369,7 +395,7 @@ pub async fn invoke_actor_http(
         Ok(grpc_resp) => {
             let resp_inner = grpc_resp.into_inner();
             // Convert InvokeActorResponse to JSON
-            use base64::{Engine as _, engine::general_purpose};
+            use base64::{engine::general_purpose, Engine as _};
             let payload_json = if resp_inner.payload.is_empty() {
                 serde_json::Value::Null
             } else {
@@ -379,9 +405,9 @@ pub async fn invoke_actor_http(
                         // Try to parse as JSON, otherwise return as string
                         serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
                     }
-                    Err(_) => {
-                        serde_json::Value::String(general_purpose::STANDARD.encode(&resp_inner.payload))
-                    }
+                    Err(_) => serde_json::Value::String(
+                        general_purpose::STANDARD.encode(&resp_inner.payload),
+                    ),
                 }
             };
 

@@ -47,7 +47,10 @@ async fn test_health_check_healthy_vm() {
 
     // VM in Created state (not running) should be unhealthy
     let status = monitor.check_health().await;
-    assert_eq!(status, HealthStatus::Unhealthy("VM not running yet".to_string()));
+    assert_eq!(
+        status,
+        HealthStatus::Unhealthy("VM not running yet".to_string())
+    );
 }
 
 #[tokio::test]
@@ -182,4 +185,3 @@ async fn test_health_monitor_start_stop() {
     monitor.stop().await.unwrap();
     assert!(!monitor.is_monitoring().await);
 }
-

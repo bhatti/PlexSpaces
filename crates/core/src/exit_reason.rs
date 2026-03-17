@@ -101,11 +101,13 @@ impl ExitReason {
                 linked_actor_id: String::new(),
                 linked_reason: 0, // ExitReasonUnspecified
             }),
-            ExitReason::Linked { actor_id, reason } => Some(plexspaces_proto::v1::actor::ExitReasonDetails {
-                error_message: String::new(),
-                linked_actor_id: actor_id.clone(),
-                linked_reason: reason.to_proto() as i32,
-            }),
+            ExitReason::Linked { actor_id, reason } => {
+                Some(plexspaces_proto::v1::actor::ExitReasonDetails {
+                    error_message: String::new(),
+                    linked_actor_id: actor_id.clone(),
+                    linked_reason: reason.to_proto() as i32,
+                })
+            }
             _ => None,
         }
     }
@@ -120,7 +122,7 @@ impl ExitReason {
         details: Option<&plexspaces_proto::v1::actor::ExitReasonDetails>,
     ) -> Self {
         use plexspaces_proto::v1::actor::ExitReason as ProtoExitReason;
-        
+
         match proto {
             ProtoExitReason::ExitReasonNormal => ExitReason::Normal,
             ProtoExitReason::ExitReasonShutdown => ExitReason::Shutdown,
@@ -150,14 +152,20 @@ impl ExitReason {
                 let linked_reason = details
                     .and_then(|d| {
                         if d.linked_reason != 0 {
-                            ProtoExitReason::try_from(d.linked_reason).ok()
-                                .map(|proto_reason| Box::new(ExitReason::from_proto(proto_reason, None)))
+                            ProtoExitReason::try_from(d.linked_reason)
+                                .ok()
+                                .map(|proto_reason| {
+                                    Box::new(ExitReason::from_proto(proto_reason, None))
+                                })
                         } else {
                             None
                         }
                     })
                     .unwrap_or_else(|| Box::new(ExitReason::Normal));
-                ExitReason::Linked { actor_id, reason: linked_reason }
+                ExitReason::Linked {
+                    actor_id,
+                    reason: linked_reason,
+                }
             }
             ProtoExitReason::ExitReasonUnspecified => ExitReason::Normal, // Default to Normal
         }
@@ -237,7 +245,7 @@ impl ExitAction {
     /// Convert from proto ExitAction enum
     pub fn from_proto(proto: plexspaces_proto::v1::actor::ExitAction) -> Self {
         use plexspaces_proto::v1::actor::ExitAction as ProtoExitAction;
-        
+
         match proto {
             ProtoExitAction::ExitActionPropagate => ExitAction::Propagate,
             ProtoExitAction::ExitActionHandle => ExitAction::Handle,
@@ -289,7 +297,3 @@ mod tests {
         assert_eq!(action, ExitAction::Handle);
     }
 }
-
-
-
-

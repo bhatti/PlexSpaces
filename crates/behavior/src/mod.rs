@@ -176,18 +176,18 @@ pub trait GenServer: Actor {
     ) -> Result<(), BehaviorError> {
         use crate::MessageTypeExt;
         use std::thread_local;
-        
+
         // RECURSION DETECTION: Track call depth to detect infinite loops
         thread_local! {
             static ROUTE_MESSAGE_DEPTH: std::cell::Cell<usize> = std::cell::Cell::new(0);
         }
-        
+
         let depth = ROUTE_MESSAGE_DEPTH.with(|d| {
             let current = d.get();
             d.set(current + 1);
             current
         });
-        
+
         // Safety check: prevent infinite recursion
         const MAX_RECURSION_DEPTH: usize = 100;
         if depth > MAX_RECURSION_DEPTH {
@@ -202,12 +202,12 @@ pub trait GenServer: Actor {
                 depth
             )));
         }
-        
+
         let msg_type = msg.message_type();
-        
+
         // Get target actor ID from message.receiver_id (the actor receiving this message)
         let target_actor_id = msg.receiver_id.clone();
-        
+
         // VALIDATION: Check for self-messaging (source == target)
         if !msg.sender_id.is_empty() {
             if msg.sender_id == target_actor_id {
@@ -235,30 +235,34 @@ pub trait GenServer: Actor {
                 );
             }
         }
-        
+
         match msg_type {
             MessageType::Call => {
                 // DEBUG: Check if sender is temporary sender
                 use plexspaces_core::TEMP_SENDER_PREFIX;
-                let sender_is_temp = !msg.sender_id.is_empty() 
-                    && msg.sender_id.starts_with(&format!("{}-", TEMP_SENDER_PREFIX)) 
+                let sender_is_temp = !msg.sender_id.is_empty()
+                    && msg
+                        .sender_id
+                        .starts_with(&format!("{}-", TEMP_SENDER_PREFIX))
                     && msg.sender_id.contains('@');
-                
+
                 // Clone values for logging before moving msg
                 let message_id = msg.id.clone();
                 let message_type = msg.message_type.clone();
                 let sender_id = msg.sender_id.clone();
                 let receiver_id = msg.receiver_id.clone();
                 let correlation_id = msg.correlation_id.clone();
-                
+
                 // Log route_message at debug level (consolidated to reduce noise, guarded)
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         "[ROUTE_MESSAGE] Call: message_id={}, target={}, correlation_id={}",
-                        message_id, target_actor_id, correlation_id
+                        message_id,
+                        target_actor_id,
+                        correlation_id
                     );
                 }
-                
+
                 // Call handle_request with Message (handler will use ActorService::send() to send reply)
                 let result = self.handle_request(ctx, msg).await;
                 if tracing::enabled!(tracing::Level::DEBUG) {
@@ -274,7 +278,7 @@ pub trait GenServer: Actor {
                         }
                     }
                 }
-                
+
                 // Always log errors at warn level
                 if let Err(e) = &result {
                     tracing::warn!(
@@ -283,9 +287,9 @@ pub trait GenServer: Actor {
                     );
                 }
                 result?;
-                
+
                 metrics::counter!("plexspaces_behavior_genserver_replies_sent_total", "behavior" => "genserver").increment(1);
-                
+
                 // Decrement recursion depth on success
                 let _ = ROUTE_MESSAGE_DEPTH.with(|d| {
                     let current = d.get();
@@ -293,7 +297,7 @@ pub trait GenServer: Actor {
                         d.set(current - 1);
                     }
                 });
-                
+
                 Ok(())
             }
             MessageType::Cast => {
@@ -304,22 +308,22 @@ pub trait GenServer: Actor {
                         msg.id, msg.sender_id, target_actor_id
                     );
                 }
-                
+
                 // Clone values for logging before moving msg
                 let message_id = msg.id.clone();
                 let _sender_id = msg.sender_id.clone();
-                
+
                 // Call handle_request - actor can choose to send reply or not
                 // For Cast, reply is optional (fire-and-forget)
                 let _ = self.handle_request(ctx, msg).await;
-                
+
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         "[ROUTE_MESSAGE] CAST handle_request completed: message_id={}, target_actor_id={}",
                         message_id, target_actor_id
                     );
                 }
-                
+
                 // Decrement recursion depth on success
                 let _ = ROUTE_MESSAGE_DEPTH.with(|d| {
                     let current = d.get();
@@ -327,7 +331,7 @@ pub trait GenServer: Actor {
                         d.set(current - 1);
                     }
                 });
-                
+
                 Ok(())
             }
             MessageType::Info => {
@@ -472,8 +476,7 @@ where
             // In practice, users should only add handlers for specific states
             let mut handler_override = None;
             for (_, handler) in self.state_handlers.iter_mut() {
-                if let Some(handler_state) = handler.handle(ctx, &new_state, event.clone()).await?
-                {
+                if let Some(handler_state) = handler.handle(ctx, &new_state, event.clone()).await? {
                     // Handler can override the state
                     handler_override = Some(handler_state);
                     break; // Only call first handler that returns Some
@@ -689,15 +692,15 @@ pub trait Workflow: Actor {
             MessageType::WorkflowRun => {
                 let span = tracing::span!(tracing::Level::DEBUG, "workflow.run");
                 let _enter = span.enter();
-                
+
                 metrics::counter!("plexspaces_behavior_workflow_runs_total", "behavior" => "workflow").increment(1);
                 let start = std::time::Instant::now();
-                
+
                 let result = self.run(ctx, msg.clone()).await?;
-                
+
                 let duration = start.elapsed();
                 metrics::histogram!("plexspaces_behavior_workflow_run_duration_seconds", "behavior" => "workflow").record(duration.as_secs_f64());
-                
+
                 // Store result for queries or send back to caller using ActorRef
                 // Prefer reply_to (for ask pattern) over sender_id (for backward compatibility)
                 let reply_target = if !msg.reply_to.is_empty() {
@@ -707,7 +710,7 @@ pub trait Workflow: Actor {
                 } else {
                     None
                 };
-                
+
                 if let Some(target_id) = reply_target {
                     // Use correlation_id from message (set by ask()) or from headers (backward compatibility)
                     let mut reply_msg = result;
@@ -716,17 +719,24 @@ pub trait Workflow: Actor {
                     } else if let Some(corr_id) = msg.headers.get("correlation_id") {
                         reply_msg.correlation_id = corr_id.clone();
                     }
-                    
+
                     // Use ActorService::send() to send reply (handles local/remote automatically)
                     // ActorService::send() will route via ActorRef::tell() which handles temporary sender IDs and correlation_id routing
-                    let actor_service = ctx.service_locator.get_actor_service().await
-                        .ok_or_else(|| BehaviorError::ProcessingError("ActorService not available in ServiceLocator".to_string()))?;
-                    
+                    let actor_service =
+                        ctx.service_locator
+                            .get_actor_service()
+                            .await
+                            .ok_or_else(|| {
+                                BehaviorError::ProcessingError(
+                                    "ActorService not available in ServiceLocator".to_string(),
+                                )
+                            })?;
+
                     // Set receiver_id to sender_id (the actor that called ask())
                     reply_msg.receiver_id = target_id.to_string();
                     // Set sender_id to this actor's ID
                     reply_msg.sender_id = msg.receiver_id.clone();
-                    
+
                     actor_service.send(&target_id.to_string(), reply_msg).await
                         .map_err(|e| {
                             metrics::counter!("plexspaces_behavior_workflow_reply_errors_total", "behavior" => "workflow", "error" => "send_failed", "type" => "run").increment(1);
@@ -741,38 +751,40 @@ pub trait Workflow: Actor {
                     tracing::warn!("Workflow run has no reply_to or sender_id, reply not sent");
                     metrics::counter!("plexspaces_behavior_workflow_reply_errors_total", "behavior" => "workflow", "error" => "no_sender", "type" => "run").increment(1);
                 }
-                
+
                 Ok(())
             }
             MessageType::WorkflowSignal(name) => {
-                let span = tracing::span!(tracing::Level::DEBUG, "workflow.signal", signal_name = %name);
+                let span =
+                    tracing::span!(tracing::Level::DEBUG, "workflow.signal", signal_name = %name);
                 let _enter = span.enter();
-                
+
                 metrics::counter!("plexspaces_behavior_workflow_signals_total", "behavior" => "workflow", "signal" => name.clone()).increment(1);
                 let start = std::time::Instant::now();
-                
+
                 self.signal(ctx, name.clone(), msg.clone()).await?;
-                
+
                 let duration = start.elapsed();
                 metrics::histogram!("plexspaces_behavior_workflow_signal_duration_seconds", "behavior" => "workflow", "signal" => name.clone()).record(duration.as_secs_f64());
-                
+
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(signal_name = %name, "Workflow signal processed");
                 }
                 Ok(())
             }
             MessageType::WorkflowQuery(name) => {
-                let span = tracing::span!(tracing::Level::DEBUG, "workflow.query", query_name = %name);
+                let span =
+                    tracing::span!(tracing::Level::DEBUG, "workflow.query", query_name = %name);
                 let _enter = span.enter();
-                
+
                 metrics::counter!("plexspaces_behavior_workflow_queries_total", "behavior" => "workflow", "query" => name.clone()).increment(1);
                 let start = std::time::Instant::now();
-                
+
                 let result = self.query(ctx, name.clone(), msg.clone()).await?;
-                
+
                 let duration = start.elapsed();
                 metrics::histogram!("plexspaces_behavior_workflow_query_duration_seconds", "behavior" => "workflow", "query" => name.clone()).record(duration.as_secs_f64());
-                
+
                 // Send result back to caller using ActorService
                 // ActorService automatically handles local/remote routing based on node_id
                 // Prefer reply_to (for ask pattern) over sender_id (for backward compatibility)
@@ -783,7 +795,7 @@ pub trait Workflow: Actor {
                 } else {
                     None
                 };
-                
+
                 if let Some(target_id) = reply_target {
                     // Use correlation_id from message (set by ask()) or from headers (backward compatibility)
                     let mut reply_msg = result;
@@ -792,27 +804,39 @@ pub trait Workflow: Actor {
                     } else if let Some(corr_id) = msg.headers.get("correlation_id") {
                         reply_msg.correlation_id = corr_id.clone();
                     }
-                    
+
                     // Ensure reply message ID has "res-" prefix
                     // Note: Message IDs are managed by send_reply() in actor_context.rs, but we ensure prefix here for consistency
-                    if reply_msg.id.is_empty() || (!reply_msg.id.starts_with("res-") && !reply_msg.id.starts_with("req-")) {
+                    if reply_msg.id.is_empty()
+                        || (!reply_msg.id.starts_with("res-") && !reply_msg.id.starts_with("req-"))
+                    {
                         // Generate new ID with res- prefix if empty or missing prefix
                         // Use timestamp-based ID generation since ulid may not be available
                         use std::time::{SystemTime, UNIX_EPOCH};
-                        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+                        let timestamp = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_nanos();
                         reply_msg.id = format!("res-{:x}", timestamp);
                     }
-                    
+
                     // Use ActorService::send() to send reply (handles local/remote automatically)
                     // ActorService::send() will route via ActorRef::tell() which handles temporary sender IDs and correlation_id routing
-                    let actor_service = ctx.service_locator.get_actor_service().await
-                        .ok_or_else(|| BehaviorError::ProcessingError("ActorService not available in ServiceLocator".to_string()))?;
-                    
+                    let actor_service =
+                        ctx.service_locator
+                            .get_actor_service()
+                            .await
+                            .ok_or_else(|| {
+                                BehaviorError::ProcessingError(
+                                    "ActorService not available in ServiceLocator".to_string(),
+                                )
+                            })?;
+
                     // Set receiver_id to sender_id (the actor that called ask())
                     reply_msg.receiver_id = target_id.to_string();
                     // Set sender_id to this actor's ID
                     reply_msg.sender_id = msg.receiver_id.clone();
-                    
+
                     actor_service.send(&target_id.to_string(), reply_msg).await
                         .map_err(|e| {
                         metrics::counter!("plexspaces_behavior_workflow_reply_errors_total", "behavior" => "workflow", "error" => "send_failed", "type" => "query").increment(1);
@@ -827,7 +851,7 @@ pub trait Workflow: Actor {
                     metrics::counter!("plexspaces_behavior_workflow_reply_errors_total", "behavior" => "workflow", "error" => "no_sender", "type" => "query").increment(1);
                     tracing::warn!(query_name = %name, "Workflow query has no reply_to or sender_id, reply not sent");
                 }
-                
+
                 Ok(())
             }
             _ => Err(BehaviorError::UnsupportedMessage),
@@ -966,12 +990,12 @@ mod tests {
 
         // Test with no handlers (should succeed) - Go-style: context first, then message
         use plexspaces_core::ActorContext;
-        use std::sync::Arc;
         use plexspaces_core::ServiceLocator;
+        use std::sync::Arc;
         let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
         let ctx = Arc::new(ActorContext::new(
             "test-node".to_string(),
-            String::new(), // tenant_id (empty if auth disabled)
+            String::new(),         // tenant_id (empty if auth disabled)
             "test-ns".to_string(), // namespace
             service_locator,
             None,

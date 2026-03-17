@@ -222,7 +222,7 @@ impl WorkflowBehavior for OrderWorkflow {
         // Step 4: Send confirmation
         ctx.step(|| send_confirmation(order, shipment)).await?;
         
-        Ok(Message::new(b"workflow complete".to_vec()))
+        Ok(new_message("workflow complete"))
     }
 }
 ```

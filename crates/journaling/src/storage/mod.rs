@@ -93,9 +93,7 @@ pub use ddb::DynamoDBJournalStorage;
 /// # Ok(())
 /// # }
 /// ```
-pub async fn create_journal_storage(
-    db_url: &str,
-) -> JournalResult<Arc<dyn JournalStorage>> {
+pub async fn create_journal_storage(db_url: &str) -> JournalResult<Arc<dyn JournalStorage>> {
     // Determine backend type from connection string or plain path
     // Support both connection strings (sqlite:///path) and plain paths (/path/to/db or ~/path/to/db)
     if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {
@@ -119,17 +117,20 @@ pub async fn create_journal_storage(
                 ":memory:".to_string()
             } else if db_url.starts_with("sqlite:///") {
                 // Format: "sqlite:///absolute/path" - preserve leading /
-                let extracted = db_url.strip_prefix("sqlite:///")
+                let extracted = db_url
+                    .strip_prefix("sqlite:///")
                     .and_then(|s| s.split('?').next())
                     .unwrap_or(db_url);
                 format!("/{}", extracted) // Restore leading /
             } else if db_url.starts_with("sqlite://") {
-                db_url.strip_prefix("sqlite://")
+                db_url
+                    .strip_prefix("sqlite://")
                     .and_then(|s| s.split('?').next())
                     .unwrap_or(db_url)
                     .to_string()
             } else if db_url.starts_with("sqlite:") {
-                db_url.strip_prefix("sqlite:")
+                db_url
+                    .strip_prefix("sqlite:")
                     .and_then(|s| s.split('?').next())
                     .unwrap_or(db_url)
                     .to_string()
@@ -137,14 +138,12 @@ pub async fn create_journal_storage(
                 // Plain file path (e.g., /path/to/db or ~/path/to/db)
                 // Expand ~ to home directory if needed
                 if db_url.starts_with("~/") {
-                    let home = std::env::var("HOME")
-                        .unwrap_or_else(|_| "~".to_string());
+                    let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
                     db_url.replacen("~/", &format!("{}/", home), 1)
                 } else {
                     db_url.to_string()
                 }
             };
-            
 
             // Ensure directory exists for file-based SQLite databases
             if path != ":memory:" && !path.is_empty() {
@@ -152,12 +151,13 @@ pub async fn create_journal_storage(
                     std::fs::create_dir_all(parent).map_err(|e| {
                         JournalError::InvalidConfiguration(format!(
                             "Failed to create database directory '{}': {}",
-                            parent.display(), e
+                            parent.display(),
+                            e
                         ))
                     })?;
                 }
             }
-            
+
             let storage = SqliteJournalStorage::new(&path).await?;
             Ok(Arc::new(storage))
         }
@@ -180,9 +180,10 @@ pub async fn create_journal_storage(
         }
         #[cfg(not(feature = "sqlite-backend"))]
         {
-            Err(JournalError::InvalidConfiguration(
-                format!("Unsupported database URL: {} (and sqlite-backend not enabled)", db_url)
-            ))
+            Err(JournalError::InvalidConfiguration(format!(
+                "Unsupported database URL: {} (and sqlite-backend not enabled)",
+                db_url
+            )))
         }
     }
 }

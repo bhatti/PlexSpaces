@@ -197,7 +197,10 @@ pub mod blob;
 #[cfg(feature = "ddb-backend")]
 pub mod ddb;
 
-pub use config::{create_keyvalue_from_config, create_keyvalue_from_env, create_keyvalue_stores_from_config, create_keyvalue_stores_from_env, BackendType, KVConfig};
+pub use config::{
+    create_keyvalue_from_config, create_keyvalue_from_env, create_keyvalue_stores_from_config,
+    create_keyvalue_stores_from_env, BackendType, KVConfig,
+};
 pub use error::{KVError, KVResult};
 
 /// Maps `KVError` to `plexspaces_common::KeyValueStoreError` with semantic error preservation.
@@ -211,8 +214,12 @@ pub fn map_kv_error(e: KVError) -> plexspaces_common::KeyValueStoreError {
     match e {
         KVError::KeyNotFound(k) => plexspaces_common::KeyValueStoreError::NotFound(k),
         KVError::CASFailed => plexspaces_common::KeyValueStoreError::CasConflict,
-        KVError::SerializationError(msg) => plexspaces_common::KeyValueStoreError::SerializationError(msg),
-        KVError::DeserializationError(msg) => plexspaces_common::KeyValueStoreError::SerializationError(msg),
+        KVError::SerializationError(msg) => {
+            plexspaces_common::KeyValueStoreError::SerializationError(msg)
+        }
+        KVError::DeserializationError(msg) => {
+            plexspaces_common::KeyValueStoreError::SerializationError(msg)
+        }
         other => plexspaces_common::KeyValueStoreError::StorageError(other.to_string()),
     }
 }
@@ -491,7 +498,11 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>>;
+    async fn multi_get(
+        &self,
+        ctx: &RequestContext,
+        keys: &[&str],
+    ) -> KVResult<Vec<Option<Vec<u8>>>>;
 
     /// Put multiple key-value pairs atomically (batch write).
     ///
@@ -533,7 +544,13 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, ttl: Duration) -> KVResult<()>;
+    async fn put_with_ttl(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        value: Vec<u8>,
+        ttl: Duration,
+    ) -> KVResult<()>;
 
     /// Refresh TTL for existing key (lease renewal).
     ///
@@ -603,8 +620,13 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn cas(&self, ctx: &RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>)
-        -> KVResult<bool>;
+    async fn cas(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        expected: Option<Vec<u8>>,
+        new_value: Vec<u8>,
+    ) -> KVResult<bool>;
 
     /// Atomic increment (for counters/metrics).
     ///
@@ -692,7 +714,8 @@ pub trait KeyValueStore: Send + Sync {
     /// # Ok(())
     /// # }
     /// ```
-    async fn watch_prefix(&self, ctx: &RequestContext, prefix: &str) -> KVResult<Receiver<KVEvent>>;
+    async fn watch_prefix(&self, ctx: &RequestContext, prefix: &str)
+        -> KVResult<Receiver<KVEvent>>;
 
     // =========================================================================
     // Maintenance Operations (Cleanup, Snapshots)

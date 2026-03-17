@@ -25,11 +25,13 @@
 //! - No memory leaks when actor panics
 //! - No memory leaks when actor terminates naturally
 
+use async_trait::async_trait;
 use plexspaces_actor::Actor;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorError, ActorId, BehaviorError, ExitReason, Message};
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, ActorError, ActorId, BehaviorError, ExitReason, Message,
+};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
-use async_trait::async_trait;
 use tokio::time::{sleep, Duration};
 use ulid::Ulid;
 
@@ -115,7 +117,9 @@ impl plexspaces_core::Actor for NaturalTerminationActor {
         _ctx: &ActorContext,
         _msg: Message,
     ) -> Result<(), BehaviorError> {
-        let count = self.message_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let count = self
+            .message_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if count >= self.max_messages {
             // Signal termination by stopping mailbox processing
             // In real scenario, actor would call stop() or exit naturally
@@ -133,8 +137,10 @@ async fn test_registration_after_init_succeeds() {
     // Test that registration happens AFTER init() succeeds
     // This prevents memory leaks when init() fails
     let actor_impl = FailingInitActor::new(false);
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -146,13 +152,15 @@ async fn test_registration_after_init_succeeds() {
 
     // Start should succeed (init() succeeds)
     let handle = actor.start().await.expect("Actor should start");
-    
+
     // Actor should be in Active state (registration would have happened in ActorFactory)
     let state = actor.state().await;
-    assert!(state == plexspaces_actor::ActorState::Active || 
-            state == plexspaces_actor::ActorState::Stopping ||
-            state == plexspaces_actor::ActorState::Terminated);
-    
+    assert!(
+        state == plexspaces_actor::ActorState::Active
+            || state == plexspaces_actor::ActorState::Stopping
+            || state == plexspaces_actor::ActorState::Terminated
+    );
+
     // Cleanup
     let _ = actor.stop().await;
     let _ = handle.await;
@@ -163,8 +171,10 @@ async fn test_no_registration_when_init_fails() {
     // Test that actor is NOT registered when init() fails
     // This prevents memory leaks
     let actor_impl = FailingInitActor::new(true);
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -177,12 +187,14 @@ async fn test_no_registration_when_init_fails() {
     // Start should fail (init() fails)
     let result = actor.start().await;
     assert!(result.is_err(), "Actor start should fail when init() fails");
-    
+
     // Actor should be in Failed state
     let state = actor.state().await;
-    assert!(matches!(state, plexspaces_actor::ActorState::Failed(_)), 
-            "Actor should be in Failed state when init() fails");
-    
+    assert!(
+        matches!(state, plexspaces_actor::ActorState::Failed(_)),
+        "Actor should be in Failed state when init() fails"
+    );
+
     // Actor should NOT be registered (verified by state being Failed, not Active)
     // In ActorFactory, registration happens AFTER start() succeeds
 }
@@ -191,8 +203,10 @@ async fn test_no_registration_when_init_fails() {
 async fn test_unregister_on_stop() {
     // Test that unregistration happens when actor is stopped
     let actor_impl = FailingInitActor::new(false);
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -204,15 +218,17 @@ async fn test_unregister_on_stop() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
+
     // Stop actor
     let _ = actor.stop().await;
-    
+
     // Actor should be in Terminated state
     let state = actor.state().await;
-    assert!(state == plexspaces_actor::ActorState::Terminated || 
-            state == plexspaces_actor::ActorState::Stopping);
-    
+    assert!(
+        state == plexspaces_actor::ActorState::Terminated
+            || state == plexspaces_actor::ActorState::Stopping
+    );
+
     // In ActorFactory, watch_actor_termination() will call unregister_with_cleanup()
     let _ = handle.await;
 }
@@ -221,8 +237,10 @@ async fn test_unregister_on_stop() {
 async fn test_unregister_on_natural_termination() {
     // Test that unregistration happens when actor terminates naturally
     let actor_impl = NaturalTerminationActor::new(1);
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -234,10 +252,10 @@ async fn test_unregister_on_natural_termination() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
+
     // Stop actor (simulates natural termination)
     let _ = actor.stop().await;
-    
+
     // In ActorFactory, watch_actor_termination() will call unregister_with_cleanup()
     let result = handle.await;
     // Result may be Ok (normal termination) or Err (cancelled)
@@ -248,8 +266,10 @@ async fn test_unregister_on_natural_termination() {
 async fn test_idempotent_unregistration() {
     // Test that unregistration is idempotent (safe to call multiple times)
     let actor_impl = FailingInitActor::new(false);
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -261,17 +281,19 @@ async fn test_idempotent_unregistration() {
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
-    
+
     // Stop actor multiple times (should be idempotent)
     let _ = actor.stop().await;
     let _ = actor.stop().await;
     let _ = actor.stop().await;
-    
+
     // Should not panic or error
     let state = actor.state().await;
-    assert!(state == plexspaces_actor::ActorState::Terminated || 
-            state == plexspaces_actor::ActorState::Stopping);
-    
+    assert!(
+        state == plexspaces_actor::ActorState::Terminated
+            || state == plexspaces_actor::ActorState::Stopping
+    );
+
     let _ = handle.await;
 }
 
@@ -280,8 +302,10 @@ async fn test_no_memory_leak_on_init_failure() {
     // Test that there's no memory leak when init() fails
     // Actor should not be registered, so no cleanup needed
     let actor_impl = FailingInitActor::new(true);
-    
-    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new())).await.unwrap();
+
+    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
+        .await
+        .unwrap();
     let mut actor = Actor::new(
         "test-actor".to_string(),
         Box::new(actor_impl),
@@ -294,14 +318,10 @@ async fn test_no_memory_leak_on_init_failure() {
     // Start should fail
     let result = actor.start().await;
     assert!(result.is_err());
-    
+
     // Actor should be in Failed state (not registered)
     let state = actor.state().await;
     assert!(matches!(state, plexspaces_actor::ActorState::Failed(_)));
-    
+
     // No cleanup needed - actor was never registered
 }
-
-
-
-

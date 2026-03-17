@@ -19,7 +19,7 @@ use tracing::{debug, info, trace, warn};
 
 use crate::{Channel, ChannelError, ChannelResult};
 use plexspaces_core::{ProcessGroupService, RequestContext, ServiceLocator};
-use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, ChannelStats};
+use plexspaces_proto::channel::v1::{ChannelConfig, ChannelProvider, ChannelStats};
 use plexspaces_proto::common::v1::Message;
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 1024;
@@ -148,8 +148,7 @@ impl ProcessGroupChannel {
     }
 
     fn record_latency(&self, duration: Duration) {
-        metrics::histogram!("plexspaces_pg_channel_latency_seconds")
-            .record(duration.as_secs_f64());
+        metrics::histogram!("plexspaces_pg_channel_latency_seconds").record(duration.as_secs_f64());
     }
 }
 
@@ -407,7 +406,9 @@ impl Channel for ProcessGroupChannel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::actor_context::{ActorService, ChannelService, ObjectRegistry, ProcessGroupService, TupleSpaceProvider};
+    use plexspaces_core::actor_context::{
+        ActorService, ChannelService, ObjectRegistry, ProcessGroupService, TupleSpaceProvider,
+    };
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
@@ -431,110 +432,249 @@ mod tests {
     #[async_trait]
     impl ServiceLocator for TestServiceLocator {
         // Service registration by type (generic)
-        async fn register_service<T: plexspaces_core::Service + 'static>(&self, _service: Arc<T>) where Self: Sized {}
-        async fn get_service<T: plexspaces_core::Service + 'static>(&self) -> Option<Arc<T>> where Self: Sized { None }
-        async fn register_service_by_name<T: plexspaces_core::Service + 'static>(&self, _name: &str, _service: Arc<T>) where Self: Sized {}
-        async fn get_service_by_name<T: plexspaces_core::Service + 'static>(&self, _name: &str) -> Option<Arc<T>> where Self: Sized { None }
-        
+        async fn register_service<T: plexspaces_core::Service + 'static>(&self, _service: Arc<T>)
+        where
+            Self: Sized,
+        {
+        }
+        async fn get_service<T: plexspaces_core::Service + 'static>(&self) -> Option<Arc<T>>
+        where
+            Self: Sized,
+        {
+            None
+        }
+        async fn register_service_by_name<T: plexspaces_core::Service + 'static>(
+            &self,
+            _name: &str,
+            _service: Arc<T>,
+        ) where
+            Self: Sized,
+        {
+        }
+        async fn get_service_by_name<T: plexspaces_core::Service + 'static>(
+            &self,
+            _name: &str,
+        ) -> Option<Arc<T>>
+        where
+            Self: Sized,
+        {
+            None
+        }
+
         // Registries
-        async fn actor_registry(&self) -> Option<Arc<plexspaces_core::ActorRegistry>> { None }
+        async fn actor_registry(&self) -> Option<Arc<plexspaces_core::ActorRegistry>> {
+            None
+        }
         async fn register_actor_registry(&self, _registry: Arc<plexspaces_core::ActorRegistry>) {}
-        async fn virtual_actor_manager(&self) -> Option<Arc<plexspaces_core::VirtualActorManager>> { None }
-        async fn reply_waiter_registry(&self) -> Option<Arc<plexspaces_core::ReplyWaiterRegistry>> { None }
+        async fn virtual_actor_manager(&self) -> Option<Arc<plexspaces_core::VirtualActorManager>> {
+            None
+        }
+        async fn reply_waiter_registry(&self) -> Option<Arc<plexspaces_core::ReplyWaiterRegistry>> {
+            None
+        }
         // Note: ActorFactory methods are not part of ServiceLocator trait (to avoid circular dependency)
-        
+
         // Core services
-        async fn get_actor_service(&self) -> Option<Arc<dyn ActorService>> { None }
+        async fn get_actor_service(&self) -> Option<Arc<dyn ActorService>> {
+            None
+        }
         async fn register_actor_service(&self, _: Arc<dyn ActorService>) {}
-        async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>> { None }
+        async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>> {
+            None
+        }
         async fn register_channel_service(&self, _: Arc<dyn ChannelService>) {}
-        async fn get_tuplespace_provider(&self) -> Option<Arc<dyn TupleSpaceProvider>> { None }
+        async fn get_tuplespace_provider(&self) -> Option<Arc<dyn TupleSpaceProvider>> {
+            None
+        }
         async fn register_tuplespace_provider(&self, _: Arc<dyn TupleSpaceProvider>) {}
-        async fn get_object_registry(&self) -> Option<Arc<dyn ObjectRegistry>> { None }
+        async fn get_object_registry(&self) -> Option<Arc<dyn ObjectRegistry>> {
+            None
+        }
         async fn register_object_registry(&self, _: Arc<dyn ObjectRegistry>) {}
-        
+
         // Storage
-        async fn get_journal_storage(&self) -> Option<Arc<dyn plexspaces_core::JournalStorage + Send + Sync>> { None }
-        async fn register_journal_storage(&self, _: Arc<dyn plexspaces_core::JournalStorage + Send + Sync>) {}
-        
+        async fn get_journal_storage(
+            &self,
+        ) -> Option<Arc<dyn plexspaces_core::JournalStorage + Send + Sync>> {
+            None
+        }
+        async fn register_journal_storage(
+            &self,
+            _: Arc<dyn plexspaces_core::JournalStorage + Send + Sync>,
+        ) {
+        }
+
         // Monitoring
-        async fn get_node_metrics_accessor(&self) -> Option<Arc<dyn plexspaces_core::monitoring::NodeMetricsAccessor + Send + Sync>> { None }
-        async fn register_node_metrics_accessor(&self, _: Arc<dyn plexspaces_core::monitoring::NodeMetricsAccessor + Send + Sync>) {}
-        
+        async fn get_node_metrics_accessor(
+            &self,
+        ) -> Option<Arc<dyn plexspaces_core::monitoring::NodeMetricsAccessor + Send + Sync>>
+        {
+            None
+        }
+        async fn register_node_metrics_accessor(
+            &self,
+            _: Arc<dyn plexspaces_core::monitoring::NodeMetricsAccessor + Send + Sync>,
+        ) {
+        }
+
         // Facets
-        async fn get_facet_manager(&self) -> Option<Arc<plexspaces_core::facet_service_wrapper::FacetManagerServiceWrapper>> { None }
-        async fn register_facet_manager(&self, _: Arc<plexspaces_core::facet_service_wrapper::FacetManagerServiceWrapper>) {}
-        async fn get_facet_registry(&self) -> Option<Arc<plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper>> { None }
-        async fn register_facet_registry(&self, _: Arc<plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper>) {}
-        
+        async fn get_facet_manager(
+            &self,
+        ) -> Option<Arc<plexspaces_core::facet_service_wrapper::FacetManagerServiceWrapper>>
+        {
+            None
+        }
+        async fn register_facet_manager(
+            &self,
+            _: Arc<plexspaces_core::facet_service_wrapper::FacetManagerServiceWrapper>,
+        ) {
+        }
+        async fn get_facet_registry(
+            &self,
+        ) -> Option<Arc<plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper>>
+        {
+            None
+        }
+        async fn register_facet_registry(
+            &self,
+            _: Arc<plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper>,
+        ) {
+        }
+
         // Node config
-        async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig> { None }
+        async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig> {
+            None
+        }
         async fn register_node_config(&self, _: plexspaces_proto::node::v1::NodeConfig) {}
-        async fn get_node_connection_info(&self) -> Option<Arc<dyn plexspaces_core::monitoring::NodeConnectionInfo + Send + Sync>> { None }
-        async fn register_node_connection_info(&self, _: Arc<dyn plexspaces_core::monitoring::NodeConnectionInfo + Send + Sync>) {}
-        
+        async fn get_node_connection_info(
+            &self,
+        ) -> Option<Arc<dyn plexspaces_core::monitoring::NodeConnectionInfo + Send + Sync>>
+        {
+            None
+        }
+        async fn register_node_connection_info(
+            &self,
+            _: Arc<dyn plexspaces_core::monitoring::NodeConnectionInfo + Send + Sync>,
+        ) {
+        }
+
         // Shutdown
-        fn is_shutdown_requested(&self) -> bool { false }
+        fn is_shutdown_requested(&self) -> bool {
+            false
+        }
         fn request_shutdown(&self) {}
-        
+
         // Application manager
-        async fn application_manager(&self) -> Option<Arc<dyn plexspaces_core::ApplicationManager>> { None }
-        async fn register_application_manager(&self, _: Arc<dyn plexspaces_core::ApplicationManager>) {}
-        
+        async fn application_manager(
+            &self,
+        ) -> Option<Arc<dyn plexspaces_core::ApplicationManager>> {
+            None
+        }
+        async fn register_application_manager(
+            &self,
+            _: Arc<dyn plexspaces_core::ApplicationManager>,
+        ) {
+        }
+
         // Behavior registry
-        async fn get_behavior_registry(&self) -> Option<Arc<plexspaces_core::behavior_factory::BehaviorRegistry>> { None }
-        async fn register_behavior_registry(&self, _: Arc<plexspaces_core::behavior_factory::BehaviorRegistry>) {}
-        
+        async fn get_behavior_registry(
+            &self,
+        ) -> Option<Arc<plexspaces_core::behavior_factory::BehaviorRegistry>> {
+            None
+        }
+        async fn register_behavior_registry(
+            &self,
+            _: Arc<plexspaces_core::behavior_factory::BehaviorRegistry>,
+        ) {
+        }
+
         // System context - use empty strings (this is a test stub)
         async fn request_context_for_system_operations(&self) -> plexspaces_core::RequestContext {
             plexspaces_core::RequestContext::new_without_auth(String::new(), String::new())
         }
-        async fn request_context_for_system_operations_with_namespace(&self, namespace: String) -> plexspaces_core::RequestContext {
+        async fn request_context_for_system_operations_with_namespace(
+            &self,
+            namespace: String,
+        ) -> plexspaces_core::RequestContext {
             plexspaces_core::RequestContext::new_without_auth(String::new(), namespace)
         }
-        
+
         // Lock manager
-        async fn get_lock_manager(&self) -> Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>> { None }
-        async fn register_lock_manager(&self, _: Arc<dyn plexspaces_locks::LockManager + Send + Sync>) {}
-        
+        async fn get_lock_manager(
+            &self,
+        ) -> Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>> {
+            None
+        }
+        async fn register_lock_manager(
+            &self,
+            _: Arc<dyn plexspaces_locks::LockManager + Send + Sync>,
+        ) {
+        }
+
         // Actor factory
-        async fn get_actor_factory(&self) -> Option<Arc<dyn plexspaces_core::ActorFactory>> { None }
+        async fn get_actor_factory(&self) -> Option<Arc<dyn plexspaces_core::ActorFactory>> {
+            None
+        }
         async fn register_actor_factory(&self, _: Arc<dyn plexspaces_core::ActorFactory>) {}
-        
+
         // Initialize services (no-op for test stub)
         async fn initialize_services(
             &self,
             _node_id: Option<String>,
             _node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
             _release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
-        ) {}
-        
+        ) {
+        }
+
         // gRPC connection manager
-        async fn get_grpc_connection_manager(&self) -> Option<Arc<plexspaces_core::GrpcConnectionManager>> { None }
-        async fn register_grpc_connection_manager(&self, _: Arc<plexspaces_core::GrpcConnectionManager>) {}
-        async fn get_actor_service_client(&self, _node_id: &str) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_grpc_connection_manager(
+            &self,
+        ) -> Option<Arc<plexspaces_core::GrpcConnectionManager>> {
+            None
+        }
+        async fn register_grpc_connection_manager(
+            &self,
+            _: Arc<plexspaces_core::GrpcConnectionManager>,
+        ) {
+        }
+        async fn get_actor_service_client(
+            &self,
+            _node_id: &str,
+        ) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented".into())
         }
-        
+
         // WASM runtime
-        async fn get_wasm_runtime(&self) -> Option<Arc<dyn plexspaces_core::WasmRuntimeTrait>> { None }
+        async fn get_wasm_runtime(&self) -> Option<Arc<dyn plexspaces_core::WasmRuntimeTrait>> {
+            None
+        }
         async fn register_wasm_runtime(&self, _: Arc<dyn plexspaces_core::WasmRuntimeTrait>) {}
-        
+
         // Security config
-        async fn get_security_config(&self) -> Option<plexspaces_proto::node::v1::SecurityConfig> { None }
+        async fn get_security_config(&self) -> Option<plexspaces_proto::node::v1::SecurityConfig> {
+            None
+        }
         async fn register_security_config(&self, _: plexspaces_proto::node::v1::SecurityConfig) {}
-        async fn is_auth_disabled(&self) -> bool { false }
-        
+        async fn is_auth_disabled(&self) -> bool {
+            false
+        }
+
         // Blob service
-        async fn get_blob_service(&self) -> Option<Arc<dyn plexspaces_core::BlobServiceTrait>> { None }
+        async fn get_blob_service(&self) -> Option<Arc<dyn plexspaces_core::BlobServiceTrait>> {
+            None
+        }
         async fn register_blob_service(&self, _: Arc<dyn plexspaces_core::BlobServiceTrait>) {}
-        
+
         // Node registry
-        async fn get_node_registry(&self) -> Option<Arc<dyn plexspaces_core::NodeRegistryTrait>> { None }
+        async fn get_node_registry(&self) -> Option<Arc<dyn plexspaces_core::NodeRegistryTrait>> {
+            None
+        }
         async fn register_node_registry(&self, _: Arc<dyn plexspaces_core::NodeRegistryTrait>) {}
 
         // KeyValue store
-        async fn get_keyvalue_store(&self) -> Option<Arc<dyn plexspaces_core::KeyValueStore>> { None }
+        async fn get_keyvalue_store(&self) -> Option<Arc<dyn plexspaces_core::KeyValueStore>> {
+            None
+        }
         async fn register_keyvalue_store(&self, _: Arc<dyn plexspaces_core::KeyValueStore>) {}
 
         // Process group service
@@ -560,43 +700,83 @@ mod tests {
 
     #[async_trait]
     impl ProcessGroupService for MockProcessGroupService {
-        async fn create_group(&self, _ctx: &RequestContext, group_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        async fn create_group(
+            &self,
+            _ctx: &RequestContext,
+            group_name: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut groups = self.groups.write().await;
-            groups.entry(group_name.to_string()).or_insert_with(Vec::new);
+            groups
+                .entry(group_name.to_string())
+                .or_insert_with(Vec::new);
             Ok(())
         }
-        async fn delete_group(&self, _ctx: &RequestContext, group_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        async fn delete_group(
+            &self,
+            _ctx: &RequestContext,
+            group_name: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut groups = self.groups.write().await;
             groups.remove(group_name);
             Ok(())
         }
-        async fn join_group(&self, _ctx: &RequestContext, group_name: &str, actor_id: &str, _topics: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        async fn join_group(
+            &self,
+            _ctx: &RequestContext,
+            group_name: &str,
+            actor_id: &str,
+            _topics: Vec<String>,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut groups = self.groups.write().await;
-            let members = groups.entry(group_name.to_string()).or_insert_with(Vec::new);
+            let members = groups
+                .entry(group_name.to_string())
+                .or_insert_with(Vec::new);
             if !members.contains(&actor_id.to_string()) {
                 members.push(actor_id.to_string());
             }
             Ok(())
         }
-        async fn leave_group(&self, _ctx: &RequestContext, group_name: &str, actor_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        async fn leave_group(
+            &self,
+            _ctx: &RequestContext,
+            group_name: &str,
+            actor_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut groups = self.groups.write().await;
             if let Some(members) = groups.get_mut(group_name) {
                 members.retain(|m| m != actor_id);
             }
             Ok(())
         }
-        async fn get_members(&self, _ctx: &RequestContext, group_name: &str) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_members(
+            &self,
+            _ctx: &RequestContext,
+            group_name: &str,
+        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
             let groups = self.groups.read().await;
             Ok(groups.get(group_name).cloned().unwrap_or_default())
         }
-        async fn get_local_members(&self, ctx: &RequestContext, group_name: &str) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn get_local_members(
+            &self,
+            ctx: &RequestContext,
+            group_name: &str,
+        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
             self.get_members(ctx, group_name).await
         }
-        async fn list_groups(&self, _ctx: &RequestContext) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        async fn list_groups(
+            &self,
+            _ctx: &RequestContext,
+        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
             let groups = self.groups.read().await;
             Ok(groups.keys().cloned().collect())
         }
-        async fn publish_to_group(&self, _ctx: &RequestContext, group_name: &str, _topic: Option<&str>, _message: Message) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+        async fn publish_to_group(
+            &self,
+            _ctx: &RequestContext,
+            group_name: &str,
+            _topic: Option<&str>,
+            _message: Message,
+        ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
             let groups = self.groups.read().await;
             Ok(groups.get(group_name).map(|m| m.len()).unwrap_or(0) as u32)
         }
@@ -772,4 +952,3 @@ mod tests {
         assert!(channel.send(message).await.is_err());
     }
 }
-

@@ -21,13 +21,7 @@ mod tests {
         let lock_manager = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
         let actor_id = ActorId::from("test-actor".to_string());
         let host_functions = Arc::new(HostFunctions::new());
-        SimpleHostImpl::with_services(
-            actor_id,
-            host_functions,
-            None,
-            Some(lock_manager),
-            None,
-        )
+        SimpleHostImpl::with_services(actor_id, host_functions, None, Some(lock_manager), None)
     }
 
     #[tokio::test]
@@ -90,7 +84,10 @@ mod tests {
             "lock_release should succeed, got: {}",
             release_out
         );
-        assert_eq!(release_out, "", "release should return empty string on success");
+        assert_eq!(
+            release_out, "",
+            "release should return empty string on success"
+        );
     }
 
     #[tokio::test]
@@ -127,7 +124,10 @@ mod tests {
             renew_out
         );
         assert_ne!(renew_out, version, "renew should return a new version");
-        assert!(!renew_out.is_empty(), "renew should return non-empty version");
+        assert!(
+            !renew_out.is_empty(),
+            "renew should return non-empty version"
+        );
 
         // Release with the new version
         let release_out = host

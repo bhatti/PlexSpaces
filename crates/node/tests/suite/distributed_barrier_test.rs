@@ -44,7 +44,7 @@
 //! - MapReduce (shuffle barriers)
 //! - Distributed training (gradient synchronization)
 
-use plexspaces_node::{Node, NodeId, default_node_config};
+use plexspaces_node::{default_node_config, Node, NodeId};
 use plexspaces_tuplespace::{Pattern, PatternField, Tuple, TupleField};
 use std::sync::Arc;
 use std::time::{Duration as StdDuration, Instant};

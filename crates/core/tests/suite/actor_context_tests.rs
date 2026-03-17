@@ -31,8 +31,8 @@ async fn test_actor_context_minimal() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "node1".to_string(),
-        "test-tenant".to_string(),  // tenant_id
-        "default".to_string(),       // namespace
+        "test-tenant".to_string(), // tenant_id
+        "default".to_string(),     // namespace
         service_locator,
         None,
     );
@@ -58,7 +58,9 @@ async fn test_tuplespace_provider_wrapper() {
         TupleField::String("test".to_string()),
         TupleField::Integer(42),
     ]);
-    TupleSpaceProvider::write(&wrapper, tuple.clone()).await.unwrap();
+    TupleSpaceProvider::write(&wrapper, tuple.clone())
+        .await
+        .unwrap();
 
     // Test read
     let pattern = Pattern::new(vec![
@@ -89,12 +91,12 @@ async fn test_stub_actor_service() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "node1".to_string(),
-        "test-tenant".to_string(),  // tenant_id
-        "default".to_string(),       // namespace
+        "test-tenant".to_string(), // tenant_id
+        "default".to_string(),     // namespace
         service_locator,
         None,
     );
-    
+
     // Services are accessed via service_locator, not directly
     assert_eq!(ctx.node_id, "node1");
     assert_eq!(ctx.tenant_id, "test-tenant");
@@ -113,12 +115,12 @@ async fn test_stub_object_registry() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "node1".to_string(),
-        "test-tenant".to_string(),  // tenant_id
-        "default".to_string(),       // namespace
+        "test-tenant".to_string(), // tenant_id
+        "default".to_string(),     // namespace
         service_locator,
         None,
     );
-    
+
     // Services are accessed via service_locator, not directly
     assert_eq!(ctx.node_id, "node1");
     assert_eq!(ctx.tenant_id, "test-tenant");
@@ -135,8 +137,8 @@ async fn test_stub_node_operations() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "node1".to_string(),
-        "test-tenant".to_string(),  // tenant_id
-        "default".to_string(),      // namespace
+        "test-tenant".to_string(), // tenant_id
+        "default".to_string(),     // namespace
         service_locator,
         None,
     );
@@ -159,8 +161,8 @@ async fn test_actor_context_new_with_tenant_id() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "node1".to_string(),
-        "tenant-123".to_string(),  // tenant_id
-        "production".to_string(),   // namespace
+        "tenant-123".to_string(), // tenant_id
+        "production".to_string(), // namespace
         service_locator,
         None,
     );
@@ -179,8 +181,8 @@ async fn test_actor_context_tenant_id_getter() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "node1".to_string(),
-        "tenant-789".to_string(),  // tenant_id
-        "production".to_string(),   // namespace
+        "tenant-789".to_string(), // tenant_id
+        "production".to_string(), // namespace
         service_locator,
         None,
     );
@@ -198,8 +200,8 @@ async fn test_actor_context_clone_preserves_tenant_id() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let ctx1 = ActorContext::new(
         "node1".to_string(),
-        "tenant-123".to_string(),  // tenant_id
-        "production".to_string(),   // namespace
+        "tenant-123".to_string(), // tenant_id
+        "production".to_string(), // namespace
         service_locator,
         None,
     );
@@ -224,8 +226,8 @@ async fn test_actor_context_new() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
-        "tenant-123".to_string(),  // tenant_id
-        "test-ns".to_string(),      // namespace
+        "tenant-123".to_string(), // tenant_id
+        "test-ns".to_string(),    // namespace
         service_locator,
         None,
     );
@@ -251,8 +253,8 @@ async fn test_actor_context_new_with_config() {
 
     let ctx = ActorContext::new(
         "test-node".to_string(),
-        "tenant-123".to_string(),  // tenant_id
-        "test-ns".to_string(),      // namespace
+        "tenant-123".to_string(), // tenant_id
+        "test-ns".to_string(),    // namespace
         service_locator,
         config.clone(),
     );
@@ -271,14 +273,16 @@ async fn test_actor_context_new_with_metadata() {
     let service_locator = create_default_service_locator(None, None, None).await;
     let mut ctx = ActorContext::new(
         "test-node".to_string(),
-        "tenant-123".to_string(),  // tenant_id
-        "test-ns".to_string(),      // namespace
+        "tenant-123".to_string(), // tenant_id
+        "test-ns".to_string(),    // namespace
         service_locator,
         None,
     );
 
-    ctx.metadata.insert("key1".to_string(), "value1".to_string());
-    ctx.metadata.insert("key2".to_string(), "value2".to_string());
+    ctx.metadata
+        .insert("key1".to_string(), "value1".to_string());
+    ctx.metadata
+        .insert("key2".to_string(), "value2".to_string());
 
     assert_eq!(ctx.metadata.get("key1"), Some(&"value1".to_string()));
     assert_eq!(ctx.metadata.get("key2"), Some(&"value2".to_string()));
@@ -286,4 +290,3 @@ async fn test_actor_context_new_with_metadata() {
     assert_eq!(ctx.tenant_id, "tenant-123");
     assert_eq!(ctx.namespace, "test-ns");
 }
-

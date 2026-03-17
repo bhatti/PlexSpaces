@@ -30,8 +30,8 @@
 
 use plexspaces_node::Node;
 use plexspaces_proto::application::v1::{
-    ApplicationSpec, ApplicationType, SupervisorSpec, ChildSpec, ChildType,
-    SupervisionStrategy, RestartPolicy,
+    ApplicationSpec, ApplicationType, ChildSpec, ChildType, RestartPolicy, SupervisionStrategy,
+    SupervisorSpec,
 };
 use plexspaces_proto::node::v1::ReleaseSpec;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ async fn test_deployment_starts_supervisor_hierarchy() {
     // 3. Actors are started after their supervisors
     // 4. All links/monitors are established
     // 5. Metrics are recorded
-    
+
     // Implementation needed: Create node, deploy application with supervisor spec,
     // verify hierarchy is started correctly
 }
@@ -59,7 +59,7 @@ async fn test_undeployment_shuts_down_hierarchy() {
     // 2. Actors are stopped with their shutdown specs
     // 3. Links/monitors are cleaned up
     // 4. Metrics are recorded
-    
+
     // Implementation needed: Deploy application, then undeploy,
     // verify graceful shutdown
 }
@@ -145,7 +145,3 @@ async fn test_invalid_child_spec_fails() {
     // - Invalid child types
     // - Invalid shutdown specs
 }
-
-
-
-

@@ -26,18 +26,14 @@
 // Consider accessing node functionality through ServiceLocator instead
 
 #[cfg(feature = "firecracker")]
-use plexspaces_firecracker::{
-    ApplicationDeployment, FirecrackerVm, VmConfig, VmState,
-};
+use plexspaces_firecracker::{ApplicationDeployment, FirecrackerVm, VmConfig, VmState};
 #[cfg(feature = "firecracker")]
 use plexspaces_proto::firecracker::v1::{
-    firecracker_vm_service_server::FirecrackerVmService,
-    CreateVmRequest, CreateVmResponse, BootVmRequest, BootVmResponse,
-    PauseVmRequest, PauseVmResponse, ResumeVmRequest, ResumeVmResponse,
-    StopVmRequest, StopVmResponse, GetVmStateRequest, GetVmStateResponse,
-    ListVmsRequest, ListVmsResponse, DeployApplicationRequest, DeployApplicationResponse,
-    UndeployApplicationRequest, UndeployApplicationResponse,
-    VmInstance,
+    firecracker_vm_service_server::FirecrackerVmService, BootVmRequest, BootVmResponse,
+    CreateVmRequest, CreateVmResponse, DeployApplicationRequest, DeployApplicationResponse,
+    GetVmStateRequest, GetVmStateResponse, ListVmsRequest, ListVmsResponse, PauseVmRequest,
+    PauseVmResponse, ResumeVmRequest, ResumeVmResponse, StopVmRequest, StopVmResponse,
+    UndeployApplicationRequest, UndeployApplicationResponse, VmInstance,
 };
 
 #[cfg(feature = "firecracker")]
@@ -77,11 +73,11 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<CreateVmRequest>,
     ) -> Result<Response<CreateVmResponse>, Status> {
         let req = request.into_inner();
-        
+
         // Convert proto VmConfig to Firecracker VmConfig
-        let vm_config = req.config.ok_or_else(|| {
-            Status::invalid_argument("VM configuration is required")
-        })?;
+        let vm_config = req
+            .config
+            .ok_or_else(|| Status::invalid_argument("VM configuration is required"))?;
 
         let vm_id = vm_config.vm_id.clone();
         tracing::info!(vm_id = %vm_id, "Creating Firecracker VM");
@@ -124,7 +120,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<BootVmRequest>,
     ) -> Result<Response<BootVmResponse>, Status> {
         let req = request.into_inner();
-        
+
         tracing::info!(vm_id = %req.vm_id, "Booting Firecracker VM");
 
         let vm = {
@@ -156,7 +152,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<PauseVmRequest>,
     ) -> Result<Response<PauseVmResponse>, Status> {
         let req = request.into_inner();
-        
+
         let vm = {
             let vms = self.vms.read().await;
             vms.get(&req.vm_id)
@@ -165,9 +161,10 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         };
 
         let mut vm_guard = vm.write().await;
-        vm_guard.pause().await.map_err(|e| {
-            Status::internal(format!("Failed to pause VM: {}", e))
-        })?;
+        vm_guard
+            .pause()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to pause VM: {}", e)))?;
 
         let state = vm_guard.state();
 
@@ -183,7 +180,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<ResumeVmRequest>,
     ) -> Result<Response<ResumeVmResponse>, Status> {
         let req = request.into_inner();
-        
+
         let vm = {
             let vms = self.vms.read().await;
             vms.get(&req.vm_id)
@@ -192,9 +189,10 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         };
 
         let mut vm_guard = vm.write().await;
-        vm_guard.resume().await.map_err(|e| {
-            Status::internal(format!("Failed to resume VM: {}", e))
-        })?;
+        vm_guard
+            .resume()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to resume VM: {}", e)))?;
 
         let state = vm_guard.state();
 
@@ -210,7 +208,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<StopVmRequest>,
     ) -> Result<Response<StopVmResponse>, Status> {
         let req = request.into_inner();
-        
+
         tracing::info!(vm_id = %req.vm_id, force = req.force, "Stopping Firecracker VM");
 
         let vm = {
@@ -238,7 +236,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<GetVmStateRequest>,
     ) -> Result<Response<GetVmStateResponse>, Status> {
         let req = request.into_inner();
-        
+
         let vm = {
             let vms = self.vms.read().await;
             vms.get(&req.vm_id)
@@ -269,7 +267,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<ListVmsRequest>,
     ) -> Result<Response<ListVmsResponse>, Status> {
         let req = request.into_inner();
-        
+
         let vms = self.vms.read().await;
         let mut vm_instances = Vec::new();
 
@@ -307,7 +305,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<DeployApplicationRequest>,
     ) -> Result<Response<DeployApplicationResponse>, Status> {
         let req = request.into_inner();
-        
+
         tracing::info!(
             vm_id = %req.vm_id,
             application_id = %req.application_id,
@@ -326,9 +324,9 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
                     vm_id: req.vm_id.clone(),
                     ..Default::default()
                 };
-                let new_vm = FirecrackerVm::create(config).await.map_err(|e| {
-                    Status::internal(format!("Failed to create VM: {}", e))
-                })?;
+                let new_vm = FirecrackerVm::create(config)
+                    .await
+                    .map_err(|e| Status::internal(format!("Failed to create VM: {}", e)))?;
                 let vm_arc = Arc::new(RwLock::new(new_vm));
                 let mut vms = self.vms.write().await;
                 vms.insert(req.vm_id.clone(), vm_arc.clone());
@@ -340,9 +338,10 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         {
             let mut vm_guard = vm.write().await;
             if vm_guard.state() == VmState::Created {
-                vm_guard.boot().await.map_err(|e| {
-                    Status::internal(format!("Failed to boot VM: {}", e))
-                })?;
+                vm_guard
+                    .boot()
+                    .await
+                    .map_err(|e| Status::internal(format!("Failed to boot VM: {}", e)))?;
             }
         }
 
@@ -353,15 +352,15 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         // 2. Start PlexSpaces node inside VM
         // 3. Deploy application to that node via gRPC
         // 4. Configure networking between host and VM
-        
+
         // For now, we use ApplicationDeployment to create the deployment configuration
         // and store the association between VM and application
-        let _deployment = ApplicationDeployment::new(&req.application_id)
-            .with_vm_config(VmConfig {
+        let _deployment =
+            ApplicationDeployment::new(&req.application_id).with_vm_config(VmConfig {
                 vm_id: req.vm_id.clone(),
                 ..Default::default()
             });
-        
+
         // Store deployment association (VM ID -> Application ID)
         // In production, this would be persisted and used for VM lifecycle management
         tracing::info!(
@@ -375,7 +374,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         // - Network configuration (to connect to VM's PlexSpaces node)
         // - Application startup inside VM
         // This is a placeholder for the full implementation
-        
+
         Ok(Response::new(DeployApplicationResponse {
             success: true,
             application_id: req.application_id,
@@ -389,7 +388,7 @@ impl FirecrackerVmService for FirecrackerVmServiceImpl {
         request: Request<UndeployApplicationRequest>,
     ) -> Result<Response<UndeployApplicationResponse>, Status> {
         let req = request.into_inner();
-        
+
         tracing::info!(
             vm_id = %req.vm_id,
             application_id = %req.application_id,

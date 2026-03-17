@@ -36,10 +36,10 @@
 //! - **System operations** (node registration, heartbeats) use
 //!   `ServiceLocator::request_context_for_system_operations()` (empty tenant, optional namespace).
 
-use std::collections::HashMap;
 use chrono::Utc;
-use ulid::Ulid;
 use prost_types::Timestamp;
+use std::collections::HashMap;
+use ulid::Ulid;
 
 /// Request context (Go-style context.Context)
 ///
@@ -160,7 +160,7 @@ impl RequestContext {
         if auth_enabled && tenant_id.is_empty() {
             return Err(RequestContextError::MissingTenantId);
         }
-        
+
         let now = Utc::now();
         Ok(Self {
             tenant_id,
@@ -179,7 +179,7 @@ impl RequestContext {
             auth_enabled,
         })
     }
-    
+
     /// Create a new RequestContext (convenience method for backward compatibility)
     ///
     /// ## Note
@@ -232,11 +232,9 @@ impl RequestContext {
             } else {
                 Some(proto.correlation_id.clone())
             },
-            timestamp: proto.timestamp.clone().unwrap_or_else(|| {
-                Timestamp {
-                    seconds: now.timestamp(),
-                    nanos: now.timestamp_subsec_nanos() as i32,
-                }
+            timestamp: proto.timestamp.clone().unwrap_or_else(|| Timestamp {
+                seconds: now.timestamp(),
+                nanos: now.timestamp_subsec_nanos() as i32,
             }),
             metadata: proto.metadata.clone(),
             headers: proto.headers.clone(),
@@ -494,7 +492,6 @@ impl RequestContext {
         self.metadata.contains_key(key)
     }
 
-
     /// Create RequestContext from auth config and tenant/namespace
     ///
     /// ## Purpose
@@ -529,9 +526,7 @@ impl RequestContext {
         // Validate tenant_id: if auth is enabled, tenant_id must be provided
         // If auth is disabled, use default_tenant_id (can be empty)
         let effective_tenant_id = if auth_enabled {
-            tenant_id.ok_or_else(|| {
-                RequestContextError::MissingTenantId
-            })?
+            tenant_id.ok_or_else(|| RequestContextError::MissingTenantId)?
         } else {
             // If auth disabled, tenant_id can be empty (use default or empty)
             tenant_id.or(default_tenant_id).unwrap_or_default()
@@ -540,8 +535,8 @@ impl RequestContext {
         // Namespace must come from user request; do not substitute with config
         let effective_namespace = namespace.unwrap_or_default();
 
-        let mut ctx = Self::new(effective_tenant_id, effective_namespace, auth_enabled)?
-            .with_admin(admin);
+        let mut ctx =
+            Self::new(effective_tenant_id, effective_namespace, auth_enabled)?.with_admin(admin);
 
         if let Some(uid) = user_id {
             ctx = ctx.with_user_id(uid);
@@ -597,7 +592,7 @@ mod tests {
     #[test]
     fn test_new_request_context() {
         let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "default".to_string());
-        
+
         assert_eq!(ctx.tenant_id(), "tenant-123");
         assert_eq!(ctx.namespace(), "default");
         assert_eq!(ctx.user_id(), None);
@@ -607,8 +602,9 @@ mod tests {
 
     #[test]
     fn test_with_namespace() {
-        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string());
-        
+        let ctx =
+            RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string());
+
         assert_eq!(ctx.namespace(), "production");
     }
 
@@ -616,7 +612,7 @@ mod tests {
     fn test_with_user_id() {
         let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "".to_string())
             .with_user_id("user-456".to_string());
-        
+
         assert_eq!(ctx.user_id(), Some("user-456"));
     }
 
@@ -624,7 +620,7 @@ mod tests {
     fn test_with_correlation_id() {
         let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "".to_string())
             .with_correlation_id("corr-789".to_string());
-        
+
         assert_eq!(ctx.correlation_id(), Some("corr-789"));
     }
 
@@ -633,7 +629,7 @@ mod tests {
         let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "".to_string())
             .with_metadata("key1".to_string(), "value1".to_string())
             .with_metadata("key2".to_string(), "value2".to_string());
-        
+
         assert_eq!(ctx.get_metadata("key1"), Some(&"value1".to_string()));
         assert_eq!(ctx.get_metadata("key2"), Some(&"value2".to_string()));
         assert!(ctx.has_metadata("key1"));
@@ -642,11 +638,12 @@ mod tests {
 
     #[test]
     fn test_builder_chain() {
-        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string())
-            .with_user_id("user-456".to_string())
-            .with_correlation_id("corr-789".to_string())
-            .with_metadata("source".to_string(), "api".to_string());
-        
+        let ctx =
+            RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string())
+                .with_user_id("user-456".to_string())
+                .with_correlation_id("corr-789".to_string())
+                .with_metadata("source".to_string(), "api".to_string());
+
         assert_eq!(ctx.tenant_id(), "tenant-123");
         assert_eq!(ctx.namespace(), "production");
         assert_eq!(ctx.user_id(), Some("user-456"));
@@ -678,7 +675,7 @@ mod tests {
         };
 
         let ctx = RequestContext::from_proto(&proto, false).unwrap();
-        
+
         assert_eq!(ctx.tenant_id(), "tenant-123");
         assert_eq!(ctx.namespace(), "production");
         assert_eq!(ctx.user_id(), Some("user-456"));
@@ -707,7 +704,11 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, RequestContextError::MissingTenantId));
-        assert!(err.to_string().contains("PLEXSPACES_DISABLE_AUTH"), "Auth error must include hint: {}", err);
+        assert!(
+            err.to_string().contains("PLEXSPACES_DISABLE_AUTH"),
+            "Auth error must include hint: {}",
+            err
+        );
     }
 
     #[test]
@@ -715,18 +716,22 @@ mod tests {
         let result = RequestContext::new(String::new(), "ns".to_string(), true);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("PLEXSPACES_DISABLE_AUTH"), "MissingTenantId must include auth hint: {}", err);
+        assert!(
+            err.to_string().contains("PLEXSPACES_DISABLE_AUTH"),
+            "MissingTenantId must include auth hint: {}",
+            err
+        );
     }
 
     #[test]
     fn test_from_proto_defaults() {
         let proto = plexspaces_proto::v1::common::RequestContext {
             tenant_id: "tenant-123".to_string(),
-            namespace: "".to_string(), // Empty namespace remains empty
-            user_id: "".to_string(),   // Empty should be None
-            request_id: "".to_string(), // Empty should generate new ULID
+            namespace: "".to_string(),      // Empty namespace remains empty
+            user_id: "".to_string(),        // Empty should be None
+            request_id: "".to_string(),     // Empty should generate new ULID
             correlation_id: "".to_string(), // Empty should be None
-            timestamp: None, // None should use current time
+            timestamp: None,                // None should use current time
             metadata: HashMap::new(),
             headers: HashMap::new(),
             admin: false,
@@ -735,7 +740,7 @@ mod tests {
         };
 
         let ctx = RequestContext::from_proto(&proto, false).unwrap();
-        
+
         assert_eq!(ctx.tenant_id(), "tenant-123");
         assert_eq!(ctx.namespace(), "");
         assert_eq!(ctx.user_id(), None);
@@ -745,13 +750,14 @@ mod tests {
 
     #[test]
     fn test_to_proto() {
-        let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string())
-            .with_user_id("user-456".to_string())
-            .with_correlation_id("corr-789".to_string())
-            .with_metadata("key1".to_string(), "value1".to_string());
+        let ctx =
+            RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string())
+                .with_user_id("user-456".to_string())
+                .with_correlation_id("corr-789".to_string())
+                .with_metadata("key1".to_string(), "value1".to_string());
 
         let proto = ctx.to_proto();
-        
+
         assert_eq!(proto.tenant_id, "tenant-123");
         assert_eq!(proto.namespace, "production");
         assert_eq!(proto.user_id, "user-456");
@@ -763,44 +769,66 @@ mod tests {
     #[test]
     fn test_should_skip_namespace_filter() {
         // Admin context with empty namespace should skip filter
-        let admin_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
-            .with_admin(true);
-        assert!(admin_ctx.should_skip_namespace_filter(), "Admin with empty namespace should skip filter");
+        let admin_ctx =
+            RequestContext::new_without_auth("tenant1".to_string(), String::new()).with_admin(true);
+        assert!(
+            admin_ctx.should_skip_namespace_filter(),
+            "Admin with empty namespace should skip filter"
+        );
 
         // Internal context with empty namespace should skip filter
         let internal_ctx = RequestContext::new_without_auth("tenant1".to_string(), String::new())
             .with_internal(true);
-        assert!(internal_ctx.should_skip_namespace_filter(), "Internal with empty namespace should skip filter");
+        assert!(
+            internal_ctx.should_skip_namespace_filter(),
+            "Internal with empty namespace should skip filter"
+        );
 
         // Admin context with non-empty namespace should NOT skip filter
-        let admin_with_ns = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string())
-            .with_admin(true);
-        assert!(!admin_with_ns.should_skip_namespace_filter(), "Admin with namespace should NOT skip filter");
+        let admin_with_ns =
+            RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string())
+                .with_admin(true);
+        assert!(
+            !admin_with_ns.should_skip_namespace_filter(),
+            "Admin with namespace should NOT skip filter"
+        );
 
         // Internal context with non-empty namespace should NOT skip filter
-        let internal_with_ns = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string())
-            .with_internal(true);
-        assert!(!internal_with_ns.should_skip_namespace_filter(), "Internal with namespace should NOT skip filter");
+        let internal_with_ns =
+            RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string())
+                .with_internal(true);
+        assert!(
+            !internal_with_ns.should_skip_namespace_filter(),
+            "Internal with namespace should NOT skip filter"
+        );
 
         // Normal context should NOT skip filter
         let normal_ctx = RequestContext::new_without_auth("tenant1".to_string(), "ns1".to_string());
-        assert!(!normal_ctx.should_skip_namespace_filter(), "Normal context should NOT skip filter");
+        assert!(
+            !normal_ctx.should_skip_namespace_filter(),
+            "Normal context should NOT skip filter"
+        );
 
         // Normal context with empty namespace should NOT skip filter (not admin/internal)
-        let normal_empty_ns = RequestContext::new_without_auth("tenant1".to_string(), String::new());
-        assert!(!normal_empty_ns.should_skip_namespace_filter(), "Normal context with empty namespace should NOT skip filter");
+        let normal_empty_ns =
+            RequestContext::new_without_auth("tenant1".to_string(), String::new());
+        assert!(
+            !normal_empty_ns.should_skip_namespace_filter(),
+            "Normal context with empty namespace should NOT skip filter"
+        );
     }
 
     #[test]
     fn test_to_proto_roundtrip() {
-        let original = RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string())
-            .with_user_id("user-456".to_string())
-            .with_correlation_id("corr-789".to_string())
-            .with_metadata("key1".to_string(), "value1".to_string());
+        let original =
+            RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string())
+                .with_user_id("user-456".to_string())
+                .with_correlation_id("corr-789".to_string())
+                .with_metadata("key1".to_string(), "value1".to_string());
 
         let proto = original.to_proto();
         let restored = RequestContext::from_proto(&proto, false).unwrap();
-        
+
         assert_eq!(original.tenant_id(), restored.tenant_id());
         assert_eq!(original.namespace(), restored.namespace());
         assert_eq!(original.user_id(), restored.user_id());
@@ -810,11 +838,12 @@ mod tests {
 
     #[test]
     fn test_clone() {
-        let ctx1 = RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string())
-            .with_user_id("user-456".to_string());
+        let ctx1 =
+            RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string())
+                .with_user_id("user-456".to_string());
 
         let ctx2 = ctx1.clone();
-        
+
         assert_eq!(ctx1.tenant_id(), ctx2.tenant_id());
         assert_eq!(ctx1.namespace(), ctx2.namespace());
         assert_eq!(ctx1.user_id(), ctx2.user_id());
@@ -930,16 +959,7 @@ mod tests {
 
     #[test]
     fn test_from_auth_auth_disabled_empty_tenant_allowed() {
-        let ctx = RequestContext::from_auth(
-            None,
-            None,
-            None,
-            false,
-            false,
-            None,
-            None,
-        )
-        .unwrap();
+        let ctx = RequestContext::from_auth(None, None, None, false, false, None, None).unwrap();
         assert_eq!(ctx.tenant_id(), "");
         assert_eq!(ctx.namespace(), "");
     }
@@ -962,17 +982,13 @@ mod tests {
 
     #[test]
     fn test_from_auth_auth_enabled_missing_tenant_fails() {
-        let result = RequestContext::from_auth(
-            None,
-            Some("ns".to_string()),
-            None,
-            false,
-            true,
-            None,
-            None,
-        );
+        let result =
+            RequestContext::from_auth(None, Some("ns".to_string()), None, false, true, None, None);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), RequestContextError::MissingTenantId));
+        assert!(matches!(
+            result.unwrap_err(),
+            RequestContextError::MissingTenantId
+        ));
     }
 
     #[test]
@@ -1008,17 +1024,9 @@ mod tests {
 
     #[test]
     fn test_from_auth_namespace_empty_defaults_to_empty() {
-        let ctx = RequestContext::from_auth(
-            Some("t1".to_string()),
-            None,
-            None,
-            false,
-            false,
-            None,
-            None,
-        )
-        .unwrap();
+        let ctx =
+            RequestContext::from_auth(Some("t1".to_string()), None, None, false, false, None, None)
+                .unwrap();
         assert_eq!(ctx.namespace(), "");
     }
 }
-

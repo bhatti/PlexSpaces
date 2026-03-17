@@ -113,16 +113,16 @@ fn hash_partition(partition_key: &[u8], shard_count: u32) -> Result<u32, String>
 /// - Need minimal rebalancing
 fn consistent_hash_partition(partition_key: &[u8], shard_count: u32) -> Result<u32, String> {
     const VIRTUAL_NODES_PER_SHARD: u32 = 100; // Default virtual nodes per shard
-    
+
     // Hash the partition key to get position on ring
     let mut hasher = DefaultHasher::new();
     partition_key.hash(&mut hasher);
     let key_hash = hasher.finish();
-    
+
     // Find closest virtual node clockwise
     let mut best_shard = 0u32;
     let mut best_distance = u64::MAX;
-    
+
     // Check all virtual nodes for all shards
     for shard_id in 0..shard_count {
         for vn in 0..VIRTUAL_NODES_PER_SHARD {
@@ -131,7 +131,7 @@ fn consistent_hash_partition(partition_key: &[u8], shard_count: u32) -> Result<u
             let mut vn_hasher = DefaultHasher::new();
             vn_key.hash(&mut vn_hasher);
             let vn_hash = vn_hasher.finish();
-            
+
             // Calculate clockwise distance on ring
             let distance = if vn_hash >= key_hash {
                 vn_hash - key_hash
@@ -139,14 +139,14 @@ fn consistent_hash_partition(partition_key: &[u8], shard_count: u32) -> Result<u
                 // Wrap around: distance = (max - key_hash) + vn_hash
                 (u64::MAX - key_hash) + vn_hash + 1
             };
-            
+
             if distance < best_distance {
                 best_distance = distance;
                 best_shard = shard_id;
             }
         }
     }
-    
+
     Ok(best_shard)
 }
 
@@ -186,14 +186,14 @@ fn range_partition(
                 shard_count
             ));
         }
-        
+
         // Binary search for matching range
         for (i, range_boundary) in ranges.iter().enumerate() {
             if partition_key < range_boundary.as_slice() {
                 return Ok(i as u32);
             }
         }
-        
+
         // Key >= last boundary, assign to last shard
         Ok(shard_count - 1)
     } else {
@@ -202,7 +202,7 @@ fn range_partition(
         if partition_key.is_empty() {
             return Err("Partition key cannot be empty for range partitioning".to_string());
         }
-        
+
         let first_byte = partition_key[0] as u32;
         let shard_id = (first_byte * shard_count) / 256;
         Ok(shard_id.min(shard_count - 1))
@@ -218,13 +218,13 @@ mod tests {
         let key1 = b"user-001";
         let key2 = b"user-002";
         let shard_count = 4;
-        
+
         let shard1 = hash_partition(key1, shard_count).unwrap();
         let shard2 = hash_partition(key2, shard_count).unwrap();
-        
+
         assert!(shard1 < shard_count);
         assert!(shard2 < shard_count);
-        
+
         // Same key should map to same shard
         let shard1_again = hash_partition(key1, shard_count).unwrap();
         assert_eq!(shard1, shard1_again);
@@ -235,13 +235,13 @@ mod tests {
         let key1 = b"user-001";
         let key2 = b"user-002";
         let shard_count = 4;
-        
+
         let shard1 = consistent_hash_partition(key1, shard_count).unwrap();
         let shard2 = consistent_hash_partition(key2, shard_count).unwrap();
-        
+
         assert!(shard1 < shard_count);
         assert!(shard2 < shard_count);
-        
+
         // Same key should map to same shard
         let shard1_again = consistent_hash_partition(key1, shard_count).unwrap();
         assert_eq!(shard1, shard1_again);
@@ -250,19 +250,28 @@ mod tests {
     #[test]
     fn test_range_partition() {
         let shard_count = 4;
-        
+
         // Test with explicit ranges
         let ranges = vec![
-            b"a".to_vec(),   // Shard 0: < "a"
-            b"m".to_vec(),   // Shard 1: "a" <= key < "m"
-            b"t".to_vec(),   // Shard 2: "m" <= key < "t"
-            b"z".to_vec(),   // Shard 3: "t" <= key < "z"
+            b"a".to_vec(), // Shard 0: < "a"
+            b"m".to_vec(), // Shard 1: "a" <= key < "m"
+            b"t".to_vec(), // Shard 2: "m" <= key < "t"
+            b"z".to_vec(), // Shard 3: "t" <= key < "z"
         ];
-        
-        assert_eq!(range_partition(b"apple", shard_count, Some(&ranges)).unwrap(), 1);
-        assert_eq!(range_partition(b"zebra", shard_count, Some(&ranges)).unwrap(), 3);
-        assert_eq!(range_partition(b"0", shard_count, Some(&ranges)).unwrap(), 0);
-        
+
+        assert_eq!(
+            range_partition(b"apple", shard_count, Some(&ranges)).unwrap(),
+            1
+        );
+        assert_eq!(
+            range_partition(b"zebra", shard_count, Some(&ranges)).unwrap(),
+            3
+        );
+        assert_eq!(
+            range_partition(b"0", shard_count, Some(&ranges)).unwrap(),
+            0
+        );
+
         // Test without ranges (byte-based)
         let shard = range_partition(b"\x40", shard_count, None).unwrap();
         assert!(shard < shard_count);

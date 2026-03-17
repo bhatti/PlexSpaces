@@ -122,11 +122,7 @@ const MAX_IFNAME_LEN: usize = 15;
 /// - Lowercase for consistency (some systems are case-insensitive)
 pub fn generate_tap_name(vm_id: &str) -> String {
     // Take first 8 characters of VM ID (or less if shorter)
-    let id_suffix = if vm_id.len() >= 8 {
-        &vm_id[..8]
-    } else {
-        vm_id
-    };
+    let id_suffix = if vm_id.len() >= 8 { &vm_id[..8] } else { vm_id };
 
     // Format: "tap-{id}"
     // Total length: 4 (tap-) + 8 (id) = 12 chars (well under 15 limit)

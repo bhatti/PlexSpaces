@@ -43,9 +43,10 @@
 
 use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
+use chrono::Utc;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelProvider, ChannelConfig, ChannelStats, RedisConfig,
+    channel_config, ChannelConfig, ChannelProvider, ChannelStats, RedisConfig,
 };
 use plexspaces_proto::common::v1::Message;
 use redis::aio::Connection;
@@ -53,7 +54,6 @@ use redis::{Client, RedisResult, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use chrono::Utc;
 
 #[cfg(feature = "redis-backend")]
 use base64::{engine::general_purpose, Engine as _};
@@ -208,7 +208,7 @@ impl RedisChannel {
     }
 
     /// Serialize message to Redis fields
-    /// 
+    ///
     /// Redis XADD requires field-value pairs. For binary data (payload), we use base64 encoding
     /// to ensure safe transmission. All other fields are strings.
     fn serialize_message(msg: &Message) -> Vec<(&str, String)> {
@@ -237,13 +237,13 @@ impl RedisChannel {
         if let Some(original_id) = fields.get("id") {
             headers.insert("original_id".to_string(), original_id.clone());
         }
-        
+
         // Decode base64 payload
         let payload = fields
             .get("payload")
             .and_then(|s| general_purpose::STANDARD.decode(s).ok())
             .unwrap_or_default();
-        
+
         // Parse timestamp from Redis ID (format: "milliseconds-sequence")
         let timestamp = redis_id
             .split('-')
@@ -255,7 +255,7 @@ impl RedisChannel {
                 let nanos = ((ms % 1000) * 1_000_000) as i32;
                 Timestamp { seconds, nanos }
             });
-        
+
         Message {
             // Use Redis stream ID as the message ID (required for ack/nack)
             // Original ULID is stored in headers["original_id"] if needed
@@ -274,7 +274,10 @@ impl RedisChannel {
             timestamp,
             headers,
             message_type: fields.get("message_type").cloned().unwrap_or_default(),
-            priority: fields.get("priority").and_then(|s| s.parse().ok()).unwrap_or(0),
+            priority: fields
+                .get("priority")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
             ttl: None,
             idempotency_key: fields.get("idempotency_key").cloned().unwrap_or_default(),
             uri_path: fields.get("uri_path").cloned().unwrap_or_default(),
@@ -299,12 +302,12 @@ impl Channel for RedisChannel {
         // Redis requires field-value pairs (even number of arguments after stream_key and ID)
         let mut cmd = redis::cmd("XADD");
         cmd.arg(&self.stream_key);
-        
+
         // Add MAXLEN before ID if configured
         if self.redis_config.max_length > 0 {
             cmd.arg("MAXLEN").arg("~").arg(self.redis_config.max_length);
         }
-        
+
         // Add auto-generated ID
         cmd.arg("*");
 
@@ -473,9 +476,12 @@ impl Channel for RedisChannel {
     }
 
     async fn ack(&self, message_id: &str) -> ChannelResult<()> {
-        use crate::observability::{backend_name, record_channel_ack, record_channel_error, record_channel_latency_from_start};
+        use crate::observability::{
+            backend_name, record_channel_ack, record_channel_error,
+            record_channel_latency_from_start,
+        };
         use std::time::Instant;
-        
+
         let start = Instant::now();
         let backend = backend_name(self.config.provider);
 
@@ -614,7 +620,10 @@ impl Channel for RedisChannel {
                             .await
                             .map_err(|e| {
                                 self.stats.errors.fetch_add(1, Ordering::Relaxed);
-                                ChannelError::BackendError(format!("Failed to ack message after DLQ: {}", e))
+                                ChannelError::BackendError(format!(
+                                    "Failed to ack message after DLQ: {}",
+                                    e
+                                ))
                             })?;
 
                         crate::observability::record_channel_dlq(
@@ -624,26 +633,26 @@ impl Channel for RedisChannel {
                             "max_retries_exceeded",
                             crate::observability::backend_name(self.config.provider),
                         );
-                        
+
                         if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            channel = %self.config.name,
-                            message_id = %message_id,
-                            dlq = %dlq_key,
-                            max_retries = max_retries,
-                            "Message sent to DLQ after max retries"
-                        );
+                            tracing::debug!(
+                                channel = %self.config.name,
+                                message_id = %message_id,
+                                dlq = %dlq_key,
+                                max_retries = max_retries,
+                                "Message sent to DLQ after max retries"
+                            );
                         }
                     }
                 }
             } else {
                 // Just don't ACK (message will be redelivered after timeout)
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    channel = %self.config.name,
-                    message_id = %message_id,
-                    "Message nacked (will be redelivered after timeout, DLQ disabled or not configured)"
-                );
+                    tracing::debug!(
+                        channel = %self.config.name,
+                        message_id = %message_id,
+                        "Message nacked (will be redelivered after timeout, DLQ disabled or not configured)"
+                    );
                 }
             }
         }

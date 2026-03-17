@@ -37,13 +37,16 @@
 //! and generated via `buf generate`. This module provides Rust-friendly wrappers
 //! and conversion methods.
 
+use crate::Actor;
+use plexspaces_core::{ActorError, ActorRef};
+use plexspaces_proto::supervision::v1::{
+    ChildSpec as ProtoChildSpec, ChildType as ProtoChildType,
+    RestartStrategy as ProtoRestartStrategy,
+};
+use prost_types;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use crate::Actor;
-use plexspaces_core::{ActorError, ActorRef};
-use plexspaces_proto::supervision::v1::{ChildSpec as ProtoChildSpec, ChildType as ProtoChildType, RestartStrategy as ProtoRestartStrategy};
-use prost_types;
 
 /// Boxed future type for async start functions
 pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
@@ -63,38 +66,38 @@ pub struct ChildSpec {
     /// Unique identifier for this child within the supervisor
     /// This is the child's local name, like "worker1" or "db_supervisor"
     pub child_id: String,
-    
+
     /// ID of the actor or supervisor to supervise
     /// - For actors: actor ID (e.g., "worker1@localhost")
     /// - For supervisors: supervisor ID (e.g., "db-supervisor")
     /// The supervisor monitors this process regardless of its type
     pub actor_or_supervisor_id: String,
-    
+
     /// How to handle child failures
     pub restart_strategy: RestartStrategy,
-    
+
     /// Shutdown timeout for graceful termination
     /// - None/0 = brutal_kill (immediate)
     /// - Some(ms) = graceful shutdown with timeout
     /// - For supervisors: typically set high or infinity to allow children to shutdown
     pub shutdown_timeout: Option<Duration>,
-    
+
     /// Child type: actor (worker) or supervisor
     pub child_type: ChildType,
-    
+
     /// Metadata for child configuration
     /// Can include:
     /// - "start_module": Module name for recreation
     /// - "start_function": Function to call
     /// - "supervisor_strategy": For CHILD_TYPE_SUPERVISOR, its strategy
     pub metadata: HashMap<String, String>,
-    
+
     /// Facet configuration (for automatic attachment during actor creation)
     /// Facets are attached in priority order (high priority first) before actor.init() is called
     /// All facets are automatically restored during supervisor restart
     /// Phase 1: Unified Lifecycle - Multiple facets support
     pub facets: Vec<plexspaces_proto::common::v1::Facet>,
-    
+
     /// Factory function to create/start the child
     /// Returns StartedChild which can be either an Actor or Supervisor
     pub start_fn: StartFn,
@@ -108,7 +111,8 @@ pub struct ChildSpec {
 ///
 /// ## Erlang Equivalent
 /// Maps to Erlang's `start => {Module, Function, Args}` in child_spec.
-pub type StartFn = Arc<dyn Fn() -> BoxFuture<'static, Result<StartedChild, ActorError>> + Send + Sync>;
+pub type StartFn =
+    Arc<dyn Fn() -> BoxFuture<'static, Result<StartedChild, ActorError>> + Send + Sync>;
 
 /// Result of starting a child
 ///
@@ -205,11 +209,7 @@ impl ChildSpec {
     ///     })
     /// }));
     /// ```
-    pub fn worker(
-        child_id: String,
-        actor_id: String,
-        start_fn: StartFn,
-    ) -> Self {
+    pub fn worker(child_id: String, actor_id: String, start_fn: StartFn) -> Self {
         Self {
             child_id,
             actor_or_supervisor_id: actor_id,
@@ -279,11 +279,7 @@ impl ChildSpec {
     ///     })
     /// }));
     /// ```
-    pub fn supervisor(
-        child_id: String,
-        supervisor_id: String,
-        start_fn: StartFn,
-    ) -> Self {
+    pub fn supervisor(child_id: String, supervisor_id: String, start_fn: StartFn) -> Self {
         Self {
             child_id,
             actor_or_supervisor_id: supervisor_id,
@@ -399,7 +395,9 @@ impl RestartStrategy {
 
     /// Convert from proto RestartStrategy enum
     pub fn from_proto(proto: i32) -> Self {
-        match ProtoRestartStrategy::try_from(proto).unwrap_or(ProtoRestartStrategy::RestartStrategyUnspecified) {
+        match ProtoRestartStrategy::try_from(proto)
+            .unwrap_or(ProtoRestartStrategy::RestartStrategyUnspecified)
+        {
             ProtoRestartStrategy::Permanent => RestartStrategy::Permanent,
             ProtoRestartStrategy::Transient => RestartStrategy::Transient,
             ProtoRestartStrategy::Temporary => RestartStrategy::Temporary,
@@ -459,14 +457,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_child_spec_worker_creation() {
-        let start_fn: StartFn = Arc::new(|| {
-            Box::pin(async move {
-                Err(ActorError::InvalidState("test".to_string()))
-            })
-        });
-        
+        let start_fn: StartFn =
+            Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
+
         let spec = ChildSpec::worker("worker1".to_string(), "worker1@node1".to_string(), start_fn);
-        
+
         assert_eq!(spec.child_id, "worker1");
         assert_eq!(spec.actor_or_supervisor_id, "worker1@node1");
         assert_eq!(spec.restart_strategy, RestartStrategy::Permanent);
@@ -476,14 +471,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_child_spec_supervisor_creation() {
-        let start_fn: StartFn = Arc::new(|| {
-            Box::pin(async move {
-                Err(ActorError::InvalidState("test".to_string()))
-            })
-        });
-        
-        let spec = ChildSpec::supervisor("db-supervisor".to_string(), "db-supervisor".to_string(), start_fn);
-        
+        let start_fn: StartFn =
+            Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
+
+        let spec = ChildSpec::supervisor(
+            "db-supervisor".to_string(),
+            "db-supervisor".to_string(),
+            start_fn,
+        );
+
         assert_eq!(spec.child_id, "db-supervisor");
         assert_eq!(spec.actor_or_supervisor_id, "db-supervisor");
         assert_eq!(spec.child_type, ChildType::Supervisor);
@@ -492,34 +488,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_child_spec_with_restart() {
-        let start_fn: StartFn = Arc::new(|| {
-            Box::pin(async move {
-                Err(ActorError::InvalidState("test".to_string()))
-            })
-        });
-        
+        let start_fn: StartFn =
+            Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
+
         let spec = ChildSpec::worker("worker1".to_string(), "worker1@node1".to_string(), start_fn)
             .with_restart(RestartStrategy::Temporary);
-        
+
         assert_eq!(spec.restart_strategy, RestartStrategy::Temporary);
     }
 
     #[tokio::test]
     async fn test_child_spec_with_shutdown() {
-        let start_fn: StartFn = Arc::new(|| {
-            Box::pin(async move {
-                Err(ActorError::InvalidState("test".to_string()))
-            })
-        });
-        
+        let start_fn: StartFn =
+            Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
+
         let spec = ChildSpec::worker("worker1".to_string(), "worker1@node1".to_string(), start_fn)
             .with_shutdown(ShutdownSpec::BrutalKill);
-        
+
         assert_eq!(spec.shutdown_timeout, Some(Duration::ZERO));
-        
+
         let spec2 = spec.with_shutdown(ShutdownSpec::Infinity);
         assert_eq!(spec2.shutdown_timeout, None);
-        
+
         let spec3 = spec2.with_shutdown(ShutdownSpec::Timeout(Duration::from_secs(10)));
         assert_eq!(spec3.shutdown_timeout, Some(Duration::from_secs(10)));
     }
@@ -534,7 +524,7 @@ mod tests {
             RestartStrategy::from_proto(ProtoRestartStrategy::Permanent as i32),
             RestartStrategy::Permanent
         );
-        
+
         assert_eq!(
             RestartStrategy::Transient.to_proto() as i32,
             ProtoRestartStrategy::Transient as i32
@@ -543,7 +533,7 @@ mod tests {
             RestartStrategy::from_proto(ProtoRestartStrategy::Transient as i32),
             RestartStrategy::Transient
         );
-        
+
         assert_eq!(
             RestartStrategy::Temporary.to_proto() as i32,
             ProtoRestartStrategy::Temporary as i32
@@ -564,7 +554,7 @@ mod tests {
             ChildType::from_proto(ProtoChildType::ChildTypeActor as i32),
             ChildType::Actor
         );
-        
+
         assert_eq!(
             ChildType::Supervisor.to_proto() as i32,
             ProtoChildType::ChildTypeSupervisor as i32
@@ -581,23 +571,14 @@ mod tests {
             ShutdownSpec::from_duration(Some(Duration::ZERO)),
             ShutdownSpec::BrutalKill
         );
-        assert_eq!(
-            ShutdownSpec::from_duration(None),
-            ShutdownSpec::Infinity
-        );
+        assert_eq!(ShutdownSpec::from_duration(None), ShutdownSpec::Infinity);
         assert_eq!(
             ShutdownSpec::from_duration(Some(Duration::from_secs(5))),
             ShutdownSpec::Timeout(Duration::from_secs(5))
         );
-        
-        assert_eq!(
-            ShutdownSpec::BrutalKill.to_duration(),
-            Some(Duration::ZERO)
-        );
-        assert_eq!(
-            ShutdownSpec::Infinity.to_duration(),
-            None
-        );
+
+        assert_eq!(ShutdownSpec::BrutalKill.to_duration(), Some(Duration::ZERO));
+        assert_eq!(ShutdownSpec::Infinity.to_duration(), None);
         assert_eq!(
             ShutdownSpec::Timeout(Duration::from_secs(10)).to_duration(),
             Some(Duration::from_secs(10))
@@ -606,32 +587,35 @@ mod tests {
 
     #[tokio::test]
     async fn test_child_spec_to_proto() {
-        let start_fn: StartFn = Arc::new(|| {
-            Box::pin(async move {
-                Err(ActorError::InvalidState("test".to_string()))
-            })
-        });
-        
+        let start_fn: StartFn =
+            Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
+
         let spec = ChildSpec::worker("worker1".to_string(), "worker1@node1".to_string(), start_fn)
             .with_restart(RestartStrategy::Transient)
             .with_shutdown(ShutdownSpec::Timeout(Duration::from_secs(10)))
             .with_metadata("start_module".to_string(), "my_module".to_string());
-        
+
         let proto = spec.to_proto();
-        
+
         assert_eq!(proto.child_id, "worker1");
         assert_eq!(proto.actor_or_supervisor_id, "worker1@node1");
-        assert_eq!(proto.restart_strategy, ProtoRestartStrategy::Transient as i32);
+        assert_eq!(
+            proto.restart_strategy,
+            ProtoRestartStrategy::Transient as i32
+        );
         assert_eq!(proto.child_type, ProtoChildType::ChildTypeActor as i32);
         assert!(proto.shutdown_timeout.is_some());
         assert_eq!(proto.shutdown_timeout.unwrap().seconds, 10);
-        assert_eq!(proto.metadata.get("start_module"), Some(&"my_module".to_string()));
+        assert_eq!(
+            proto.metadata.get("start_module"),
+            Some(&"my_module".to_string())
+        );
     }
 
     #[tokio::test]
     async fn test_child_spec_from_proto() {
         use prost_types::Duration as ProtoDuration;
-        
+
         let proto = ProtoChildSpec {
             child_id: "worker1".to_string(),
             actor_or_supervisor_id: "worker1@node1".to_string(),
@@ -648,24 +632,20 @@ mod tests {
             },
             facets: Vec::new(),
         };
-        
-        let start_fn: StartFn = Arc::new(|| {
-            Box::pin(async move {
-                Err(ActorError::InvalidState("test".to_string()))
-            })
-        });
-        
+
+        let start_fn: StartFn =
+            Arc::new(|| Box::pin(async move { Err(ActorError::InvalidState("test".to_string())) }));
+
         let spec = ChildSpec::from_proto(&proto, start_fn);
-        
+
         assert_eq!(spec.child_id, "worker1");
         assert_eq!(spec.actor_or_supervisor_id, "worker1@node1");
         assert_eq!(spec.restart_strategy, RestartStrategy::Transient);
         assert_eq!(spec.child_type, ChildType::Actor);
         assert_eq!(spec.shutdown_timeout, Some(Duration::from_secs(10)));
-        assert_eq!(spec.metadata.get("start_module"), Some(&"my_module".to_string()));
+        assert_eq!(
+            spec.metadata.get("start_module"),
+            Some(&"my_module".to_string())
+        );
     }
 }
-
-
-
-

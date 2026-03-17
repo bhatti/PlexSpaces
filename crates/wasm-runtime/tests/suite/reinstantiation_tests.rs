@@ -26,7 +26,7 @@
 #[cfg(test)]
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_wasm_runtime::{WasmRuntime, WasmConfig, WasmCapabilities, ResourceLimits};
+    use plexspaces_wasm_runtime::{ResourceLimits, WasmCapabilities, WasmConfig, WasmRuntime};
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -83,21 +83,33 @@ mod tests {
 
         let module = timeout(
             Duration::from_secs(60),
-            runtime.load_module("calculator", "1.0.0", &wasm_bytes)
-        ).await
-            .expect("Module loading timed out")
-            .expect("Failed to load module");
+            runtime.load_module("calculator", "1.0.0", &wasm_bytes),
+        )
+        .await
+        .expect("Module loading timed out")
+        .expect("Failed to load module");
 
         let config = test_config();
         let instance = timeout(
             Duration::from_secs(10),
             runtime.instantiate(
-                module, "test-sequential-1".to_string(), &[], config,
-                None, None, None, None, None, None, None, None,
+                module,
+                "test-sequential-1".to_string(),
+                &[],
+                config,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
                 None, // blob_service
                 None, // elastic_pool_service
-            )
-        ).await;
+            ),
+        )
+        .await;
         let instance = match instance {
             Ok(Ok(inst)) => inst,
             Ok(Err(e)) if should_skip(&e) => {
@@ -112,8 +124,9 @@ mod tests {
         let payload1 = br#"{"operands":[10,20]}"#.to_vec();
         let result1 = timeout(
             Duration::from_secs(10),
-            instance.handle_message("sender", "add", payload1)
-        ).await;
+            instance.handle_message("sender", "add", payload1),
+        )
+        .await;
         match result1 {
             Ok(Ok(resp)) => {
                 let resp_str = String::from_utf8_lossy(&resp);
@@ -133,8 +146,9 @@ mod tests {
         let payload2 = br#"{"operands":[3,4]}"#.to_vec();
         let result2 = timeout(
             Duration::from_secs(10),
-            instance.handle_message("sender", "add", payload2)
-        ).await;
+            instance.handle_message("sender", "add", payload2),
+        )
+        .await;
         match result2 {
             Ok(Ok(resp)) => {
                 let resp_str = String::from_utf8_lossy(&resp);
@@ -150,7 +164,10 @@ mod tests {
                         err_str
                     );
                 } else {
-                    eprintln!("Second handle() returned error (not re-entry related): {}", err_str);
+                    eprintln!(
+                        "Second handle() returned error (not re-entry related): {}",
+                        err_str
+                    );
                 }
             }
             Err(_) => panic!("Second handle() timed out"),
@@ -179,20 +196,33 @@ mod tests {
 
         let module = timeout(
             Duration::from_secs(60),
-            runtime.load_module("calculator", "1.0.0", &wasm_bytes)
-        ).await
-            .expect("Module loading timed out")
-            .expect("Failed to load module");
+            runtime.load_module("calculator", "1.0.0", &wasm_bytes),
+        )
+        .await
+        .expect("Module loading timed out")
+        .expect("Failed to load module");
 
         let config = test_config();
         let instance = timeout(
             Duration::from_secs(10),
             runtime.instantiate(
-                module, "test-state-1".to_string(), &[], config,
-                None, None, None, None, None, None, None, None,
-                None, None, // blob_service, elastic_pool_service
-            )
-        ).await;
+                module,
+                "test-state-1".to_string(),
+                &[],
+                config,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None, // blob_service, elastic_pool_service
+            ),
+        )
+        .await;
         let instance = match instance {
             Ok(Ok(inst)) => inst,
             Ok(Err(e)) if should_skip(&e) => {
@@ -207,8 +237,9 @@ mod tests {
         let payload1 = br#"{"operands":[10,20]}"#.to_vec();
         let result1 = timeout(
             Duration::from_secs(10),
-            instance.handle_message("sender", "add", payload1)
-        ).await;
+            instance.handle_message("sender", "add", payload1),
+        )
+        .await;
         match &result1 {
             Ok(Ok(resp)) => {
                 let resp_str = String::from_utf8_lossy(resp);
@@ -236,8 +267,9 @@ mod tests {
         let payload2 = br#"{}"#.to_vec();
         let result2 = timeout(
             Duration::from_secs(10),
-            instance.handle_message("sender", "get_state", payload2)
-        ).await;
+            instance.handle_message("sender", "get_state", payload2),
+        )
+        .await;
         match &result2 {
             Ok(Ok(resp)) => {
                 let resp_str = String::from_utf8_lossy(resp);
@@ -246,7 +278,9 @@ mod tests {
                 // Check if the state includes the first operation
                 if resp_str.contains("\"add\"") && resp_str.contains("30") {
                     eprintln!("PASS: State preserved across calls (history contains add operation with result 30)");
-                } else if resp_str.contains("\"last_operation\": null") || resp_str.contains("\"history\": []") {
+                } else if resp_str.contains("\"last_operation\": null")
+                    || resp_str.contains("\"history\": []")
+                {
                     panic!(
                         "FAIL: State was LOST after re-instantiation. \
                          Expected history to contain add operation, got: {}",
@@ -282,20 +316,33 @@ mod tests {
 
         let module = timeout(
             Duration::from_secs(60),
-            runtime.load_module("calculator", "1.0.0", &wasm_bytes)
-        ).await
-            .expect("Module loading timed out")
-            .expect("Failed to load module");
+            runtime.load_module("calculator", "1.0.0", &wasm_bytes),
+        )
+        .await
+        .expect("Module loading timed out")
+        .expect("Failed to load module");
 
         let config = test_config();
         let instance = timeout(
             Duration::from_secs(10),
             runtime.instantiate(
-                module, "test-getstate-1".to_string(), &[], config,
-                None, None, None, None, None, None, None, None,
-                None, None, // blob_service, elastic_pool_service
-            )
-        ).await;
+                module,
+                "test-getstate-1".to_string(),
+                &[],
+                config,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None, // blob_service, elastic_pool_service
+            ),
+        )
+        .await;
         let instance = match instance {
             Ok(Ok(inst)) => inst,
             Ok(Err(e)) if should_skip(&e) => {
@@ -310,8 +357,9 @@ mod tests {
         let payload = br#"{"operands":[5,3]}"#.to_vec();
         let handle_result = timeout(
             Duration::from_secs(10),
-            instance.handle_message("sender", "add", payload)
-        ).await;
+            instance.handle_message("sender", "add", payload),
+        )
+        .await;
         match &handle_result {
             Ok(Ok(resp)) => {
                 let resp_str = String::from_utf8_lossy(resp);
@@ -328,10 +376,7 @@ mod tests {
         // Now call get_state_component() to verify state was preserved
         // After the state preservation fix, get_state() should return state
         // that includes the add operation from the handle() call above
-        let state_result = timeout(
-            Duration::from_secs(10),
-            instance.get_state_component()
-        ).await;
+        let state_result = timeout(Duration::from_secs(10), instance.get_state_component()).await;
         match state_result {
             Ok(Ok(state_bytes)) => {
                 let state_str = String::from_utf8_lossy(&state_bytes);

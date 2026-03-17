@@ -39,8 +39,8 @@
 //! 3. `ActorRegistry::is_actor_state_active()` calls `get_actor_state()` and checks if it's `Active`
 //! 4. `get_actor_state()` uses the trait to fetch state without importing `Actor`
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 /// Trait for fetching actor state (implemented by Actor)
 ///
@@ -72,7 +72,10 @@ use std::sync::OnceLock;
 
 /// Callback type for fetching actor state
 /// This callback is registered by code that can import `Actor` (in `plexspaces_actor` crate)
-type StateFetcherCallback = fn(&Arc<dyn std::any::Any + Send + Sync>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<i32>> + Send>>;
+type StateFetcherCallback =
+    fn(
+        &Arc<dyn std::any::Any + Send + Sync>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<i32>> + Send>>;
 
 /// Static callback for fetching actor state
 /// This is set by code that can import `Actor` (in `plexspaces_actor` crate)

@@ -65,13 +65,13 @@
 //!                └─> ReplyWaiter.notify() wakes up waiting ask() caller
 //! ```
 
+use crate::Service;
+use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::{Mutex, Notify, RwLock};
-use plexspaces_proto::common::v1::Message;
-use crate::Service;
 
 /// Reply waiter using async condition variables for high-performance ask pattern
 ///
@@ -109,7 +109,7 @@ impl ReplyWaiter {
             notify: Arc::new(Notify::new()),
         }
     }
-    
+
     /// Wait for reply with timeout (async)
     ///
     /// ## Arguments
@@ -120,12 +120,9 @@ impl ReplyWaiter {
     /// - Err(ReplyWaiterError::Timeout) if timeout exceeded
     pub async fn wait(&self, timeout: Duration) -> Result<Message, ReplyWaiterError> {
         if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!(
-                "[REPLY_WAITER] WAIT START: timeout={:?}",
-                timeout
-            );
+            tracing::trace!("[REPLY_WAITER] WAIT START: timeout={:?}", timeout);
         }
-        
+
         let timeout_future = tokio::time::sleep(timeout);
         let wait_future = async {
             loop {
@@ -140,7 +137,7 @@ impl ReplyWaiter {
                     return Ok(msg);
                 }
                 drop(reply); // Release lock before waiting
-                
+
                 // Wait for notification
                 if tracing::enabled!(tracing::Level::TRACE) {
                     tracing::trace!("[REPLY_WAITER] WAITING: Waiting for notification...");
@@ -151,7 +148,7 @@ impl ReplyWaiter {
                 }
             }
         };
-        
+
         tokio::select! {
             result = wait_future => {
                 if tracing::enabled!(tracing::Level::TRACE) {
@@ -180,7 +177,7 @@ impl ReplyWaiter {
             },
         }
     }
-    
+
     /// Notify waiter that reply has arrived (async)
     ///
     /// ## Arguments
@@ -196,24 +193,26 @@ impl ReplyWaiter {
                 reply.sender_id, reply.receiver_id, reply.correlation_id
             );
         }
-        
+
         let mut stored_reply = self.reply.lock().await;
-        
+
         if stored_reply.is_some() {
             return Err(ReplyWaiterError::AlreadySet);
         }
-        
+
         *stored_reply = Some(reply.clone());
         drop(stored_reply); // Release lock before notifying
-        
+
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
                 "[REPLY_WAITER] NOTIFYING: correlation_id={}, reply_sender={}, reply_receiver={}",
-                reply.correlation_id, reply.sender_id, reply.receiver_id
+                reply.correlation_id,
+                reply.sender_id,
+                reply.receiver_id
             );
         }
         self.notify.notify_one();
-        
+
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
                 "[REPLY_WAITER] NOTIFY SUCCESS: correlation_id={:?}",
@@ -249,7 +248,7 @@ impl ReplyWaiterRegistry {
             waiters: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    
+
     /// Register a waiter for a correlation_id
     ///
     /// ## Arguments
@@ -266,7 +265,7 @@ impl ReplyWaiterRegistry {
             );
         }
     }
-    
+
     /// Notify a waiter that reply has arrived
     ///
     /// ## Arguments
@@ -289,7 +288,10 @@ impl ReplyWaiterRegistry {
         if let Some(waiter) = waiters.remove(correlation_id) {
             drop(waiters); // Release lock before notifying
             if tracing::enabled!(tracing::Level::TRACE) {
-                tracing::trace!("[REPLY_WAITER_REGISTRY] Found waiter for correlation_id={}, notifying...", correlation_id);
+                tracing::trace!(
+                    "[REPLY_WAITER_REGISTRY] Found waiter for correlation_id={}, notifying...",
+                    correlation_id
+                );
             }
             match waiter.notify(reply).await {
                 Ok(()) => {
@@ -317,14 +319,17 @@ impl ReplyWaiterRegistry {
         }
         false
     }
-    
+
     /// Remove a waiter (for cleanup on timeout/error)
     ///
     /// ## Arguments
     /// * `correlation_id` - Correlation ID to remove
     pub async fn remove(&self, correlation_id: &str) {
         if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!("ReplyWaiterRegistry::remove: correlation_id={}", correlation_id);
+            tracing::trace!(
+                "ReplyWaiterRegistry::remove: correlation_id={}",
+                correlation_id
+            );
         }
         let mut waiters = self.waiters.write().await;
         waiters.remove(correlation_id);
@@ -357,5 +362,3 @@ pub enum ReplyWaiterError {
     #[error("Reply already set")]
     AlreadySet,
 }
-
-

@@ -21,8 +21,10 @@
 //! Provides a builder pattern for creating mailboxes with different channel backends.
 //! Simplifies selection of InMemory, Redis, Kafka, SQLite, or other backends.
 
-use crate::{Mailbox, MailboxConfig, MailboxError, mailbox_config_default};
-use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, RedisConfig, KafkaConfig, SqliteConfig};
+use crate::{mailbox_config_default, Mailbox, MailboxConfig, MailboxError};
+use plexspaces_proto::channel::v1::{
+    ChannelConfig, ChannelProvider, KafkaConfig, RedisConfig, SqliteConfig,
+};
 
 /// Builder for creating mailboxes with fluent API
 ///
@@ -88,7 +90,7 @@ impl MailboxBuilder {
     /// * `url` - Redis connection URL (e.g., "redis://localhost:6379")
     pub fn with_redis(mut self, url: String) -> Self {
         self.channel_provider = Some(ChannelProvider::ChannelProviderRedis);
-        
+
         let redis_config = RedisConfig {
             url,
             stream_key: String::new(), // Will be set from mailbox name
@@ -98,15 +100,17 @@ impl MailboxBuilder {
             claim_timeout: None,
             pool_size: 10,
         };
-        
+
         let channel_config = ChannelConfig {
             name: String::new(), // Will be set from mailbox_id
             provider: ChannelProvider::ChannelProviderRedis as i32,
             capacity: self.config.capacity as u64,
-            backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Redis(redis_config)),
+            backend_config: Some(
+                plexspaces_proto::channel::v1::channel_config::BackendConfig::Redis(redis_config),
+            ),
             ..Default::default()
         };
-        
+
         self.channel_config = Some(channel_config);
         self
     }
@@ -117,7 +121,7 @@ impl MailboxBuilder {
     /// * `brokers` - Kafka broker addresses (e.g., vec!["localhost:9092"])
     pub fn with_kafka(mut self, brokers: Vec<String>) -> Self {
         self.channel_provider = Some(ChannelProvider::ChannelProviderKafka);
-        
+
         let kafka_config = KafkaConfig {
             brokers,
             topic: String::new(), // Will be set from mailbox name
@@ -125,19 +129,21 @@ impl MailboxBuilder {
             partitions: 1,
             replication_factor: 1,
             compression: 0, // COMPRESSION_TYPE_NONE
-            acks: 1, // PRODUCER_ACKS_LEADER
+            acks: 1,        // PRODUCER_ACKS_LEADER
             batch_size: 16384,
             linger_ms: None,
         };
-        
+
         let channel_config = ChannelConfig {
             name: String::new(), // Will be set from mailbox_id
             provider: ChannelProvider::ChannelProviderKafka as i32,
             capacity: self.config.capacity as u64,
-            backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(kafka_config)),
+            backend_config: Some(
+                plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(kafka_config),
+            ),
             ..Default::default()
         };
-        
+
         self.channel_config = Some(channel_config);
         self
     }
@@ -149,7 +155,7 @@ impl MailboxBuilder {
     /// * `wal_mode` - Enable WAL mode for better concurrency (default: true)
     pub fn with_sqlite(mut self, database_path: String) -> Self {
         self.channel_provider = Some(ChannelProvider::ChannelProviderSqlite);
-        
+
         let sqlite_config = SqliteConfig {
             database_path,
             table_name: "channel_messages".to_string(),
@@ -157,15 +163,17 @@ impl MailboxBuilder {
             cleanup_acked: true,
             cleanup_age_seconds: 3600,
         };
-        
+
         let channel_config = ChannelConfig {
             name: String::new(), // Will be set from mailbox_id
             provider: ChannelProvider::ChannelProviderSqlite as i32,
             capacity: self.config.capacity as u64,
-            backend_config: Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config)),
+            backend_config: Some(
+                plexspaces_proto::channel::v1::channel_config::BackendConfig::Sqlite(sqlite_config),
+            ),
             ..Default::default()
         };
-        
+
         self.channel_config = Some(channel_config);
         self
     }
@@ -208,7 +216,9 @@ impl MailboxBuilder {
     pub fn with_channel_config(mut self, config: ChannelConfig) -> Self {
         self.channel_config = Some(config);
         // Update backend from channel config
-        if let Ok(backend) = ChannelProvider::try_from(self.channel_config.as_ref().unwrap().provider) {
+        if let Ok(backend) =
+            ChannelProvider::try_from(self.channel_config.as_ref().unwrap().provider)
+        {
             self.channel_provider = Some(backend);
         }
         self
@@ -231,7 +241,7 @@ impl MailboxBuilder {
         if let Some(backend) = self.channel_provider {
             config.channel_provider = backend as i32;
         }
-        
+
         // Update channel config name if provided
         if let Some(mut ch_config) = self.channel_config {
             if ch_config.name.is_empty() {
@@ -239,12 +249,16 @@ impl MailboxBuilder {
             }
             // Update Redis/Kafka stream/topic name if empty
             match &mut ch_config.backend_config {
-                Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Redis(redis_cfg)) => {
+                Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Redis(
+                    redis_cfg,
+                )) => {
                     if redis_cfg.stream_key.is_empty() {
                         redis_cfg.stream_key = format!("mailbox:{}", mailbox_id);
                     }
                 }
-                Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(kafka_cfg)) => {
+                Some(plexspaces_proto::channel::v1::channel_config::BackendConfig::Kafka(
+                    kafka_cfg,
+                )) => {
                     if kafka_cfg.topic.is_empty() {
                         kafka_cfg.topic = format!("mailbox:{}", mailbox_id);
                     }
@@ -253,7 +267,7 @@ impl MailboxBuilder {
             }
             config.channel_config = Some(ch_config);
         }
-        
+
         // Create mailbox
         Mailbox::new(config, mailbox_id).await
     }
@@ -274,7 +288,7 @@ mod tests {
     async fn test_mailbox_builder_default() {
         let builder = MailboxBuilder::new();
         let mailbox = builder.build("test-mailbox".to_string()).await.unwrap();
-        
+
         // Should default to InMemory backend
         // Just verify it builds successfully
         assert!(true);
@@ -288,14 +302,16 @@ mod tests {
             .build("test-mailbox".to_string())
             .await
             .unwrap();
-        
+
         // Test basic send/receive
         let msg = crate::Message::new(b"test".to_vec());
         mailbox.enqueue(msg.clone()).await.unwrap();
-        
+
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        
-        let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
+
+        let received = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
+            .await;
         assert!(received.is_some());
         assert_eq!(received.unwrap().payload, b"test");
     }
@@ -307,7 +323,7 @@ mod tests {
             .build("test-mailbox".to_string())
             .await
             .unwrap();
-        
+
         // Verify capacity is set (check via config if accessible)
         // For now, just verify it builds
         assert!(true);
@@ -316,13 +332,13 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_builder_with_ordering() {
         use crate::OrderingStrategy;
-        
+
         let mailbox = MailboxBuilder::new()
             .with_ordering(OrderingStrategy::OrderingPriority)
             .build("test-mailbox".to_string())
             .await
             .unwrap();
-        
+
         // Verify ordering is set
         assert!(true);
     }
@@ -330,13 +346,13 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_builder_with_backpressure() {
         use crate::BackpressureStrategy;
-        
+
         let mailbox = MailboxBuilder::new()
             .with_backpressure(BackpressureStrategy::DropOldest)
             .build("test-mailbox".to_string())
             .await
             .unwrap();
-        
+
         // Verify backpressure is set
         assert!(true);
     }
@@ -346,20 +362,22 @@ mod tests {
     async fn test_mailbox_builder_sqlite() {
         // Use in-memory database to prevent concurrency issues
         let db_path_str = ":memory:".to_string();
-        
+
         let mailbox = MailboxBuilder::new()
             .with_sqlite(db_path_str)
             .build("test-mailbox-sqlite".to_string())
             .await
             .unwrap();
-        
+
         // Test basic send/receive
         let msg = crate::Message::new(b"test-sqlite".to_vec());
         mailbox.enqueue(msg.clone()).await.unwrap();
-        
+
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        
-        let received = mailbox.dequeue_with_timeout(Some(std::time::Duration::from_secs(1))).await;
+
+        let received = mailbox
+            .dequeue_with_timeout(Some(std::time::Duration::from_secs(1)))
+            .await;
         assert!(received.is_some());
         assert_eq!(received.unwrap().payload, b"test-sqlite");
     }
@@ -367,9 +385,8 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_builder_redis_config() {
         // Test that Redis config is created correctly (even if Redis not available)
-        let builder = MailboxBuilder::new()
-            .with_redis("redis://localhost:6379".to_string());
-        
+        let builder = MailboxBuilder::new().with_redis("redis://localhost:6379".to_string());
+
         // Verify builder state (can't test build without Redis)
         assert!(true);
     }
@@ -377,9 +394,8 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_builder_kafka_config() {
         // Test that Kafka config is created correctly (even if Kafka not available)
-        let builder = MailboxBuilder::new()
-            .with_kafka(vec!["localhost:9092".to_string()]);
-        
+        let builder = MailboxBuilder::new().with_kafka(vec!["localhost:9092".to_string()]);
+
         // Verify builder state (can't test build without Kafka)
         assert!(true);
     }
@@ -394,7 +410,7 @@ mod tests {
             .build("test-mailbox".to_string())
             .await
             .unwrap();
-        
+
         // Verify all settings applied
         assert!(true);
     }
@@ -402,20 +418,20 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_builder_custom_channel_config() {
         use plexspaces_proto::channel::v1::ChannelConfig;
-        
+
         let custom_config = ChannelConfig {
             name: "custom-channel".to_string(),
             provider: ChannelProvider::ChannelProviderInMemory as i32,
             capacity: 5000,
             ..Default::default()
         };
-        
+
         let mailbox = MailboxBuilder::new()
             .with_channel_config(custom_config)
             .build("test-mailbox".to_string())
             .await
             .unwrap();
-        
+
         // Verify custom config is used
         assert!(true);
     }
@@ -424,7 +440,7 @@ mod tests {
     async fn test_mailbox_builder_default_impl() {
         let builder = MailboxBuilder::default();
         let mailbox = builder.build("test-mailbox".to_string()).await.unwrap();
-        
+
         // Should work same as new()
         assert!(true);
     }
@@ -435,9 +451,9 @@ mod tests {
         // Note: Mailbox::new() validates backend and returns error for invalid values
         let mut config = mailbox_config_default();
         config.channel_provider = 999; // Invalid backend value
-        
+
         let result = Mailbox::new(config, "test-mailbox".to_string()).await;
-        
+
         // Should fail because backend is invalid
         assert!(result.is_err());
         if let Err(crate::MailboxError::InvalidConfig(_)) = result {
@@ -449,9 +465,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mailbox_builder_redis_stream_key_set() {
-        let builder = MailboxBuilder::new()
-            .with_redis("redis://localhost:6379".to_string());
-        
+        let builder = MailboxBuilder::new().with_redis("redis://localhost:6379".to_string());
+
         // Build should set stream_key from mailbox_id
         // May fail if Redis not available, but config should be set correctly
         // For now, just verify builder doesn't panic on config creation
@@ -460,9 +475,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mailbox_builder_kafka_topic_set() {
-        let builder = MailboxBuilder::new()
-            .with_kafka(vec!["localhost:9092".to_string()]);
-        
+        let builder = MailboxBuilder::new().with_kafka(vec!["localhost:9092".to_string()]);
+
         // Build should set topic from mailbox_id
         // May fail if Kafka not available, but config should be set correctly
         // For now, just verify builder doesn't panic on config creation

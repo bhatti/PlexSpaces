@@ -20,8 +20,8 @@
 
 //! Lock manager trait for distributed lock/lease coordination.
 
-use async_trait::async_trait;
 use crate::{AcquireLockOptions, Lock, LockResult, ReleaseLockOptions, RenewLockOptions};
+use async_trait::async_trait;
 use plexspaces_common::RequestContext;
 
 /// Trait for distributed lock/lease management.
@@ -65,7 +65,11 @@ pub trait LockManager: Send + Sync {
     /// - `Ok(Lock)`: Lock acquired successfully
     /// - `Err(LockError::LockAlreadyHeld)`: Lock held by different holder
     /// - `Err(LockError::BackendError)`: Backend error
-    async fn acquire_lock(&self, ctx: &RequestContext, options: AcquireLockOptions) -> LockResult<Lock>;
+    async fn acquire_lock(
+        &self,
+        ctx: &RequestContext,
+        options: AcquireLockOptions,
+    ) -> LockResult<Lock>;
 
     /// Renew a lock (heartbeat mechanism).
     ///
@@ -80,7 +84,8 @@ pub trait LockManager: Send + Sync {
     /// - `Err(LockError::VersionMismatch)`: Version doesn't match (optimistic locking failure)
     /// - `Err(LockError::LockNotFound)`: Lock doesn't exist
     /// - `Err(LockError::LockExpired)`: Lock expired
-    async fn renew_lock(&self, ctx: &RequestContext, options: RenewLockOptions) -> LockResult<Lock>;
+    async fn renew_lock(&self, ctx: &RequestContext, options: RenewLockOptions)
+        -> LockResult<Lock>;
 
     /// Release a lock (atomic operation).
     ///
@@ -93,7 +98,11 @@ pub trait LockManager: Send + Sync {
     /// - `Ok(())`: Lock released successfully
     /// - `Err(LockError::VersionMismatch)`: Version doesn't match (optimistic locking failure)
     /// - `Err(LockError::LockNotFound)`: Lock doesn't exist
-    async fn release_lock(&self, ctx: &RequestContext, options: ReleaseLockOptions) -> LockResult<()>;
+    async fn release_lock(
+        &self,
+        ctx: &RequestContext,
+        options: ReleaseLockOptions,
+    ) -> LockResult<()>;
 
     /// Get current lock state (non-blocking).
     ///
@@ -103,4 +112,3 @@ pub trait LockManager: Send + Sync {
     /// - `Err(LockError::BackendError)`: Backend error
     async fn get_lock(&self, ctx: &RequestContext, lock_key: &str) -> LockResult<Option<Lock>>;
 }
-

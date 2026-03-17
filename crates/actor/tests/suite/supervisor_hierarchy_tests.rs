@@ -26,15 +26,21 @@
 //! - Deep hierarchies (4+ levels)
 //! - Edge cases (empty supervisors, single child, etc.)
 
-use plexspaces_actor::supervisor::{Supervisor, SupervisionStrategy, RestartPolicy, ChildType, SupervisorEvent};
+use async_trait::async_trait;
+use plexspaces_actor::child_spec::{
+    ChildType as CSChildType, RestartStrategy, ShutdownSpec, StartedChild,
+};
+use plexspaces_actor::supervisor::{
+    ChildType, RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
+};
 use plexspaces_actor::{Actor, ActorRef as ActorActorRef, ChildSpec};
-use plexspaces_actor::child_spec::{RestartStrategy, ChildType as CSChildType, StartedChild, ShutdownSpec};
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorError, BehaviorError, Message, ServiceLocator};
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, ActorError, BehaviorError, Message, ServiceLocator,
+};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
-use async_trait::async_trait;
-use tokio::time::{sleep, Duration, timeout as tokio_timeout};
+use tokio::time::{sleep, timeout as tokio_timeout, Duration};
 
 /// Helper function to create a ChildSpec from a sync factory
 /// Uses worker_sync with core ActorRef (ChildSpec now uses plexspaces_core::ActorRef)
@@ -45,28 +51,27 @@ fn create_child_spec_from_factory(
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
     use plexspaces_core::ActorRef as CoreActorRef;
-    
+
     // Create core ActorRef (now accepted by ChildSpec::worker_sync)
-    let actor_ref = CoreActorRef::new(id.clone())
-        .expect("Failed to create actor ref");
-    
+    let actor_ref = CoreActorRef::new(id.clone()).expect("Failed to create actor ref");
+
     let restart_strategy = match restart_policy {
         RestartPolicy::Permanent => RestartStrategy::Permanent,
         RestartPolicy::Transient => RestartStrategy::Transient,
         RestartPolicy::Temporary => RestartStrategy::Temporary,
         RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
     };
-    
-    let mut spec = ChildSpec::worker_sync(id.clone(), id, factory, actor_ref)
-        .with_restart(restart_strategy);
-    
+
+    let mut spec =
+        ChildSpec::worker_sync(id.clone(), id, factory, actor_ref).with_restart(restart_strategy);
+
     // Apply shutdown timeout if specified
     spec = match shutdown_timeout_ms {
         Some(0) => spec.with_shutdown(ShutdownSpec::BrutalKill),
         Some(ms) => spec.with_shutdown(ShutdownSpec::Timeout(StdDuration::from_millis(ms))),
         None => spec.with_shutdown(ShutdownSpec::Infinity),
     };
-    
+
     spec
 }
 
@@ -85,12 +90,12 @@ impl TestActor {
             init_fail: false,
         }
     }
-    
+
     fn with_init_delay(mut self, delay_ms: u64) -> Self {
         self.init_delay_ms = Some(delay_ms);
         self
     }
-    
+
     fn with_init_fail(mut self) -> Self {
         self.init_fail = true;
         self
@@ -104,7 +109,10 @@ impl plexspaces_core::Actor for TestActor {
             sleep(Duration::from_millis(delay)).await;
         }
         if self.init_fail {
-            Err(ActorError::InvalidState(format!("Init failed for {}", self.id)))
+            Err(ActorError::InvalidState(format!(
+                "Init failed for {}",
+                self.id
+            )))
         } else {
             Ok(())
         }
@@ -124,7 +132,8 @@ impl plexspaces_core::Actor for TestActor {
 }
 
 async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
     Supervisor::new(
         "test-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -139,11 +148,11 @@ async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<Su
 #[tokio::test]
 async fn test_bottom_up_startup_3_level_hierarchy() {
     let (mut root_supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     // Level 1: Root supervisor with 2 children
     let child1_id = "child1@test-node".to_string();
     let child2_id = "child2@test-node".to_string();
-    
+
     let spec1 = create_child_spec_from_factory(
         child1_id.clone(),
         Arc::new({
@@ -155,9 +164,10 @@ async fn test_bottom_up_startup_3_level_hierarchy() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(
-                        Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()))
-                    )
+                    rt.block_on(Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id.clone()),
+                    ))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -175,7 +185,7 @@ async fn test_bottom_up_startup_3_level_hierarchy() {
         RestartPolicy::Permanent,
         Some(5000),
     );
-    
+
     let spec2 = create_child_spec_from_factory(
         child2_id.clone(),
         Arc::new({
@@ -187,9 +197,10 @@ async fn test_bottom_up_startup_3_level_hierarchy() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(
-                        Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()))
-                    )
+                    rt.block_on(Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id.clone()),
+                    ))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -207,16 +218,22 @@ async fn test_bottom_up_startup_3_level_hierarchy() {
         RestartPolicy::Permanent,
         Some(5000),
     );
-    
+
     // Add children (they start immediately in add_child)
-    let _ = root_supervisor.add_child(spec1).await.expect("add_child should succeed");
-    let _ = root_supervisor.add_child(spec2).await.expect("add_child should succeed");
-    
+    let _ = root_supervisor
+        .add_child(spec1)
+        .await
+        .expect("add_child should succeed");
+    let _ = root_supervisor
+        .add_child(spec2)
+        .await
+        .expect("add_child should succeed");
+
     // Verify all children are started
     let count = root_supervisor.count_children().await;
     assert_eq!(count.actors, 2);
     assert_eq!(count.total, 2);
-    
+
     // Verify children are registered via count_children()
     // Parent-child registration is tested via the count_children() method
 }
@@ -225,7 +242,7 @@ async fn test_bottom_up_startup_3_level_hierarchy() {
 #[tokio::test]
 async fn test_startup_rollback_on_failure() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     // Add first child (should succeed)
     let child1_id = "child1@test-node".to_string();
     let spec1 = create_child_spec_from_factory(
@@ -239,9 +256,10 @@ async fn test_startup_rollback_on_failure() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(
-                        Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()))
-                    )
+                    rt.block_on(Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id.clone()),
+                    ))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -259,9 +277,12 @@ async fn test_startup_rollback_on_failure() {
         RestartPolicy::Permanent,
         Some(5000),
     );
-    
-    let _ = supervisor.add_child(spec1).await.expect("add_child should succeed");
-    
+
+    let _ = supervisor
+        .add_child(spec1)
+        .await
+        .expect("add_child should succeed");
+
     // Add second child that fails init()
     let child2_id = "child2@test-node".to_string();
     let spec2 = create_child_spec_from_factory(
@@ -275,9 +296,10 @@ async fn test_startup_rollback_on_failure() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(
-                        Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()))
-                    )
+                    rt.block_on(Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id.clone()),
+                    ))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -295,15 +317,15 @@ async fn test_startup_rollback_on_failure() {
         RestartPolicy::Permanent,
         Some(5000),
     );
-    
+
     // This should fail because init() fails, and the actor should not be registered
     let result = supervisor.add_child(spec2).await;
     assert!(result.is_err(), "add_child should fail when init() fails");
-    
+
     // Verify first child is still present (rollback didn't remove it since it was already started)
     let count = supervisor.count_children().await;
     assert_eq!(count.actors, 1, "First child should still be present");
-    
+
     // Verify failed child is not registered
     // This is verified via count_children() which shows only 1 child
 }
@@ -312,7 +334,8 @@ async fn test_startup_rollback_on_failure() {
 #[tokio::test]
 async fn test_top_down_shutdown_nested_supervisors() {
     // Create root supervisor
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
     let (root_supervisor, _root_event_rx) = Supervisor::new(
         "root".to_string(),
         SupervisionStrategy::OneForOne {
@@ -321,7 +344,7 @@ async fn test_top_down_shutdown_nested_supervisors() {
         },
         service_locator.clone(),
     );
-    
+
     // Create child supervisor
     let (child_supervisor, _child_event_rx) = Supervisor::new(
         "child-supervisor".to_string(),
@@ -331,7 +354,7 @@ async fn test_top_down_shutdown_nested_supervisors() {
         },
         service_locator.clone(),
     );
-    
+
     // Add actor to child supervisor
     let actor_id = "actor1@test-node".to_string();
     let actor_spec = create_child_spec_from_factory(
@@ -346,9 +369,10 @@ async fn test_top_down_shutdown_nested_supervisors() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(
-                        Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id_for_mailbox.clone()))
-                    )
+                    rt.block_on(Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id_for_mailbox.clone()),
+                    ))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -366,9 +390,12 @@ async fn test_top_down_shutdown_nested_supervisors() {
         RestartPolicy::Permanent,
         Some(5000),
     );
-    
-    let _ = child_supervisor.add_child(actor_spec).await.expect("add_child should succeed");
-    
+
+    let _ = child_supervisor
+        .add_child(actor_spec)
+        .await
+        .expect("add_child should succeed");
+
     // Note: This test verifies the shutdown order - child supervisor should shutdown its children first
     // Then root supervisor shuts down child supervisor
     // Full implementation would require proper supervisor hierarchy setup via add_supervisor_child()
@@ -383,7 +410,7 @@ async fn test_top_down_shutdown_nested_supervisors() {
 #[tokio::test]
 async fn test_shutdown_brutal_kill() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     // Add child with BrutalKill shutdown (timeout = 0)
     let child_id = "child1@test-node".to_string();
     let spec = create_child_spec_from_factory(
@@ -397,9 +424,10 @@ async fn test_shutdown_brutal_kill() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(
-                        Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()))
-                    )
+                    rt.block_on(Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id.clone()),
+                    ))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -417,23 +445,32 @@ async fn test_shutdown_brutal_kill() {
         RestartPolicy::Permanent,
         Some(0), // BrutalKill
     );
-    
-    let _ = supervisor.add_child(spec).await.expect("add_child should succeed");
-    
+
+    let _ = supervisor
+        .add_child(spec)
+        .await
+        .expect("add_child should succeed");
+
     // Shutdown should be immediate (BrutalKill)
     let start = std::time::Instant::now();
     let result = tokio_timeout(Duration::from_millis(100), supervisor.shutdown()).await;
     let elapsed = start.elapsed();
-    
-    assert!(result.is_ok(), "Shutdown should complete quickly with BrutalKill");
-    assert!(elapsed < Duration::from_millis(50), "BrutalKill should be very fast");
+
+    assert!(
+        result.is_ok(),
+        "Shutdown should complete quickly with BrutalKill"
+    );
+    assert!(
+        elapsed < Duration::from_millis(50),
+        "BrutalKill should be very fast"
+    );
 }
 
 /// Test shutdown timeout enforcement - Timeout
 #[tokio::test]
 async fn test_shutdown_timeout() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     // Add child with timeout shutdown
     let child_id = "child1@test-node".to_string();
     let spec = create_child_spec_from_factory(
@@ -447,9 +484,10 @@ async fn test_shutdown_timeout() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(
-                        Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()))
-                    )
+                    rt.block_on(Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id.clone()),
+                    ))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -467,39 +505,48 @@ async fn test_shutdown_timeout() {
         RestartPolicy::Permanent,
         Some(100), // 100ms timeout
     );
-    
-    let _ = supervisor.add_child(spec).await.expect("add_child should succeed");
-    
+
+    let _ = supervisor
+        .add_child(spec)
+        .await
+        .expect("add_child should succeed");
+
     // Shutdown should respect timeout
     let start = std::time::Instant::now();
     let _ = supervisor.shutdown().await;
     let elapsed = start.elapsed();
-    
+
     // Should complete within reasonable time (not too fast, not too slow)
-    assert!(elapsed < Duration::from_millis(200), "Shutdown should respect timeout");
+    assert!(
+        elapsed < Duration::from_millis(200),
+        "Shutdown should respect timeout"
+    );
 }
 
 /// Test empty supervisor
 #[tokio::test]
 async fn test_empty_supervisor() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     // Empty supervisor should have no children
     let count = supervisor.count_children().await;
     assert_eq!(count.actors, 0);
     assert_eq!(count.supervisors, 0);
     assert_eq!(count.total, 0);
-    
+
     // Shutdown should succeed
     let result = supervisor.shutdown().await;
-    assert!(result.is_ok(), "Shutdown should succeed for empty supervisor");
+    assert!(
+        result.is_ok(),
+        "Shutdown should succeed for empty supervisor"
+    );
 }
 
 /// Test single child supervisor
 #[tokio::test]
 async fn test_single_child_supervisor() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     let child_id = "child1@test-node".to_string();
     let spec = create_child_spec_from_factory(
         child_id.clone(),
@@ -512,9 +559,10 @@ async fn test_single_child_supervisor() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(
-                        Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()))
-                    )
+                    rt.block_on(Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id.clone()),
+                    ))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -532,13 +580,16 @@ async fn test_single_child_supervisor() {
         RestartPolicy::Permanent,
         Some(5000),
     );
-    
-    let _ = supervisor.add_child(spec).await.expect("add_child should succeed");
-    
+
+    let _ = supervisor
+        .add_child(spec)
+        .await
+        .expect("add_child should succeed");
+
     let count = supervisor.count_children().await;
     assert_eq!(count.actors, 1);
     assert_eq!(count.total, 1);
-    
+
     // Shutdown should succeed
     let result = supervisor.shutdown().await;
     assert!(result.is_ok(), "Shutdown should succeed for single child");
@@ -552,11 +603,11 @@ async fn test_deep_hierarchy_4_levels() {
     // Level 2: Mid1, Mid2
     // Level 3: Leaf1, Leaf2 (under Mid1)
     // Level 4: Actor1, Actor2 (under Leaf1)
-    
+
     // For now, we'll test with actors at different levels
     // Full supervisor hierarchy would require more complex setup
     let (mut root_supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     // Add multiple children to simulate hierarchy
     for i in 1..=4 {
         let child_id = format!("child{}@test-node", i);
@@ -571,9 +622,10 @@ async fn test_deep_hierarchy_4_levels() {
                             .enable_all()
                             .build()
                             .expect("Failed to create runtime for mailbox");
-                        rt.block_on(
-                            Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone()))
-                        )
+                        rt.block_on(Mailbox::new(
+                            MailboxConfig::default(),
+                            format!("mailbox-{}", actor_id.clone()),
+                        ))
                     })
                     .join()
                     .expect("Thread panicked")
@@ -591,14 +643,17 @@ async fn test_deep_hierarchy_4_levels() {
             RestartPolicy::Permanent,
             Some(5000),
         );
-        
-        let _ = root_supervisor.add_child(spec).await.expect("add_child should succeed");
+
+        let _ = root_supervisor
+            .add_child(spec)
+            .await
+            .expect("add_child should succeed");
     }
-    
+
     let count = root_supervisor.count_children().await;
     assert_eq!(count.actors, 4);
     assert_eq!(count.total, 4);
-    
+
     // Shutdown should handle all children
     let result = root_supervisor.shutdown().await;
     assert!(result.is_ok(), "Shutdown should succeed for deep hierarchy");

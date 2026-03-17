@@ -81,21 +81,21 @@
 
 use crate::{
     Checkpoint, CheckpointConfig, CheckpointManager, DurabilityConfig, ExecutionContextImpl,
-    ExecutionMode, JournalEntry, JournalError, JournalResult, JournalStorage, MessageProcessed, MessageReceived,
-    ProcessingResult, SideEffectExecuted, ReplayHandler, StateLoader,
+    ExecutionMode, JournalEntry, JournalError, JournalResult, JournalStorage, MessageProcessed,
+    MessageReceived, ProcessingResult, ReplayHandler, SideEffectExecuted, StateLoader,
 };
-use std::collections::HashSet;
 use async_trait::async_trait;
+use plexspaces_core::ActorContext;
 use plexspaces_facet::{ErrorHandling, Facet, FacetError, InterceptResult};
+use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::prost_types;
 use plexspaces_proto::v1::journaling::CompressionType;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH, Instant};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use plexspaces_proto::common::v1::Message;
-use plexspaces_core::ActorContext;
 
 // Observability
 use metrics;
@@ -118,10 +118,10 @@ use tracing;
 pub struct DurabilityFacet {
     /// Facet configuration as Value (immutable, for Facet trait)
     config_value: Value,
-    
+
     /// Facet priority (immutable)
     priority: i32,
-    
+
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
 
@@ -147,7 +147,8 @@ pub struct DurabilityFacet {
     pending_promises: Arc<RwLock<HashSet<String>>>,
 
     /// Resolved promises (promise_id -> (result, timestamp))
-    resolved_promises: Arc<RwLock<HashMap<String, (Result<Vec<u8>, String>, prost_types::Timestamp)>>>,
+    resolved_promises:
+        Arc<RwLock<HashMap<String, (Result<Vec<u8>, String>, prost_types::Timestamp)>>>,
 
     /// Replay handler for deterministic message replay
     replay_handler: Arc<RwLock<Option<Box<dyn ReplayHandler>>>>,
@@ -196,7 +197,7 @@ impl DurabilityFacet {
             entry_interval: durability_config.checkpoint_interval,
             time_interval: durability_config.checkpoint_timeout.clone(),
             compression: durability_config.compression,
-            retention_count: 2,  // Keep last 2 checkpoints
+            retention_count: 2,   // Keep last 2 checkpoints
             auto_truncate: false, // Don't auto-truncate - let users control this via config
             async_checkpointing: false,
             metadata: HashMap::new(),
@@ -208,7 +209,7 @@ impl DurabilityFacet {
         } else {
             1 // Default to schema version 1
         };
-        
+
         // Create checkpoint manager with shared storage reference
         let checkpoint_storage = Arc::clone(&storage);
         let checkpoint_manager = Arc::new(CheckpointManager::new(
@@ -234,7 +235,7 @@ impl DurabilityFacet {
             state_loader: Arc::new(RwLock::new(None)),
         }
     }
-    
+
     /// Parse Value to DurabilityConfig
     fn parse_config(config: Value) -> DurabilityConfig {
         // Extract values from JSON config or use defaults
@@ -245,18 +246,16 @@ impl DurabilityFacet {
                 .and_then(|v| v.as_i64())
                 .map(|v| v as u64)
                 .unwrap_or(100),
-            checkpoint_timeout: config
-                .get("checkpoint_timeout")
-                .and_then(|v| {
-                    // Try to parse as Duration proto or as string
-                    if let Some(_duration_str) = v.as_str() {
-                        // Parse duration string (e.g., "5m", "10s") - simplified for now
-                        // In real implementation, would parse to prost_types::Duration
-                        None // Skip for now - requires duration parsing
-                    } else {
-                        None
-                    }
-                }),
+            checkpoint_timeout: config.get("checkpoint_timeout").and_then(|v| {
+                // Try to parse as Duration proto or as string
+                if let Some(_duration_str) = v.as_str() {
+                    // Parse duration string (e.g., "5m", "10s") - simplified for now
+                    // In real implementation, would parse to prost_types::Duration
+                    None // Skip for now - requires duration parsing
+                } else {
+                    None
+                }
+            }),
             replay_on_activation: config
                 .get("replay_on_activation")
                 .and_then(|v| v.as_bool())
@@ -288,13 +287,16 @@ impl DurabilityFacet {
     /// - Must be called before `on_attach()` if replay is enabled
     /// - Handler will be used during `replay_journal_with_handler()`
     /// - Context is stored and used instead of creating a dummy context
-    pub async fn set_replay_handler(&self, handler: Box<dyn ReplayHandler>, context: Arc<ActorContext>) {
+    pub async fn set_replay_handler(
+        &self,
+        handler: Box<dyn ReplayHandler>,
+        context: Arc<ActorContext>,
+    ) {
         let mut h = self.replay_handler.write().await;
         *h = Some(handler);
         let mut ctx = self.actor_context.write().await;
         *ctx = Some(context);
     }
-
 
     /// Set state loader for automatic checkpoint state deserialization
     ///
@@ -319,9 +321,9 @@ impl DurabilityFacet {
     /// - If StateLoader is set, automatic loading will be used instead
     pub async fn get_latest_checkpoint(&self) -> JournalResult<Option<Checkpoint>> {
         let actor_id = self.actor_id.read().await;
-        let actor_id = actor_id.as_ref().ok_or_else(|| {
-            JournalError::Serialization("Actor not attached".to_string())
-        })?;
+        let actor_id = actor_id
+            .as_ref()
+            .ok_or_else(|| JournalError::Serialization("Actor not attached".to_string()))?;
 
         match self.storage.get_latest_checkpoint(actor_id).await {
             Ok(checkpoint) => Ok(Some(checkpoint)),
@@ -389,17 +391,18 @@ impl DurabilityFacet {
 
         // Load side effects into context
         ctx.load_side_effects(side_effects.clone()).await;
-        
-            // Record side effect cache metrics
-            let side_effect_count = side_effects.len();
-            if side_effect_count > 0 {
-                metrics::histogram!("plexspaces_journaling_side_effects_cached",
-                    "actor_id" => actor_id.to_string()
-                ).record(side_effect_count as f64);
-                if tracing::enabled!(tracing::Level::DEBUG) {
+
+        // Record side effect cache metrics
+        let side_effect_count = side_effects.len();
+        if side_effect_count > 0 {
+            metrics::histogram!("plexspaces_journaling_side_effects_cached",
+                "actor_id" => actor_id.to_string()
+            )
+            .record(side_effect_count as f64);
+            if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(actor_id = %actor_id, side_effects_count = side_effect_count, "Side effects cached for replay");
-                }
             }
+        }
 
         // CRITICAL: Update message_sequence to highest sequence number from ALL entries
         // This ensures we don't create duplicate sequence numbers when writing new entries
@@ -464,15 +467,16 @@ impl DurabilityFacet {
 
         // Load side effects into context (for caching during replay)
         ctx.load_side_effects(side_effects.clone()).await;
-        
+
         // Record side effect cache metrics
         let side_effect_count = side_effects.len();
         if side_effect_count > 0 {
             metrics::histogram!("plexspaces_journaling_side_effects_cached",
                 "actor_id" => actor_id.to_string()
-            ).record(side_effect_count as f64);
+            )
+            .record(side_effect_count as f64);
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(actor_id = %actor_id, side_effects_count = side_effect_count, "Side effects cached for replay");
+                tracing::debug!(actor_id = %actor_id, side_effects_count = side_effect_count, "Side effects cached for replay");
             }
         }
 
@@ -483,7 +487,8 @@ impl DurabilityFacet {
         let replay_handler = self.replay_handler.read().await;
         if let Some(handler) = replay_handler.as_ref() {
             // Count messages to replay
-            let messages_to_replay: Vec<_> = entries.iter()
+            let messages_to_replay: Vec<_> = entries
+                .iter()
                 .filter_map(|entry| {
                     use plexspaces_proto::v1::journaling::journal_entry::Entry;
                     if let Some(Entry::MessageReceived(ref msg)) = entry.entry {
@@ -493,7 +498,7 @@ impl DurabilityFacet {
                     }
                 })
                 .collect();
-            
+
             if !messages_to_replay.is_empty() {
                 tracing::info!(
                     actor_id = %actor_id,
@@ -503,7 +508,7 @@ impl DurabilityFacet {
                     messages_to_replay.len()
                 );
             }
-            
+
             let mut replayed_count = 0;
             for entry in &entries {
                 use plexspaces_proto::v1::journaling::journal_entry::Entry;
@@ -524,22 +529,27 @@ impl DurabilityFacet {
                     // Use the stored ActorContext instead of creating a dummy one
                     let stored_context = self.actor_context.read().await;
                     let context = stored_context.as_ref().ok_or_else(|| {
-                        JournalError::Replay("ActorContext not set - call set_replay_handler with context first".to_string())
+                        JournalError::Replay(
+                            "ActorContext not set - call set_replay_handler with context first"
+                                .to_string(),
+                        )
                     })?;
-                    
+
                     tracing::debug!(
                         actor_id = %actor_id,
                         sequence = entry.sequence,
                         message_type = %msg_received.message_type,
                         "Replaying message"
                     );
-                    
-                    handler.replay_message(message, context).await
+
+                    handler
+                        .replay_message(message, context)
+                        .await
                         .map_err(|e| JournalError::Replay(format!("Replay failed: {}", e)))?;
                     replayed_count += 1;
                 }
             }
-            
+
             if replayed_count > 0 {
                 tracing::info!(
                     actor_id = %actor_id,
@@ -591,9 +601,9 @@ impl DurabilityFacet {
         timeout: Option<std::time::Duration>,
     ) -> JournalResult<()> {
         let actor_id = self.actor_id.read().await;
-        let actor_id = actor_id.as_ref().ok_or_else(|| {
-            JournalError::Serialization("Actor not attached".to_string())
-        })?;
+        let actor_id = actor_id
+            .as_ref()
+            .ok_or_else(|| JournalError::Serialization("Actor not attached".to_string()))?;
 
         // Check if promise already exists
         let pending = self.pending_promises.read().await;
@@ -669,9 +679,9 @@ impl DurabilityFacet {
         result: Result<Vec<u8>, String>,
     ) -> JournalResult<()> {
         let actor_id = self.actor_id.read().await;
-        let actor_id = actor_id.as_ref().ok_or_else(|| {
-            JournalError::Serialization("Actor not attached".to_string())
-        })?;
+        let actor_id = actor_id
+            .as_ref()
+            .ok_or_else(|| JournalError::Serialization("Actor not attached".to_string()))?;
 
         // Check if promise exists and is pending
         let pending = self.pending_promises.read().await;
@@ -734,10 +744,13 @@ impl DurabilityFacet {
                 promise_id.to_string(),
                 (
                     result,
-                    entry.timestamp.clone().unwrap_or_else(|| prost_types::Timestamp {
-                        seconds: 0,
-                        nanos: 0,
-                    }),
+                    entry
+                        .timestamp
+                        .clone()
+                        .unwrap_or_else(|| prost_types::Timestamp {
+                            seconds: 0,
+                            nanos: 0,
+                        }),
                 ),
             );
         }
@@ -805,10 +818,13 @@ impl DurabilityFacet {
                         promise_id,
                         (
                             result,
-                            entry.timestamp.clone().unwrap_or_else(|| prost_types::Timestamp {
-                                seconds: 0,
-                                nanos: 0,
-                            }),
+                            entry
+                                .timestamp
+                                .clone()
+                                .unwrap_or_else(|| prost_types::Timestamp {
+                                    seconds: 0,
+                                    nanos: 0,
+                                }),
                         ),
                     );
                 }
@@ -825,11 +841,11 @@ impl Facet for DurabilityFacet {
     fn facet_type(&self) -> &str {
         "durability"
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -844,7 +860,11 @@ impl Facet for DurabilityFacet {
         // Replay journal if enabled
         if self.config.replay_on_activation {
             // Step 1: Load latest checkpoint (if exists)
-            let (from_sequence, _checkpoint) = match self.storage.get_latest_checkpoint(actor_id).await {
+            let (from_sequence, _checkpoint) = match self
+                .storage
+                .get_latest_checkpoint(actor_id)
+                .await
+            {
                 Ok(checkpoint) => {
                     // Step 2: Validate schema version automatically (prevents incompatible checkpoints)
                     let current_version = self.config.state_schema_version;
@@ -930,23 +950,29 @@ impl Facet for DurabilityFacet {
                 }
             };
             let duration = start.elapsed();
-            
+
             // Get replay stats
-            let entries = self.storage.replay_from(actor_id, from_sequence).await
+            let entries = self
+                .storage
+                .replay_from(actor_id, from_sequence)
+                .await
                 .unwrap_or_default();
             let entries_count = entries.len();
-            
+
             // Record metrics
             metrics::counter!("plexspaces_journaling_replays_total",
                 "actor_id" => actor_id.to_string()
-            ).increment(1);
+            )
+            .increment(1);
             metrics::histogram!("plexspaces_journaling_replay_duration_seconds",
                 "actor_id" => actor_id.to_string()
-            ).record(duration.as_secs_f64());
+            )
+            .record(duration.as_secs_f64());
             metrics::histogram!("plexspaces_journaling_replay_entries_count",
                 "actor_id" => actor_id.to_string()
-            ).record(entries_count as f64);
-            
+            )
+            .record(entries_count as f64);
+
             // Log appropriate message based on recovery scenario
             if entries_count > 0 {
                 tracing::info!(
@@ -971,7 +997,8 @@ impl Facet for DurabilityFacet {
             }
 
             // Load promises from journal entries
-            self.load_promises_from_journal(actor_id).await
+            self.load_promises_from_journal(actor_id)
+                .await
                 .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
             // CRITICAL: Switch to NORMAL mode after replay completes
@@ -1002,7 +1029,8 @@ impl Facet for DurabilityFacet {
             *exec_ctx = Some(ctx);
 
             // Load promises from existing journal entries
-            self.load_promises_from_journal(actor_id).await
+            self.load_promises_from_journal(actor_id)
+                .await
                 .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
         }
 
@@ -1027,16 +1055,20 @@ impl Facet for DurabilityFacet {
     ) -> Result<(), FacetError> {
         // Flush journal and save checkpoint on EXIT
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            actor_id = %actor_id,
-            "DurabilityFacet handling EXIT signal - flushing journal and saving checkpoint"
-        );
+            tracing::debug!(
+                actor_id = %actor_id,
+                "DurabilityFacet handling EXIT signal - flushing journal and saving checkpoint"
+            );
         }
-        
+
         // Save checkpoint if enabled (use maybe_checkpoint which handles interval logic)
         let checkpoint_start = std::time::Instant::now();
         let current_sequence = *self.message_sequence.read().await;
-        if let Err(e) = self.checkpoint_manager.maybe_checkpoint(actor_id, current_sequence, vec![]).await {
+        if let Err(e) = self
+            .checkpoint_manager
+            .maybe_checkpoint(actor_id, current_sequence, vec![])
+            .await
+        {
             tracing::warn!(
                 actor_id = %actor_id,
                 error = %e,
@@ -1044,25 +1076,28 @@ impl Facet for DurabilityFacet {
             );
             metrics::counter!("plexspaces_durability_facet_exit_checkpoint_errors_total",
                 "actor_id" => actor_id.to_string()
-            ).increment(1);
+            )
+            .increment(1);
         } else {
             let checkpoint_duration = checkpoint_start.elapsed();
             metrics::histogram!("plexspaces_durability_facet_exit_checkpoint_duration_seconds",
                 "actor_id" => actor_id.to_string()
-            ).record(checkpoint_duration.as_secs_f64());
+            )
+            .record(checkpoint_duration.as_secs_f64());
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                actor_id = %actor_id,
-                duration_ms = checkpoint_duration.as_millis(),
-                "Saved checkpoint on EXIT signal"
-            );
+                tracing::debug!(
+                    actor_id = %actor_id,
+                    duration_ms = checkpoint_duration.as_millis(),
+                    "Saved checkpoint on EXIT signal"
+                );
             }
         }
-        
+
         metrics::counter!("plexspaces_durability_facet_exit_total",
             "actor_id" => actor_id.to_string()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         Ok(())
     }
 
@@ -1083,19 +1118,20 @@ impl Facet for DurabilityFacet {
     ) -> Result<(), FacetError> {
         // Log DOWN notification for observability
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            actor_id = %actor_id,
-            monitored_id = %monitored_id,
-            reason = ?reason,
-            "DurabilityFacet received DOWN notification (no action needed)"
-        );
+            tracing::debug!(
+                actor_id = %actor_id,
+                monitored_id = %monitored_id,
+                reason = ?reason,
+                "DurabilityFacet received DOWN notification (no action needed)"
+            );
         }
-        
+
         metrics::counter!("plexspaces_durability_facet_down_total",
             "actor_id" => actor_id.to_string(),
             "monitored_id" => monitored_id.to_string()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         Ok(())
     }
 
@@ -1173,16 +1209,18 @@ impl Facet for DurabilityFacet {
             .await
             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?;
         let duration = start.elapsed();
-        
+
         // Record metrics
         metrics::counter!("plexspaces_journaling_entries_appended_total",
             "actor_id" => actor_id.clone()
-        ).increment(1);
+        )
+        .increment(1);
         metrics::histogram!("plexspaces_journaling_append_duration_seconds",
             "actor_id" => actor_id.clone()
-        ).record(duration.as_secs_f64());
+        )
+        .record(duration.as_secs_f64());
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(actor_id = %actor_id, sequence = sequence, duration_ms = duration.as_millis(), "Journal entry appended");
+            tracing::debug!(actor_id = %actor_id, sequence = sequence, duration_ms = duration.as_millis(), "Journal entry appended");
         }
 
         Ok(InterceptResult::Continue)
@@ -1281,19 +1319,22 @@ impl Facet for DurabilityFacet {
                 .await
                 .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?;
             let duration = start.elapsed();
-            
+
             // Record metrics
             metrics::counter!("plexspaces_journaling_batches_appended_total",
                 "actor_id" => actor_id.clone()
-            ).increment(1);
+            )
+            .increment(1);
             metrics::histogram!("plexspaces_journaling_batch_append_duration_seconds",
                 "actor_id" => actor_id.clone()
-            ).record(duration.as_secs_f64());
+            )
+            .record(duration.as_secs_f64());
             metrics::histogram!("plexspaces_journaling_batch_size",
                 "actor_id" => actor_id.clone()
-            ).record(batch_size as f64);
+            )
+            .record(batch_size as f64);
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(actor_id = %actor_id, batch_size = batch_size, duration_ms = duration.as_millis(), "Journal batch appended");
+                tracing::debug!(actor_id = %actor_id, batch_size = batch_size, duration_ms = duration.as_millis(), "Journal batch appended");
             }
         }
 
@@ -1313,20 +1354,24 @@ impl Facet for DurabilityFacet {
                 .await
                 .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?;
             let duration = start.elapsed();
-            
+
             // Record metrics
             metrics::counter!("plexspaces_journaling_checkpoints_created_total",
                 "actor_id" => actor_id.clone()
-            ).increment(1);
+            )
+            .increment(1);
             metrics::histogram!("plexspaces_journaling_checkpoint_duration_seconds",
                 "actor_id" => actor_id.clone()
-            ).record(duration.as_secs_f64());
+            )
+            .record(duration.as_secs_f64());
             metrics::histogram!("plexspaces_journaling_checkpoint_size_bytes",
                 "actor_id" => actor_id.clone()
-            ).record(checkpoint_size as f64);
+            )
+            .record(checkpoint_size as f64);
             metrics::gauge!("plexspaces_journaling_latest_checkpoint_sequence",
                 "actor_id" => actor_id.clone()
-            ).set(current_sequence as f64);
+            )
+            .set(current_sequence as f64);
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(actor_id = %actor_id, sequence = current_sequence, size_bytes = checkpoint_size, duration_ms = duration.as_millis(), "Checkpoint created");
             }
@@ -1340,11 +1385,11 @@ impl Facet for DurabilityFacet {
         // Future: Could record error in journal for debugging
         Ok(ErrorHandling::Propagate)
     }
-    
+
     fn get_config(&self) -> Value {
         self.config_value.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }
@@ -1391,7 +1436,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_creation() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1401,7 +1447,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_attach_without_replay() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let mut config = create_test_config();
         config.replay_on_activation = false; // Disable replay
 
@@ -1422,7 +1469,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_attach_with_empty_journal_replay() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config(); // replay_on_activation = true
 
         let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1434,7 +1482,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_detach() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1455,7 +1504,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_before_method_journals_message_received() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1488,7 +1538,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_after_method_journals_message_processed() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1526,7 +1577,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_sequence_number_increments() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1555,7 +1607,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_checkpoint_creation_at_interval() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1580,7 +1633,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_replay_journal_on_activation() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false; // First attach without replay
@@ -1625,7 +1679,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_error_handling() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1638,7 +1693,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_before_method_without_attach_fails() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
 
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
@@ -1650,7 +1706,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_messages_with_different_payloads() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1690,7 +1747,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_get_state() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
         let facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
@@ -1701,7 +1759,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_facet_set_state() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = create_test_config();
         let mut facet = DurabilityFacet::new(storage, config_to_value(&config), 50);
 
@@ -1713,7 +1772,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_replay_with_checkpoint() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
         let mut config = create_test_config();
         config.replay_on_activation = false;
@@ -1770,7 +1830,8 @@ mod tests {
         // and to avoid any potential issues with storage cloning
         use crate::sql::SqliteJournalStorage;
 
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone(); // SQLite pool is Arc-based, so clone shares connection
 
         let mut config = create_test_config();
@@ -1838,7 +1899,8 @@ mod tests {
         // Use SQLite to ensure batching works correctly without side effects
         use crate::sql::SqliteJournalStorage;
 
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let storage_clone = storage.clone();
 
         let mut config = create_test_config();

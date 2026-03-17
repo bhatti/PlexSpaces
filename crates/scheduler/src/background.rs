@@ -33,15 +33,19 @@ use crate::capacity_tracker::CapacityTracker;
 use crate::state_store::SchedulingStateStore;
 use futures::StreamExt;
 use plexspaces_channel::Channel;
-use plexspaces_locks::{AcquireLockOptions, LockManager, RenewLockOptions, ReleaseLockOptions};
+use plexspaces_core::RequestContext;
+use plexspaces_locks::{
+    AcquireLockOptions, Lock, LockError, LockManager, ReleaseLockOptions, RenewLockOptions,
+};
 use plexspaces_proto::{
     common::v1::Message,
     prost_types::Timestamp,
     scheduling::v1::{SchedulingRequest, SchedulingStatus},
 };
-use plexspaces_core::RequestContext;
 use prost::Message as ProstMessage;
+use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::SystemTime;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep, Duration};
@@ -51,6 +55,11 @@ use tracing::{error, info, warn};
 const LEASE_RETRY_MAX: u32 = 3;
 const LEASE_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 
+fn active_scheduler_nodes() -> &'static StdMutex<HashSet<String>> {
+    static ACTIVE: OnceLock<StdMutex<HashSet<String>>> = OnceLock::new();
+    ACTIVE.get_or_init(|| StdMutex::new(HashSet::new()))
+}
+
 /// Check if error is a transient database error (readonly, locked, etc.)
 fn is_transient_db_error(e: &str) -> bool {
     let lower = e.to_lowercase();
@@ -59,12 +68,16 @@ fn is_transient_db_error(e: &str) -> bool {
         || lower.contains("attempt to write")
         || lower.contains("database is locked")
         || lower.contains("code: 517")  // SQLite SQLITE_BUSY
-        || lower.contains("code: 8")    // SQLite SQLITE_READONLY
+        || lower.contains("code: 8") // SQLite SQLITE_READONLY
 }
 
 /// Error types for background scheduler
 #[derive(Debug, thiserror::Error)]
 pub enum BackgroundSchedulerError {
+    /// Background scheduler already running for this node in the current process
+    #[error("Background scheduler already running for node {0}")]
+    AlreadyStarted(String),
+
     /// Lock manager error
     #[error("Lock manager error: {0}")]
     LockError(String),
@@ -136,10 +149,27 @@ impl BackgroundScheduler {
             shutdown: Arc::new(tokio::sync::Notify::new()),
         }
     }
-    
+
     /// RequestContext for system operations (admin context with empty tenant/namespace).
     fn default_context(&self) -> RequestContext {
         RequestContext::new_without_auth(String::new(), String::new()).with_admin(true)
+    }
+
+    fn claim_node_start(&self) -> BackgroundSchedulerResult<()> {
+        let mut active = active_scheduler_nodes()
+            .lock()
+            .expect("active scheduler registry lock poisoned");
+        if !active.insert(self.node_id.clone()) {
+            return Err(BackgroundSchedulerError::AlreadyStarted(self.node_id.clone()));
+        }
+        Ok(())
+    }
+
+    fn release_node_start(&self) {
+        let mut active = active_scheduler_nodes()
+            .lock()
+            .expect("active scheduler registry lock poisoned");
+        active.remove(&self.node_id);
     }
 
     /// Start the background scheduler
@@ -149,6 +179,8 @@ impl BackgroundScheduler {
     /// 2. If acquired: Start worker and heartbeat tasks
     /// 3. If not acquired: Return error (caller should retry)
     pub async fn start(self: &Arc<Self>) -> BackgroundSchedulerResult<()> {
+        self.claim_node_start()?;
+
         // Attempt to acquire lease
         let lease = {
             let options = AcquireLockOptions {
@@ -160,17 +192,27 @@ impl BackgroundScheduler {
                 metadata: std::collections::HashMap::new(),
             };
             let ctx = self.default_context();
-            self.lock_manager
+            match self
+                .lock_manager
                 .acquire_lock(&ctx, options)
                 .await
-                .map_err(|e| BackgroundSchedulerError::LockError(e.to_string()))?
+            {
+                Ok(lease) => lease,
+                Err(e) => {
+                    self.release_node_start();
+                    return Err(BackgroundSchedulerError::LockError(e.to_string()));
+                }
+            }
         };
         {
             let mut current = self.current_lease.write().await;
             *current = Some(lease);
         }
 
-        info!("Background scheduler {} acquired lease, starting worker", self.node_id);
+        info!(
+            "Background scheduler {} acquired lease, starting worker",
+            self.node_id
+        );
 
         // Start worker task
         let worker_handle = self.start_worker_task();
@@ -186,7 +228,9 @@ impl BackgroundScheduler {
         heartbeat_handle.abort();
 
         // Release lease
-        self.release_lease().await?;
+        let release_result = self.release_lease().await;
+        self.release_node_start();
+        release_result?;
 
         info!("Background scheduler {} stopped", self.node_id);
         Ok(())
@@ -215,13 +259,45 @@ impl BackgroundScheduler {
             .map_err(|e| BackgroundSchedulerError::LockError(e.to_string()))
     }
 
+    fn lock_is_live(lock: &Lock) -> bool {
+        if !lock.locked {
+            return false;
+        }
+        let now_secs = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        lock.expires_at
+            .as_ref()
+            .map(|ts| ts.seconds > now_secs)
+            .unwrap_or(false)
+    }
+
+    async fn adopt_current_lease_if_same_holder(&self) -> BackgroundSchedulerResult<bool> {
+        let ctx = self.default_context();
+        let current_lock = self
+            .lock_manager
+            .get_lock(&ctx, &self.lease_key)
+            .await
+            .map_err(|e| BackgroundSchedulerError::LockError(e.to_string()))?;
+
+        match current_lock {
+            Some(lock) if lock.holder_id == self.node_id && Self::lock_is_live(&lock) => {
+                let mut current = self.current_lease.write().await;
+                *current = Some(lock);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
     /// Renew lease (heartbeat)
     async fn renew_lease(&self) -> BackgroundSchedulerResult<()> {
         let lease_opt = {
             let current = self.current_lease.read().await;
             current.clone()
         };
-        
+
         if let Some(lease) = lease_opt {
             let options = RenewLockOptions {
                 lock_key: self.lease_key.clone(),
@@ -238,13 +314,26 @@ impl BackgroundScheduler {
                     *current = Some(renewed);
                     Ok(())
                 }
-                Err(e) => {
-                    // Error logged at call site with retry count
-                    Err(BackgroundSchedulerError::LockError(e.to_string()))
+                Err(LockError::VersionMismatch { .. }) => {
+                    if self.adopt_current_lease_if_same_holder().await? {
+                        warn!(
+                            node_id = %self.node_id,
+                            lease_key = %self.lease_key,
+                            "Recovered scheduler lease after version mismatch by adopting current lock state"
+                        );
+                        Ok(())
+                    } else {
+                        Err(BackgroundSchedulerError::LockError(
+                            "Version mismatch and no recoverable current lease found".to_string(),
+                        ))
+                    }
                 }
+                Err(e) => Err(BackgroundSchedulerError::LockError(e.to_string())),
             }
         } else {
-            Err(BackgroundSchedulerError::LockError("No lease to renew".to_string()))
+            Err(BackgroundSchedulerError::LockError(
+                "No lease to renew".to_string(),
+            ))
         }
     }
 
@@ -254,7 +343,7 @@ impl BackgroundScheduler {
             let current = self.current_lease.read().await;
             current.clone()
         };
-        
+
         if let Some(lease) = lease_opt {
             let options = ReleaseLockOptions {
                 lock_key: self.lease_key.clone(),
@@ -293,7 +382,7 @@ impl BackgroundScheduler {
             let mut interval = interval(Duration::from_secs(interval_secs as u64));
             // Skip first tick (immediate renewal not needed, lease just acquired)
             interval.tick().await;
-            
+
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -364,7 +453,10 @@ impl BackgroundScheduler {
             .await
             .map_err(|e| BackgroundSchedulerError::ChannelError(e.to_string()))?;
 
-        info!("Background scheduler {} subscribed to channel", self.node_id);
+        info!(
+            "Background scheduler {} subscribed to channel",
+            self.node_id
+        );
 
         // Process messages from stream
         loop {
@@ -393,8 +485,13 @@ impl BackgroundScheduler {
     /// Process a scheduling request
     async fn process_request(&self, msg: &Message) -> BackgroundSchedulerResult<()> {
         // Deserialize SchedulingRequest from message payload
-        let request: SchedulingRequest = SchedulingRequest::decode(&msg.payload[..])
-            .map_err(|e| BackgroundSchedulerError::StateStoreError(format!("Failed to decode request: {}", e)))?;
+        let request: SchedulingRequest =
+            SchedulingRequest::decode(&msg.payload[..]).map_err(|e| {
+                BackgroundSchedulerError::StateStoreError(format!(
+                    "Failed to decode request: {}",
+                    e
+                ))
+            })?;
 
         info!("Processing scheduling request: {}", request.request_id);
 
@@ -411,10 +508,9 @@ impl BackgroundScheduler {
             .map_err(|e| BackgroundSchedulerError::NodeSelectionError(e.to_string()))?;
 
         // Select best node
-        let requirements = request
-            .requirements
-            .as_ref()
-            .ok_or_else(|| BackgroundSchedulerError::NodeSelectionError("Missing requirements".to_string()))?;
+        let requirements = request.requirements.as_ref().ok_or_else(|| {
+            BackgroundSchedulerError::NodeSelectionError("Missing requirements".to_string())
+        })?;
 
         match crate::node_selector::NodeSelector::select_node(requirements, &node_capacities) {
             Ok((node_id, _score)) => {
@@ -431,7 +527,10 @@ impl BackgroundScheduler {
                     .await
                     .map_err(|e| BackgroundSchedulerError::StateStoreError(e.to_string()))?;
 
-                info!("Scheduled request {} on node {}", request.request_id, node_id);
+                info!(
+                    "Scheduled request {} on node {}",
+                    request.request_id, node_id
+                );
             }
             Err(e) => {
                 // Update state store: FAILED
@@ -483,16 +582,23 @@ mod tests {
     ) {
         let lock_manager = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
         let state_store = Arc::new(SqliteSchedulingStateStore::new(":memory:").await.unwrap());
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
 
         let channel_config = ChannelConfig {
             name: "scheduling:requests".to_string(),
-            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory as i32,
+            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory
+                as i32,
             capacity: 100,
-            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
-            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,
+            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce
+                as i32,
+            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo
+                as i32,
             ..Default::default()
         };
         let channel = Arc::new(InMemoryChannel::new(channel_config).await.unwrap());
@@ -521,7 +627,11 @@ mod tests {
     #[tokio::test]
     async fn test_acquire_lease_already_held() {
         let (scheduler1, lock_manager, state_store, channel) = create_test_scheduler().await;
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
         let scheduler2 = Arc::new(BackgroundScheduler::new(
@@ -558,7 +668,10 @@ mod tests {
 
         // Renew lease with timeout
         let result = tokio::time::timeout(Duration::from_secs(2), scheduler.renew_lease()).await;
-        assert!(result.is_ok(), "Renew lease should complete within 2 seconds");
+        assert!(
+            result.is_ok(),
+            "Renew lease should complete within 2 seconds"
+        );
         result.unwrap().unwrap();
 
         // Verify lease was renewed (version should change)
@@ -566,6 +679,98 @@ mod tests {
         assert!(current.is_some());
         let renewed_lease = current.as_ref().unwrap();
         assert_ne!(renewed_lease.version, original_version);
+    }
+
+    #[tokio::test]
+    async fn test_renew_lease_recovers_from_stale_local_version() {
+        let (scheduler, lock_manager, _, _) = create_test_scheduler().await;
+        let lease = scheduler.acquire_lease().await.unwrap();
+        {
+            let mut current = scheduler.current_lease.write().await;
+            *current = Some(lease.clone());
+        }
+
+        let ctx = scheduler.default_context();
+        let externally_renewed = lock_manager
+            .renew_lock(
+                &ctx,
+                RenewLockOptions {
+                    lock_key: scheduler.lease_key.clone(),
+                    holder_id: scheduler.node_id.clone(),
+                    version: lease.version.clone(),
+                    lease_duration_secs: scheduler.lease_duration_secs,
+                    metadata: HashMap::new(),
+                },
+            )
+            .await
+            .unwrap();
+
+        scheduler.renew_lease().await.unwrap();
+
+        let current = scheduler.current_lease.read().await;
+        let recovered = current.as_ref().expect("scheduler should retain lease");
+        assert_ne!(recovered.version, lease.version);
+        assert_ne!(recovered.version, externally_renewed.version);
+
+        let persisted = lock_manager
+            .get_lock(&ctx, &scheduler.lease_key)
+            .await
+            .unwrap()
+            .expect("lock should still exist");
+        assert_eq!(recovered.version, persisted.version);
+    }
+
+    #[tokio::test]
+    async fn test_start_rejects_duplicate_scheduler_for_same_node() {
+        let (scheduler1, lock_manager, state_store, channel) = create_test_scheduler().await;
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
+        let capacity_tracker = Arc::new(CapacityTracker::new(registry));
+        let scheduler2 = Arc::new(BackgroundScheduler::new(
+            "test-node".to_string(),
+            lock_manager,
+            state_store,
+            capacity_tracker,
+            channel,
+            30,
+            10,
+        ));
+
+        let scheduler1_task = {
+            let scheduler = scheduler1.clone();
+            tokio::spawn(async move { scheduler.start().await })
+        };
+
+        let ctx = scheduler1.default_context();
+        for _ in 0..20 {
+            if scheduler1
+                .lock_manager
+                .get_lock(&ctx, &scheduler1.lease_key)
+                .await
+                .unwrap()
+                .is_some()
+            {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+
+        let duplicate_start = scheduler2.start().await;
+        assert!(matches!(
+            duplicate_start,
+            Err(BackgroundSchedulerError::AlreadyStarted(node_id)) if node_id == "test-node"
+        ));
+
+        scheduler1.stop();
+        let stop_result = tokio::time::timeout(Duration::from_secs(2), scheduler1_task)
+            .await
+            .expect("primary scheduler should stop")
+            .expect("scheduler task should join");
+        assert!(stop_result.is_ok(), "primary scheduler should stop cleanly");
     }
 
     #[tokio::test]
@@ -579,16 +784,23 @@ mod tests {
 
         // Release lease with timeout
         let result = tokio::time::timeout(Duration::from_secs(2), scheduler.release_lease()).await;
-        assert!(result.is_ok(), "Release lease should complete within 2 seconds");
+        assert!(
+            result.is_ok(),
+            "Release lease should complete within 2 seconds"
+        );
         result.unwrap().unwrap();
 
         // Verify lease was released
         let current = scheduler.current_lease.read().await;
         assert!(current.is_none());
-        
+
         // Verify lease is no longer held in lock manager
         let ctx = scheduler.default_context();
-        let lock = scheduler.lock_manager.get_lock(&ctx, &scheduler.lease_key).await.unwrap();
+        let lock = scheduler
+            .lock_manager
+            .get_lock(&ctx, &scheduler.lease_key)
+            .await
+            .unwrap();
         assert!(lock.is_none() || !lock.unwrap().locked);
     }
 
@@ -605,7 +817,6 @@ mod tests {
                     cluster: String::new(),
                     node_ids: vec![],
                     required_labels: HashMap::new(),
-                    preferred_node_ids: vec![],
                     avoid_node_ids: vec![],
                     resource_requirements: Some(plexspaces_proto::common::v1::ResourceSpec {
                         cpu_cores: 1.0,
@@ -615,7 +826,6 @@ mod tests {
                         gpu_type: String::new(),
                     }),
                     affinity_labels: HashMap::new(),
-                    preferred_node_id: String::new(),
                 }),
             }),
             namespace: String::new(), // Empty for test
@@ -631,7 +841,10 @@ mod tests {
 
         // Store request - use node-config defaults for test
         let ctx = scheduler.default_context();
-        state_store.store_request(&ctx, request.clone()).await.unwrap();
+        state_store
+            .store_request(&ctx, request.clone())
+            .await
+            .unwrap();
 
         // Create channel message
         let mut payload = Vec::new();
@@ -665,12 +878,10 @@ mod tests {
     #[tokio::test]
     async fn test_stop_scheduler() {
         let (scheduler, _, _, _) = create_test_scheduler().await;
-        
+
         // Start scheduler in background
         let scheduler_clone = scheduler.clone();
-        let handle = tokio::spawn(async move {
-            scheduler_clone.start().await
-        });
+        let handle = tokio::spawn(async move { scheduler_clone.start().await });
 
         // Wait a bit
         sleep(Duration::from_millis(100)).await;

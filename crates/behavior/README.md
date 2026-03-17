@@ -47,9 +47,9 @@ impl GenServerBehavior for CounterGenServer {
         match msg.payload() {
             b"increment" => {
                 self.count += 1;
-                Ok(Message::new(self.count.to_string().into_bytes()))
+                Ok(new_message(self.count.to_string()))
             }
-            b"get" => Ok(Message::new(self.count.to_string().into_bytes())),
+            b"get" => Ok(new_message(self.count.to_string())),
             _ => Err(BehaviorError::UnknownMessage),
         }
     }
@@ -135,7 +135,7 @@ impl WorkflowBehavior for MyWorkflow {
     ) -> Result<Message, BehaviorError> {
         // Main workflow execution (exclusive, one at a time)
         // Like: Restate workflow.run(), Temporal workflow execution
-        Ok(Message::new(b"workflow complete".to_vec()))
+        Ok(new_message("workflow complete"))
     }
 
     async fn signal(
@@ -157,7 +157,7 @@ impl WorkflowBehavior for MyWorkflow {
     ) -> Result<Message, BehaviorError> {
         // Read-only queries (does not modify state)
         // Like: Restate workflow.query(), Temporal query handlers
-        Ok(Message::new(b"query result".to_vec()))
+        Ok(new_message("query result"))
     }
 }
 ```
@@ -259,7 +259,7 @@ impl ActorBehavior for MyActor {
 impl GenServerBehavior for MyActor {
     async fn handle_request(&mut self, msg: Message, ctx: &ActorContext) -> Result<Message, BehaviorError> {
         // Handle synchronous requests
-        Ok(Message::new(b"response".to_vec()))
+        Ok(new_message("response"))
     }
 }
 
@@ -310,4 +310,3 @@ This crate is used by:
 - Implementation: `crates/behavior/src/`
 - Tests: `crates/behavior/src/` (genserver_tests, genevent_tests, genfsm_tests)
 - Proto definitions: `proto/plexspaces/v1/behaviors.proto`, `proto/plexspaces/v1/workflow.proto`
-

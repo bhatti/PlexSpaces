@@ -24,7 +24,7 @@
 
 #[cfg(test)]
 mod tests {
-    use plexspaces_wasm_runtime::{WasmRuntime, WasmConfig, ResourceLimits};
+    use plexspaces_wasm_runtime::{ResourceLimits, WasmConfig, WasmRuntime};
     use sha2::{Digest, Sha256};
 
     // Simple WASM module: (module (func (export "test") (result i32) i32.const 42))
@@ -100,7 +100,7 @@ mod tests {
             limits: ResourceLimits {
                 max_memory_bytes: 1 * 1024 * 1024, // 1MB limit
                 max_stack_bytes: 512 * 1024,       // 512KB stack
-                max_fuel: 1000,                     // Small fuel limit
+                max_fuel: 1000,                    // Small fuel limit
                 ..Default::default()
             },
             ..Default::default()
@@ -250,4 +250,3 @@ mod tests {
         assert_eq!(module.name, "stateful-actor");
     }
 }
-

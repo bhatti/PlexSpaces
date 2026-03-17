@@ -44,7 +44,9 @@ pub fn read_bytes<T>(
     if ptr + len > data.len() {
         return Err(WasmError::ActorFunctionError(format!(
             "Memory access out of bounds: ptr={}, len={}, memory_size={}",
-            ptr, len, data.len()
+            ptr,
+            len,
+            data.len()
         )));
     }
 
@@ -72,9 +74,8 @@ pub fn read_string<T>(
     len: i32,
 ) -> WasmResult<String> {
     let bytes = read_bytes(memory, store, ptr, len)?;
-    String::from_utf8(bytes).map_err(|e| {
-        WasmError::ActorFunctionError(format!("Invalid UTF-8 string: {}", e))
-    })
+    String::from_utf8(bytes)
+        .map_err(|e| WasmError::ActorFunctionError(format!("Invalid UTF-8 string: {}", e)))
 }
 
 /// Write bytes to WASM linear memory
@@ -110,7 +111,9 @@ pub fn write_bytes<T>(
     if ptr + len > data.len() {
         return Err(WasmError::ActorFunctionError(format!(
             "Memory write out of bounds: ptr={}, len={}, memory_size={}",
-            ptr, len, data.len()
+            ptr,
+            len,
+            data.len()
         )));
     }
 
@@ -138,15 +141,15 @@ mod tests {
                 (memory (export "memory") 1)
             )
         "#;
-        let wasm_bytes = wat::parse_str(wat).map_err(|e| {
-            WasmError::CompilationError(format!("WAT parse failed: {}", e))
-        })?;
+        let wasm_bytes = wat::parse_str(wat)
+            .map_err(|e| WasmError::CompilationError(format!("WAT parse failed: {}", e)))?;
         let module = Module::new(&engine, &wasm_bytes)?;
 
         let mut linker = Linker::new(&engine);
         // Use synchronous instantiate since we disabled async support for tests
         let instance = linker.instantiate(&mut store, &module)?;
-        let memory = instance.get_memory(&mut store, "memory")
+        let memory = instance
+            .get_memory(&mut store, "memory")
             .ok_or_else(|| WasmError::ActorFunctionError("Memory not found".to_string()))?;
 
         Ok((engine, store, memory))

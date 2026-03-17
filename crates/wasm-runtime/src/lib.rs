@@ -224,7 +224,6 @@
 pub mod capabilities;
 #[cfg(feature = "component-model")]
 pub mod component_host;
-pub mod simple_component_host;
 pub mod deployment_service;
 pub mod error;
 pub mod grpc_service;
@@ -235,7 +234,7 @@ pub mod memory;
 pub mod module_cache;
 pub mod resource_limits;
 pub mod runtime;
-
+pub mod simple_component_host;
 
 // Re-export ModuleCache for external use
 pub use module_cache::ModuleCache;
@@ -260,22 +259,31 @@ pub const SIMPLE_ACTOR_HANDLE_FAILED_LOG_MESSAGE: &str = "Simple actor handle() 
 pub mod wasm_runtime_helpers {
     use super::*;
     use std::sync::Arc;
-    
+
     /// Extract WasmModule from Arc<dyn Any>
-    pub fn extract_wasm_module(module_any: Arc<dyn std::any::Any + Send + Sync>) -> Result<Arc<WasmModule>, WasmError> {
-        module_any.downcast::<WasmModule>()
+    pub fn extract_wasm_module(
+        module_any: Arc<dyn std::any::Any + Send + Sync>,
+    ) -> Result<Arc<WasmModule>, WasmError> {
+        module_any
+            .downcast::<WasmModule>()
             .map_err(|_| WasmError::CompilationError("Failed to downcast WasmModule".to_string()))
     }
-    
+
     /// Extract WasmConfig from Arc<dyn Any>
-    pub fn extract_wasm_config(config_any: Arc<dyn std::any::Any + Send + Sync>) -> Result<Arc<WasmConfig>, WasmError> {
-        config_any.downcast::<WasmConfig>()
+    pub fn extract_wasm_config(
+        config_any: Arc<dyn std::any::Any + Send + Sync>,
+    ) -> Result<Arc<WasmConfig>, WasmError> {
+        config_any
+            .downcast::<WasmConfig>()
             .map_err(|_| WasmError::CompilationError("Failed to downcast WasmConfig".to_string()))
     }
-    
+
     /// Extract WasmInstance from Arc<dyn Any>
-    pub fn extract_wasm_instance(instance_any: Arc<dyn std::any::Any + Send + Sync>) -> Result<Arc<WasmInstance>, WasmError> {
-        instance_any.downcast::<WasmInstance>()
+    pub fn extract_wasm_instance(
+        instance_any: Arc<dyn std::any::Any + Send + Sync>,
+    ) -> Result<Arc<WasmInstance>, WasmError> {
+        instance_any
+            .downcast::<WasmInstance>()
             .map_err(|_| WasmError::CompilationError("Failed to downcast WasmInstance".to_string()))
     }
 }
@@ -328,10 +336,10 @@ impl Default for WasmConfig {
             },
             capabilities: crate::capabilities::profiles::default(),
             profile_name: "default".to_string(),
-            enable_pooling: true, // Warm starts by default
-            enable_aot: false,    // JIT by default (faster deployment)
-            durability_enabled: false, // Off by default for performance
-            use_instance_pool: true,   // On by default; used when deploy-path integration is done
+            enable_pooling: true,                   // Warm starts by default
+            enable_aot: false,                      // JIT by default (faster deployment)
+            durability_enabled: false,              // Off by default for performance
+            use_instance_pool: true, // On by default; used when deploy-path integration is done
             max_concurrent_instantiations: Some(7), // Default: 7 permits (leaves headroom under Wasmtime's limit of 10)
         }
     }
@@ -344,7 +352,11 @@ impl From<plexspaces_proto::wasm::v1::WasmConfig> for WasmConfig {
         Self {
             limits: p.limits.unwrap_or(default.limits),
             capabilities: p.capabilities.unwrap_or(default.capabilities),
-            profile_name: if p.profile_name.is_empty() { default.profile_name } else { p.profile_name },
+            profile_name: if p.profile_name.is_empty() {
+                default.profile_name
+            } else {
+                p.profile_name
+            },
             enable_pooling: p.enable_pooling,
             enable_aot: p.enable_aot,
             durability_enabled: p.durability_enabled,

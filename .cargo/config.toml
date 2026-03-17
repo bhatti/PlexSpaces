@@ -1,14 +1,25 @@
+[build]
+# Keep all workspace and example builds in the shared top-level target directory
+target-dir = "target"
+# Enable incremental compilation for faster local rebuilds
+incremental = true
+
 [net]
 git-fetch-with-cli = false
-ssl-cert-file = "/Users/sbhatti/workplace/tspaces/archived_docs/cert.pem"
 
-[build]
-# Auto-detect CPU cores for parallel compilation
-# Omit jobs setting to let cargo auto-detect (default behavior)
-# Enable incremental compilation for faster rebuilds
-incremental = true
-# Use sccache if available (set RUSTC_WRAPPER=sccache)
-# rustc-wrapper = "sccache"
+[registries.crates-io]
+# Sparse index reduces dependency metadata fetch time
+protocol = "sparse"
+
+[http]
+multiplexing = true
+
+[env]
+# Enable incremental compilation in shells that invoke cargo outside the Makefile.
+CARGO_INCREMENTAL = "1"
+# Optional compiler cache. Leave disabled by default and enable per-shell or in Makefile
+# when `sccache` is installed.
+# RUSTC_WRAPPER = "sccache"
 
 [target.'cfg(target_os = "linux")']
 # Optimize compilation flags for faster builds on Linux

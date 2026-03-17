@@ -325,7 +325,7 @@ pub struct DataParallelConfig {
     /// Shard group ID
     #[prost(string, tag="1")]
     pub group_id: ::prost::alloc::string::String,
-    /// Number of shards in the group
+    /// Number of shards in the group (1 to 1 billion)
     #[prost(uint32, tag="2")]
     pub shard_count: u32,
     /// Partitioning strategy
@@ -405,21 +405,15 @@ pub struct NodePlacement {
     /// Node must match all labels (Kubernetes-inspired). Used by scheduler for node selection.
     #[prost(map="string, string", tag="4")]
     pub required_labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Preferred node IDs (hint; scheduler may prefer these when scoring)
-    #[prost(string, repeated, tag="5")]
-    pub preferred_node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// Avoid node IDs (anti-affinity; scheduler excludes these)
-    #[prost(string, repeated, tag="6")]
+    #[prost(string, repeated, tag="5")]
     pub avoid_node_ids: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// CPU, memory, disk, GPU requirements. Scheduler filters by NodeCapacity.available.
-    #[prost(message, optional, tag="7")]
+    #[prost(message, optional, tag="6")]
     pub resource_requirements: ::core::option::Option<super::super::common::v1::ResourceSpec>,
     /// Affinity labels (co-location hint; scheduler may prefer nodes with matching labels)
-    #[prost(map="string, string", tag="8")]
+    #[prost(map="string, string", tag="7")]
     pub affinity_labels: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Single preferred node (convenience; equivalent to preferred_node_ids with one element)
-    #[prost(string, tag="9")]
-    pub preferred_node_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

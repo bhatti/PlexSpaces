@@ -360,13 +360,13 @@ mod tests {
         std::env::remove_var("PLEXSPACES_POSTGRES_TABLE");
         std::env::remove_var("PLEXSPACES_POOL_SIZE");
         std::env::remove_var("PLEXSPACES_REDIS_NAMESPACE");
-        
+
         // Small delay to ensure env vars are cleared
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         let space = TupleSpace::from_env_or_default().await.unwrap();
         drop(space);
-        
+
         // Clean up after test
         std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
     }
@@ -380,7 +380,7 @@ mod tests {
         std::env::remove_var("PLEXSPACES_POSTGRES_URL");
         std::env::remove_var("PLEXSPACES_POSTGRES_TABLE");
         std::env::remove_var("PLEXSPACES_POOL_SIZE");
-        
+
         // Small delay to ensure env vars are cleared
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
@@ -412,7 +412,7 @@ mod tests {
         use std::sync::Mutex;
         static ENV_LOCK: Mutex<()> = Mutex::new(());
         let _guard = ENV_LOCK.lock().unwrap();
-        
+
         // Clean up first to avoid interference
         std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
         std::env::remove_var("PLEXSPACES_SQLITE_PATH");
@@ -436,7 +436,7 @@ mod tests {
         std::env::remove_var("PLEXSPACES_SQLITE_PATH");
         std::env::remove_var("PLEXSPACES_REDIS_URL");
         std::env::remove_var("PLEXSPACES_POSTGRES_URL");
-        
+
         // Small delay to ensure env vars are cleared
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
@@ -445,9 +445,15 @@ mod tests {
         std::env::remove_var("PLEXSPACES_SQLITE_PATH");
 
         let result = TupleSpace::from_env().await;
-        assert!(result.is_err(), "Should fail when SQLite backend is specified but path is missing");
+        assert!(
+            result.is_err(),
+            "Should fail when SQLite backend is specified but path is missing"
+        );
         if let Err(e) = result {
-            assert!(e.to_string().contains("PLEXSPACES_SQLITE_PATH"), "Error should mention PLEXSPACES_SQLITE_PATH");
+            assert!(
+                e.to_string().contains("PLEXSPACES_SQLITE_PATH"),
+                "Error should mention PLEXSPACES_SQLITE_PATH"
+            );
         }
 
         // Clean up after test

@@ -61,7 +61,10 @@ impl VmRegistry {
 
         for entry in entries {
             let entry = entry.map_err(|e| {
-                FirecrackerError::VmOperationFailed(format!("Failed to read directory entry: {}", e))
+                FirecrackerError::VmOperationFailed(format!(
+                    "Failed to read directory entry: {}",
+                    e
+                ))
             })?;
 
             let path = entry.path();
@@ -153,15 +156,19 @@ impl VmRegistry {
         registry: &plexspaces_object_registry::ObjectRegistry,
         vm_entry: &VmRegistryEntry,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType, HealthStatus};
+        use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 
         // Map VM state to health status
         let health_status = match vm_entry.state {
             crate::vm::VmState::Running => HealthStatus::HealthStatusHealthy,
             crate::vm::VmState::Paused => HealthStatus::HealthStatusDegraded,
-            crate::vm::VmState::Booting | crate::vm::VmState::Ready => HealthStatus::HealthStatusStarting,
+            crate::vm::VmState::Booting | crate::vm::VmState::Ready => {
+                HealthStatus::HealthStatusStarting
+            }
             crate::vm::VmState::Stopping => HealthStatus::HealthStatusStopping,
-            crate::vm::VmState::Stopped | crate::vm::VmState::Failed => HealthStatus::HealthStatusUnhealthy,
+            crate::vm::VmState::Stopped | crate::vm::VmState::Failed => {
+                HealthStatus::HealthStatusUnhealthy
+            }
             crate::vm::VmState::Created => HealthStatus::HealthStatusStarting,
         };
 
@@ -180,4 +187,3 @@ impl VmRegistry {
         Ok(())
     }
 }
-

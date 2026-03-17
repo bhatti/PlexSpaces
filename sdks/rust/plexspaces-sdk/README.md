@@ -425,23 +425,27 @@ async fn log_event(&mut self, _ctx: &ActorContext, msg: &Message)
 }
 ```
 
-## Parallel Operations
+## ShardGroup Operations
 
-The SDK provides a unified `ParallelClient` for data-parallel operations (scatter/gather):
+The SDK uses the shard-group client APIs directly for data-parallel operations:
 
 ```rust
-use plexspaces_sdk::{ParallelClient, PartitionStrategy};
+use plexspaces_sdk::{ShardGroupClientLocal, ShardGroupClientTrait};
+use plexspaces_proto::actor::v1::PartitionStrategy;
 
-let mut client = ParallelClient::from_service_locator(service_locator).await?;
+let mut client = ShardGroupClientLocal::new(service_locator).await?;
 
-// Map operation across shards
+let group = client.create_shard_group(
+    "worker-pool".to_string(),
+    "worker".to_string(),
+    4,
+    PartitionStrategy::PartitionStrategyHash,
+    None,
+).await?;
+
 let results = client.map(
-    &ctx,
-    "worker-pool",
-    "namespace",
+    "worker-pool".to_string(),
     json!({ "action": "process", "data": items }),
-    PartitionStrategy::RoundRobin,
-    Duration::from_secs(30),
 ).await?;
 
 // Reduce operation (aggregate results)

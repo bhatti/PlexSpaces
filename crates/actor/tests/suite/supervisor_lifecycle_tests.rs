@@ -27,15 +27,21 @@
 //! - get_childspec() - get child specification
 //! - Parent-child registration integration
 
-use plexspaces_actor::supervisor::{Supervisor, SupervisionStrategy, RestartPolicy, ChildType, SupervisorEvent};
+use async_trait::async_trait;
+use plexspaces_actor::child_spec::{
+    ChildType as CSChildType, RestartStrategy, ShutdownSpec, StartedChild,
+};
+use plexspaces_actor::supervisor::{
+    ChildType, RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
+};
 use plexspaces_actor::{Actor, ActorRef as ActorActorRef, ChildSpec};
-use plexspaces_actor::child_spec::{RestartStrategy, ChildType as CSChildType, StartedChild, ShutdownSpec};
-use plexspaces_core::{Actor as ActorTrait, ActorRef as CoreActorRef, ActorContext, ActorError, BehaviorError, Message};
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, ActorError, ActorRef as CoreActorRef, BehaviorError, Message,
+};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_services::ServiceLocatorImpl;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
-use async_trait::async_trait;
 use tokio::time::{sleep, Duration};
 
 /// Helper function to create a ChildSpec from a sync factory
@@ -46,27 +52,26 @@ fn create_child_spec_from_factory(
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
     use plexspaces_actor::child_spec::ShutdownSpec;
-    
-    let actor_ref = CoreActorRef::new(id.clone())
-        .expect("Failed to create actor ref");
-    
+
+    let actor_ref = CoreActorRef::new(id.clone()).expect("Failed to create actor ref");
+
     let restart_strategy = match restart_policy {
         RestartPolicy::Permanent => RestartStrategy::Permanent,
         RestartPolicy::Transient => RestartStrategy::Transient,
         RestartPolicy::Temporary => RestartStrategy::Temporary,
         RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
     };
-    
-    let mut spec = ChildSpec::worker_sync(id.clone(), id, factory, actor_ref)
-        .with_restart(restart_strategy);
-    
+
+    let mut spec =
+        ChildSpec::worker_sync(id.clone(), id, factory, actor_ref).with_restart(restart_strategy);
+
     // Apply shutdown timeout if specified
     spec = match shutdown_timeout_ms {
         Some(0) => spec.with_shutdown(ShutdownSpec::BrutalKill),
         Some(ms) => spec.with_shutdown(ShutdownSpec::Timeout(StdDuration::from_millis(ms))),
         None => spec.with_shutdown(ShutdownSpec::Infinity),
     };
-    
+
     spec
 }
 
@@ -101,7 +106,8 @@ impl plexspaces_core::Actor for TestActor {
 }
 
 async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(ServiceLocatorImpl::new());
     Supervisor::new(
         "test-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -115,10 +121,10 @@ async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<Su
 #[tokio::test]
 async fn test_start_child() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     let child_id = "worker1".to_string();
     let actor_id = format!("{}@test-node", child_id);
-    
+
     let actor_id_for_closure = actor_id.clone();
     let spec = ChildSpec::worker(
         child_id.clone(),
@@ -126,7 +132,12 @@ async fn test_start_child() {
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
-                let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone())).await.unwrap();
+                let mailbox = Mailbox::new(
+                    MailboxConfig::default(),
+                    format!("mailbox-{}", actor_id.clone()),
+                )
+                .await
+                .unwrap();
                 let actor = Actor::new(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
@@ -141,11 +152,11 @@ async fn test_start_child() {
             })
         }),
     );
-    
+
     let result = supervisor.start_child(spec).await;
     assert!(result.is_ok(), "start_child should succeed");
     assert_eq!(result.unwrap(), actor_id);
-    
+
     // Verify child is in supervisor
     let count = supervisor.count_children().await;
     assert_eq!(count.actors, 1);
@@ -155,11 +166,11 @@ async fn test_start_child() {
 #[tokio::test]
 async fn test_delete_child() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     // Add a child first
     let child_id = "worker1".to_string();
     let actor_id = format!("{}@test-node", child_id);
-    
+
     let actor_id_for_closure = actor_id.clone();
     let spec = ChildSpec::worker(
         child_id.clone(),
@@ -167,7 +178,12 @@ async fn test_delete_child() {
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
-                let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone())).await.unwrap();
+                let mailbox = Mailbox::new(
+                    MailboxConfig::default(),
+                    format!("mailbox-{}", actor_id.clone()),
+                )
+                .await
+                .unwrap();
                 let actor = Actor::new(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
@@ -182,13 +198,16 @@ async fn test_delete_child() {
             })
         }),
     );
-    
-    let _ = supervisor.start_child(spec).await.expect("start_child should succeed");
-    
+
+    let _ = supervisor
+        .start_child(spec)
+        .await
+        .expect("start_child should succeed");
+
     // Delete the child
     let result = supervisor.delete_child(&actor_id).await;
     assert!(result.is_ok(), "delete_child should succeed");
-    
+
     // Verify child is removed
     let count = supervisor.count_children().await;
     assert_eq!(count.actors, 0);
@@ -198,19 +217,24 @@ async fn test_delete_child() {
 #[tokio::test]
 async fn test_which_children() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     // Add multiple children
     for i in 1..=3 {
         let child_id = format!("worker{}", i);
         let actor_id = format!("{}@test-node", child_id);
-        
+
         let spec = ChildSpec::worker(
             child_id.clone(),
             actor_id.clone(),
             Arc::new(move || {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
-                    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone())).await.unwrap();
+                    let mailbox = Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id.clone()),
+                    )
+                    .await
+                    .unwrap();
                     let actor = Actor::new(
                         actor_id.clone(),
                         Box::new(TestActor::new(actor_id.clone())),
@@ -225,14 +249,17 @@ async fn test_which_children() {
                 })
             }),
         );
-        
-        let _ = supervisor.start_child(spec).await.expect("start_child should succeed");
+
+        let _ = supervisor
+            .start_child(spec)
+            .await
+            .expect("start_child should succeed");
     }
-    
+
     // Get children list
     let children = supervisor.which_children().await;
     assert_eq!(children.len(), 3);
-    
+
     // Verify all children are listed
     let child_ids: Vec<String> = children.iter().map(|c| c.child_id.clone()).collect();
     assert!(child_ids.contains(&"worker1@test-node".to_string()));
@@ -243,25 +270,30 @@ async fn test_which_children() {
 #[tokio::test]
 async fn test_count_children() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     // Initially empty
     let count = supervisor.count_children().await;
     assert_eq!(count.actors, 0);
     assert_eq!(count.supervisors, 0);
     assert_eq!(count.total, 0);
-    
+
     // Add actors
     for i in 1..=2 {
         let child_id = format!("worker{}", i);
         let actor_id = format!("{}@test-node", child_id);
-        
+
         let spec = ChildSpec::worker(
             child_id.clone(),
             actor_id.clone(),
             Arc::new(move || {
                 let actor_id = actor_id.clone();
                 Box::pin(async move {
-                    let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone())).await.unwrap();
+                    let mailbox = Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id.clone()),
+                    )
+                    .await
+                    .unwrap();
                     let actor = Actor::new(
                         actor_id.clone(),
                         Box::new(TestActor::new(actor_id.clone())),
@@ -276,10 +308,13 @@ async fn test_count_children() {
                 })
             }),
         );
-        
-        let _ = supervisor.start_child(spec).await.expect("start_child should succeed");
+
+        let _ = supervisor
+            .start_child(spec)
+            .await
+            .expect("start_child should succeed");
     }
-    
+
     let count = supervisor.count_children().await;
     assert_eq!(count.actors, 2);
     assert_eq!(count.supervisors, 0);
@@ -289,10 +324,10 @@ async fn test_count_children() {
 #[tokio::test]
 async fn test_get_childspec() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     let child_id = "worker1".to_string();
     let actor_id = format!("{}@test-node", child_id);
-    
+
     let actor_id_for_closure = actor_id.clone();
     let original_spec = ChildSpec::worker(
         child_id.clone(),
@@ -300,7 +335,12 @@ async fn test_get_childspec() {
         Arc::new(move || {
             let actor_id = actor_id_for_closure.clone();
             Box::pin(async move {
-                let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id.clone())).await.unwrap();
+                let mailbox = Mailbox::new(
+                    MailboxConfig::default(),
+                    format!("mailbox-{}", actor_id.clone()),
+                )
+                .await
+                .unwrap();
                 let actor = Actor::new(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
@@ -317,13 +357,16 @@ async fn test_get_childspec() {
     );
     // Note: RestartStrategy is not directly accessible, so we skip the restart strategy test
     // The important part is that get_childspec() returns the spec
-    
-    let _ = supervisor.start_child(original_spec.clone()).await.expect("start_child should succeed");
-    
+
+    let _ = supervisor
+        .start_child(original_spec.clone())
+        .await
+        .expect("start_child should succeed");
+
     // Get child spec
     let retrieved_spec = supervisor.get_childspec(&actor_id).await;
     assert!(retrieved_spec.is_some(), "get_childspec should return spec");
-    
+
     let spec = retrieved_spec.unwrap();
     assert_eq!(spec.child_id, child_id);
     // Note: actor_or_supervisor_id might be the full actor_id (with @node), not just child_id
@@ -333,11 +376,11 @@ async fn test_get_childspec() {
 #[tokio::test]
 async fn test_restart_child() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
-    
+
     // Add a child using ChildSpec
     let child_id = "worker1".to_string();
     let actor_id = format!("{}@test-node", child_id);
-    
+
     let child_spec = create_child_spec_from_factory(
         actor_id.clone(),
         Arc::new({
@@ -349,9 +392,10 @@ async fn test_restart_child() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(
-                        Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", actor_id_clone.clone()))
-                    )
+                    rt.block_on(Mailbox::new(
+                        MailboxConfig::default(),
+                        format!("mailbox-{}", actor_id_clone.clone()),
+                    ))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -369,13 +413,16 @@ async fn test_restart_child() {
         RestartPolicy::Permanent,
         Some(5000),
     );
-    
-    let _ = supervisor.add_child(child_spec).await.expect("add_child should succeed");
-    
+
+    let _ = supervisor
+        .add_child(child_spec)
+        .await
+        .expect("add_child should succeed");
+
     // Restart the child
     let result = supervisor.restart_child(&actor_id).await;
     assert!(result.is_ok(), "restart_child should succeed");
-    
+
     // Verify child is still present
     let count = supervisor.count_children().await;
     assert_eq!(count.actors, 1);

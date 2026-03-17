@@ -424,14 +424,16 @@ impl EnvConfig {
 
     /// Get database URL with fallback to default SQLite path
     pub fn database_url_or_default(&self, node_id: &str, component: &str) -> String {
-        self.database_url.clone().unwrap_or_else(|| {
-            format!("/tmp/plexspaces-{}-{}.db", component, node_id)
-        })
+        self.database_url
+            .clone()
+            .unwrap_or_else(|| format!("/tmp/plexspaces-{}-{}.db", component, node_id))
     }
 
     /// Get mTLS cert directory with default
     pub fn mtls_cert_dir_or_default(&self) -> String {
-        self.mtls_cert_dir.clone().unwrap_or_else(|| "/app/certs".to_string())
+        self.mtls_cert_dir
+            .clone()
+            .unwrap_or_else(|| "/app/certs".to_string())
     }
 }
 
@@ -451,11 +453,11 @@ fn get_default_base_dir() -> String {
     if let Some(base_dir) = get_env(ENV_BASE_DIR) {
         return base_dir;
     }
-    
+
     if let Some(home) = dirs::home_dir() {
         return home.join("plexspaces").to_string_lossy().to_string();
     }
-    
+
     "/tmp/plexspaces".to_string()
 }
 
@@ -508,7 +510,7 @@ fn mask_db_url(url: &str) -> String {
 pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
     use plexspaces_proto::channel::v1::ChannelProvider;
     use plexspaces_proto::storage::v1::SharedDbConfig;
-    
+
     let config = EnvConfig::from_env();
 
     // Ensure runtime config exists
@@ -520,20 +522,34 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
     // ===========================================
     // 1. Set base_dir (foundation for other paths)
     // ===========================================
-    let base_dir = config.base_dir
+    let base_dir = config
+        .base_dir
         .clone()
         .filter(|s| !s.is_empty())
-        .or_else(|| if !runtime.base_dir.is_empty() { Some(runtime.base_dir.clone()) } else { None })
+        .or_else(|| {
+            if !runtime.base_dir.is_empty() {
+                Some(runtime.base_dir.clone())
+            } else {
+                None
+            }
+        })
         .unwrap_or_else(get_default_base_dir);
     runtime.base_dir = base_dir.clone();
 
     // ===========================================
     // 2. Set wasm_apps_directory
     // ===========================================
-    let wasm_apps_dir = config.wasm_apps_dir
+    let wasm_apps_dir = config
+        .wasm_apps_dir
         .clone()
         .filter(|s| !s.is_empty())
-        .or_else(|| if !runtime.wasm_apps_directory.is_empty() { Some(runtime.wasm_apps_directory.clone()) } else { None })
+        .or_else(|| {
+            if !runtime.wasm_apps_directory.is_empty() {
+                Some(runtime.wasm_apps_directory.clone())
+            } else {
+                None
+            }
+        })
         .unwrap_or_else(|| format!("{}/apps", base_dir));
     runtime.wasm_apps_directory = wasm_apps_dir.clone();
 
@@ -541,16 +557,19 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
     // 3. Set shared database config
     // ===========================================
     let db_dir = format!("{}/db", base_dir);
-    let db_url = config.database_url
+    let db_url = config
+        .database_url
         .clone()
         .filter(|s| !s.is_empty())
         .or_else(|| {
-            runtime.db.as_ref()
+            runtime
+                .db
+                .as_ref()
                 .map(|db| db.connection_string.clone())
                 .filter(|s| !s.is_empty())
         })
         .unwrap_or_else(|| format!("sqlite://{}/plexspaces.db?mode=rwc", db_dir));
-    
+
     if runtime.db.is_none() {
         runtime.db = Some(SharedDbConfig::default());
     }
@@ -592,19 +611,26 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
     // As per design: "redis (if available), else use shared db"
     // Only set if not already explicitly configured
     if runtime.locks_provider.is_none() {
-        use plexspaces_proto::storage::v1::{StorageProvider, StorageProviderConfig, RedisBackendConfig};
-        
+        use plexspaces_proto::storage::v1::{
+            RedisBackendConfig, StorageProvider, StorageProviderConfig,
+        };
+
         if let Some(ref redis_url) = config.redis_url {
             // Redis is configured - use Redis for locks
-            tracing::info!(locks_provider = "Redis", "Locks provider set to Redis (from PLEXSPACES_REDIS_URL)");
+            tracing::info!(
+                locks_provider = "Redis",
+                "Locks provider set to Redis (from PLEXSPACES_REDIS_URL)"
+            );
             runtime.locks_provider = Some(StorageProviderConfig {
                 provider: StorageProvider::StorageProviderRedis as i32,
-                config: Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Redis(
-                    RedisBackendConfig {
-                        url: redis_url.clone(),
-                        ..Default::default()
-                    }
-                )),
+                config: Some(
+                    plexspaces_proto::storage::v1::storage_provider_config::Config::Redis(
+                        RedisBackendConfig {
+                            url: redis_url.clone(),
+                            ..Default::default()
+                        },
+                    ),
+                ),
             });
         } else {
             // No Redis - use shared database for locks
@@ -636,7 +662,7 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
     }
 
     // ===========================================
-    // 6. Set mailbox_provider default  
+    // 6. Set mailbox_provider default
     // ===========================================
     // Default to IN_MEMORY (same as channel_provider)
     if runtime.mailbox_provider == ChannelProvider::ChannelProviderInMemory as i32 {
@@ -716,7 +742,7 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
         Ok(ChannelProvider::ChannelProviderCustom) => "CUSTOM",
         Err(_) => "UNKNOWN",
     };
-    
+
     let mailbox_provider_name = match ChannelProvider::try_from(runtime.mailbox_provider) {
         Ok(ChannelProvider::ChannelProviderInMemory) => "IN_MEMORY",
         Ok(ChannelProvider::ChannelProviderRedis) => "REDIS",
@@ -726,7 +752,12 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
         Err(_) => "UNKNOWN",
     };
 
-    let auth_status = if runtime.security.as_ref().map(|s| s.disable_auth).unwrap_or(false) {
+    let auth_status = if runtime
+        .security
+        .as_ref()
+        .map(|s| s.disable_auth)
+        .unwrap_or(false)
+    {
         "disabled"
     } else {
         "enabled"
@@ -844,28 +875,30 @@ mod tests {
     #[test]
     fn test_initialize_sets_defaults() {
         use plexspaces_proto::node::v1::ReleaseSpec;
-        
+
         // Clean environment for test
         env::remove_var("PLEXSPACES_BASE_DIR");
         env::remove_var("PLEXSPACES_WASM_APPS_DIR");
         env::remove_var("PLEXSPACES_DATABASE_URL");
         env::remove_var("PLEXSPACES_NODE_ID");
-        
+
         let mut spec = ReleaseSpec::default();
         initialize(&mut spec);
-        
+
         // Verify runtime was created
         assert!(spec.runtime.is_some());
         let runtime = spec.runtime.as_ref().unwrap();
-        
+
         // Verify base_dir is set to default (home_dir/plexspaces)
         assert!(!runtime.base_dir.is_empty());
-        assert!(runtime.base_dir.ends_with("plexspaces") || runtime.base_dir.contains("plexspaces"));
-        
+        assert!(
+            runtime.base_dir.ends_with("plexspaces") || runtime.base_dir.contains("plexspaces")
+        );
+
         // Verify wasm_apps_directory is set
         assert!(!runtime.wasm_apps_directory.is_empty());
         assert!(runtime.wasm_apps_directory.ends_with("/apps"));
-        
+
         // Verify db is configured
         assert!(runtime.db.is_some());
         let db = runtime.db.as_ref().unwrap();
@@ -877,12 +910,12 @@ mod tests {
     // Note: Tests that modify environment variables need to be run serially
     // as env vars are process-global. Use #[serial] from serial_test crate
     // or use unique env var names per test if available.
-    
+
     #[test]
     fn test_initialize_with_env_config() {
-        use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig, NodeConfig};
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec, RuntimeConfig};
         use plexspaces_proto::storage::v1::SharedDbConfig;
-        
+
         // Create EnvConfig directly (simulates env vars without actually setting them)
         // This tests the initialize logic without global env var pollution
         let mut spec = ReleaseSpec {
@@ -907,16 +940,19 @@ mod tests {
             shutdown: None,
             system_applications: vec![],
         };
-        
+
         // Test that initialize preserves config values when no env overrides
         // (This is safe because we don't set env vars)
         initialize(&mut spec);
-        
+
         let runtime = spec.runtime.as_ref().unwrap();
-        
+
         // Config file values should be preserved (no env overrides in this test)
         assert_eq!(runtime.base_dir, "/config/base/dir");
-        assert_eq!(runtime.db.as_ref().unwrap().connection_string, "postgres://localhost/test");
+        assert_eq!(
+            runtime.db.as_ref().unwrap().connection_string,
+            "postgres://localhost/test"
+        );
         assert_eq!(spec.node.as_ref().unwrap().id, "config-node-id");
     }
 
@@ -924,10 +960,10 @@ mod tests {
     fn test_env_config_priority_order() {
         // Test the EnvConfig structure directly
         // EnvConfig.from_env() reads env vars, but we test the priority logic here
-        
+
         // Priority should be: Env var > Config file > Default
         // This test verifies the logic without actually modifying process env
-        
+
         let config = EnvConfig {
             node_id: Some("env-node".to_string()),
             listen_addr: None, // Not set in "env"
@@ -946,13 +982,13 @@ mod tests {
             redis_url: None,
             release_config_path: None,
         };
-        
+
         // Verify EnvConfig fields
         assert_eq!(config.node_id, Some("env-node".to_string()));
         assert_eq!(config.base_dir, Some("/env/base".to_string()));
         assert_eq!(config.database_url, Some("sqlite::memory:".to_string()));
         assert!(config.auth_disabled);
-        
+
         // Verify is_auth_disabled helper
         assert!(config.is_auth_disabled());
     }
@@ -961,22 +997,28 @@ mod tests {
     fn test_initialize_creates_directories() {
         use plexspaces_proto::node::v1::ReleaseSpec;
         use std::path::Path;
-        
+
         // Use a unique temp directory for this test
         let test_base_dir = format!("/tmp/plexspaces-test-{}", std::process::id());
         env::set_var("PLEXSPACES_BASE_DIR", &test_base_dir);
-        
+
         // Clean up any existing directory
         let _ = std::fs::remove_dir_all(&test_base_dir);
-        
+
         let mut spec = ReleaseSpec::default();
         initialize(&mut spec);
-        
+
         // Verify directories were created
         assert!(Path::new(&test_base_dir).exists(), "base_dir should exist");
-        assert!(Path::new(&format!("{}/db", test_base_dir)).exists(), "db dir should exist");
-        assert!(Path::new(&format!("{}/apps", test_base_dir)).exists(), "apps dir should exist");
-        
+        assert!(
+            Path::new(&format!("{}/db", test_base_dir)).exists(),
+            "db dir should exist"
+        );
+        assert!(
+            Path::new(&format!("{}/apps", test_base_dir)).exists(),
+            "apps dir should exist"
+        );
+
         // Cleanup
         let _ = std::fs::remove_dir_all(&test_base_dir);
         env::remove_var("PLEXSPACES_BASE_DIR");
@@ -986,10 +1028,10 @@ mod tests {
     fn test_initialize_security_overrides() {
         use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig, SecurityConfig};
         use plexspaces_proto::security::v1::JwtConfig;
-        
+
         env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
         env::set_var("PLEXSPACES_JWT_SECRET", "test-secret-123");
-        
+
         let mut spec = ReleaseSpec {
             runtime: Some(RuntimeConfig {
                 security: Some(SecurityConfig {
@@ -1005,17 +1047,17 @@ mod tests {
             }),
             ..Default::default()
         };
-        
+
         initialize(&mut spec);
-        
+
         let security = spec.runtime.as_ref().unwrap().security.as_ref().unwrap();
-        
+
         // Auth should be disabled via env var
         assert!(security.disable_auth);
-        
+
         // JWT secret should be set via env var
         assert_eq!(security.jwt.as_ref().unwrap().secret, "test-secret-123");
-        
+
         // Cleanup
         env::remove_var("PLEXSPACES_DISABLE_AUTH");
         env::remove_var("PLEXSPACES_JWT_SECRET");
@@ -1024,24 +1066,24 @@ mod tests {
     #[test]
     fn test_initialize_locks_provider_logic() {
         use plexspaces_proto::storage::v1::StorageProvider;
-        
+
         // Test the locks_provider logic directly via EnvConfig
         // This avoids env var pollution from parallel tests
-        
+
         // Case 1: No Redis URL -> should use SQLite
         let config_no_redis = EnvConfig {
             redis_url: None,
             ..Default::default()
         };
         assert!(config_no_redis.redis_url.is_none());
-        
-        // Case 2: Redis URL set -> should use Redis  
+
+        // Case 2: Redis URL set -> should use Redis
         let config_with_redis = EnvConfig {
             redis_url: Some("redis://localhost:6379".to_string()),
             ..Default::default()
         };
         assert!(config_with_redis.redis_url.is_some());
-        
+
         // Verify StorageProvider enum values match expectations
         assert_eq!(StorageProvider::StorageProviderSqlite as i32, 2);
         assert_eq!(StorageProvider::StorageProviderRedis as i32, 3);
@@ -1051,31 +1093,37 @@ mod tests {
     fn test_initialize_locks_provider_uses_redis_when_available() {
         use plexspaces_proto::node::v1::ReleaseSpec;
         use plexspaces_proto::storage::v1::StorageProvider;
-        
+
         // Set Redis URL
         env::set_var("PLEXSPACES_REDIS_URL", "redis://localhost:6379");
-        
+
         let mut spec = ReleaseSpec::default();
         initialize(&mut spec);
-        
+
         // Verify locks_provider uses Redis
         let runtime = spec.runtime.as_ref().unwrap();
-        assert!(runtime.locks_provider.is_some(), "locks_provider should be set");
-        
+        assert!(
+            runtime.locks_provider.is_some(),
+            "locks_provider should be set"
+        );
+
         let locks_provider = runtime.locks_provider.as_ref().unwrap();
         assert_eq!(
             locks_provider.provider,
             StorageProvider::StorageProviderRedis as i32,
             "locks_provider should use Redis when PLEXSPACES_REDIS_URL is set"
         );
-        
+
         // Verify Redis config is populated
-        if let Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Redis(redis_config)) = &locks_provider.config {
+        if let Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Redis(
+            redis_config,
+        )) = &locks_provider.config
+        {
             assert_eq!(redis_config.url, "redis://localhost:6379");
         } else {
             panic!("locks_provider config should be Redis");
         }
-        
+
         // Cleanup
         env::remove_var("PLEXSPACES_REDIS_URL");
     }
@@ -1083,30 +1131,34 @@ mod tests {
     #[test]
     fn test_initialize_preserves_explicit_locks_provider() {
         use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig};
-        use plexspaces_proto::storage::v1::{StorageProvider, StorageProviderConfig, DynamoDbBackendConfig};
-        
+        use plexspaces_proto::storage::v1::{
+            DynamoDbBackendConfig, StorageProvider, StorageProviderConfig,
+        };
+
         // Set Redis URL (should be ignored since locks_provider is explicit)
         env::set_var("PLEXSPACES_REDIS_URL", "redis://localhost:6379");
-        
+
         // Create spec with explicit DynamoDB locks_provider
         let mut spec = ReleaseSpec {
             runtime: Some(RuntimeConfig {
                 locks_provider: Some(StorageProviderConfig {
                     provider: StorageProvider::StorageProviderDynamodb as i32,
-                    config: Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Dynamodb(
-                        DynamoDbBackendConfig {
-                            table_prefix: "my-locks".to_string(),
-                            ..Default::default()
-                        }
-                    )),
+                    config: Some(
+                        plexspaces_proto::storage::v1::storage_provider_config::Config::Dynamodb(
+                            DynamoDbBackendConfig {
+                                table_prefix: "my-locks".to_string(),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
                 }),
                 ..Default::default()
             }),
             ..Default::default()
         };
-        
+
         initialize(&mut spec);
-        
+
         // Verify locks_provider was NOT overridden (explicit config preserved)
         let runtime = spec.runtime.as_ref().unwrap();
         let locks_provider = runtime.locks_provider.as_ref().unwrap();
@@ -1115,7 +1167,7 @@ mod tests {
             StorageProvider::StorageProviderDynamodb as i32,
             "Explicit locks_provider should be preserved"
         );
-        
+
         // Cleanup
         env::remove_var("PLEXSPACES_REDIS_URL");
     }

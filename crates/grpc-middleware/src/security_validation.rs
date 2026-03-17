@@ -29,17 +29,11 @@ use thiserror::Error;
 pub enum SecurityValidationError {
     /// Secret found in config file (should be in environment variable)
     #[error("Security violation: Secret found in config file for field '{}'. Use environment variable '{}' instead.", .field, .env_var)]
-    SecretInConfig {
-        field: String,
-        env_var: String,
-    },
+    SecretInConfig { field: String, env_var: String },
 
     /// Missing required secret
     #[error("Security violation: Required secret '{}' not found in environment variable '{}'", .field, .env_var)]
-    MissingSecret {
-        field: String,
-        env_var: String,
-    },
+    MissingSecret { field: String, env_var: String },
 }
 
 /// Security validator
@@ -98,7 +92,7 @@ impl SecurityValidator {
         // Production should use connection string with password placeholder like:
         // - `postgresql://user:${DB_PASSWORD}@localhost/db`
         // - `postgresql://user:%s@localhost/db` (with placeholder)
-        
+
         // Check for password= with actual value (not placeholder)
         if connection_string.contains("password=") {
             // Extract password part
@@ -108,7 +102,10 @@ impl SecurityValidator {
                 if let Some(pwd_end) = pwd_part.find('&').or_else(|| pwd_part.find('@')) {
                     let pwd_value = &pwd_part[..pwd_end];
                     // If it's not a placeholder (${...} or %s), it's a real password
-                    if !pwd_value.starts_with("${") && !pwd_value.contains("%s") && !pwd_value.is_empty() {
+                    if !pwd_value.starts_with("${")
+                        && !pwd_value.contains("%s")
+                        && !pwd_value.is_empty()
+                    {
                         return Err(SecurityValidationError::SecretInConfig {
                             field: "database_password".to_string(),
                             env_var: password_env_var.to_string(),
@@ -117,7 +114,10 @@ impl SecurityValidator {
                 } else {
                     // Password at end of string
                     let pwd_value = pwd_part;
-                    if !pwd_value.starts_with("${") && !pwd_value.contains("%s") && !pwd_value.is_empty() {
+                    if !pwd_value.starts_with("${")
+                        && !pwd_value.contains("%s")
+                        && !pwd_value.is_empty()
+                    {
                         return Err(SecurityValidationError::SecretInConfig {
                             field: "database_password".to_string(),
                             env_var: password_env_var.to_string(),
@@ -137,7 +137,10 @@ impl SecurityValidator {
                     if let Some(colon_pos) = user_pass.find(':') {
                         let password = &user_pass[colon_pos + 1..];
                         // If password is not a placeholder, it's a real password
-                        if !password.starts_with("${") && !password.contains("%s") && !password.is_empty() {
+                        if !password.starts_with("${")
+                            && !password.contains("%s")
+                            && !password.is_empty()
+                        {
                             return Err(SecurityValidationError::SecretInConfig {
                                 field: "database_password".to_string(),
                                 env_var: password_env_var.to_string(),
@@ -204,7 +207,7 @@ mod tests {
 
         // Config should be empty
         let result = SecurityValidator::validate_jwt_secret("", "TEST_JWT_SECRET");
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "secret-from-env");
 
@@ -216,10 +219,13 @@ mod tests {
     fn test_validate_jwt_secret_fails_when_in_config() {
         // Config has secret (should fail)
         let result = SecurityValidator::validate_jwt_secret("secret-in-config", "TEST_JWT_SECRET");
-        
+
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, SecurityValidationError::SecretInConfig { .. }));
+        assert!(matches!(
+            err,
+            SecurityValidationError::SecretInConfig { .. }
+        ));
         assert!(err.to_string().contains("Secret found in config"));
     }
 
@@ -230,11 +236,13 @@ mod tests {
 
         // Config is empty but env var is missing (should fail)
         let result = SecurityValidator::validate_jwt_secret("", "TEST_JWT_SECRET_MISSING");
-        
+
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, SecurityValidationError::MissingSecret { .. }));
-        assert!(err.to_string().contains("not found in environment variable"));
+        assert!(err
+            .to_string()
+            .contains("not found in environment variable"));
     }
 
     #[test]
@@ -242,7 +250,7 @@ mod tests {
         // Connection string with placeholder (should pass)
         let conn_str = "postgresql://user:${DB_PASSWORD}@localhost/db";
         let result = SecurityValidator::validate_database_password(conn_str, "DB_PASSWORD");
-        
+
         assert!(result.is_ok());
     }
 
@@ -251,10 +259,13 @@ mod tests {
         // Connection string with plain password (should fail)
         let conn_str = "postgresql://user:plainpassword@localhost/db";
         let result = SecurityValidator::validate_database_password(conn_str, "DB_PASSWORD");
-        
+
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, SecurityValidationError::SecretInConfig { .. }));
+        assert!(matches!(
+            err,
+            SecurityValidationError::SecretInConfig { .. }
+        ));
     }
 
     #[test]
@@ -264,7 +275,7 @@ mod tests {
 
         // Config should be empty
         let result = SecurityValidator::validate_api_key("", "TEST_API_KEY");
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "key-from-env");
 
@@ -276,10 +287,13 @@ mod tests {
     fn test_validate_api_key_fails_when_in_config() {
         // Config has key (should fail)
         let result = SecurityValidator::validate_api_key("key-in-config", "TEST_API_KEY");
-        
+
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(matches!(err, SecurityValidationError::SecretInConfig { .. }));
+        assert!(matches!(
+            err,
+            SecurityValidationError::SecretInConfig { .. }
+        ));
     }
 
     #[test]
@@ -289,7 +303,7 @@ mod tests {
 
         // Config should be empty
         let result = SecurityValidator::validate_all("", "TEST_JWT_SECRET_ALL");
-        
+
         assert!(result.is_ok());
 
         // Cleanup
@@ -300,8 +314,7 @@ mod tests {
     fn test_validate_all_fails_when_secret_in_config() {
         // Config has secret (should fail)
         let result = SecurityValidator::validate_all("secret-in-config", "TEST_JWT_SECRET_ALL");
-        
+
         assert!(result.is_err());
     }
 }
-

@@ -36,10 +36,10 @@ use tonic::{Request, Response, Status};
 // Import health service types from tonic-health
 // Note: tonic-health v0.10 uses pb module for proto types
 // Check dependency_registration.rs for correct import pattern
+use tonic_health::pb::health_check_response::ServingStatus as HealthServingStatus;
 use tonic_health::pb::health_server::Health;
 use tonic_health::pb::HealthCheckRequest;
 use tonic_health::pb::HealthCheckResponse;
-use tonic_health::pb::health_check_response::ServingStatus as HealthServingStatus;
 
 /// Standard gRPC Health Service implementation
 pub struct StandardHealthServiceImpl {
@@ -52,7 +52,7 @@ impl StandardHealthServiceImpl {
     pub fn new(health_reporter: Arc<PlexSpacesHealthReporter>) -> Self {
         Self { health_reporter }
     }
-    
+
     /// Convert PlexSpaces ServingStatus to tonic-health ServingStatus
     fn convert_status(status: ServingStatus) -> HealthServingStatus {
         match status {
@@ -76,16 +76,16 @@ impl Health for StandardHealthServiceImpl {
         } else {
             req.service
         };
-        
+
         // Check if shutdown is in progress - health checks should still work during shutdown
         // but return NOT_SERVING status
-        
+
         // Get service-specific health status
         let status = if service_name.is_empty() {
             // Overall health - check via public methods
             let (is_ready, _) = self.health_reporter.check_readiness().await;
             let is_alive = self.health_reporter.is_alive().await;
-            
+
             if !is_alive || !is_ready {
                 ServingStatus::ServingStatusNotServing
             } else {
@@ -95,17 +95,15 @@ impl Health for StandardHealthServiceImpl {
             // Service-specific health
             self.health_reporter.get_service_status(&service_name).await
         };
-        
+
         let health_status = Self::convert_status(status);
-        
+
         Ok(Response::new(HealthCheckResponse {
             status: health_status as i32,
         }))
     }
 
-    type WatchStream = tokio_stream::wrappers::ReceiverStream<
-        Result<HealthCheckResponse, Status>,
-    >;
+    type WatchStream = tokio_stream::wrappers::ReceiverStream<Result<HealthCheckResponse, Status>>;
 
     async fn watch(
         &self,
@@ -117,24 +115,24 @@ impl Health for StandardHealthServiceImpl {
         } else {
             req.service
         };
-        
+
         // Create a channel for streaming health status updates
         let (tx, rx) = tokio::sync::mpsc::channel(128);
-        
+
         // Spawn a task to periodically check and send health status
         let health_reporter = self.health_reporter.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
-            
+
             loop {
                 interval.tick().await;
-                
+
                 // Get current health status
                 let status = if service_name.is_empty() {
                     // Overall health - check via public methods
                     let (is_ready, _) = health_reporter.check_readiness().await;
                     let is_alive = health_reporter.is_alive().await;
-                    
+
                     if !is_alive || !is_ready {
                         ServingStatus::ServingStatusNotServing
                     } else {
@@ -143,9 +141,9 @@ impl Health for StandardHealthServiceImpl {
                 } else {
                     health_reporter.get_service_status(&service_name).await
                 };
-                
+
                 let health_status = Self::convert_status(status);
-                
+
                 // Send status update
                 if tx
                     .send(Ok(HealthCheckResponse {
@@ -159,7 +157,9 @@ impl Health for StandardHealthServiceImpl {
                 }
             }
         });
-        
-        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(rx)))
+
+        Ok(Response::new(tokio_stream::wrappers::ReceiverStream::new(
+            rx,
+        )))
     }
 }

@@ -10,6 +10,7 @@ categories.workspace = true
 description = "Application lifecycle management for PlexSpaces (Erlang/OTP-inspired)"
 
 [dependencies]
+plexspaces-common = { path = "../common" }
 plexspaces-core = { path = "../core" }
 plexspaces-proto = { workspace = true }
 plexspaces-actor = { path = "../actor" }
@@ -45,4 +46,3 @@ plexspaces-services = { path = "../services" }
 [lib]
 name = "plexspaces_application"
 path = "src/lib.rs"
-

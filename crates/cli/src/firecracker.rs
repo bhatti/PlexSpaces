@@ -51,15 +51,15 @@ pub enum VmCommands {
         /// VM ID
         #[arg(short, long)]
         id: String,
-        
+
         /// Config file path
         #[arg(short, long)]
         config: Option<PathBuf>,
-        
+
         /// Kernel image path
         #[arg(short, long)]
         kernel: Option<PathBuf>,
-        
+
         /// Root filesystem path
         #[arg(short, long)]
         rootfs: Option<PathBuf>,
@@ -77,17 +77,17 @@ pub enum VmCommands {
         #[arg(long)]
         node: Option<String>,
     },
-    
+
     /// Stop a Firecracker VM
     Stop {
         /// VM ID
         #[arg(short, long)]
         id: String,
     },
-    
+
     /// List running VMs
     List,
-    
+
     /// Get VM status
     Status {
         /// VM ID
@@ -98,18 +98,29 @@ pub enum VmCommands {
 
 pub async fn handle_vm_command(cmd: VmCommands) -> Result<()> {
     match cmd {
-        VmCommands::Start { id, config, kernel, rootfs, empty, app, node } => {
-            start_vm(&id, config.as_ref(), kernel.as_ref(), rootfs.as_ref(), empty, app.as_ref(), node.as_deref()).await
+        VmCommands::Start {
+            id,
+            config,
+            kernel,
+            rootfs,
+            empty,
+            app,
+            node,
+        } => {
+            start_vm(
+                &id,
+                config.as_ref(),
+                kernel.as_ref(),
+                rootfs.as_ref(),
+                empty,
+                app.as_ref(),
+                node.as_deref(),
+            )
+            .await
         }
-        VmCommands::Stop { id } => {
-            stop_vm(&id).await
-        }
-        VmCommands::List => {
-            list_vms().await
-        }
-        VmCommands::Status { id } => {
-            status_vm(&id).await
-        }
+        VmCommands::Stop { id } => stop_vm(&id).await,
+        VmCommands::List => list_vms().await,
+        VmCommands::Status { id } => status_vm(&id).await,
     }
 }
 
@@ -127,7 +138,9 @@ async fn start_vm(
     }
 
     if app.is_some() && node_addr.is_none() {
-        return Err(anyhow::anyhow!("--node address is required when using --app flag"));
+        return Err(anyhow::anyhow!(
+            "--node address is required when using --app flag"
+        ));
     }
 
     // OBSERVABILITY: Log VM start attempt
@@ -139,9 +152,12 @@ async fn start_vm(
         has_rootfs = rootfs.is_some(),
         "Starting Firecracker VM"
     );
-    
+
     if empty {
-        println!("🚀 Starting empty Firecracker VM (framework only): {}", vm_id);
+        println!(
+            "🚀 Starting empty Firecracker VM (framework only): {}",
+            vm_id
+        );
     } else if app.is_some() {
         println!("🚀 Starting Firecracker VM with bundled app: {}", vm_id);
     } else {
@@ -155,18 +171,18 @@ async fn start_vm(
     } else {
         let mut config = VmConfig::default();
         config.vm_id = vm_id.to_string();
-        
+
         if let Some(kernel) = kernel {
             config.kernel_image_path = kernel.to_string_lossy().to_string();
         }
-        
+
         if let Some(rootfs) = rootfs {
             config.rootfs = plexspaces_firecracker::config::DriveConfig {
                 path_on_host: rootfs.to_string_lossy().to_string(),
                 ..Default::default()
             };
         }
-        
+
         config
     };
 
@@ -178,9 +194,7 @@ async fn start_vm(
     println!("   ✓ VM created (state: {:?})", vm.state());
 
     // Boot VM (this starts Firecracker process and boots the kernel)
-    vm.boot()
-        .await
-        .context("Failed to boot VM")?;
+    vm.boot().await.context("Failed to boot VM")?;
 
     // OBSERVABILITY: Log successful VM start
     tracing::info!(
@@ -203,14 +217,10 @@ async fn start_vm(
 }
 
 /// Deploy application to node via gRPC DeployApplication
-async fn deploy_app_to_node(
-    node_addr: &str,
-    vm_id: &str,
-    wasm_path: &PathBuf,
-) -> Result<()> {
+async fn deploy_app_to_node(node_addr: &str, vm_id: &str, wasm_path: &PathBuf) -> Result<()> {
     use plexspaces_proto::application::v1::{
-        application_service_client::ApplicationServiceClient,
-        DeployApplicationRequest, ApplicationSpec, ApplicationType, ShutdownStrategy,
+        application_service_client::ApplicationServiceClient, ApplicationSpec, ApplicationType,
+        DeployApplicationRequest, ShutdownStrategy,
     };
     use plexspaces_proto::wasm::v1::WasmModule;
     use std::fs;
@@ -223,7 +233,11 @@ async fn deploy_app_to_node(
         wasm_path = %wasm_path.display(),
         "Deploying application to node from Firecracker VM"
     );
-    println!("   📦 Deploying app to node {}: {}", node_addr, wasm_path.display());
+    println!(
+        "   📦 Deploying app to node {}: {}",
+        node_addr,
+        wasm_path.display()
+    );
 
     // Connect to node
     let channel = Channel::from_shared(format!("http://{}", node_addr))
@@ -270,6 +284,7 @@ async fn deploy_app_to_node(
         shutdown_timeout: None,
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         metadata: None,
+        seed_nodes: vec![],
     };
 
     // Create deployment request
@@ -292,7 +307,9 @@ async fn deploy_app_to_node(
     if !response.success {
         anyhow::bail!(
             "Application deployment failed: {}",
-            response.error.unwrap_or_else(|| "Unknown error".to_string())
+            response
+                .error
+                .unwrap_or_else(|| "Unknown error".to_string())
         );
     }
 
@@ -310,7 +327,7 @@ async fn stop_vm(vm_id: &str) -> Result<()> {
         "Stopping Firecracker VM"
     );
     println!("🛑 Stopping Firecracker VM: {}", vm_id);
-    
+
     // Find VM socket path
     let socket_path = plexspaces_firecracker::VmRegistry::get_vm_socket_path(vm_id)
         .await
@@ -333,7 +350,9 @@ async fn stop_vm(vm_id: &str) -> Result<()> {
     // Note: This requires adding a method to connect to existing VM
     // For now, we'll use the API client directly
     let client = plexspaces_firecracker::FirecrackerApiClient::new(&socket_path);
-    client.send_ctrl_alt_del().await
+    client
+        .send_ctrl_alt_del()
+        .await
         .context("Failed to send shutdown signal")?;
 
     // Wait a bit for graceful shutdown
@@ -379,7 +398,7 @@ async fn status_vm(vm_id: &str) -> Result<()> {
         Some(vm) => {
             println!("   State: {:?}", vm.state);
             println!("   Socket: {}", vm.socket_path);
-            
+
             // Try to get detailed info from API
             let client = plexspaces_firecracker::FirecrackerApiClient::new(&vm.socket_path);
             if let Ok(info) = client.get_instance_info().await {
@@ -397,4 +416,3 @@ async fn status_vm(vm_id: &str) -> Result<()> {
 
     Ok(())
 }
-

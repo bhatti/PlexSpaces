@@ -26,7 +26,7 @@
 //! These checkers are used by the health service to monitor external dependencies
 //! and update node readiness status accordingly.
 
-use plexspaces_core::{HealthChecker, HealthCheckContext, HealthCheckError, HealthCheckResult};
+use plexspaces_core::{HealthCheckContext, HealthCheckError, HealthCheckResult, HealthChecker};
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -82,24 +82,27 @@ impl HealthChecker for MinIOHealthChecker {
 
     async fn check(&self, ctx: &HealthCheckContext) -> HealthCheckResult {
         let timeout_duration = ctx.timeout.unwrap_or(Duration::from_secs(5));
-        
+
         // MinIO health endpoint
         let health_url = format!("{}/minio/health/live", self.endpoint.trim_end_matches('/'));
-        
+
         // Create HTTP client
         let client = reqwest::Client::builder()
             .timeout(timeout_duration)
             .build()
-            .map_err(|e| HealthCheckError::CheckFailed(format!("Failed to create HTTP client: {}", e)))?;
-        
+            .map_err(|e| {
+                HealthCheckError::CheckFailed(format!("Failed to create HTTP client: {}", e))
+            })?;
+
         // Build request
         let mut request = client.get(&health_url);
-        
+
         // Add authentication if provided
-        if let (Some(access_key), Some(secret_key)) = (&self.access_key_id, &self.secret_access_key) {
+        if let (Some(access_key), Some(secret_key)) = (&self.access_key_id, &self.secret_access_key)
+        {
             request = request.basic_auth(access_key, Some(secret_key));
         }
-        
+
         // Perform health check
         match timeout(timeout_duration, request.send()).await {
             Ok(Ok(response)) => {
@@ -168,14 +171,14 @@ impl HealthChecker for DynamoDBHealthChecker {
 
     async fn check(&self, ctx: &HealthCheckContext) -> HealthCheckResult {
         let timeout_duration = ctx.timeout.unwrap_or(Duration::from_secs(5));
-        
+
         // For now, we'll do a simple connectivity check
         // In production, you might want to use AWS SDK to check table access
         // This is a placeholder that checks if we can resolve the DynamoDB endpoint
-        
+
         // DynamoDB endpoint format: dynamodb.{region}.amazonaws.com
         let endpoint = format!("dynamodb.{}.amazonaws.com", self.region);
-        
+
         // Try to resolve DNS and connect (basic connectivity check)
         match timeout(
             timeout_duration,
@@ -240,10 +243,10 @@ impl HealthChecker for SQSHealthChecker {
 
     async fn check(&self, ctx: &HealthCheckContext) -> HealthCheckResult {
         let timeout_duration = ctx.timeout.unwrap_or(Duration::from_secs(5));
-        
+
         // SQS endpoint format: sqs.{region}.amazonaws.com
         let endpoint = format!("sqs.{}.amazonaws.com", self.region);
-        
+
         // Try to resolve DNS and connect (basic connectivity check)
         match timeout(
             timeout_duration,
@@ -270,16 +273,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_minio_health_checker() {
-        let checker = MinIOHealthChecker::new(
-            "http://localhost:9000".to_string(),
-            None,
-            None,
-            true,
-        );
-        
+        let checker =
+            MinIOHealthChecker::new("http://localhost:9000".to_string(), None, None, true);
+
         assert_eq!(checker.name(), "minio");
         assert!(checker.is_critical());
-        
+
         // This will fail if MinIO is not running, but that's OK for the test
         let ctx = HealthCheckContext::default();
         let _result = checker.check(&ctx).await;
@@ -287,15 +286,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_dynamodb_health_checker() {
-        let checker = DynamoDBHealthChecker::new(
-            "us-east-1".to_string(),
-            None,
-            true,
-        );
-        
+        let checker = DynamoDBHealthChecker::new("us-east-1".to_string(), None, true);
+
         assert_eq!(checker.name(), "dynamodb");
         assert!(checker.is_critical());
-        
+
         let ctx = HealthCheckContext::default();
         // This will try to connect to AWS DynamoDB endpoint
         // It may fail if not on AWS network, but that's OK for the test
@@ -304,19 +299,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqs_health_checker() {
-        let checker = SQSHealthChecker::new(
-            "us-east-1".to_string(),
-            None,
-            true,
-        );
-        
+        let checker = SQSHealthChecker::new("us-east-1".to_string(), None, true);
+
         assert_eq!(checker.name(), "sqs");
         assert!(checker.is_critical());
-        
+
         let ctx = HealthCheckContext::default();
         // This will try to connect to AWS SQS endpoint
         // It may fail if not on AWS network, but that's OK for the test
         let _result = checker.check(&ctx).await;
     }
 }
-

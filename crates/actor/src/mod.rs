@@ -200,8 +200,8 @@
 
 // Submodules are declared in lib.rs, not here
 
-use std::sync::Arc;
 use std::io::prelude::*;
+use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 // For catch_unwind()
 use crate::resource::{ActorHealth, ResourceContract, ResourceProfile, ResourceUsage};
@@ -212,7 +212,10 @@ use plexspaces_core::{
 };
 
 /// Parse ExitReason from string representation (used for EXIT messages)
-fn parse_exit_reason_from_str(reason_str: &str, metadata: &std::collections::HashMap<String, String>) -> ExitReason {
+fn parse_exit_reason_from_str(
+    reason_str: &str,
+    metadata: &std::collections::HashMap<String, String>,
+) -> ExitReason {
     if reason_str == "Normal" {
         ExitReason::Normal
     } else if reason_str == "Shutdown" {
@@ -220,11 +223,18 @@ fn parse_exit_reason_from_str(reason_str: &str, metadata: &std::collections::Has
     } else if reason_str == "Killed" {
         ExitReason::Killed
     } else if reason_str.starts_with("Error:") {
-        let error_msg = reason_str.strip_prefix("Error:").unwrap_or("unknown error").to_string();
+        let error_msg = reason_str
+            .strip_prefix("Error:")
+            .unwrap_or("unknown error")
+            .to_string();
         ExitReason::Error(error_msg)
     } else if reason_str.starts_with("Linked:") {
-        let linked_actor_id = reason_str.strip_prefix("Linked:").unwrap_or("unknown").to_string();
-        let linked_error_str = metadata.get("exit_linked_error")
+        let linked_actor_id = reason_str
+            .strip_prefix("Linked:")
+            .unwrap_or("unknown")
+            .to_string();
+        let linked_error_str = metadata
+            .get("exit_linked_error")
             .map(|s| s.as_str())
             .unwrap_or("Normal");
         let linked_reason = parse_exit_reason_from_str(linked_error_str, metadata);
@@ -236,11 +246,11 @@ fn parse_exit_reason_from_str(reason_str: &str, metadata: &std::collections::Has
         ExitReason::Normal // Default
     }
 }
+use async_trait::async_trait;
 use plexspaces_facet::{Facet, FacetContainer};
+use plexspaces_journaling::ReplayHandler;
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
-use plexspaces_journaling::ReplayHandler;
-use async_trait::async_trait;
 
 // Observability
 use metrics;
@@ -307,9 +317,12 @@ impl ActorState {
     }
 
     /// Convert from proto ActorState enum
-    /// 
+    ///
     /// Note: For FAILED state, error message should be retrieved from Actor.error_message field
-    pub fn from_proto(proto: plexspaces_proto::v1::actor::ActorState, error_message: Option<String>) -> Self {
+    pub fn from_proto(
+        proto: plexspaces_proto::v1::actor::ActorState,
+        error_message: Option<String>,
+    ) -> Self {
         use plexspaces_proto::v1::actor::ActorState as ProtoState;
         match proto {
             ProtoState::ActorStateUnspecified => ActorState::Unspecified,
@@ -380,11 +393,11 @@ pub struct Actor {
     facets: Arc<RwLock<FacetContainer>>,
 
     /// Error message when actor is in FAILED state
-    /// 
+    ///
     /// ## Purpose
     /// Provides error details when actor.state == ActorState::Failed.
     /// Used for debugging, logging, and supervisor restart decisions.
-    /// 
+    ///
     /// ## Usage
     /// - Only populated when state == ActorState::Failed
     /// - Empty string when state != ActorState::Failed
@@ -409,14 +422,19 @@ async fn set_replay_handler_for_facet(
     };
 
     // Downcast to DurabilityFacet (no longer generic, uses trait objects)
-    if let Some(durability_facet) = facet.as_any_mut().downcast_mut::<plexspaces_journaling::DurabilityFacet>() {
-        durability_facet.set_replay_handler(Box::new(handler), Arc::clone(context)).await;
+    if let Some(durability_facet) = facet
+        .as_any_mut()
+        .downcast_mut::<plexspaces_journaling::DurabilityFacet>()
+    {
+        durability_facet
+            .set_replay_handler(Box::new(handler), Arc::clone(context))
+            .await;
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!("ReplayHandler set for DurabilityFacet");
         }
         return;
     }
-    
+
     // If we get here, we couldn't downcast - that's okay, replay will use default mode
     if tracing::enabled!(tracing::Level::DEBUG) {
         tracing::debug!("Could not set ReplayHandler - facet is not a DurabilityFacet");
@@ -445,7 +463,9 @@ impl ReplayHandler for ActorReplayHandler {
         // The context parameter is ignored - we use self.context which has the proper
         // ExecutionContext with REPLAY mode set by DurabilityFacet
         let mut behavior = self.behavior.write().await;
-        behavior.handle_message(&self.context, message).await
+        behavior
+            .handle_message(&self.context, message)
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 }
@@ -482,7 +502,8 @@ impl Actor {
         // Note: This is a sync function, so we create a minimal ServiceLocator stub
         // Node will replace it with full services when spawning
         use crate::TestServiceLocatorStub;
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+            Arc::new(TestServiceLocatorStub::new());
         let context = Arc::new(ActorContext::new(
             node_id_str,
             tenant_id.clone(),
@@ -527,7 +548,7 @@ impl Actor {
     pub fn context(&self) -> &Arc<ActorContext> {
         &self.context
     }
-    
+
     /// Get the exit reason Arc (for watch_actor_termination)
     pub fn exit_reason(&self) -> Arc<RwLock<Option<ExitReason>>> {
         self.exit_reason.clone()
@@ -631,7 +652,11 @@ impl Actor {
     pub async fn start(&mut self) -> Result<tokio::task::JoinHandle<()>, ActorError> {
         let state = self.state.read().await.clone();
         if state != ActorState::Creating && state != ActorState::Terminated {
-            tracing::error!("[ACTOR::START] Invalid state for start(): actor_id={}, state={:?}", self.id, state);
+            tracing::error!(
+                "[ACTOR::START] Invalid state for start(): actor_id={}, state={:?}",
+                self.id,
+                state
+            );
             return Err(ActorError::InvalidState(format!(
                 "Cannot start actor in state {:?}",
                 state
@@ -642,22 +667,24 @@ impl Actor {
         // OBSERVABILITY: Track actor creation
         metrics::counter!("plexspaces_actor_created_total",
             "actor_id" => self.id.clone()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(actor_id = %self.id, "Actor created");
         }
 
         // Step 1: State → Activating
         *self.state.write().await = ActorState::Activating;
-        
+
         // OBSERVABILITY: Track state transition
         metrics::counter!("plexspaces_actor_state_transitions_total",
             "actor_id" => self.id.clone(),
             "from" => "Creating",
             "to" => "Activating"
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         // Step 2: Actor initialization
         // Note: Facets are already attached before start() is called (via attach_facet() in actor_factory)
         // Supervisor waits for init() to complete before starting next child
@@ -672,30 +699,35 @@ impl Actor {
                     metrics::counter!("plexspaces_actor_init_total",
                         "actor_id" => self.id.clone(),
                         "status" => "success"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     metrics::histogram!("plexspaces_actor_init_duration_seconds",
                         "actor_id" => self.id.clone()
-                    ).record(init_duration.as_secs_f64());
+                    )
+                    .record(init_duration.as_secs_f64());
                 }
                 Err(e) => {
                     // Set error state and message (sync operations only in error handler)
                     let init_duration = init_start.elapsed();
                     *self.state.write().await = ActorState::Failed(e.to_string());
                     let _ = self.set_error_message(e.to_string()).await;
-                    
+
                     // Track init failure metrics
                     metrics::counter!("plexspaces_actor_init_total",
                         "actor_id" => self.id.clone(),
                         "status" => "failure"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     metrics::histogram!("plexspaces_actor_init_duration_seconds",
                         "actor_id" => self.id.clone()
-                    ).record(init_duration.as_secs_f64());
+                    )
+                    .record(init_duration.as_secs_f64());
                     metrics::counter!("plexspaces_actor_init_errors_total",
                         "actor_id" => self.id.clone(),
                         "error_type" => format!("{:?}", e)
-                    ).increment(1);
-                    
+                    )
+                    .increment(1);
+
                     tracing::error!(
                         actor_id = %self.id,
                         error = %e,
@@ -714,7 +746,7 @@ impl Actor {
         {
             let mut facets = self.facets.write().await;
             let facet_errors = facets.call_on_init_complete(&self.id).await;
-            
+
             if !facet_errors.is_empty() {
                 // Log errors but don't fail activation (facets may have non-critical errors)
                 for error in &facet_errors {
@@ -722,7 +754,8 @@ impl Actor {
                         "facet_type" => "unknown",
                         "error_type" => format!("{:?}", error),
                         "operation" => "on_init_complete"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     tracing::warn!(
                         actor_id = %self.id,
                         error = %error,
@@ -730,11 +763,12 @@ impl Actor {
                     );
                 }
             }
-            
+
             let facets_init_complete_duration = facets_init_complete_start.elapsed();
             metrics::histogram!("plexspaces_facet_init_complete_duration_seconds",
                 "actor_id" => self.id.clone()
-            ).record(facets_init_complete_duration.as_secs_f64());
+            )
+            .record(facets_init_complete_duration.as_secs_f64());
             if tracing::enabled!(tracing::Level::TRACE) {
                 tracing::trace!(
                     actor_id = %self.id,
@@ -755,7 +789,8 @@ impl Actor {
                     let facets_ready_duration = facets_ready_start.elapsed();
                     metrics::histogram!("plexspaces_actor_facets_ready_duration_seconds",
                         "actor_id" => self.id.clone()
-                    ).record(facets_ready_duration.as_secs_f64());
+                    )
+                    .record(facets_ready_duration.as_secs_f64());
                     if tracing::enabled!(tracing::Level::TRACE) {
                         tracing::trace!(
                             actor_id = %self.id,
@@ -770,7 +805,8 @@ impl Actor {
                     metrics::counter!("plexspaces_actor_facets_ready_errors_total",
                         "actor_id" => self.id.clone(),
                         "error_type" => format!("{:?}", e)
-                    ).increment(1);
+                    )
+                    .increment(1);
                     tracing::warn!(
                         actor_id = %self.id,
                         error = %e,
@@ -818,18 +854,17 @@ impl Actor {
             // CRITICAL: The guard must remain active for the ENTIRE task lifecycle to prevent panics.
             let noop_dispatcher = tracing::dispatcher::Dispatch::none();
             let _tracing_guard = tracing::dispatcher::set_default(&noop_dispatcher);
-               
-               // Mark as active
-               *state.write().await = ActorState::Active;
-            
+
+            // Mark as active
+            *state.write().await = ActorState::Active;
+
             // Signal that actor is now active and ready to process messages
             // Ignore error if receiver was dropped (shouldn't happen in normal flow)
             let _ = active_tx.send(());
             let mut loop_iteration = 0;
             loop {
                 loop_iteration += 1;
-                if loop_iteration % 100 == 0 {
-                }
+                if loop_iteration % 100 == 0 {}
                 // Use tokio::select! with biased to prioritize shutdown
                 // Add a very short timeout to periodically check shutdown (non-blocking)
                 // This allows shutdown to interrupt even when mailbox is empty
@@ -860,7 +895,7 @@ impl Actor {
                                 "Dequeued message, processing"
                             );
                         }
-                        
+
                         // Check if this is an EXIT message (from linked actor death)
                         // Use helper functions for EXIT handling
                         use plexspaces_mailbox::{is_exit, try_parse_exit};
@@ -884,12 +919,12 @@ impl Actor {
                                             plexspaces_facet::ExitReason::Error(format!("Linked: {} -> {:?}", actor_id, reason))
                                         },
                                     };
-                                    
+
                                     let facet_exit_errors = {
                                         let mut facets_guard = facets.write().await;
                                         facets_guard.call_on_exit(&actor_id_for_logging, &from_actor_id, &facet_exit_reason).await
                                     };
-                                    
+
                                     let facet_exit_duration = facet_exit_start.elapsed();
                                     if !facet_exit_errors.is_empty() {
                                         metrics::counter!("plexspaces_facet_exit_errors_total",
@@ -918,7 +953,7 @@ impl Actor {
                                     metrics::counter!("plexspaces_facet_exit_total",
                                         "actor_id" => actor_id_for_logging.clone()
                                     ).increment(1);
-                                    
+
                                     // Call handle_exit() - actor can decide to propagate or handle
                                     let handle_exit_start = std::time::Instant::now();
                                     let mut behavior_guard = behavior.write().await;
@@ -1069,7 +1104,7 @@ impl Actor {
                                 continue; // Skip normal message processing for EXIT messages
                             }
                         }
-                        
+
                         // Process normal message with facets
                         if tracing::enabled!(tracing::Level::DEBUG) {
                             tracing::debug!(
@@ -1234,13 +1269,13 @@ impl Actor {
 
             // Note: terminate() is called in Actor::stop() before the message loop exits
             // So we don't need to call it again here. The message loop just exits cleanly.
-            
+
             // Mark as stopped
             // CRITICAL: The tracing context guard set at the start of this task is still active
             // and will remain active until this function returns, preventing any automatic logging
             // from trying to clone closed spans when the task completes.
             *state.write().await = ActorState::Terminated;
-            
+
             // The guard will be automatically dropped when this function returns,
             // ensuring the tracing context remains cleared throughout the entire task lifecycle
         });
@@ -1250,9 +1285,12 @@ impl Actor {
         // Wait for actor to become active (message loop started and ready to process messages)
         // This ensures actor is fully ready when start() returns, simplifying caller logic
         // The actor is registered and message loop is running, so it can immediately process messages
-        active_rx.await
-            .map_err(|_| ActorError::InvalidState("Failed to wait for actor activation - message loop may have exited".to_string()))?;
-        
+        active_rx.await.map_err(|_| {
+            ActorError::InvalidState(
+                "Failed to wait for actor activation - message loop may have exited".to_string(),
+            )
+        })?;
+
         // Verify state is Active (double-check after waiting)
         let current_state = self.state.read().await.clone();
         if current_state != ActorState::Active {
@@ -1264,9 +1302,9 @@ impl Actor {
 
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
-            actor_id = %self.id,
-            "Actor fully active and ready to process messages"
-        );
+                actor_id = %self.id,
+                "Actor fully active and ready to process messages"
+            );
         }
 
         Ok(handle)
@@ -1276,7 +1314,10 @@ impl Actor {
     pub async fn stop(&mut self) -> Result<(), ActorError> {
         let state = self.state.read().await.clone();
         // Check if already stopped or stopping - return early to avoid calling terminate() multiple times
-        if state == ActorState::Stopping || state == ActorState::Terminated || matches!(state, ActorState::Failed(_)) {
+        if state == ActorState::Stopping
+            || state == ActorState::Terminated
+            || matches!(state, ActorState::Failed(_))
+        {
             return Ok(()); // Already stopped or stopping
         }
         // Only proceed if Active or Inactive
@@ -1343,7 +1384,9 @@ impl Actor {
                         ExitReason::Shutdown => plexspaces_facet::ExitReason::Shutdown,
                         ExitReason::Killed => plexspaces_facet::ExitReason::Killed,
                         ExitReason::Error(msg) => plexspaces_facet::ExitReason::Error(msg.clone()),
-                        ExitReason::Linked { .. } => plexspaces_facet::ExitReason::Error("linked".to_string()),
+                        ExitReason::Linked { .. } => {
+                            plexspaces_facet::ExitReason::Error("linked".to_string())
+                        }
                     };
                     plexspaces_facet::ExitReason::Linked {
                         actor_id: actor_id.clone(),
@@ -1351,8 +1394,10 @@ impl Actor {
                     }
                 }
             };
-            let facet_errors = facets.call_on_terminate_start(&self.id, &facet_exit_reason).await;
-            
+            let facet_errors = facets
+                .call_on_terminate_start(&self.id, &facet_exit_reason)
+                .await;
+
             if !facet_errors.is_empty() {
                 // Log errors but don't fail shutdown (facets may have non-critical errors)
                 for error in &facet_errors {
@@ -1360,7 +1405,8 @@ impl Actor {
                         "facet_type" => "unknown",
                         "error_type" => format!("{:?}", error),
                         "operation" => "on_terminate_start"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     tracing::warn!(
                         actor_id = %self.id,
                         error = %error,
@@ -1368,18 +1414,19 @@ impl Actor {
                     );
                 }
             }
-            
+
             let facets_terminate_start_duration = facets_terminate_start_time.elapsed();
             metrics::histogram!("plexspaces_facet_terminate_start_duration_seconds",
                 "actor_id" => self.id.clone()
-            ).record(facets_terminate_start_duration.as_secs_f64());
+            )
+            .record(facets_terminate_start_duration.as_secs_f64());
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
-                actor_id = %self.id,
-                facet_count = facets.list_facets().len(),
-                duration_ms = facets_terminate_start_duration.as_millis(),
-                "Facet on_terminate_start() called for all facets"
-            );
+                    actor_id = %self.id,
+                    facet_count = facets.list_facets().len(),
+                    duration_ms = facets_terminate_start_duration.as_millis(),
+                    "Facet on_terminate_start() called for all facets"
+                );
             }
         }
 
@@ -1388,18 +1435,22 @@ impl Actor {
         let facets_detaching_start = std::time::Instant::now();
         {
             let mut behavior = self.behavior.write().await;
-            match behavior.on_facets_detaching(&self.context, &exit_reason).await {
+            match behavior
+                .on_facets_detaching(&self.context, &exit_reason)
+                .await
+            {
                 Ok(()) => {
                     let facets_detaching_duration = facets_detaching_start.elapsed();
                     metrics::histogram!("plexspaces_actor_facets_detaching_duration_seconds",
                         "actor_id" => self.id.clone()
-                    ).record(facets_detaching_duration.as_secs_f64());
+                    )
+                    .record(facets_detaching_duration.as_secs_f64());
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
-                        actor_id = %self.id,
-                        duration_ms = facets_detaching_duration.as_millis(),
-                        "Actor on_facets_detaching() completed successfully"
-                    );
+                            actor_id = %self.id,
+                            duration_ms = facets_detaching_duration.as_millis(),
+                            "Actor on_facets_detaching() completed successfully"
+                        );
                     }
                 }
                 Err(e) => {
@@ -1408,7 +1459,8 @@ impl Actor {
                     metrics::counter!("plexspaces_actor_facets_detaching_errors_total",
                         "actor_id" => self.id.clone(),
                         "error_type" => format!("{:?}", e)
-                    ).increment(1);
+                    )
+                    .increment(1);
                     tracing::warn!(
                         actor_id = %self.id,
                         error = %e,
@@ -1431,16 +1483,18 @@ impl Actor {
                     metrics::counter!("plexspaces_actor_terminate_total",
                         "actor_id" => self.id.clone(),
                         "reason" => "shutdown"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     metrics::histogram!("plexspaces_actor_terminate_duration_seconds",
                         "actor_id" => self.id.clone()
-                    ).record(terminate_duration.as_secs_f64());
+                    )
+                    .record(terminate_duration.as_secs_f64());
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
-                        actor_id = %self.id,
-                        duration_ms = terminate_duration.as_millis(),
-                        "Actor terminate() completed successfully"
-                    );
+                            actor_id = %self.id,
+                            duration_ms = terminate_duration.as_millis(),
+                            "Actor terminate() completed successfully"
+                        );
                     }
                 }
                 Err(e) => {
@@ -1448,14 +1502,17 @@ impl Actor {
                     metrics::counter!("plexspaces_actor_terminate_total",
                         "actor_id" => self.id.clone(),
                         "reason" => "shutdown"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     metrics::histogram!("plexspaces_actor_terminate_duration_seconds",
                         "actor_id" => self.id.clone()
-                    ).record(terminate_duration.as_secs_f64());
+                    )
+                    .record(terminate_duration.as_secs_f64());
                     metrics::counter!("plexspaces_actor_terminate_errors_total",
                         "actor_id" => self.id.clone(),
                         "error_type" => format!("{:?}", e)
-                    ).increment(1);
+                    )
+                    .increment(1);
                     tracing::warn!(
                         actor_id = %self.id,
                         error = %e,
@@ -1473,7 +1530,7 @@ impl Actor {
         {
             let mut facets = self.facets.write().await;
             let facet_errors = facets.detach_all(&self.id).await;
-            
+
             if !facet_errors.is_empty() {
                 // Log errors but don't fail shutdown (facets may have non-critical errors)
                 for error in &facet_errors {
@@ -1481,7 +1538,8 @@ impl Actor {
                         "facet_type" => "unknown",
                         "error_type" => format!("{:?}", error),
                         "operation" => "on_detach"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     tracing::warn!(
                         actor_id = %self.id,
                         error = %error,
@@ -1489,18 +1547,19 @@ impl Actor {
                     );
                 }
             }
-            
+
             let facets_detach_duration = facets_detach_start.elapsed();
             metrics::histogram!("plexspaces_facet_detach_all_duration_seconds",
                 "actor_id" => self.id.clone()
-            ).record(facets_detach_duration.as_secs_f64());
+            )
+            .record(facets_detach_duration.as_secs_f64());
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
-                actor_id = %self.id,
-                facet_count = facets.list_facets().len(),
-                duration_ms = facets_detach_duration.as_millis(),
-                "All facets detached"
-            );
+                    actor_id = %self.id,
+                    facet_count = facets.list_facets().len(),
+                    duration_ms = facets_detach_duration.as_millis(),
+                    "All facets detached"
+                );
             }
         }
 
@@ -1510,8 +1569,9 @@ impl Actor {
         // OBSERVABILITY: Track actor termination
         metrics::counter!("plexspaces_actor_terminated_total",
             "actor_id" => self.id.clone()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         tracing::info!(actor_id = %self.id, "Actor terminated");
 
         // Note: State is set to Terminated by on_deactivate(), no need to set again
@@ -1519,23 +1579,23 @@ impl Actor {
     }
 
     /// Get shutdown sender for graceful shutdown from Arc
-    /// 
+    ///
     /// ## Purpose
     /// Returns a clone of the shutdown sender so we can signal the message loop to stop.
     /// `mpsc::Sender` is `Clone`, so we can safely clone and send to it from Arc<Actor>.
-    /// 
+    ///
     /// ## Returns
     /// Some(Sender) if actor is running, None if already stopped
     fn get_shutdown_sender(&self) -> Option<mpsc::Sender<()>> {
         self.shutdown_tx.clone()
     }
-    
+
     /// Get processor abort handle for forced shutdown from Arc
-    /// 
+    ///
     /// ## Purpose
     /// Returns a clone of the abort handle so we can abort the message loop if needed.
     /// `AbortHandle` is `Clone`, so we can safely clone and abort from Arc<Actor>.
-    /// 
+    ///
     /// ## Returns
     /// Some(AbortHandle) if message loop is running, None if already stopped
     fn get_processor_abort_handle(&self) -> Option<tokio::task::AbortHandle> {
@@ -1543,18 +1603,18 @@ impl Actor {
     }
 
     /// Stop the actor from Arc (production-grade graceful shutdown)
-    /// 
+    ///
     /// ## Purpose
     /// Stops the actor's message loop when we only have Arc<Actor> (no mutable access).
     /// This is used by ActorFactory when stopping actors from the registry.
-    /// 
+    ///
     /// ## Design
     /// 1. Mark actor as Stopping (prevents new messages)
     /// 2. Send shutdown signal via shutdown_tx (graceful - message loop exits cleanly)
     /// 3. Wait briefly for graceful shutdown
     /// 4. If still running, abort message loop (forced shutdown)
     /// 5. Mark as Terminated
-    /// 
+    ///
     /// ## Production-Grade Features
     /// - Uses proper shutdown channel (mpsc::Sender is Clone, so we can clone and send)
     /// - Graceful shutdown first (allows in-progress messages to complete)
@@ -1564,7 +1624,10 @@ impl Actor {
     pub async fn stop_from_arc(self: Arc<Self>) -> Result<(), ActorError> {
         let state = self.state.read().await.clone();
         // Check if already stopped or stopping
-        if state == ActorState::Stopping || state == ActorState::Terminated || matches!(state, ActorState::Failed(_)) {
+        if state == ActorState::Stopping
+            || state == ActorState::Terminated
+            || matches!(state, ActorState::Failed(_))
+        {
             return Ok(()); // Already stopped or stopping
         }
         // Only proceed if Active or Inactive
@@ -1679,12 +1742,9 @@ impl Actor {
     /// - Checks if mailbox is durable and logs metrics
     /// - Records mailbox stats for observability
     /// - Sets ReplayHandler for deterministic message replay
-    pub async fn attach_facet(
-        &self,
-        mut facet: Box<dyn Facet>,
-    ) -> Result<String, ActorError> {
+    pub async fn attach_facet(&self, mut facet: Box<dyn Facet>) -> Result<String, ActorError> {
         let facet_type = facet.facet_type().to_string();
-        
+
         // Coordinate with mailbox for DurabilityFacet
         if facet_type == "durability" {
             let mailbox_stats = self.mailbox.get_stats().await;
@@ -1695,7 +1755,7 @@ impl Actor {
                 mailbox_size = mailbox_stats.current_size,
                 "Attaching DurabilityFacet - mailbox durability status"
             );
-            
+
             // Record metrics
             metrics::gauge!("plexspaces_mailbox_size", "actor_id" => self.id.to_string(), "backend" => mailbox_stats.backend_type.clone())
                 .set(mailbox_stats.current_size as f64);
@@ -1707,7 +1767,7 @@ impl Actor {
             // We use a helper function that works with any storage backend via type erasure
             set_replay_handler_for_facet(&mut *facet, &self.behavior, &self.context).await;
         }
-        
+
         // For RegistryFacet, store tenant_id/namespace from actor context
         // This allows facets to use API-provided tenant_id/namespace instead of defaults
         // We'll pass them through the attach call
@@ -1721,7 +1781,7 @@ impl Actor {
         } else {
             None
         };
-        
+
         let mut facets = self.facets.write().await;
         facets
             .attach_with_tenant_context(facet, &self.id, tenant_id_opt, namespace_opt)
@@ -1740,9 +1800,10 @@ impl Actor {
         if facet_type == "durability" {
             // Flush pending messages to durable backend before detaching
             let timeout = Some(std::time::Duration::from_secs(30));
-            self.mailbox.graceful_shutdown(timeout).await
-                .map_err(|e| ActorError::MailboxError(format!("Failed to gracefully shutdown mailbox: {}", e)))?;
-            
+            self.mailbox.graceful_shutdown(timeout).await.map_err(|e| {
+                ActorError::MailboxError(format!("Failed to gracefully shutdown mailbox: {}", e))
+            })?;
+
             // Record final mailbox stats
             let mailbox_stats = self.mailbox.get_stats().await;
             tracing::info!(
@@ -1753,12 +1814,12 @@ impl Actor {
                 total_dequeued = mailbox_stats.total_dequeued,
                 "Detaching DurabilityFacet - final mailbox stats"
             );
-            
+
             // Record final metrics
             metrics::gauge!("plexspaces_mailbox_size", "actor_id" => self.id.to_string(), "backend" => mailbox_stats.backend_type.clone())
                 .set(mailbox_stats.current_size as f64);
         }
-        
+
         let mut facets = self.facets.write().await;
         facets
             .detach(facet_type, &self.id)
@@ -1771,7 +1832,7 @@ impl Actor {
         let facets = self.facets.read().await;
         facets.list_facets()
     }
-    
+
     /// Get a facet by type (for FacetService - Option B)
     ///
     /// ## Arguments
@@ -1783,7 +1844,7 @@ impl Actor {
         let facets = self.facets.read().await;
         facets.get_facet(facet_type)
     }
-    
+
     /// Get facets container (for FacetService - Option 1: Store facets separately)
     ///
     /// ## Purpose
@@ -1819,13 +1880,13 @@ impl Actor {
     /// This is similar to Erlang's gen_server:init callback
     async fn on_activate(&mut self) -> Result<(), ActorError> {
         let actor_id = self.id.clone();
-        
+
         // Attached facets for observability (logged in span and message)
         let facet_list: String = {
             let facets = self.facets.read().await;
             facets.list_facets().join(", ")
         };
-        
+
         // OBSERVABILITY: Tracing span for activation (includes facets when present)
         let span = tracing::span!(
             tracing::Level::DEBUG,
@@ -1835,7 +1896,7 @@ impl Actor {
             facets = %facet_list
         );
         let _guard = span.enter();
-        
+
         if tracing::enabled!(tracing::Level::TRACE) {
             if facet_list.is_empty() {
                 tracing::trace!("Actor activating");
@@ -1843,7 +1904,7 @@ impl Actor {
                 tracing::trace!(facets = %facet_list, "Actor activating");
             }
         }
-        
+
         // 1. Set state to Activating
         *self.state.write().await = ActorState::Activating;
 
@@ -1852,7 +1913,8 @@ impl Actor {
             "actor_id" => actor_id.clone(),
             "from" => "Created",
             "to" => "Activating"
-        ).increment(1);
+        )
+        .increment(1);
 
         // 2. Let behavior initialize if it has lifecycle extensions
         // (Behaviors can optionally implement lifecycle hooks via helper methods)
@@ -1870,12 +1932,14 @@ impl Actor {
             "actor_id" => actor_id.clone(),
             "from" => "Activating",
             "to" => "Active"
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         metrics::gauge!("plexspaces_actor_active_total",
             "actor_id" => actor_id.clone()
-        ).increment(1.0);
-        
+        )
+        .increment(1.0);
+
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(actor_id = %actor_id, "Actor activated successfully");
         }
@@ -1895,7 +1959,7 @@ impl Actor {
     /// This is similar to Erlang's gen_server:terminate callback
     async fn on_deactivate(&mut self) -> Result<(), ActorError> {
         let actor_id = self.id.clone();
-        
+
         // OBSERVABILITY: Tracing span for deactivation
         let span = tracing::span!(
             tracing::Level::INFO,
@@ -1903,9 +1967,9 @@ impl Actor {
             actor_id = %actor_id
         );
         let _guard = span.enter();
-        
+
         tracing::info!("Actor deactivating");
-        
+
         // 1. Set state to Deactivating
         *self.state.write().await = ActorState::Deactivating;
 
@@ -1914,7 +1978,8 @@ impl Actor {
             "actor_id" => actor_id.clone(),
             "from" => "Active",
             "to" => "Deactivating"
-        ).increment(1);
+        )
+        .increment(1);
 
         // 2. Let behavior clean up if it has lifecycle extensions
         if let Ok(_behavior) = self.behavior.try_write() {
@@ -1930,12 +1995,14 @@ impl Actor {
             "actor_id" => actor_id.clone(),
             "from" => "Deactivating",
             "to" => "Terminated"
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         metrics::gauge!("plexspaces_actor_active_total",
             "actor_id" => actor_id.clone()
-        ).decrement(1.0);
-        
+        )
+        .decrement(1.0);
+
         tracing::info!("Actor deactivated successfully");
 
         Ok(())
@@ -1957,10 +2024,10 @@ impl Actor {
     /// ## Returns
     /// Ok(()) if registration succeeds, ActorError otherwise
     async fn register_in_registry(&self) -> Result<(), ActorError> {
-        use plexspaces_core::{RequestContext, MessageSender};
         use crate::ActorRef;
+        use plexspaces_core::{MessageSender, RequestContext};
         use std::sync::Arc;
-        
+
         // Get ActorRegistry from ServiceLocator
         if let Some(registry) = self.context.service_locator.actor_registry().await {
             let ctx = RequestContext::new_without_auth(
@@ -1986,23 +2053,26 @@ impl Actor {
             let actor_type = match behavior_type {
                 plexspaces_core::BehaviorType::GenServer => Some("GenServer".to_string()),
                 plexspaces_core::BehaviorType::GenEvent => Some("GenEvent".to_string()),
-                plexspaces_core::BehaviorType::GenStateMachine => Some("GenStateMachine".to_string()),
+                plexspaces_core::BehaviorType::GenStateMachine => {
+                    Some("GenStateMachine".to_string())
+                }
                 plexspaces_core::BehaviorType::Workflow => Some("Workflow".to_string()),
                 plexspaces_core::BehaviorType::Custom(s) => Some(s),
             };
 
             // Register actor in registry with type information for dashboard
             // Note: Config and instance will be updated later in spawn_built_actor (idempotent)
-            registry.register_actor(
-                &ctx,
-                self.id.clone(),
-                Arc::new(actor_ref) as Arc<dyn MessageSender>,
-                actor_type,
-                None, // Config not available here (set during spawn, updated later)
-                None, // Instance not available here (stored separately in actor_factory_impl, updated later)
-                Some(behavior_kind),
-            ).await;
-
+            registry
+                .register_actor(
+                    &ctx,
+                    self.id.clone(),
+                    Arc::new(actor_ref) as Arc<dyn MessageSender>,
+                    actor_type,
+                    None, // Config not available here (set during spawn, updated later)
+                    None, // Instance not available here (stored separately in actor_factory_impl, updated later)
+                    Some(behavior_kind),
+                )
+                .await;
         } else {
             // Registry not available - log warning but don't fail
             // This allows actors to be created in test environments without full service setup
@@ -2011,7 +2081,7 @@ impl Actor {
                 "ActorRegistry not available in ServiceLocator - actor not registered"
             );
         }
-        
+
         Ok(())
     }
 
@@ -2060,13 +2130,13 @@ impl Actor {
         thread_local! {
             static PROCESS_MESSAGE_DEPTH: std::cell::Cell<usize> = std::cell::Cell::new(0);
         }
-        
+
         let depth = PROCESS_MESSAGE_DEPTH.with(|d| {
             let current = d.get();
             d.set(current + 1);
             current
         });
-        
+
         // Safety check: prevent infinite recursion
         const MAX_RECURSION_DEPTH: usize = 100;
         if depth > MAX_RECURSION_DEPTH {
@@ -2081,13 +2151,13 @@ impl Actor {
                 depth
             )));
         }
-        
+
         // Convert actor_id to owned String early to avoid lifetime issues in macros
         let actor_id_owned = actor_id.to_string();
         let message_id = message.id.clone();
         let message_type = message.message_type.clone();
         let start = std::time::Instant::now();
-        
+
         // Behavior kind for logging (OTP-inspired: GenServer, EventHandler, etc.; WASM uses spec'd kind)
         let behavior_owned = {
             let b = behavior.read().await;
@@ -2099,7 +2169,7 @@ impl Actor {
                 plexspaces_core::BehaviorType::Custom(ref s) => s.clone(),
             }
         };
-        
+
         // Verify actor_id matches message.receiver_id
         if actor_id != message.receiver_id {
             tracing::warn!(
@@ -2117,7 +2187,7 @@ impl Actor {
             tracing::trace!("[ACTOR::PROCESS_MESSAGE] START: actor_id={}, behavior={}, message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
                 actor_id, behavior_owned, message.id, message.sender_id, message.receiver_id, message.correlation_id, message.message_type);
         }
-        
+
         // OBSERVABILITY: Tracing span for message processing (TRACE to reduce log noise; use RUST_LOG=plexspaces_actor=trace to enable)
         // CRITICAL: Disable span creation to prevent "tried to clone a span that already closed" panics.
         // The issue occurs when:
@@ -2127,21 +2197,25 @@ impl Actor {
         // 4. When we log during termination, tracing tries to clone the already-closed span
         // Solution: Don't create spans in process_message. Use regular tracing macros instead.
         // If distributed tracing is needed, it should be implemented at a higher level.
-        
+
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
                 "PROCESS_MESSAGE START: depth={}, actor_id={}, message_id={}, message_type={}",
-                depth, actor_id_owned, message_id, message_type
+                depth,
+                actor_id_owned,
+                message_id,
+                message_type
             );
         }
-        
+
         // OBSERVABILITY: Track message received
         let message_type_owned = message_type.clone();
         metrics::counter!("plexspaces_actor_messages_received_total",
             "actor_id" => actor_id_owned.clone(),
             "message_type" => message_type_owned
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         // Update last message time for health monitoring
         *last_message_time.write().await = std::time::Instant::now();
 
@@ -2162,11 +2236,12 @@ impl Actor {
                 metrics::counter!("plexspaces_actor_facet_intercept_errors_total",
                     "actor_id" => actor_id_owned.clone(),
                     "facet_error" => error_str.clone()
-                ).increment(1);
+                )
+                .increment(1);
                 tracing::error!(error = %e, "Facet interception error");
                 ActorError::FacetError(error_str)
             })?;
-        
+
         // Handle interception outcome explicitly
         match intercept_outcome {
             BeforeInterceptOutcome::ShortCircuit(result) => {
@@ -2182,13 +2257,17 @@ impl Actor {
                     reply_msg.sender_id = actor_id_owned.clone();
                     reply_msg.receiver_id = message.sender_id.clone();
                     reply_msg.correlation_id = message.correlation_id.clone();
-                    reply_msg.timestamp = Some(prost_types::Timestamp::from(std::time::SystemTime::now()));
-                    if let Err(e) = context.send_reply(
-                        Some(&message.correlation_id),
-                        &message.sender_id,
-                        actor_id_owned.clone(),
-                        reply_msg,
-                    ).await {
+                    reply_msg.timestamp =
+                        Some(prost_types::Timestamp::from(std::time::SystemTime::now()));
+                    if let Err(e) = context
+                        .send_reply(
+                            Some(&message.correlation_id),
+                            &message.sender_id,
+                            actor_id_owned.clone(),
+                            reply_msg,
+                        )
+                        .await
+                    {
                         tracing::error!(
                             actor_id = %actor_id_owned,
                             method = %method_name,
@@ -2221,7 +2300,7 @@ impl Actor {
                 // Process with behavior (Go-style: context first, then message)
                 // Note: ActorContext is now static - sender_id and correlation_id are in Message, not context
                 let mut behavior = behavior.write().await;
-                
+
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         "[PROCESS_MESSAGE] CALLING handle_message: actor_id={}, behavior={}, method={}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}, depth={}",
@@ -2229,7 +2308,7 @@ impl Actor {
                     );
                 }
                 let result = behavior.handle_message(context, message.clone()).await;
-                
+
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(
                         "[PROCESS_MESSAGE] handle_message COMPLETED: actor_id={}, behavior={}, method={}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}, result={:?}, depth={}",
@@ -2266,11 +2345,13 @@ impl Actor {
                             "actor_id" => actor_id_owned.clone(),
                             "message_type" => message_type_owned2.clone(),
                             "status" => "success"
-                        ).increment(1);
+                        )
+                        .increment(1);
                         metrics::histogram!("plexspaces_actor_message_processing_duration_seconds",
                             "actor_id" => actor_id_owned.clone(),
                             "message_type" => message_type_owned2.clone()
-                        ).record(duration.as_secs_f64());
+                        )
+                        .record(duration.as_secs_f64());
                     }
                     Err(e) => {
                         let message_type_owned3 = message_type.clone();
@@ -2279,12 +2360,14 @@ impl Actor {
                             "actor_id" => actor_id_owned.clone(),
                             "message_type" => message_type_owned3.clone(),
                             "status" => "error"
-                        ).increment(1);
+                        )
+                        .increment(1);
                         metrics::counter!("plexspaces_actor_message_processing_errors_total",
                             "actor_id" => actor_id_owned.clone(),
                             "message_type" => message_type_owned3.clone(),
                             "error_type" => error_type
-                        ).increment(1);
+                        )
+                        .increment(1);
                         // Note: set_error_message() is available but not called here because:
                         // 1. process_message() is not a method (no self parameter)
                         // 2. Error handling should be done at the actor level, not in process_message
@@ -2309,7 +2392,7 @@ mod tests {
     use plexspaces_behavior::MockBehavior;
     use plexspaces_mailbox::MailboxConfig;
     use ulid::Ulid;
-    
+
     /// Helper to create a test message
     fn create_test_message(payload: Vec<u8>) -> Message {
         Message {
@@ -2318,7 +2401,7 @@ mod tests {
             ..Default::default()
         }
     }
-    
+
     /// Helper to create a test message with TTL
     fn create_test_message_with_ttl(payload: Vec<u8>, ttl: std::time::Duration) -> Message {
         let mut msg = create_test_message(payload);
@@ -2333,9 +2416,18 @@ mod tests {
     async fn test_actor_lifecycle() {
         let id = "test-actor".to_string();
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), id.clone()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), id.clone())
+            .await
+            .unwrap();
 
-        let mut actor = Actor::new(id.clone(), behavior, mailbox, String::new(), "test-namespace".to_string(), None);
+        let mut actor = Actor::new(
+            id.clone(),
+            behavior,
+            mailbox,
+            String::new(),
+            "test-namespace".to_string(),
+            None,
+        );
 
         // Test initial state
         assert_eq!(actor.state().await, ActorState::Creating);
@@ -2362,7 +2454,9 @@ mod tests {
     #[tokio::test]
     async fn test_static_lifecycle_on_activate_always_runs() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let mut actor = Actor::new(
             "test-actor".to_string(),
@@ -2385,7 +2479,9 @@ mod tests {
     #[tokio::test]
     async fn test_static_lifecycle_on_deactivate_always_runs() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let mut actor = Actor::new(
             "test-actor".to_string(),
@@ -2407,7 +2503,9 @@ mod tests {
     #[tokio::test]
     async fn test_static_lifecycle_state_transitions() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let mut actor = Actor::new(
             "test-actor".to_string(),
@@ -2437,7 +2535,9 @@ mod tests {
         // This test will pass once we implement the helper methods
         // for behaviors to extend lifecycle (like as_lifecycle_mut())
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let mut actor = Actor::new(
             "test-actor".to_string(),
@@ -2460,7 +2560,9 @@ mod tests {
     #[tokio::test]
     async fn test_with_resource_profile() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let profile = ResourceProfile::CpuIntensive;
 
@@ -2484,7 +2586,9 @@ mod tests {
     #[tokio::test]
     async fn test_with_resource_contract() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let contract = ResourceContract {
             max_memory_bytes: 1024 * 1024 * 50, // 50 MB
@@ -2515,7 +2619,9 @@ mod tests {
     #[tokio::test]
     async fn test_resource_usage() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2539,7 +2645,9 @@ mod tests {
     #[tokio::test]
     async fn test_health_check() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2560,7 +2668,9 @@ mod tests {
     #[tokio::test]
     async fn test_validate_resources_without_contract() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2579,7 +2689,9 @@ mod tests {
     #[tokio::test]
     async fn test_validate_resources_with_contract() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let contract = ResourceContract {
             max_memory_bytes: 1024 * 1024 * 1000, // 1000 MB (high limit)
@@ -2611,7 +2723,9 @@ mod tests {
     #[tokio::test]
     async fn test_start_already_active_error() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let mut actor = Actor::new(
             "test-actor".to_string(),
@@ -2635,7 +2749,9 @@ mod tests {
     #[tokio::test]
     async fn test_stop_already_stopped() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let mut actor = Actor::new(
             "test-actor".to_string(),
@@ -2661,7 +2777,9 @@ mod tests {
         use plexspaces_mailbox::mailbox_config_default;
 
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor".to_string()).await.expect("Failed to create mailbox");
+        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor".to_string())
+            .await
+            .expect("Failed to create mailbox");
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2684,7 +2802,9 @@ mod tests {
     #[tokio::test]
     async fn test_actor_id_getter() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor-123".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor-123".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor-123".to_string(),
@@ -2702,7 +2822,9 @@ mod tests {
     #[tokio::test]
     async fn test_mailbox_getter() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2726,7 +2848,9 @@ mod tests {
     #[tokio::test]
     async fn test_become_changes_behavior() {
         let behavior1 = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2746,7 +2870,9 @@ mod tests {
     #[tokio::test]
     async fn test_unbecome_restores_previous_behavior() {
         let behavior1 = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2769,7 +2895,9 @@ mod tests {
     #[tokio::test]
     async fn test_unbecome_error_when_no_previous_behavior() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2849,7 +2977,9 @@ mod tests {
         }
 
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2869,7 +2999,9 @@ mod tests {
     #[tokio::test]
     async fn test_list_facets() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2888,7 +3020,9 @@ mod tests {
     #[tokio::test]
     async fn test_detach_facet() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -2917,7 +3051,9 @@ mod tests {
         use plexspaces_mailbox::mailbox_config_default;
 
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor".to_string()).await.expect("Failed to create mailbox");
+        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor".to_string())
+            .await
+            .expect("Failed to create mailbox");
 
         let mut actor = Actor::new(
             "test-actor".to_string(),
@@ -2951,7 +3087,9 @@ mod tests {
     #[tokio::test]
     async fn test_actor_graceful_shutdown() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let mut actor = Actor::new(
             "test-actor".to_string(),
@@ -2982,7 +3120,9 @@ mod tests {
     #[tokio::test]
     async fn test_on_timer_hook() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let mut actor = Actor::new(
             "test-actor".to_string(),
@@ -3007,7 +3147,9 @@ mod tests {
         use plexspaces_mailbox::mailbox_config_default;
 
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor".to_string()).await.expect("Failed to create mailbox");
+        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor".to_string())
+            .await
+            .expect("Failed to create mailbox");
 
         let mut actor = Actor::new(
             "receiver".to_string(),
@@ -3064,7 +3206,9 @@ mod tests {
         }
 
         let behavior = Box::new(FailingBehavior);
-        let mailbox = Mailbox::new(mailbox_config_default(), "failing-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(mailbox_config_default(), "failing-actor".to_string())
+            .await
+            .unwrap();
 
         let mut actor = Actor::new(
             "failing-actor".to_string(),
@@ -3097,7 +3241,9 @@ mod tests {
     #[tokio::test]
     async fn test_health_tracking_with_messages() {
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+            .await
+            .unwrap();
 
         let actor = Actor::new(
             "test-actor".to_string(),
@@ -3139,7 +3285,7 @@ impl plexspaces_core::ActorStateFetcher for Actor {
     async fn get_state(&self) -> i32 {
         use crate::ActorState;
         use plexspaces_proto::v1::actor::ActorState as ProtoActorState;
-        
+
         // Convert ActorState to proto enum value
         match self.state().await {
             ActorState::Unspecified => ProtoActorState::ActorStateUnspecified as i32,
@@ -3171,11 +3317,11 @@ impl plexspaces_core::ActorStateFetcher for Actor {
 /// The callback uses the `ActorStateFetcher` trait to fetch state. This allows `plexspaces_core` to check
 /// actor state without circular dependencies. This is consistent for all actor types (regular/virtual/workflows/etc.).
 pub fn register_state_fetcher_callback() {
-    use std::sync::Arc;
-    use std::pin::Pin;
-    use std::future::Future;
     use plexspaces_core::ActorStateFetcher;
-    
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::Arc;
+
     plexspaces_core::actor_state_checker::register_state_fetcher_callback(
         |instance: &Arc<dyn std::any::Any + Send + Sync>| {
             let instance_clone = instance.clone();
@@ -3190,6 +3336,6 @@ pub fn register_state_fetcher_callback() {
                     None
                 }
             }) as Pin<Box<dyn Future<Output = Option<i32>> + Send>>
-        }
+        },
     );
 }

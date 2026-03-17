@@ -35,7 +35,8 @@
 //! ```
 
 use plexspaces_proto::node::v1::{
-    ReleaseSpec, NodeConfig, RuntimeConfig, ShutdownConfig, GrpcConfig, HealthConfig, SecurityConfig,
+    GrpcConfig, HealthConfig, NodeConfig, ReleaseSpec, RuntimeConfig, SecurityConfig,
+    ShutdownConfig,
 };
 use plexspaces_proto::security::v1::{JwtConfig, MtlsConfig};
 use prost_types::Duration;
@@ -70,10 +71,10 @@ pub async fn create_default_release_config(
 ) -> ReleaseSpec {
     // Get JWT secret from env var (empty if not set - will use JWKS or fail validation)
     let jwt_secret = get_env(ENV_JWT_SECRET).unwrap_or_default();
-    
+
     // Get cert directory from env var or use default
     let cert_dir = get_env_or(ENV_MTLS_CERT_DIR, "/app/certs");
-    
+
     // Create default security config
     let security = Some(SecurityConfig {
         service_identity: None,
@@ -90,7 +91,7 @@ pub async fn create_default_release_config(
         jwt: Some(JwtConfig {
             enable_jwt: true,
             secret: jwt_secret,
-            issuer: String::new(), // Can be set via env var or config
+            issuer: String::new(),   // Can be set via env var or config
             jwks_url: String::new(), // For RS256, set this instead of secret
             allowed_audiences: vec!["plexspaces-api".to_string()],
             token_ttl: Some(Duration {
@@ -107,7 +108,7 @@ pub async fn create_default_release_config(
         api_keys: vec![],
         disable_auth: false, // Production: false, testing: can be enabled via PLEXSPACES_DISABLE_AUTH env var
     });
-    
+
     // Create default node config
     // NOTE: default_tenant_id and default_namespace have been removed.
     // Tenant-id comes from auth (JWT/mTLS); namespace from application/actor.
@@ -124,7 +125,7 @@ pub async fn create_default_release_config(
         node_registry: None,
         grpc_address: format!("http://{}", listen_addr),
     };
-    
+
     // Create default gRPC config
     let grpc = GrpcConfig {
         enabled: true,
@@ -133,14 +134,14 @@ pub async fn create_default_release_config(
         keepalive_interval_seconds: 30,
         middleware: vec![],
     };
-    
+
     // Create default health config
     let health = HealthConfig {
         heartbeat_interval_seconds: 5,
         heartbeat_timeout_seconds: 30,
         registry_url: String::new(),
     };
-    
+
     // Create default runtime config
     // Note: base_dir, wasm_apps_directory, db, channel_provider, mailbox_provider
     // are set by config_manager::initialize()
@@ -159,14 +160,14 @@ pub async fn create_default_release_config(
         wasm_apps_directory: String::new(), // Set by config_manager::initialize
         default_virtual_actor_config: None, // Defaults applied in code when None (5m, pool 100, lazy)
     };
-    
+
     // Create default shutdown config
     let shutdown = ShutdownConfig {
         global_timeout_seconds: 30,
         grace_period_seconds: 5,
         grpc_drain_timeout_seconds: 10,
     };
-    
+
     ReleaseSpec {
         name: release_name,
         version: release_version,
@@ -174,7 +175,7 @@ pub async fn create_default_release_config(
         node: Some(node),
         runtime: Some(runtime),
         system_applications: vec![], // System apps are always included
-        applications: vec![], // User applications can be added via config
+        applications: vec![],        // User applications can be added via config
         env: std::collections::HashMap::new(),
         shutdown: Some(shutdown),
     }
@@ -183,7 +184,7 @@ pub async fn create_default_release_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_create_default_release_config() {
         let config = create_default_release_config(
@@ -191,25 +192,26 @@ mod tests {
             "1.0.0".to_string(),
             "test-node".to_string(),
             "0.0.0.0:8000".to_string(),
-        ).await;
-        
+        )
+        .await;
+
         assert_eq!(config.name, "test-cluster");
         assert_eq!(config.version, "1.0.0");
         assert!(config.node.is_some());
         assert!(config.runtime.is_some());
         assert!(config.shutdown.is_some());
-        
+
         let node = config.node.as_ref().unwrap();
         assert_eq!(node.id, "test-node");
         assert_eq!(node.listen_addr, "0.0.0.0:8000");
-        
+
         let runtime = config.runtime.as_ref().unwrap();
         assert!(runtime.security.is_some());
-        
+
         let security = runtime.security.as_ref().unwrap();
         assert!(security.mtls.is_some());
         assert!(security.jwt.is_some());
-        
+
         let mtls = security.mtls.as_ref().unwrap();
         assert!(mtls.enable_mtls);
         assert!(mtls.auto_generate);

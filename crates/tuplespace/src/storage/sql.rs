@@ -63,9 +63,9 @@ use plexspaces_proto::tuplespace::v1::StorageStats;
 #[cfg(feature = "sql-backend")]
 use sqlx::{postgres::PgPoolOptions, sqlite::SqlitePoolOptions, PgPool, Row, SqlitePool};
 #[cfg(feature = "sql-backend")]
-use std::time::Duration;
-#[cfg(feature = "sql-backend")]
 use std::sync::Arc;
+#[cfg(feature = "sql-backend")]
+use std::time::Duration;
 
 // Local config types (proto types removed, now using shared database)
 #[cfg(feature = "sql-backend")]
@@ -259,7 +259,9 @@ impl SqlStorage {
         .await
         .map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_barriers_space ON barriers(space_id)")
-            .execute(pool).await.map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
+            .execute(pool)
+            .await
+            .map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_barriers_status ON barriers(completed_at) WHERE completed_at IS NULL")
             .execute(pool).await.map_err(|e| TupleSpaceError::BackendError(e.to_string()))?;
         sqlx::query(
@@ -482,7 +484,8 @@ impl SqlStorage {
             // Calculate remaining time (use saturating_sub to avoid overflow)
             let elapsed = start.elapsed();
             let remaining = timeout_duration.saturating_sub(elapsed);
-            let sleep_duration = Duration::from_millis(poll_interval_ms.min(remaining.as_millis() as u64));
+            let sleep_duration =
+                Duration::from_millis(poll_interval_ms.min(remaining.as_millis() as u64));
 
             // Sleep before next poll
             tokio::time::sleep(sleep_duration).await;
@@ -517,7 +520,8 @@ impl SqlStorage {
             // Calculate remaining time (use saturating_sub to avoid overflow)
             let elapsed = start.elapsed();
             let remaining = timeout_duration.saturating_sub(elapsed);
-            let sleep_duration = Duration::from_millis(poll_interval_ms.min(remaining.as_millis() as u64));
+            let sleep_duration =
+                Duration::from_millis(poll_interval_ms.min(remaining.as_millis() as u64));
 
             // Sleep before next poll
             tokio::time::sleep(sleep_duration).await;
@@ -808,7 +812,8 @@ impl TupleSpaceStorage for SqlStorage {
                 }
                 SqlPool::Sqlite(pool) => {
                     // SQLite: Use IN clause
-                    let placeholders: Vec<String> = (0..ids.len()).map(|_| "?".to_string()).collect();
+                    let placeholders: Vec<String> =
+                        (0..ids.len()).map(|_| "?".to_string()).collect();
                     let delete_sql = format!(
                         "DELETE FROM {} WHERE id IN ({})",
                         self.table_name,
@@ -818,12 +823,9 @@ impl TupleSpaceStorage for SqlStorage {
                     for id in &ids {
                         query = query.bind(id);
                     }
-                    query
-                        .execute(pool)
-                        .await
-                        .map_err(|e| {
-                            TupleSpaceError::BackendError(format!("Delete failed: {}", e))
-                        })?;
+                    query.execute(pool).await.map_err(|e| {
+                        TupleSpaceError::BackendError(format!("Delete failed: {}", e))
+                    })?;
                 }
             }
 
@@ -860,21 +862,16 @@ impl TupleSpaceStorage for SqlStorage {
         }
 
         let ids: Vec<String> = matching_stored.iter().map(|s| s.id.clone()).collect();
-        
+
         match &self.pool {
             SqlPool::Postgres(pool) => {
                 // PostgreSQL: Use ANY with array
-                let delete_sql = format!(
-                    "DELETE FROM {} WHERE id = ANY($1)",
-                    self.table_name
-                );
+                let delete_sql = format!("DELETE FROM {} WHERE id = ANY($1)", self.table_name);
                 sqlx::query(&delete_sql)
                     .bind(&ids)
                     .execute(pool)
                     .await
-                    .map_err(|e| {
-                        TupleSpaceError::BackendError(format!("Delete failed: {}", e))
-                    })?;
+                    .map_err(|e| TupleSpaceError::BackendError(format!("Delete failed: {}", e)))?;
             }
             SqlPool::Sqlite(pool) => {
                 // SQLite: Use IN clause
@@ -891,9 +888,7 @@ impl TupleSpaceStorage for SqlStorage {
                 query
                     .execute(pool)
                     .await
-                    .map_err(|e| {
-                        TupleSpaceError::BackendError(format!("Delete failed: {}", e))
-                    })?;
+                    .map_err(|e| TupleSpaceError::BackendError(format!("Delete failed: {}", e)))?;
             }
         }
 
@@ -1159,9 +1154,7 @@ impl TupleSpaceStorage for SqlStorage {
                     .bind(&message_json)
                     .execute(pool)
                     .await
-                    .map_err(|e| {
-                        TupleSpaceError::BackendError(format!("NOTIFY failed: {}", e))
-                    })?;
+                    .map_err(|e| TupleSpaceError::BackendError(format!("NOTIFY failed: {}", e)))?;
             }
             SqlPool::Sqlite(_) => {
                 // SQLite doesn't support NOTIFY
@@ -1186,7 +1179,7 @@ impl TupleSpaceStorage for SqlStorage {
                 // 2. Execute LISTEN on the channel
                 // 3. Use the underlying postgres connection to receive notifications asynchronously
                 // 4. Forward messages to an mpsc channel
-                // 
+                //
                 // For now, return NotSupported - this can be implemented later by:
                 // - Using the postgres crate directly for LISTEN connections
                 // - Or accessing sqlx's internal connection to use pg_notifications()
@@ -1194,11 +1187,9 @@ impl TupleSpaceStorage for SqlStorage {
                     format!("PostgreSQL LISTEN subscription for namespace '{}' requires direct postgres connection access (not yet implemented with sqlx). Publish works via NOTIFY.", namespace),
                 ))
             }
-            SqlPool::Sqlite(_) => {
-                Err(TupleSpaceError::NotSupported(
-                    "SQLite does not support LISTEN/NOTIFY for watch events".to_string(),
-                ))
-            }
+            SqlPool::Sqlite(_) => Err(TupleSpaceError::NotSupported(
+                "SQLite does not support LISTEN/NOTIFY for watch events".to_string(),
+            )),
         }
     }
 }
@@ -1552,7 +1543,10 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].fields()[0], TupleField::String("blocking-test".to_string()));
+        assert_eq!(
+            results[0].fields()[0],
+            TupleField::String("blocking-test".to_string())
+        );
         assert!(elapsed.as_millis() >= 50, "Should have waited for tuple");
         assert!(elapsed.as_millis() < 5000, "Should not have timed out");
 
@@ -1579,7 +1573,10 @@ mod tests {
 
         assert_eq!(results.len(), 0, "Should return empty on timeout");
         assert!(elapsed.as_millis() >= 450, "Should have waited for timeout");
-        assert!(elapsed.as_millis() < 1000, "Should not wait longer than timeout");
+        assert!(
+            elapsed.as_millis() < 1000,
+            "Should not wait longer than timeout"
+        );
 
         // Cleanup
         storage.clear().await.unwrap();
@@ -1631,7 +1628,10 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].fields()[0], TupleField::String("blocking-take-test".to_string()));
+        assert_eq!(
+            results[0].fields()[0],
+            TupleField::String("blocking-take-test".to_string())
+        );
         assert!(elapsed.as_millis() >= 50, "Should have waited for tuple");
         assert!(elapsed.as_millis() < 5000, "Should not have timed out");
 

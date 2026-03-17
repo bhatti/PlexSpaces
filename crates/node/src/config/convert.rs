@@ -3,19 +3,19 @@
 //
 // Conversion from YAML intermediate representation to proto ReleaseSpec
 
-use super::yaml::{*, JwtConfigYaml, MtlsConfigYaml};
-use plexspaces_proto::node::v1::{
-    GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, ReleaseSpec,
-    RuntimeConfig, SecurityConfig, ShutdownConfig,
-};
+use super::yaml::{JwtConfigYaml, MtlsConfigYaml, *};
 use plexspaces_proto::application::v1::ApplicationSpec;
-use std::collections::HashMap;
-use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
 use plexspaces_proto::channel::v1::ChannelProvider;
-use plexspaces_proto::storage::v1::{
-    BlobConfig, RedisBackendConfig, SharedDbConfig, SqliteBackendConfig, 
-    StorageProvider, StorageProviderConfig,
+use plexspaces_proto::node::v1::{
+    GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, ReleaseSpec, RuntimeConfig,
+    SecurityConfig, ShutdownConfig,
 };
+use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
+use plexspaces_proto::storage::v1::{
+    BlobConfig, RedisBackendConfig, SharedDbConfig, SqliteBackendConfig, StorageProvider,
+    StorageProviderConfig,
+};
+use std::collections::HashMap;
 
 /// Convert YAML representation to proto ReleaseSpec
 pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
@@ -45,12 +45,11 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
             locks_provider: yaml.runtime.locks_provider.map(convert_storage_provider),
             channel_provider: parse_channel_provider(&yaml.runtime.channel_provider),
             mailbox_provider: parse_channel_provider(&yaml.runtime.mailbox_provider),
-            framework_info: None, // Set at runtime
+            framework_info: None,            // Set at runtime
             base_dir: yaml.runtime.base_dir, // Set by config_manager::initialize if empty
             wasm_apps_directory: yaml.runtime.wasm_apps_directory, // Set by config_manager::initialize if empty
             save_wasm_apps: false, // Default: disabled (only for testing)
             default_virtual_actor_config: None, // Defaults applied in code when None (5m, pool 100, lazy)
-
         }),
         system_applications: yaml.system_applications,
         applications: yaml
@@ -69,7 +68,7 @@ fn parse_channel_provider(provider: &Option<String>) -> i32 {
         Some(s) if !s.is_empty() => s.as_str(),
         _ => return ChannelProvider::ChannelProviderInMemory as i32,
     };
-    
+
     match provider_str.to_uppercase().as_str() {
         "IN_MEMORY" | "MEMORY" => ChannelProvider::ChannelProviderInMemory as i32,
         "REDIS" => ChannelProvider::ChannelProviderRedis as i32,
@@ -130,7 +129,7 @@ fn convert_security_config(yaml: SecurityConfigYaml) -> Result<SecurityConfig, S
     } else {
         None
     };
-    
+
     // mTLS config can be in either mtls or authn_config.mtls_config
     // Prefer mtls if present, otherwise use authn_config.mtls_config
     let mtls = if yaml.mtls.is_some() {
@@ -151,16 +150,12 @@ fn convert_security_config(yaml: SecurityConfigYaml) -> Result<SecurityConfig, S
     } else {
         None
     };
-    
+
     Ok(SecurityConfig {
         service_identity: yaml.service_identity.map(convert_service_identity),
         mtls,
         jwt,
-        api_keys: yaml
-            .api_keys
-            .into_iter()
-            .map(convert_api_key)
-            .collect(),
+        api_keys: yaml.api_keys.into_iter().map(convert_api_key).collect(),
         disable_auth: yaml.disable_auth,
     })
 }
@@ -182,17 +177,17 @@ fn convert_mtls_config(yaml: MtlsConfigYaml) -> MtlsConfig {
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| yaml.ca_certificate.clone());
-    
+
     let server_certificate_path = std::env::var("PLEXSPACES_MTLS_SERVER_CERT")
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| yaml.client_certificate.clone());
-    
+
     let server_key_path = std::env::var("PLEXSPACES_MTLS_SERVER_KEY")
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| yaml.client_private_key.clone());
-    
+
     MtlsConfig {
         enable_mtls: yaml.enable_mtls,
         ca_certificate_path,
@@ -232,7 +227,7 @@ fn convert_jwt_config(yaml: JwtConfigYaml) -> JwtConfig {
                 String::new()
             }
         });
-    
+
     JwtConfig {
         enable_jwt: yaml.enable_jwt,
         secret,
@@ -241,8 +236,8 @@ fn convert_jwt_config(yaml: JwtConfigYaml) -> JwtConfig {
         allowed_audiences: yaml.allowed_audiences,
         token_ttl: None,
         refresh_token_ttl: None,
-        tenant_id_claim: "tenant_id".to_string(),  // Default claim name
-        user_id_claim: "sub".to_string(),  // Default claim name
+        tenant_id_claim: "tenant_id".to_string(), // Default claim name
+        user_id_claim: "sub".to_string(),         // Default claim name
     }
 }
 
@@ -268,19 +263,19 @@ fn convert_application_config(yaml: ApplicationSpecYaml) -> ApplicationSpec {
     let shutdown_strategy = match yaml.shutdown_strategy.to_uppercase().as_str() {
         "GRACEFUL" => ShutdownStrategy::ShutdownStrategyGraceful as i32,
         "BRUTAL_KILL" | "IMMEDIATE" => ShutdownStrategy::ShutdownStrategyImmediate as i32,
-        _ => ShutdownStrategy::ShutdownStrategyGraceful as i32,  // Default
+        _ => ShutdownStrategy::ShutdownStrategyGraceful as i32, // Default
     };
-    
+
     // Convert shutdown timeout from seconds to Duration
     let shutdown_timeout = Some(prost_types::Duration {
         seconds: yaml.shutdown_timeout_seconds as i64,
         nanos: 0,
     });
-    
+
     ApplicationSpec {
         name: yaml.name.clone(),
         tenant_id: String::new(), // Set during deployment from JWT
-        namespace: yaml.name, // Use name as namespace by default
+        namespace: yaml.name,     // Use name as namespace by default
         version: yaml.version,
         description: yaml.description,
         r#type: 0, // Default type
@@ -292,6 +287,7 @@ fn convert_application_config(yaml: ApplicationSpecYaml) -> ApplicationSpec {
         shutdown_timeout,
         shutdown_strategy,
         metadata: None,
+        seed_nodes: vec![],
     }
 }
 
@@ -313,9 +309,9 @@ fn convert_blob_config(yaml: BlobConfigYaml) -> BlobConfig {
         secret_access_key: yaml.secret_access_key,
         use_ssl: yaml.use_ssl,
         prefix: yaml.prefix,
-        gcp_service_account_json: String::new(),  // Not in YAML, set via env var
-        azure_account_name: String::new(),  // Not in YAML, set via env var
-        azure_account_key: String::new(),  // Not in YAML, set via env var
+        gcp_service_account_json: String::new(), // Not in YAML, set via env var
+        azure_account_name: String::new(),       // Not in YAML, set via env var
+        azure_account_key: String::new(),        // Not in YAML, set via env var
     }
 }
 
@@ -334,21 +330,29 @@ fn convert_storage_provider(yaml: StorageProviderConfigYaml) -> StorageProviderC
     StorageProviderConfig {
         provider: provider as i32,
         config: if let Some(redis) = yaml.redis {
-            Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Redis(
-                convert_redis_config(redis),
-            ))
+            Some(
+                plexspaces_proto::storage::v1::storage_provider_config::Config::Redis(
+                    convert_redis_config(redis),
+                ),
+            )
         } else if let Some(postgres) = yaml.postgres {
-            Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Postgres(
-                convert_shared_db_config(postgres),
-            ))
+            Some(
+                plexspaces_proto::storage::v1::storage_provider_config::Config::Postgres(
+                    convert_shared_db_config(postgres),
+                ),
+            )
         } else if let Some(sqlite) = yaml.sqlite {
-            Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Sqlite(
-                convert_sqlite_config(sqlite),
-            ))
+            Some(
+                plexspaces_proto::storage::v1::storage_provider_config::Config::Sqlite(
+                    convert_sqlite_config(sqlite),
+                ),
+            )
         } else if let Some(dynamodb) = yaml.dynamodb {
-            Some(plexspaces_proto::storage::v1::storage_provider_config::Config::Dynamodb(
-                convert_dynamodb_config(dynamodb),
-            ))
+            Some(
+                plexspaces_proto::storage::v1::storage_provider_config::Config::Dynamodb(
+                    convert_dynamodb_config(dynamodb),
+                ),
+            )
         } else {
             None
         },
@@ -379,11 +383,13 @@ fn convert_sqlite_config(yaml: SqliteBackendConfigYaml) -> SqliteBackendConfig {
     SqliteBackendConfig {
         database_path: yaml.database_path,
         wal_mode: yaml.wal_mode,
-        synchronous: "NORMAL".to_string(),  // Default synchronous mode
+        synchronous: "NORMAL".to_string(), // Default synchronous mode
     }
 }
 
-fn convert_dynamodb_config(yaml: DynamoDbBackendConfigYaml) -> plexspaces_proto::storage::v1::DynamoDbBackendConfig {
+fn convert_dynamodb_config(
+    yaml: DynamoDbBackendConfigYaml,
+) -> plexspaces_proto::storage::v1::DynamoDbBackendConfig {
     plexspaces_proto::storage::v1::DynamoDbBackendConfig {
         region: yaml.region,
         table_prefix: yaml.table_prefix,
@@ -392,4 +398,3 @@ fn convert_dynamodb_config(yaml: DynamoDbBackendConfigYaml) -> plexspaces_proto:
         secret_access_key: yaml.secret_access_key,
     }
 }
-

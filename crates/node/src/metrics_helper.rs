@@ -44,8 +44,8 @@
 //! println!("Granularity ratio: {:.2}", report.granularity_ratio);
 //! ```
 
-use std::time::{Duration, Instant};
 use plexspaces_proto::metrics::v1::{CoordinationComputeMetrics, StepMetrics};
+use std::time::{Duration, Instant};
 
 /// Tracker for coordination vs compute metrics
 pub struct CoordinationComputeTracker {
@@ -99,7 +99,7 @@ impl CoordinationComputeTracker {
         if let Some(start) = self.compute_start.take() {
             let elapsed = start.elapsed();
             self.compute_duration += elapsed;
-            
+
             if let Some(step_start) = self.current_step_compute_start.take() {
                 let step_elapsed = step_start.elapsed();
                 self.current_step_compute_duration += step_elapsed;
@@ -120,7 +120,7 @@ impl CoordinationComputeTracker {
         if let Some(start) = self.coordinate_start.take() {
             let elapsed = start.elapsed();
             self.coordinate_duration += elapsed;
-            
+
             if let Some(step_start) = self.current_step_coordinate_start.take() {
                 let step_elapsed = step_start.elapsed();
                 self.current_step_coordinate_duration += step_elapsed;
@@ -145,7 +145,7 @@ impl CoordinationComputeTracker {
         if let Some(prev_step) = self.current_step.take() {
             self.finalize_step(prev_step);
         }
-        
+
         self.current_step = Some(step_name);
         self.current_step_compute_duration = Duration::ZERO;
         self.current_step_coordinate_duration = Duration::ZERO;
@@ -161,7 +161,7 @@ impl CoordinationComputeTracker {
             message_count: self.current_step_message_count,
         };
         self.step_metrics.push(step_metrics);
-        
+
         self.current_step_compute_duration = Duration::ZERO;
         self.current_step_coordinate_duration = Duration::ZERO;
         self.current_step_message_count = 0;
@@ -183,7 +183,7 @@ impl CoordinationComputeTracker {
         if let Some(step) = self.current_step.take() {
             self.finalize_step(step);
         }
-        
+
         // Ensure all timers are stopped
         if self.compute_start.is_some() {
             self.end_compute();
@@ -191,12 +191,12 @@ impl CoordinationComputeTracker {
         if self.coordinate_start.is_some() {
             self.end_coordinate();
         }
-        
+
         let total_duration = self.compute_duration + self.coordinate_duration;
         let compute_ms = self.compute_duration.as_millis() as u64;
         let coordinate_ms = self.coordinate_duration.as_millis() as u64;
         let total_ms = total_duration.as_millis() as u64;
-        
+
         // Calculate granularity ratio
         let granularity_ratio = if coordinate_ms > 0 {
             compute_ms as f64 / coordinate_ms as f64
@@ -205,14 +205,14 @@ impl CoordinationComputeTracker {
         } else {
             0.0
         };
-        
+
         // Calculate efficiency (compute / total)
         let efficiency = if total_ms > 0 {
             compute_ms as f64 / total_ms as f64
         } else {
             0.0
         };
-        
+
         CoordinationComputeMetrics {
             workflow_id: self.workflow_id,
             compute_duration_ms: compute_ms,
@@ -235,23 +235,31 @@ mod tests {
     #[test]
     fn test_basic_tracking() {
         let mut tracker = CoordinationComputeTracker::new("test-workflow".to_string());
-        
+
         // Track some computation - use longer sleep times to avoid timing precision issues
         tracker.start_compute();
         std::thread::sleep(Duration::from_millis(50)); // Increased from 10ms for better reliability
         tracker.end_compute();
-        
+
         // Track some coordination - use shorter sleep time
         tracker.start_coordinate();
         std::thread::sleep(Duration::from_millis(5)); // Increased from 1ms for better reliability
         tracker.end_coordinate();
-        
+
         let metrics = tracker.finalize();
-        
+
         // Verify durations are at least the sleep times (allowing for some overhead)
-        assert!(metrics.compute_duration_ms >= 45, "compute_duration_ms was {}, expected >= 45", metrics.compute_duration_ms);
-        assert!(metrics.coordinate_duration_ms >= 4, "coordinate_duration_ms was {}, expected >= 4", metrics.coordinate_duration_ms);
-        
+        assert!(
+            metrics.compute_duration_ms >= 45,
+            "compute_duration_ms was {}, expected >= 45",
+            metrics.compute_duration_ms
+        );
+        assert!(
+            metrics.coordinate_duration_ms >= 4,
+            "coordinate_duration_ms was {}, expected >= 4",
+            metrics.coordinate_duration_ms
+        );
+
         // Granularity ratio should be compute/coordinate = 50/5 = 10.0
         // Allow tolerance for timing variations (minimum 4.0 to account for system load and timing precision)
         // This makes the test more robust when run with other tests under load or with coverage instrumentation
@@ -267,20 +275,20 @@ mod tests {
     #[test]
     fn test_step_tracking() {
         let mut tracker = CoordinationComputeTracker::new("test-workflow".to_string());
-        
+
         tracker.start_step("step1".to_string());
         tracker.start_compute();
         std::thread::sleep(Duration::from_millis(5));
         tracker.end_compute();
         tracker.increment_message();
-        
+
         tracker.start_step("step2".to_string());
         tracker.start_compute();
         std::thread::sleep(Duration::from_millis(5));
         tracker.end_compute();
-        
+
         let metrics = tracker.finalize();
-        
+
         assert_eq!(metrics.step_metrics.len(), 2);
         assert_eq!(metrics.step_metrics[0].step_name, "step1");
         assert_eq!(metrics.step_metrics[0].message_count, 1);
@@ -288,4 +296,3 @@ mod tests {
         assert_eq!(metrics.step_metrics[1].message_count, 0);
     }
 }
-

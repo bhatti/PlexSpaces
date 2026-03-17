@@ -38,9 +38,9 @@
 use plexspaces_core::HealthReporter;
 use plexspaces_proto::system::v1::system_service_server::SystemService;
 use plexspaces_proto::system::v1::*;
+use regex::Regex;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
-use regex::Regex;
 
 /// System Service implementation
 pub struct SystemServiceImpl {
@@ -51,9 +51,7 @@ pub struct SystemServiceImpl {
 impl SystemServiceImpl {
     /// Create new SystemService implementation
     pub fn new(health_reporter: Arc<dyn HealthReporter>) -> Self {
-        Self {
-            health_reporter,
-        }
+        Self { health_reporter }
     }
 }
 
@@ -65,39 +63,48 @@ impl SystemService for SystemServiceImpl {
     ) -> Result<Response<GetSystemInfoResponse>, Status> {
         let req = request.into_inner();
         let include_details = req.include_details;
-        
+
         // Record metrics
         metrics::counter!("plexspaces_node_system_info_requests_total",
             "include_details" => include_details.to_string()
-        ).increment(1);
+        )
+        .increment(1);
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!("System info requested (include_details: {})", include_details);
+            tracing::debug!(
+                "System info requested (include_details: {})",
+                include_details
+            );
         }
-        
+
         // Get node stats if available
         // TODO: Access node stats through ServiceLocator instead of direct Node reference
         let _stats: Option<()> = None; // Node stats not available without Node dependency
-        
+
         // Get system info using sysinfo
         use sysinfo::System;
         let mut system = System::new();
         system.refresh_all();
-        
+
         let total_memory = system.total_memory();
         let _used_memory = system.used_memory();
         let _available_memory = system.available_memory();
         let cpu_count = system.cpus().len() as u32;
-        
+
         // Get CPU usage (average across all CPUs)
         let _cpu_usage = if include_details {
-            system.cpus().iter().map(|cpu| cpu.cpu_usage() as f64).sum::<f64>() / cpu_count as f64
+            system
+                .cpus()
+                .iter()
+                .map(|cpu| cpu.cpu_usage() as f64)
+                .sum::<f64>()
+                / cpu_count as f64
         } else {
             0.0
         };
-        
+
         // Build SystemInfo response
         use plexspaces_proto::system::v1::SystemInfo;
-        
+
         // Get build-time information from environment variables (set by build.rs or CI/CD)
         let build_date = option_env!("PLEXSPACES_BUILD_DATE")
             .or_else(|| option_env!("VERGEN_BUILD_TIMESTAMP"))
@@ -108,37 +115,37 @@ impl SystemService for SystemServiceImpl {
             .or_else(|| option_env!("GIT_COMMIT"))
             .unwrap_or("unknown")
             .to_string();
-        
-            // Get enabled features (compile-time feature flags)
-            let features = {
-                let mut enabled_features = Vec::new();
-                #[cfg(feature = "sqlite-backend")]
-                enabled_features.push("sqlite-backend".to_string());
-                #[cfg(feature = "postgres-backend")]
-                enabled_features.push("postgres-backend".to_string());
-                #[cfg(feature = "redis-backend")]
-                enabled_features.push("redis-backend".to_string());
-                #[cfg(feature = "kafka-backend")]
-                enabled_features.push("kafka-backend".to_string());
-                enabled_features
-            };
-            
-            let system_info = SystemInfo {
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                build_date,
-                git_commit,
-                uptime: Some(plexspaces_proto::prost_types::Duration {
-                    seconds: sysinfo::System::uptime() as i64,
-                    nanos: 0,
-                }),
-                hostname: std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
-                platform: sysinfo::System::name().unwrap_or_default(),
-                architecture: std::env::consts::ARCH.to_string(),
-                cpu_cores: cpu_count as i32,
-                total_memory_mb: (total_memory / (1024 * 1024)) as u64,
-                features,
-            };
-        
+
+        // Get enabled features (compile-time feature flags)
+        let features = {
+            let mut enabled_features = Vec::new();
+            #[cfg(feature = "sqlite-backend")]
+            enabled_features.push("sqlite-backend".to_string());
+            #[cfg(feature = "postgres-backend")]
+            enabled_features.push("postgres-backend".to_string());
+            #[cfg(feature = "redis-backend")]
+            enabled_features.push("redis-backend".to_string());
+            #[cfg(feature = "kafka-backend")]
+            enabled_features.push("kafka-backend".to_string());
+            enabled_features
+        };
+
+        let system_info = SystemInfo {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            build_date,
+            git_commit,
+            uptime: Some(plexspaces_proto::prost_types::Duration {
+                seconds: sysinfo::System::uptime() as i64,
+                nanos: 0,
+            }),
+            hostname: std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
+            platform: sysinfo::System::name().unwrap_or_default(),
+            architecture: std::env::consts::ARCH.to_string(),
+            cpu_cores: cpu_count as i32,
+            total_memory_mb: (total_memory / (1024 * 1024)) as u64,
+            features,
+        };
+
         Ok(Response::new(GetSystemInfoResponse {
             system_info: Some(system_info),
         }))
@@ -150,21 +157,22 @@ impl SystemService for SystemServiceImpl {
     ) -> Result<Response<GetHealthResponse>, Status> {
         let req = request.into_inner();
         let components = req.components;
-        
+
         // Record metrics
         metrics::counter!("plexspaces_node_health_requests_total",
             "components_count" => components.len().to_string()
-        ).increment(1);
+        )
+        .increment(1);
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!("Health check requested (components: {:?})", components);
+            tracing::debug!("Health check requested (components: {:?})", components);
         }
-        
+
         // Use detailed health check (same as get_detailed_health but simpler response)
         let health = self
             .health_reporter
             .get_detailed_health(true) // Include non-critical for comprehensive health
             .await;
-        
+
         // Convert to GetHealthResponse (use component_checks, not dependency_checks)
         Ok(Response::new(GetHealthResponse {
             overall_status: health.overall_status,
@@ -184,7 +192,9 @@ impl SystemService for SystemServiceImpl {
             .get_detailed_health(include_non_critical)
             .await;
 
-        Ok(Response::new(GetDetailedHealthResponse { health: Some(health) }))
+        Ok(Response::new(GetDetailedHealthResponse {
+            health: Some(health),
+        }))
     }
 
     async fn liveness_probe(
@@ -233,7 +243,7 @@ impl SystemService for SystemServiceImpl {
         _request: Request<GetNodeReadinessRequest>,
     ) -> Result<Response<GetNodeReadinessResponse>, Status> {
         let readiness = self.health_reporter.get_readiness().await;
-        
+
         Ok(Response::new(GetNodeReadinessResponse {
             readiness: Some(readiness),
         }))
@@ -269,10 +279,8 @@ impl SystemService for SystemServiceImpl {
         let req = request.into_inner();
         let drain_timeout = req.drain_timeout;
 
-        let (requests_drained, drain_duration, drain_completed) = self
-            .health_reporter
-            .begin_shutdown(drain_timeout)
-            .await;
+        let (requests_drained, drain_duration, drain_completed) =
+            self.health_reporter.begin_shutdown(drain_timeout).await;
 
         Ok(Response::new(BeginShutdownResponse {
             requests_drained,
@@ -286,37 +294,44 @@ impl SystemService for SystemServiceImpl {
         request: Request<GetMetricsRequest>,
     ) -> Result<Response<GetMetricsResponse>, Status> {
         let _req = request.into_inner();
-        
+
         // Record metrics
         metrics::counter!("plexspaces_node_metrics_requests_total").increment(1);
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!("Metrics requested");
+            tracing::debug!("Metrics requested");
         }
-        
+
         // Get node stats if available
         // TODO: Access node stats through ServiceLocator instead of direct Node reference
         let _stats: Option<()> = None; // Node stats not available without Node dependency
-        
+
         // Get system info using sysinfo
         use sysinfo::System;
         let mut system = System::new();
         system.refresh_all();
-        
+
         let total_memory = system.total_memory();
         let used_memory = system.used_memory();
         let available_memory = system.available_memory();
         let cpu_count = system.cpus().len() as u32;
         let cpu_usage = if cpu_count > 0 {
-            system.cpus().iter().map(|cpu| cpu.cpu_usage() as f64).sum::<f64>() / cpu_count as f64
+            system
+                .cpus()
+                .iter()
+                .map(|cpu| cpu.cpu_usage() as f64)
+                .sum::<f64>()
+                / cpu_count as f64
         } else {
             0.0
         };
-        
+
         // Build SystemMetrics from node stats and system info
-        use plexspaces_proto::metrics::v1::{SystemMetrics, CpuMetrics, MemoryMetrics, ComponentMetrics};
+        use plexspaces_proto::metrics::v1::{
+            ComponentMetrics, CpuMetrics, MemoryMetrics, SystemMetrics,
+        };
         use plexspaces_proto::prost_types;
         use std::collections::HashMap;
-        
+
         // Get load averages (sysinfo supports this on Unix systems)
         let (load_avg_1m, load_avg_5m, load_avg_15m) = if cfg!(unix) {
             // sysinfo doesn't have load_average() method, so we'll use 0.0 for now
@@ -325,11 +340,11 @@ impl SystemService for SystemServiceImpl {
         } else {
             (0.0, 0.0, 0.0) // Windows doesn't support load averages
         };
-        
+
         // Get active processes count
         system.refresh_processes();
         let active_processes = system.processes().len() as i32;
-        
+
         // Build CPU metrics
         let cpu_metrics = CpuMetrics {
             usage_percent: cpu_usage,
@@ -338,7 +353,7 @@ impl SystemService for SystemServiceImpl {
             load_average_15m: load_avg_15m,
             active_processes,
         };
-        
+
         // Get cached memory (available on Unix systems)
         let cached_mb = if cfg!(unix) {
             // On Unix, cached memory is part of available memory
@@ -347,7 +362,7 @@ impl SystemService for SystemServiceImpl {
         } else {
             0 // Windows doesn't expose cached memory separately
         };
-        
+
         // Build memory metrics (convert bytes to MB)
         let memory_metrics = MemoryMetrics {
             total_mb: total_memory / (1024 * 1024),
@@ -360,23 +375,23 @@ impl SystemService for SystemServiceImpl {
                 0.0
             },
         };
-        
+
         // TupleSpace was removed per refactoring - set to 0
         let tuplespace_size = 0u64;
-        
+
         // Get VM count (check if node has VM registry)
         // TODO: Add VM registry accessor method when VM tracking is implemented
         // For now, return 0 as VM tracking is not yet integrated
         let active_vms = 0;
-        
+
         // Build component metrics
         let mut active_actors_by_type = HashMap::new();
         active_actors_by_type.insert("standard".to_string(), 0); // TODO: Get from ServiceLocator
-        
+
         // Get subscription and transaction counts (TODO: Track these when subscriptions/transactions are implemented)
         let active_subscriptions = 0; // TODO: Track subscriptions when subscription system is implemented
         let active_transactions = 0; // TODO: Track transactions when transaction system is implemented
-        
+
         let component_metrics = ComponentMetrics {
             active_actors_by_type,
             active_vms,
@@ -384,7 +399,7 @@ impl SystemService for SystemServiceImpl {
             active_subscriptions,
             active_transactions,
         };
-        
+
         let system_metrics = SystemMetrics {
             timestamp: Some(prost_types::Timestamp {
                 seconds: chrono::Utc::now().timestamp(),
@@ -399,7 +414,7 @@ impl SystemService for SystemServiceImpl {
                 let total_disk_bytes: u64 = disks.iter().map(|d| d.total_space()).sum();
                 let available_disk_bytes: u64 = disks.iter().map(|d| d.available_space()).sum();
                 let used_disk_bytes = total_disk_bytes.saturating_sub(available_disk_bytes);
-                
+
                 if total_disk_bytes > 0 {
                     Some(plexspaces_proto::metrics::v1::DiskMetrics {
                         total_gb: total_disk_bytes / (1024 * 1024 * 1024),
@@ -410,7 +425,7 @@ impl SystemService for SystemServiceImpl {
                         } else {
                             0.0
                         },
-                        read_ops_per_sec: 0, // sysinfo doesn't provide this
+                        read_ops_per_sec: 0,  // sysinfo doesn't provide this
                         write_ops_per_sec: 0, // sysinfo doesn't provide this
                     })
                 } else {
@@ -422,7 +437,7 @@ impl SystemService for SystemServiceImpl {
                 use sysinfo::Networks;
                 let mut networks = Networks::new_with_refreshed_list();
                 networks.refresh();
-                
+
                 // Note: sysinfo doesn't provide packet counts directly
                 // We calculate bytes for potential future use, but don't use them in return value
                 // (per-second metrics would need delta calculation from previous values)
@@ -430,27 +445,27 @@ impl SystemService for SystemServiceImpl {
                 let mut _total_bytes_sent = 0u64;
                 let _total_packets_received = 0u64;
                 let _total_packets_sent = 0u64;
-                
+
                 for (_interface_name, network) in networks.iter() {
                     _total_bytes_received += network.received();
                     _total_bytes_sent += network.transmitted();
                     // sysinfo doesn't provide packet counts directly
                 }
-                
+
                 // Note: sysinfo provides cumulative stats, not per-second
                 // For per-second, we'd need to track previous values and calculate delta
                 // For now, return 0 for per-second metrics
                 Some(plexspaces_proto::metrics::v1::NetworkMetrics {
-                    bytes_received_per_sec: 0, // Would need delta calculation
-                    bytes_sent_per_sec: 0, // Would need delta calculation
+                    bytes_received_per_sec: 0,   // Would need delta calculation
+                    bytes_sent_per_sec: 0,       // Would need delta calculation
                     packets_received_per_sec: 0, // sysinfo doesn't provide
-                    packets_sent_per_sec: 0, // sysinfo doesn't provide
-                    active_connections: 0, // TODO: Get from ServiceLocator
+                    packets_sent_per_sec: 0,     // sysinfo doesn't provide
+                    active_connections: 0,       // TODO: Get from ServiceLocator
                 })
             },
             components: Some(component_metrics),
         };
-        
+
         Ok(Response::new(GetMetricsResponse {
             metrics: vec![system_metrics],
         }))
@@ -463,28 +478,29 @@ impl SystemService for SystemServiceImpl {
         let req = request.into_inner();
         let key_pattern = req.key_pattern;
         let _include_secrets = req.include_secrets;
-        
+
         // Record metrics
         metrics::counter!("plexspaces_node_config_requests_total",
             "key_pattern" => key_pattern.clone()
-        ).increment(1);
+        )
+        .increment(1);
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!("Config retrieval requested (pattern: {})", key_pattern);
+            tracing::debug!("Config retrieval requested (pattern: {})", key_pattern);
         }
-        
+
         // Get node config if available via ServiceLocator::get_node_config()
         let mut settings: Vec<plexspaces_proto::system::v1::ConfigSetting> = vec![];
-        
+
         // Filter by pattern if provided
         if !key_pattern.is_empty() {
             // Simple glob matching (supports * wildcard)
             let pattern = key_pattern.replace("*", ".*");
             let regex = Regex::new(&format!("^{}$", pattern))
                 .map_err(|e| Status::invalid_argument(format!("Invalid key pattern: {}", e)))?;
-            
+
             settings.retain(|s: &_| regex.is_match(&s.key));
         }
-        
+
         Ok(Response::new(GetConfigResponse { settings }))
     }
 
@@ -493,18 +509,19 @@ impl SystemService for SystemServiceImpl {
         request: Request<SetConfigRequest>,
     ) -> Result<Response<SetConfigResponse>, Status> {
         let req = request.into_inner();
-        
+
         // Record metrics
         metrics::counter!("plexspaces_node_config_updates_total",
             "settings_count" => req.settings.len().to_string()
-        ).increment(1);
+        )
+        .increment(1);
         tracing::info!("Config update requested ({} settings)", req.settings.len());
-        
+
         // For now, config updates are read-only (NodeConfig is immutable after creation)
         // In the future, we could support dynamic config updates
         // For now, return error indicating config is read-only
         Err(Status::failed_precondition(
-            "Configuration is read-only. Node configuration must be set at startup."
+            "Configuration is read-only. Node configuration must be set at startup.",
         ))
     }
 
@@ -513,13 +530,13 @@ impl SystemService for SystemServiceImpl {
         request: Request<GetLogsRequest>,
     ) -> Result<Response<GetLogsResponse>, Status> {
         let _req = request.into_inner();
-        
+
         // Record metrics
         metrics::counter!("plexspaces_node_logs_requests_total").increment(1);
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!("Log retrieval requested");
+            tracing::debug!("Log retrieval requested");
         }
-        
+
         // For now, log retrieval is not implemented
         // In the future, we could integrate with a log aggregation system
         // or return recent logs from memory buffer
@@ -534,18 +551,19 @@ impl SystemService for SystemServiceImpl {
         request: Request<CreateBackupRequest>,
     ) -> Result<Response<CreateBackupResponse>, Status> {
         let req = request.into_inner();
-        
+
         // Record metrics
         use plexspaces_proto::system::v1::BackupInfo;
         metrics::counter!("plexspaces_node_backup_requests_total",
             "backup_type" => req.r#type.to_string()
-        ).increment(1);
+        )
+        .increment(1);
         tracing::info!("Backup creation requested (type: {})", req.r#type);
-        
+
         // For now, backup creation is not implemented
         // In the future, we could backup actor state, journal entries, etc.
         let backup_id = format!("backup-{}", ulid::Ulid::new());
-        
+
         let backup = BackupInfo {
             id: backup_id,
             r#type: req.r#type,
@@ -571,7 +589,7 @@ impl SystemService for SystemServiceImpl {
             components: req.components.clone(),
             error: String::new(),
         };
-        
+
         Ok(Response::new(CreateBackupResponse {
             backup: Some(backup),
         }))
@@ -584,9 +602,9 @@ impl SystemService for SystemServiceImpl {
         // Record metrics
         metrics::counter!("plexspaces_node_backup_list_requests_total").increment(1);
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!("Backup listing requested");
+            tracing::debug!("Backup listing requested");
         }
-        
+
         // For now, return empty list (no backups implemented yet)
         use plexspaces_proto::common::v1::PageResponse;
         Ok(Response::new(ListBackupsResponse {
@@ -607,22 +625,22 @@ impl SystemService for SystemServiceImpl {
         // Record metrics
         metrics::counter!("plexspaces_node_shutdown_status_requests_total").increment(1);
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!("Shutdown status requested");
+            tracing::debug!("Shutdown status requested");
         }
-        
+
         // Get shutdown state from health reporter
         let state = self.health_reporter.get_state().await;
-        
-        use plexspaces_proto::system::v1::{ShutdownStatus, ShutdownPhase, ShutdownSignal};
-        
+
+        use plexspaces_proto::system::v1::{ShutdownPhase, ShutdownSignal, ShutdownStatus};
+
         use std::time::SystemTime;
-        
+
         let phase = if state.shutdown_in_progress {
             ShutdownPhase::ShutdownPhaseDraining as i32
         } else {
             ShutdownPhase::ShutdownPhaseRunning as i32
         };
-        
+
         // Calculate elapsed time if shutdown has started
         let elapsed = if let Some(started_at) = &state.state_entered_at {
             if state.shutdown_in_progress {
@@ -645,7 +663,7 @@ impl SystemService for SystemServiceImpl {
         } else {
             None
         };
-        
+
         let status = ShutdownStatus {
             phase,
             signal: ShutdownSignal::ShutdownSignalUnspecified as i32,
@@ -660,7 +678,7 @@ impl SystemService for SystemServiceImpl {
             completed: !state.shutdown_in_progress, // Completed if not in progress
             error: String::new(),
         };
-        
+
         Ok(Response::new(GetShutdownStatusResponse {
             status: Some(status),
         }))
@@ -671,16 +689,22 @@ impl SystemService for SystemServiceImpl {
         request: Request<RestoreBackupRequest>,
     ) -> Result<Response<RestoreBackupResponse>, Status> {
         let req = request.into_inner();
-        
+
         // Record metrics
         metrics::counter!("plexspaces_node_backup_restore_requests_total",
             "backup_id" => req.backup_id.clone()
-        ).increment(1);
-        tracing::info!("Backup restoration requested (backup_id: {})", req.backup_id);
-        
+        )
+        .increment(1);
+        tracing::info!(
+            "Backup restoration requested (backup_id: {})",
+            req.backup_id
+        );
+
         // For now, backup restoration is not implemented
         // In the future, we could restore actor state, journal entries, etc.
-        Err(Status::unimplemented("Backup restoration not yet implemented"))
+        Err(Status::unimplemented(
+            "Backup restoration not yet implemented",
+        ))
     }
 
     async fn shutdown(
@@ -688,28 +712,33 @@ impl SystemService for SystemServiceImpl {
         request: Request<ShutdownRequest>,
     ) -> Result<Response<ShutdownResponse>, Status> {
         let req = request.into_inner();
-        
+
         // Record metrics
         metrics::counter!("plexspaces_node_shutdown_requests_total",
             "graceful" => req.graceful.to_string()
-        ).increment(1);
+        )
+        .increment(1);
         tracing::info!("Shutdown requested (graceful: {})", req.graceful);
-        
+
         // Trigger shutdown via health reporter
         let drain_timeout = req.timeout;
-        
-        let (requests_drained, drain_duration, drain_completed) = self
-            .health_reporter
-            .begin_shutdown(drain_timeout)
-            .await;
+
+        let (requests_drained, drain_duration, drain_completed) =
+            self.health_reporter.begin_shutdown(drain_timeout).await;
         // Node shutdown is handled via ServiceLocator::request_shutdown()
-        
+
         Ok(Response::new(ShutdownResponse {
             success: drain_completed,
             message: if drain_completed {
-                format!("Shutdown completed successfully. Drained {} requests in {:?}", requests_drained, drain_duration)
+                format!(
+                    "Shutdown completed successfully. Drained {} requests in {:?}",
+                    requests_drained, drain_duration
+                )
             } else {
-                format!("Shutdown initiated. Drained {} requests (timeout reached)", requests_drained)
+                format!(
+                    "Shutdown initiated. Drained {} requests (timeout reached)",
+                    requests_drained
+                )
             },
         }))
     }
@@ -719,7 +748,7 @@ impl SystemService for SystemServiceImpl {
 mod tests {
     use super::*;
     use plexspaces_core::PlexSpacesHealthReporter;
-    use plexspaces_proto::system::v1::{HealthProbeConfig, DependencyRegistrationConfig};
+    use plexspaces_proto::system::v1::{DependencyRegistrationConfig, HealthProbeConfig};
 
     #[tokio::test]
     async fn test_liveness_probe() {
@@ -778,7 +807,7 @@ mod tests {
         // Create HealthService without ServiceLocator for standalone tests
         let (reporter, _) = PlexSpacesHealthReporter::with_config_and_service_locator(config, None);
         let reporter = Arc::new(reporter);
-        
+
         // Mark startup complete
         reporter.mark_startup_complete(None).await;
 
@@ -850,4 +879,3 @@ mod tests {
         assert!(health.dependency_checks.is_empty()); // No checkers registered yet
     }
 }
-

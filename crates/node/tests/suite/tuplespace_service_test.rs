@@ -30,9 +30,9 @@
 //! - Check existence
 //! - Error handling (invalid patterns, not found, etc.)
 
-use plexspaces_services::tuple_service::TupleSpaceServiceImpl;
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::{common::v1::Empty, tuplespace::v1::*, TupleSpaceService};
+use plexspaces_services::tuple_service::TupleSpaceServiceImpl;
 use plexspaces_tuplespace::{
     Pattern, PatternField, Tuple as InternalTuple, TupleField as InternalTupleField,
 };
@@ -122,7 +122,11 @@ async fn test_write_tuple_via_grpc() {
         PatternField::Exact(InternalTupleField::Integer(2)),
         PatternField::Exact(InternalTupleField::Integer(3)),
     ]);
-    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let tuplespace = node
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
+        .unwrap();
     let found: Vec<InternalTuple> = tuplespace.read(&pattern).await.unwrap();
     assert!(!found.is_empty());
 }
@@ -137,7 +141,11 @@ async fn test_read_tuple_via_grpc() {
         InternalTupleField::Integer(10),
         InternalTupleField::String("test".to_string()),
     ]);
-    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let tuplespace = node
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
+        .unwrap();
     let _: Result<(), _> = tuplespace.write(tuple).await;
 
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
@@ -172,7 +180,11 @@ async fn test_read_tuple_via_grpc() {
         PatternField::Exact(InternalTupleField::Integer(10)),
         PatternField::Wildcard,
     ]);
-    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let tuplespace = node
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
+        .unwrap();
     let still_there: Vec<InternalTuple> = tuplespace.read(&verify_pattern).await.unwrap();
     assert!(!still_there.is_empty());
 }
@@ -186,7 +198,11 @@ async fn test_take_tuple_via_grpc() {
         InternalTupleField::Integer(20),
         InternalTupleField::String("remove-me".to_string()),
     ]);
-    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let tuplespace = node
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
+        .unwrap();
     let _: Result<(), _> = tuplespace.write(tuple).await;
 
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
@@ -220,7 +236,11 @@ async fn test_take_tuple_via_grpc() {
         PatternField::Exact(InternalTupleField::Integer(20)),
         PatternField::Wildcard,
     ]);
-    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let tuplespace = node
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
+        .unwrap();
     let remaining: Vec<InternalTuple> = tuplespace.read(&verify_pattern).await.unwrap();
     assert!(remaining.is_empty());
 }
@@ -230,7 +250,7 @@ async fn test_tuplespace_service_does_not_use_internal_context() {
     // Test that TupleSpace service methods do NOT fallback to RequestContext::internal()
     // Even when auth is disabled, we should use defaults from NodeConfig, not internal()
     // This ensures tenant isolation - operations must have valid tenant context
-    
+
     let node = Arc::new(NodeBuilder::new("test-node-context").build().await);
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
 
@@ -239,7 +259,7 @@ async fn test_tuplespace_service_does_not_use_internal_context() {
         tuples: vec![create_int_tuple(vec![1, 2, 3])],
         transaction_id: String::new(),
     });
-    
+
     // When auth is disabled, request_context_from_grpc_request uses defaults from NodeConfig
     // This is acceptable - the key is that we don't use RequestContext::internal() as fallback
     // The fix ensures we return an error if context extraction fails, not use internal()
@@ -250,17 +270,27 @@ async fn test_tuplespace_service_does_not_use_internal_context() {
     // Assert - should succeed (using defaults when auth disabled is OK)
     // The important fix is that we removed the unwrap_or_else(|_| RequestContext::internal()) fallback
     // If context extraction fails, we now return an error instead of silently using internal()
-    assert!(response.is_ok(), "Request should succeed with default context when auth disabled");
-    
+    assert!(
+        response.is_ok(),
+        "Request should succeed with default context when auth disabled"
+    );
+
     // Verify the tuple was written (proves context was used, not internal())
     let pattern = Pattern::new(vec![
         PatternField::Exact(InternalTupleField::Integer(1)),
         PatternField::Exact(InternalTupleField::Integer(2)),
         PatternField::Exact(InternalTupleField::Integer(3)),
     ]);
-    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let tuplespace = node
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
+        .unwrap();
     let found: Vec<InternalTuple> = tuplespace.read(&pattern).await.unwrap();
-    assert!(!found.is_empty(), "Tuple should be written with proper context");
+    assert!(
+        !found.is_empty(),
+        "Tuple should be written with proper context"
+    );
 }
 
 #[tokio::test]
@@ -274,8 +304,12 @@ async fn test_count_tuples_via_grpc() {
             InternalTupleField::String("sensor".to_string()),
             InternalTupleField::Integer(i),
         ]);
-        let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
-    let _: Result<(), _> = tuplespace.write(tuple).await;
+        let tuplespace = node
+            .service_locator()
+            .get_tuplespace_provider()
+            .await
+            .unwrap();
+        let _: Result<(), _> = tuplespace.write(tuple).await;
     }
 
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
@@ -311,7 +345,11 @@ async fn test_exists_tuples_via_grpc() {
         InternalTupleField::String("timeout".to_string()),
         InternalTupleField::Integer(30),
     ]);
-    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let tuplespace = node
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
+        .unwrap();
     let _: Result<(), _> = tuplespace.write(tuple).await;
 
     let service = TupleSpaceServiceImpl::new(node.service_locator().clone());
@@ -357,7 +395,11 @@ async fn test_read_with_wildcard_pattern() {
     let node = Arc::new(NodeBuilder::new("test-node-6").build().await);
 
     // Write tuples
-    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let tuplespace = node
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
+        .unwrap();
     let _: Result<(), _> = tuplespace
         .write(InternalTuple::new(vec![
             InternalTupleField::String("user".to_string()),
@@ -579,7 +621,11 @@ async fn test_clear_tuplespace() {
     let node = Arc::new(NodeBuilder::new("test-node-10").build().await);
 
     // Write tuples
-    let tuplespace = node.service_locator().get_tuplespace_provider().await.unwrap();
+    let tuplespace = node
+        .service_locator()
+        .get_tuplespace_provider()
+        .await
+        .unwrap();
     for i in 0..3 {
         let _: Result<(), _> = tuplespace
             .write(InternalTuple::new(vec![InternalTupleField::Integer(i)]))
@@ -600,7 +646,6 @@ async fn test_clear_tuplespace() {
     let remaining: Vec<InternalTuple> = tuplespace.read(&pattern).await.unwrap();
     assert!(remaining.is_empty());
 }
-
 
 /*
  * TODO: Barrier synchronization tests removed - barrier() gRPC RPC was intentionally removed

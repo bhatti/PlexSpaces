@@ -34,7 +34,10 @@ pub async fn list_worker_node_ids(
         .list_nodes(ctx, cluster, page_size, "")
         .await
         .map_err(|e| anyhow::anyhow!("list_nodes failed: {}", e))?;
-    Ok(nodes.into_iter().map(|n| n.node_id).collect::<Vec<String>>())
+    Ok(nodes
+        .into_iter()
+        .map(|n| n.node_id)
+        .collect::<Vec<String>>())
 }
 
 /// Spawn a (non-virtual) actor on a specific node by calling that node's SpawnActor.
@@ -61,8 +64,7 @@ pub async fn spawn_actor_on_node(
     labels: std::collections::HashMap<String, String>,
 ) -> Result<String> {
     use plexspaces_proto::actor::v1::{
-        actor_service_client::ActorServiceClient, SpawnActorRequest,
-        SpawnActorResponse,
+        actor_service_client::ActorServiceClient, SpawnActorRequest, SpawnActorResponse,
     };
 
     let channel = service_locator

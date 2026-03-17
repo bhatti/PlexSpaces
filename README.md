@@ -71,7 +71,7 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
   - **BulkUpdateShardGroup**: Bulk writes with eventual consistency (DPA UpdateFunction)
   - **MapShardGroup**: Parallel queries across all shards (DPA Map operator)
   - **ScatterGather**: Aggregation queries with fault tolerance (DPA Scatter-Gather)
-  - **Unified SDK**: `ParallelClient` and `UnifiedShardGroupClient` for both WASM/internal and gRPC (optional feature)
+  - **Unified SDK**: `ShardGroupClient` and `UnifiedShardGroupClient` for both WASM/internal and gRPC (optional feature)
   - **Resource-Based Routing**: Labels flow through to ActorResourceRequirements for intelligent node placement
 - **FaaS-Style Invocation**: HTTP-based actor invocation via `InvokeActor` RPC (GET for reads, POST/PUT for updates, DELETE for deletes)
   - **RESTful API**: `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` endpoint (or `/api/v1/actors/{namespace}/{actor_type}` without tenant_id)

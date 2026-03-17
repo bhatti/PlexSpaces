@@ -71,11 +71,7 @@ impl Default for ProcessGroupConfig {
 #[async_trait]
 pub trait ProcessGroupRegistry: Send + Sync {
     /// Create a new process group
-    async fn create_group(
-        &self,
-        ctx: &RequestContext,
-        group_name: &str,
-    ) -> Result<(), String>;
+    async fn create_group(&self, ctx: &RequestContext, group_name: &str) -> Result<(), String>;
 
     /// Join a process group
     async fn join_group(
@@ -109,10 +105,7 @@ pub trait ProcessGroupRegistry: Send + Sync {
     ) -> Result<Vec<String>, String>;
 
     /// List all groups
-    async fn list_groups(
-        &self,
-        ctx: &RequestContext,
-    ) -> Result<Vec<String>, String>;
+    async fn list_groups(&self, ctx: &RequestContext) -> Result<Vec<String>, String>;
 
     /// Publish message to group members
     async fn publish_to_group(
@@ -166,7 +159,11 @@ impl ProcessGroupFacet {
 
     /// Handle process group operations with observability
     #[instrument(skip(self, args), fields(operation = method))]
-    async fn handle_process_group_operation(&self, method: &str, args: &[u8]) -> Result<Vec<u8>, FacetError> {
+    async fn handle_process_group_operation(
+        &self,
+        method: &str,
+        args: &[u8],
+    ) -> Result<Vec<u8>, FacetError> {
         let start = Instant::now();
         // Create request context - process_groups facet doesn't have access to ServiceLocator or actor context
         // TODO: Extract tenant/namespace from actor context when available (similar to RegistryFacet)
@@ -176,20 +173,24 @@ impl ProcessGroupFacet {
         let result = match method {
             "create_group" => {
                 metrics::counter!("plexspaces_facet_process_groups_operations_total", "operation" => "create_group").increment(1);
-                
+
                 let group_name: String = serde_json::from_slice(args)
                     .map_err(|e| {
                         metrics::counter!("plexspaces_facet_process_groups_errors_total", "operation" => "create_group", "error" => "deserialization").increment(1);
                         FacetError::InvalidConfig(e.to_string())
                     })?;
 
-                match self.process_group_registry.create_group(&ctx, &group_name).await {
+                match self
+                    .process_group_registry
+                    .create_group(&ctx, &group_name)
+                    .await
+                {
                     Ok(()) => {
                         let duration = start.elapsed();
                         metrics::histogram!("plexspaces_facet_process_groups_operation_duration_seconds", "operation" => "create_group").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_process_groups_operations_success_total", "operation" => "create_group").increment(1);
                         debug!(group_name = %group_name, duration_ms = duration.as_millis(), "Process group created");
-                        
+
                         serde_json::to_vec(&json!({"status": "ok"}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -214,17 +215,22 @@ impl ProcessGroupFacet {
                 let args: JoinArgs = serde_json::from_slice(args)
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
-                let topics = args.topics
+                let topics = args
+                    .topics
                     .or_else(|| self.config.default_topics.clone())
                     .unwrap_or_default();
 
-                match self.process_group_registry.join_group(&ctx, &args.group_name, &args.actor_id, topics).await {
+                match self
+                    .process_group_registry
+                    .join_group(&ctx, &args.group_name, &args.actor_id, topics)
+                    .await
+                {
                     Ok(()) => {
                         let duration = start.elapsed();
                         metrics::histogram!("plexspaces_facet_process_groups_operation_duration_seconds", "operation" => "join_group").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_process_groups_operations_success_total", "operation" => "join_group").increment(1);
                         debug!(group_name = %args.group_name, actor_id = %args.actor_id, duration_ms = duration.as_millis(), "Actor joined process group");
-                        
+
                         serde_json::to_vec(&json!({"status": "ok"}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -248,13 +254,17 @@ impl ProcessGroupFacet {
                 let args: LeaveArgs = serde_json::from_slice(args)
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
-                match self.process_group_registry.leave_group(&ctx, &args.group_name, &args.actor_id).await {
+                match self
+                    .process_group_registry
+                    .leave_group(&ctx, &args.group_name, &args.actor_id)
+                    .await
+                {
                     Ok(()) => {
                         let duration = start.elapsed();
                         metrics::histogram!("plexspaces_facet_process_groups_operation_duration_seconds", "operation" => "leave_group").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_process_groups_operations_success_total", "operation" => "leave_group").increment(1);
                         debug!(group_name = %args.group_name, actor_id = %args.actor_id, duration_ms = duration.as_millis(), "Actor left process group");
-                        
+
                         serde_json::to_vec(&json!({"status": "ok"}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -269,21 +279,25 @@ impl ProcessGroupFacet {
             }
             "get_members" => {
                 metrics::counter!("plexspaces_facet_process_groups_operations_total", "operation" => "get_members").increment(1);
-                
+
                 let group_name: String = serde_json::from_slice(args)
                     .map_err(|e| {
                         metrics::counter!("plexspaces_facet_process_groups_errors_total", "operation" => "get_members", "error" => "deserialization").increment(1);
                         FacetError::InvalidConfig(e.to_string())
                     })?;
 
-                match self.process_group_registry.get_members(&ctx, &group_name).await {
+                match self
+                    .process_group_registry
+                    .get_members(&ctx, &group_name)
+                    .await
+                {
                     Ok(members) => {
                         let duration = start.elapsed();
                         metrics::histogram!("plexspaces_facet_process_groups_operation_duration_seconds", "operation" => "get_members").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_process_groups_operations_success_total", "operation" => "get_members").increment(1);
                         metrics::gauge!("plexspaces_facet_process_groups_member_count", "group" => group_name.clone()).set(members.len() as f64);
                         debug!(group_name = %group_name, member_count = members.len(), duration_ms = duration.as_millis(), "Retrieved process group members");
-                        
+
                         serde_json::to_vec(&json!({"members": members}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -298,20 +312,24 @@ impl ProcessGroupFacet {
             }
             "get_local_members" => {
                 metrics::counter!("plexspaces_facet_process_groups_operations_total", "operation" => "get_local_members").increment(1);
-                
+
                 let group_name: String = serde_json::from_slice(args)
                     .map_err(|e| {
                         metrics::counter!("plexspaces_facet_process_groups_errors_total", "operation" => "get_local_members", "error" => "deserialization").increment(1);
                         FacetError::InvalidConfig(e.to_string())
                     })?;
 
-                match self.process_group_registry.get_local_members(&ctx, &group_name).await {
+                match self
+                    .process_group_registry
+                    .get_local_members(&ctx, &group_name)
+                    .await
+                {
                     Ok(members) => {
                         let duration = start.elapsed();
                         metrics::histogram!("plexspaces_facet_process_groups_operation_duration_seconds", "operation" => "get_local_members").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_process_groups_operations_success_total", "operation" => "get_local_members").increment(1);
                         debug!(group_name = %group_name, member_count = members.len(), duration_ms = duration.as_millis(), "Retrieved local process group members");
-                        
+
                         serde_json::to_vec(&json!({"members": members}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -326,15 +344,20 @@ impl ProcessGroupFacet {
             }
             "list_groups" => {
                 metrics::counter!("plexspaces_facet_process_groups_operations_total", "operation" => "list_groups").increment(1);
-                
+
                 match self.process_group_registry.list_groups(&ctx).await {
                     Ok(groups) => {
                         let duration = start.elapsed();
                         metrics::histogram!("plexspaces_facet_process_groups_operation_duration_seconds", "operation" => "list_groups").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_process_groups_operations_success_total", "operation" => "list_groups").increment(1);
-                        metrics::gauge!("plexspaces_facet_process_groups_total_count").set(groups.len() as f64);
-                        debug!(group_count = groups.len(), duration_ms = duration.as_millis(), "Listed process groups");
-                        
+                        metrics::gauge!("plexspaces_facet_process_groups_total_count")
+                            .set(groups.len() as f64);
+                        debug!(
+                            group_count = groups.len(),
+                            duration_ms = duration.as_millis(),
+                            "Listed process groups"
+                        );
+
                         serde_json::to_vec(&json!({"groups": groups}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -362,12 +385,11 @@ impl ProcessGroupFacet {
                 // Convert message string to bytes (assume it's JSON for now)
                 let message_bytes = args.message.as_bytes().to_vec();
 
-                match self.process_group_registry.publish_to_group(
-                    &ctx,
-                    &args.group_name,
-                    args.topic.as_deref(),
-                    message_bytes,
-                ).await {
+                match self
+                    .process_group_registry
+                    .publish_to_group(&ctx, &args.group_name, args.topic.as_deref(), message_bytes)
+                    .await
+                {
                     Ok(recipients) => {
                         let duration = start.elapsed();
                         metrics::histogram!("plexspaces_facet_process_groups_operation_duration_seconds", "operation" => "publish_to_group").record(duration.as_secs_f64());
@@ -375,13 +397,13 @@ impl ProcessGroupFacet {
                         metrics::counter!("plexspaces_facet_process_groups_messages_published_total", "group" => args.group_name.clone()).increment(1);
                         metrics::gauge!("plexspaces_facet_process_groups_publish_recipient_count", "group" => args.group_name.clone()).set(recipients.len() as f64);
                         debug!(group_name = %args.group_name, recipient_count = recipients.len(), topic = ?args.topic, duration_ms = duration.as_millis(), "Message published to process group");
-                        
+
                         serde_json::to_vec(&json!({
                             "status": "ok",
                             "recipient_count": recipients.len(),
                             "recipients": recipients
                         }))
-                            .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
+                        .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
                     Err(e) => {
                         let duration = start.elapsed();
@@ -434,9 +456,13 @@ impl Facet for ProcessGroupFacet {
         args: &[u8],
     ) -> Result<InterceptResult, FacetError> {
         // Intercept process group operations
-        if method == "create_group" || method == "join_group" || method == "leave_group"
-            || method == "get_members" || method == "get_local_members"
-            || method == "list_groups" || method == "publish_to_group"
+        if method == "create_group"
+            || method == "join_group"
+            || method == "leave_group"
+            || method == "get_members"
+            || method == "get_local_members"
+            || method == "list_groups"
+            || method == "publish_to_group"
         {
             let result = self.handle_process_group_operation(method, args).await?;
             return Ok(InterceptResult::ShortCircuit(result));
@@ -460,13 +486,13 @@ impl Facet for ProcessGroupFacet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     // In-memory process group registry for testing
     struct TestProcessGroupRegistry {
         groups: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Vec<String>>>>,
         memberships: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Vec<String>>>>,
     }
-    
+
     impl TestProcessGroupRegistry {
         fn new() -> Self {
             Self {
@@ -475,7 +501,7 @@ mod tests {
             }
         }
     }
-    
+
     #[async_trait]
     impl ProcessGroupRegistry for TestProcessGroupRegistry {
         async fn create_group(
@@ -490,7 +516,7 @@ mod tests {
             groups.insert(group_name.to_string(), vec![]);
             Ok(())
         }
-        
+
         async fn join_group(
             &self,
             _ctx: &RequestContext,
@@ -499,14 +525,15 @@ mod tests {
             _topics: Vec<String>,
         ) -> Result<(), String> {
             let mut groups = self.groups.write().await;
-            let members = groups.get_mut(group_name)
+            let members = groups
+                .get_mut(group_name)
                 .ok_or_else(|| "Group not found".to_string())?;
             if !members.contains(&actor_id.to_string()) {
                 members.push(actor_id.to_string());
             }
             Ok(())
         }
-        
+
         async fn leave_group(
             &self,
             _ctx: &RequestContext,
@@ -514,12 +541,13 @@ mod tests {
             actor_id: &str,
         ) -> Result<(), String> {
             let mut groups = self.groups.write().await;
-            let members = groups.get_mut(group_name)
+            let members = groups
+                .get_mut(group_name)
                 .ok_or_else(|| "Group not found".to_string())?;
             members.retain(|id| id != actor_id);
             Ok(())
         }
-        
+
         async fn get_members(
             &self,
             _ctx: &RequestContext,
@@ -528,7 +556,7 @@ mod tests {
             let groups = self.groups.read().await;
             Ok(groups.get(group_name).cloned().unwrap_or_default())
         }
-        
+
         async fn get_local_members(
             &self,
             ctx: &RequestContext,
@@ -537,15 +565,12 @@ mod tests {
             // For test, same as get_members
             self.get_members(ctx, group_name).await
         }
-        
-        async fn list_groups(
-            &self,
-            _ctx: &RequestContext,
-        ) -> Result<Vec<String>, String> {
+
+        async fn list_groups(&self, _ctx: &RequestContext) -> Result<Vec<String>, String> {
             let groups = self.groups.read().await;
             Ok(groups.keys().cloned().collect())
         }
-        
+
         async fn publish_to_group(
             &self,
             ctx: &RequestContext,
@@ -571,7 +596,10 @@ mod tests {
         let create_args = serde_json::json!("test-group-1");
 
         let result = facet
-            .before_method("create_group", serde_json::to_vec(&create_args).unwrap().as_slice())
+            .before_method(
+                "create_group",
+                serde_json::to_vec(&create_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -592,7 +620,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("join_group", serde_json::to_vec(&join_args).unwrap().as_slice())
+            .before_method(
+                "join_group",
+                serde_json::to_vec(&join_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -609,7 +640,10 @@ mod tests {
         let get_members_args = serde_json::json!("test-group-1");
 
         let result = facet
-            .before_method("get_members", serde_json::to_vec(&get_members_args).unwrap().as_slice())
+            .before_method(
+                "get_members",
+                serde_json::to_vec(&get_members_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -635,16 +669,26 @@ mod tests {
 
         // ACT: Create group and join
         facet
-            .before_method("create_group", serde_json::to_vec(&serde_json::json!("test-group-2")).unwrap().as_slice())
+            .before_method(
+                "create_group",
+                serde_json::to_vec(&serde_json::json!("test-group-2"))
+                    .unwrap()
+                    .as_slice(),
+            )
             .await
             .unwrap();
 
         facet
-            .before_method("join_group", serde_json::to_vec(&serde_json::json!({
-                "group_name": "test-group-2",
-                "actor_id": "actor-2",
-                "topics": []
-            })).unwrap().as_slice())
+            .before_method(
+                "join_group",
+                serde_json::to_vec(&serde_json::json!({
+                    "group_name": "test-group-2",
+                    "actor_id": "actor-2",
+                    "topics": []
+                }))
+                .unwrap()
+                .as_slice(),
+            )
             .await
             .unwrap();
 
@@ -656,7 +700,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("publish_to_group", serde_json::to_vec(&publish_args).unwrap().as_slice())
+            .before_method(
+                "publish_to_group",
+                serde_json::to_vec(&publish_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 

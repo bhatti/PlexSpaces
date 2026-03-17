@@ -22,9 +22,9 @@
 //! The ServiceLocator trait is defined in `service_locator_trait.rs`.
 //! The ServiceLocatorImpl implementation is in `plexspaces-services` crate.
 
-use std::sync::Arc;
 use crate::service_locator_trait::ServiceLocator as ServiceLocatorTrait;
 use crate::RequestContext;
+use std::sync::Arc;
 
 /// Helper function to create RequestContext from gRPC request metadata
 ///
@@ -54,36 +54,40 @@ pub async fn request_context_from_grpc_request(
 ) -> Result<RequestContext, plexspaces_common::RequestContextError> {
     // Auth enabled comes from SecurityConfig (disable_auth), not from header presence
     let auth_enabled = !service_locator.is_auth_disabled().await;
-    
+
     // NOTE: default_tenant_id and default_namespace have been removed from NodeConfig.
     // Tenant comes from auth (JWT/mTLS); namespace from application/actor or request.
-    
+
     // Extract tenant_id - RequestContext::from_auth will validate based on auth_enabled
-    let tenant_id_from_header = metadata.get("x-tenant-id")
+    let tenant_id_from_header = metadata
+        .get("x-tenant-id")
         .and_then(|v| v.to_str().ok())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
-    let tenant_id_from_labels = labels.get("tenant_id")
+    let tenant_id_from_labels = labels
+        .get("tenant_id")
         .filter(|s| !s.is_empty())
         .map(|s| s.clone());
-    
+
     // Extract namespace - can be empty, RequestContext::from_auth handles defaults
-    let namespace_from_header = metadata.get("x-namespace")
+    let namespace_from_header = metadata
+        .get("x-namespace")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let namespace_from_labels = labels.get("namespace")
-        .map(|s| s.clone());
-    
+    let namespace_from_labels = labels.get("namespace").map(|s| s.clone());
+
     // Extract user_id and admin from metadata
-    let user_id = metadata.get("x-user-id")
+    let user_id = metadata
+        .get("x-user-id")
         .and_then(|v| v.to_str().ok())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
-    let admin = metadata.get("x-admin")
+    let admin = metadata
+        .get("x-admin")
         .and_then(|v| v.to_str().ok())
         .map(|s| s == "true" || s == "1")
         .unwrap_or(false);
-    
+
     // Use shared validation from RequestContext::from_auth
     // This validates tenant_id if auth_enabled, otherwise allows empty tenant_id
     // No defaults from NodeConfig - tenant/namespace must come from request
@@ -97,4 +101,3 @@ pub async fn request_context_from_grpc_request(
         None, // No default namespace - must come from request
     )
 }
-

@@ -38,12 +38,21 @@
 
 #[cfg(feature = "component-model")]
 use crate::HostFunctions;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use plexspaces_core::{ActorId, RequestContext, TupleSpaceProvider, LockManager};
-use plexspaces_core::actor_id::parse_actor_id;
-use plexspaces_tuplespace::{OrderedFloat, Tuple, TupleField, Pattern, PatternField};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use plexspaces_blob::BlobService;
+use plexspaces_core::actor_id::parse_actor_id;
+use plexspaces_core::{ActorId, LockManager, RequestContext, TupleSpaceProvider};
 use plexspaces_locks::{AcquireLockOptions, RenewLockOptions};
+use plexspaces_proto::actor::v1::{
+    BulkUpdateShardGroupRequest, ConsistencyLevel, CreateShardGroupRequest, DataParallelConfig,
+    NodePlacement, NodePlacementStrategy, PartitionStrategy, RebalancePolicy, ScatterGatherRequest,
+    ShardGroupAggregationStrategy,
+};
+use plexspaces_proto::application::v1::{ApplicationInfo, ApplicationMetrics};
+use plexspaces_proto::common::v1::Message;
+use plexspaces_proto::prost_types::Duration;
+use plexspaces_tuplespace::{OrderedFloat, Pattern, PatternField, Tuple, TupleField};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use wasmtime::Result as WasmtimeResult;
@@ -135,8 +144,8 @@ impl SimpleHostImpl {
 
     /// Parse tuple_json (JSON array of strings/numbers) into Tuple for existing TupleSpaceProvider.write
     fn parse_tuple_json(tuple_json: &str) -> Result<Tuple, String> {
-        let arr: Vec<serde_json::Value> = serde_json::from_str(tuple_json)
-            .map_err(|e| format!("invalid tuple JSON: {}", e))?;
+        let arr: Vec<serde_json::Value> =
+            serde_json::from_str(tuple_json).map_err(|e| format!("invalid tuple JSON: {}", e))?;
         let mut fields = Vec::with_capacity(arr.len());
         for v in arr {
             let field = match v {
@@ -189,16 +198,200 @@ impl SimpleHostImpl {
 
     /// Convert Tuple to JSON string for returning to WASM
     fn tuple_to_json(tuple: &Tuple) -> String {
-        let arr: Vec<serde_json::Value> = tuple.fields().iter().map(|f| match f {
-            TupleField::String(s) => serde_json::Value::String(s.clone()),
-            TupleField::Integer(i) => serde_json::Value::Number((*i).into()),
-            TupleField::Float(f) => serde_json::Value::Number(serde_json::Number::from_f64(f.get()).unwrap_or(serde_json::Number::from(0))),
-            TupleField::Boolean(b) => serde_json::Value::Bool(*b),
-            TupleField::Null => serde_json::Value::Null,
-            TupleField::Binary(b) => serde_json::Value::String(BASE64_STANDARD.encode(b)),
-        }).collect();
+        let arr: Vec<serde_json::Value> = tuple
+            .fields()
+            .iter()
+            .map(|f| match f {
+                TupleField::String(s) => serde_json::Value::String(s.clone()),
+                TupleField::Integer(i) => serde_json::Value::Number((*i).into()),
+                TupleField::Float(f) => serde_json::Value::Number(
+                    serde_json::Number::from_f64(f.get()).unwrap_or(serde_json::Number::from(0)),
+                ),
+                TupleField::Boolean(b) => serde_json::Value::Bool(*b),
+                TupleField::Null => serde_json::Value::Null,
+                TupleField::Binary(b) => serde_json::Value::String(BASE64_STANDARD.encode(b)),
+            })
+            .collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".to_string())
     }
+}
+
+#[derive(Deserialize)]
+struct SimpleNodePlacement {
+    #[serde(default)]
+    strategy: Option<String>,
+    #[serde(default)]
+    cluster: String,
+    #[serde(default)]
+    node_ids: Vec<String>,
+    #[serde(default)]
+    required_labels: HashMap<String, String>,
+    #[serde(default)]
+    avoid_node_ids: Vec<String>,
+    #[serde(default)]
+    affinity_labels: HashMap<String, String>,
+}
+
+#[derive(Deserialize)]
+struct SimpleCreateShardGroupRequest {
+    group_id: String,
+    actor_type: String,
+    shard_count: u32,
+    #[serde(default)]
+    partition_strategy: Option<String>,
+    #[serde(default)]
+    rebalance_policy: Option<String>,
+    #[serde(default)]
+    placement: Option<SimpleNodePlacement>,
+    #[serde(default)]
+    initial_state: serde_json::Value,
+    #[serde(default)]
+    metadata: HashMap<String, String>,
+}
+
+#[derive(Deserialize)]
+struct SimpleBulkUpdateRequest {
+    group_id: String,
+    updates: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    consistency_level: Option<String>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    #[serde(default)]
+    wait_for_responses: bool,
+}
+
+#[derive(Deserialize)]
+struct SimpleScatterGatherRequest {
+    group_id: String,
+    query: serde_json::Value,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    #[serde(default)]
+    aggregation: Option<String>,
+    #[serde(default)]
+    min_responses: u32,
+}
+
+#[derive(Deserialize, Default)]
+struct SimpleApplicationMetricsPayload {
+    #[serde(default)]
+    actor_counts: HashMap<String, u64>,
+    #[serde(default)]
+    supervisor_count: u32,
+    #[serde(default)]
+    uptime_seconds: u64,
+    #[serde(default)]
+    message_count: u64,
+    #[serde(default)]
+    error_count: u64,
+    #[serde(default)]
+    counter_metrics: HashMap<String, u64>,
+    #[serde(default)]
+    latency_totals_ms: HashMap<String, u64>,
+    #[serde(default)]
+    latency_max_ms: HashMap<String, u64>,
+    #[serde(default)]
+    latency_samples: HashMap<String, u64>,
+}
+
+fn application_metrics_from_payload(
+    payload: SimpleApplicationMetricsPayload,
+) -> ApplicationMetrics {
+    ApplicationMetrics {
+        actor_counts: payload.actor_counts,
+        supervisor_count: payload.supervisor_count,
+        uptime_seconds: payload.uptime_seconds,
+        message_count: payload.message_count,
+        error_count: payload.error_count,
+        counter_metrics: payload.counter_metrics,
+        latency_totals_ms: payload.latency_totals_ms,
+        latency_max_ms: payload.latency_max_ms,
+        latency_samples: payload.latency_samples,
+    }
+}
+
+fn application_metrics_to_json(metrics: &ApplicationMetrics) -> serde_json::Value {
+    serde_json::json!({
+        "actor_counts": metrics.actor_counts,
+        "supervisor_count": metrics.supervisor_count,
+        "uptime_seconds": metrics.uptime_seconds,
+        "message_count": metrics.message_count,
+        "error_count": metrics.error_count,
+        "counter_metrics": metrics.counter_metrics,
+        "latency_totals_ms": metrics.latency_totals_ms,
+        "latency_max_ms": metrics.latency_max_ms,
+        "latency_samples": metrics.latency_samples,
+    })
+}
+
+fn application_info_to_json(info: &ApplicationInfo) -> serde_json::Value {
+    serde_json::json!({
+        "application_id": info.application_id,
+        "name": info.name,
+        "version": info.version,
+        "status": info.status,
+        "deployed_at": info.deployed_at.as_ref().map(|ts| serde_json::json!({
+            "seconds": ts.seconds,
+            "nanos": ts.nanos,
+        })),
+        "metrics": info.metrics.as_ref().map(application_metrics_to_json),
+    })
+}
+
+fn parse_node_placement_strategy(value: Option<&str>) -> NodePlacementStrategy {
+    match value.unwrap_or("same_node") {
+        "from_registry" => NodePlacementStrategy::NodePlacementStrategyFromRegistry,
+        "node_ids" => NodePlacementStrategy::NodePlacementStrategyNodeIds,
+        "same_node" => NodePlacementStrategy::NodePlacementStrategySameNode,
+        _ => NodePlacementStrategy::NodePlacementStrategySameNode,
+    }
+}
+
+fn parse_partition_strategy(value: Option<&str>) -> PartitionStrategy {
+    match value.unwrap_or("hash") {
+        "range" => PartitionStrategy::PartitionStrategyRange,
+        "consistent_hash" => PartitionStrategy::PartitionStrategyConsistentHash,
+        "custom" => PartitionStrategy::PartitionStrategyCustom,
+        _ => PartitionStrategy::PartitionStrategyHash,
+    }
+}
+
+fn parse_rebalance_policy(value: Option<&str>) -> RebalancePolicy {
+    match value.unwrap_or("none") {
+        "on_scale" => RebalancePolicy::RebalancePolicyOnScale,
+        "load_based" => RebalancePolicy::RebalancePolicyLoadBased,
+        _ => RebalancePolicy::RebalancePolicyNone,
+    }
+}
+
+fn parse_consistency_level(value: Option<&str>) -> ConsistencyLevel {
+    match value.unwrap_or("eventual") {
+        "causal" => ConsistencyLevel::ConsistencyLevelCausal,
+        "read_committed" => ConsistencyLevel::ConsistencyLevelReadCommitted,
+        "linearizable" => ConsistencyLevel::ConsistencyLevelLinearizable,
+        _ => ConsistencyLevel::ConsistencyLevelEventual,
+    }
+}
+
+fn parse_aggregation_strategy(value: Option<&str>) -> ShardGroupAggregationStrategy {
+    match value.unwrap_or("concat") {
+        "merge" => ShardGroupAggregationStrategy::ShardGroupAggregationMerge,
+        "first" => ShardGroupAggregationStrategy::ShardGroupAggregationFirst,
+        "majority" => ShardGroupAggregationStrategy::ShardGroupAggregationMajority,
+        _ => ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
+    }
+}
+
+fn make_call_message(payload: &serde_json::Value) -> Result<Message, String> {
+    let bytes = serde_json::to_vec(payload)
+        .map_err(|e| format!("failed to serialize message payload: {}", e))?;
+    Ok(Message {
+        id: ulid::Ulid::new().to_string(),
+        payload: bytes,
+        message_type: "call".to_string(),
+        ..Default::default()
+    })
 }
 
 /// Implement the simple-host interface
@@ -230,7 +423,9 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             let from = self_id.clone();
             let msg_type_clone = msg_type.clone();
             tokio::task::spawn(async move {
-                let _ = host_functions.send_message(&from, &from, &msg_type_clone, &payload_json).await;
+                let _ = host_functions
+                    .send_message(&from, &from, &msg_type_clone, &payload_json)
+                    .await;
             });
             metrics::counter!("plexspaces_wasm_simple_send_success_total").increment(1);
             return String::new();
@@ -263,29 +458,29 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             }
         }
     }
-    
+
     /// Log a message
     async fn log(&mut self, level: String, message: String) {
         metrics::counter!("plexspaces_wasm_simple_log_total").increment(1);
-        
+
         match level.to_lowercase().as_str() {
             "trace" => {
                 if tracing::enabled!(tracing::Level::TRACE) {
                     tracing::trace!(actor_id = %self.actor_id, "[WASM] {}", message);
                 }
-            },
+            }
             "debug" => {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(actor_id = %self.actor_id, "[WASM] {}", message);
                 }
-            },
+            }
             "info" => tracing::info!(actor_id = %self.actor_id, "[WASM] {}", message),
             "warn" | "warning" => tracing::warn!(actor_id = %self.actor_id, "[WASM] {}", message),
             "error" => tracing::error!(actor_id = %self.actor_id, "[WASM] {}", message),
             _ => tracing::info!(actor_id = %self.actor_id, level = %level, "[WASM] {}", message),
         }
     }
-    
+
     /// Get current timestamp in milliseconds
     async fn now_ms(&mut self) -> u64 {
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -294,7 +489,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     }
-    
+
     /// Key-value get (string-only). Returns value or empty if not found.
     /// WIT: plexspaces-simple-actor host.kv-get(key) -> string. Context uses tenant_id="", namespace=actor_id for key scoping.
     async fn kv_get(&mut self, key: String) -> String {
@@ -491,8 +686,12 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         };
         match provider.read(&pattern).await {
             Ok(tuples) => {
-                let arr: Vec<serde_json::Value> = tuples.iter()
-                    .map(|t| serde_json::from_str(&Self::tuple_to_json(t)).unwrap_or(serde_json::Value::Null))
+                let arr: Vec<serde_json::Value> = tuples
+                    .iter()
+                    .map(|t| {
+                        serde_json::from_str(&Self::tuple_to_json(t))
+                            .unwrap_or(serde_json::Value::Null)
+                    })
                     .collect();
                 serde_json::to_string(&arr).unwrap_or_else(|_| "[]".to_string())
             }
@@ -525,7 +724,11 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
                 return "ERROR: LockManager not available".to_string();
             }
         };
-        let lease_secs = if lease_duration_secs == 0 { 30 } else { lease_duration_secs };
+        let lease_secs = if lease_duration_secs == 0 {
+            30
+        } else {
+            lease_duration_secs
+        };
         tracing::debug!(
             actor_id = %self.actor_id,
             lock_name = %lock_name,
@@ -676,27 +879,30 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         };
         let ctx = RequestContext::new_without_auth(String::new(), self.actor_id.to_string());
         tracing::debug!(actor_id = %self.actor_id, name = %blob_id, data_len = decoded.len(), content_type = %content_type, "blob_upload: starting");
-        match blob_service.upload_blob(
-            &ctx,
-            &blob_id,
-            decoded,
-            Some(content_type.clone()),
-            None, // blob_group
-            None, // kind
-            HashMap::new(), // metadata
-            HashMap::new(), // tags
-            None, // expires_after
-        ).await {
+        match blob_service
+            .upload_blob(
+                &ctx,
+                &blob_id,
+                decoded,
+                Some(content_type.clone()),
+                None,           // blob_group
+                None,           // kind
+                HashMap::new(), // metadata
+                HashMap::new(), // tags
+                None,           // expires_after
+            )
+            .await
+        {
             Ok(metadata) => {
                 tracing::debug!(actor_id = %self.actor_id, name = %blob_id, internal_blob_id = %metadata.blob_id, "blob_upload: success");
                 // Return empty string on success (WIT convention)
                 // Callers use the name for download; internal blob_id is for debugging
                 String::new()
-            },
+            }
             Err(e) => {
                 tracing::warn!(actor_id = %self.actor_id, name = %blob_id, error = %e, "blob_upload: failed");
                 format!("ERROR: {}", e)
-            },
+            }
         }
     }
 
@@ -713,37 +919,37 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         };
         let ctx = RequestContext::new_without_auth(String::new(), self.actor_id.to_string());
         tracing::debug!(actor_id = %self.actor_id, blob_id = %blob_id, "blob_download: starting");
-        
+
         // First try by name (path) - common pattern for WASM actors
         match blob_service.download_blob_by_name(&ctx, &blob_id).await {
             Ok(data) => {
                 tracing::debug!(actor_id = %self.actor_id, blob_id = %blob_id, data_len = data.len(), "blob_download: success (by name)");
                 return BASE64_STANDARD.encode(&data);
-            },
+            }
             Err(plexspaces_blob::BlobError::NotFound(_)) => {
                 // Name not found, try by ID
                 tracing::debug!(actor_id = %self.actor_id, blob_id = %blob_id, "blob_download: not found by name, trying by ID");
-            },
+            }
             Err(e) => {
                 tracing::warn!(actor_id = %self.actor_id, blob_id = %blob_id, error = %e, "blob_download: name lookup failed");
                 // Continue to try by ID
-            },
+            }
         }
-        
+
         // Fall back to by ID (ULID) - for callers who have the internal blob_id
         match blob_service.download_blob(&ctx, &blob_id).await {
             Ok(data) => {
                 tracing::debug!(actor_id = %self.actor_id, blob_id = %blob_id, data_len = data.len(), "blob_download: success (by ID)");
                 BASE64_STANDARD.encode(&data)
-            },
+            }
             Err(plexspaces_blob::BlobError::NotFound(_)) => {
                 tracing::debug!(actor_id = %self.actor_id, blob_id = %blob_id, "blob_download: not found");
                 String::new() // Not found
-            },
+            }
             Err(e) => {
                 tracing::warn!(actor_id = %self.actor_id, blob_id = %blob_id, error = %e, "blob_download: failed");
                 format!("ERROR: {}", e)
-            },
+            }
         }
     }
 
@@ -760,36 +966,36 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         };
         let ctx = RequestContext::new_without_auth(String::new(), self.actor_id.to_string());
         tracing::debug!(actor_id = %self.actor_id, blob_id = %blob_id, "blob_delete: starting");
-        
+
         // First try by name (path) - common pattern for WASM actors
         match blob_service.delete_blob_by_name(&ctx, &blob_id).await {
             Ok(()) => {
                 tracing::debug!(actor_id = %self.actor_id, blob_id = %blob_id, "blob_delete: success (by name)");
                 return String::new();
-            },
+            }
             Err(plexspaces_blob::BlobError::NotFound(_)) => {
                 // Name not found, try by ID
                 tracing::debug!(actor_id = %self.actor_id, blob_id = %blob_id, "blob_delete: not found by name, trying by ID");
-            },
+            }
             Err(e) => {
                 tracing::warn!(actor_id = %self.actor_id, blob_id = %blob_id, error = %e, "blob_delete: name lookup failed");
                 // Continue to try by ID
-            },
+            }
         }
-        
+
         // Fall back to by ID (ULID) - for callers who have the internal blob_id
         match blob_service.delete_blob(&ctx, &blob_id).await {
             Ok(()) => {
                 tracing::debug!(actor_id = %self.actor_id, blob_id = %blob_id, "blob_delete: success (by ID)");
                 String::new()
-            },
+            }
             Err(plexspaces_blob::BlobError::NotFound(_)) => {
                 // Blob not found by either name or ID - return error
                 format!("ERROR: Blob not found: {}", blob_id)
-            },
+            }
             Err(e) => {
                 format!("ERROR: {}", e)
-            },
+            }
         }
     }
 
@@ -819,7 +1025,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Err(e) => {
                 tracing::warn!(actor_id = %self.actor_id, prefix = %prefix, error = %e, "blob_list: failed");
                 format!("ERROR: {}", e)
-            },
+            }
         }
     }
 
@@ -828,17 +1034,29 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     // ========================================================================
 
     /// Send request and wait for response. Delegates to HostFunctions::ask().
-    async fn ask(&mut self, to: String, msg_type: String, payload_json: String, timeout_ms: u64) -> String {
+    async fn ask(
+        &mut self,
+        to: String,
+        msg_type: String,
+        payload_json: String,
+        timeout_ms: u64,
+    ) -> String {
         let self_id = self.actor_id.to_string();
         tracing::debug!(
             actor_id = %self_id, to = %to, msg_type = %msg_type,
             timeout_ms = timeout_ms, "simple actor ask"
         );
-        match self.host_functions.ask(
-            &self_id, &to, &msg_type,
-            payload_json.into_bytes(),
-            timeout_ms,
-        ).await {
+        match self
+            .host_functions
+            .ask(
+                &self_id,
+                &to,
+                &msg_type,
+                payload_json.into_bytes(),
+                timeout_ms,
+            )
+            .await
+        {
             Ok(response_bytes) => String::from_utf8_lossy(&response_bytes).into_owned(),
             Err(e) => format!("ERROR: {}", e),
         }
@@ -863,23 +1081,36 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     /// If actor_id is empty, the framework generates a ULID-based ID automatically.
     /// Returns the actual spawned actor ID on success (important when auto-generated),
     /// or "ERROR:message" on failure.
-    async fn spawn(&mut self, module_ref: String, actor_id: String, init_config_json: String) -> String {
+    async fn spawn(
+        &mut self,
+        module_ref: String,
+        actor_id: String,
+        init_config_json: String,
+    ) -> String {
         metrics::counter!("plexspaces_wasm_spawn_total").increment(1);
         let self_id = self.actor_id.to_string();
         // Pass None for empty actor_id so the framework generates a ULID
-        let requested_id = if actor_id.is_empty() { None } else { Some(actor_id.clone()) };
+        let requested_id = if actor_id.is_empty() {
+            None
+        } else {
+            Some(actor_id.clone())
+        };
         tracing::debug!(
             actor_id = %self_id, module_ref = %module_ref,
             new_actor_id = %actor_id, "simple actor spawn"
         );
-        match self.host_functions.spawn_actor(
-            &self_id,
-            &module_ref,
-            init_config_json.into_bytes(),
-            requested_id,
-            vec![],  // labels not exposed in simple-actor WIT
-            false,   // durability configured at framework level via facets
-        ).await {
+        match self
+            .host_functions
+            .spawn_actor(
+                &self_id,
+                &module_ref,
+                init_config_json.into_bytes(),
+                requested_id,
+                vec![], // labels not exposed in simple-actor WIT
+                false,  // durability configured at framework level via facets
+            )
+            .await
+        {
             Ok(spawned_id) => {
                 metrics::counter!("plexspaces_wasm_spawn_success_total").increment(1);
                 tracing::debug!(
@@ -900,7 +1131,11 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     async fn stop(&mut self, actor_id: String) -> String {
         let self_id = self.actor_id.to_string();
         tracing::debug!(actor_id = %self_id, target = %actor_id, "simple actor stop");
-        match self.host_functions.stop_actor(&self_id, &actor_id, 5000).await {
+        match self
+            .host_functions
+            .stop_actor(&self_id, &actor_id, 5000)
+            .await
+        {
             Ok(()) => String::new(),
             Err(e) => format!("ERROR: {}", e),
         }
@@ -913,7 +1148,11 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     /// Bidirectional link
     async fn link(&mut self, actor_id: String) -> String {
         let self_id = self.actor_id.to_string();
-        match self.host_functions.link_actor(&self_id, &self_id, &actor_id).await {
+        match self
+            .host_functions
+            .link_actor(&self_id, &self_id, &actor_id)
+            .await
+        {
             Ok(()) => String::new(),
             Err(e) => format!("ERROR: {}", e),
         }
@@ -922,7 +1161,11 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     /// Remove bidirectional link
     async fn unlink(&mut self, actor_id: String) -> String {
         let self_id = self.actor_id.to_string();
-        match self.host_functions.unlink_actor(&self_id, &self_id, &actor_id).await {
+        match self
+            .host_functions
+            .unlink_actor(&self_id, &self_id, &actor_id)
+            .await
+        {
             Ok(()) => String::new(),
             Err(e) => format!("ERROR: {}", e),
         }
@@ -944,7 +1187,11 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Ok(id) => id,
             Err(_) => return format!("ERROR: invalid monitor ref: {}", monitor_ref),
         };
-        match self.host_functions.demonitor_actor(&self_id, "", ref_id).await {
+        match self
+            .host_functions
+            .demonitor_actor(&self_id, "", ref_id)
+            .await
+        {
             Ok(()) => String::new(),
             Err(e) => format!("ERROR: {}", e),
         }
@@ -958,14 +1205,21 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     /// Spawns a tracked background task that delivers the message after delay_ms.
     /// Returns a timer-id for observability. The JoinHandle is stored in pending_timers
     /// so it can be joined/aborted when the actor stops (cleanup via drop or explicit stop).
-    async fn send_after(&mut self, delay_ms: u64, msg_type: String, payload_json: String) -> String {
+    async fn send_after(
+        &mut self,
+        delay_ms: u64,
+        msg_type: String,
+        payload_json: String,
+    ) -> String {
         metrics::counter!("plexspaces_wasm_send_after_total").increment(1);
         let host_functions = self.host_functions.clone();
         let self_id = self.actor_id.to_string();
         let from = self_id.clone();
 
         // Generate unique timer ID using actor ID + monotonic nanos
-        let timer_id = format!("timer-{}-{}", self_id,
+        let timer_id = format!(
+            "timer-{}-{}",
+            self_id,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos())
@@ -984,7 +1238,10 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         // Spawn tracked background task
         let handle = tokio::task::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-            if let Err(e) = host_functions.send_message(&from, &from, &msg_type, &payload_json).await {
+            if let Err(e) = host_functions
+                .send_message(&from, &from, &msg_type, &payload_json)
+                .await
+            {
                 tracing::warn!(
                     actor_id = %from, timer_id = %timer_id_for_task,
                     error = %e, "send_after: delivery failed"
@@ -1001,7 +1258,10 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         });
 
         // Store JoinHandle for cleanup on actor stop
-        self.pending_timers.write().await.insert(timer_id.clone(), handle);
+        self.pending_timers
+            .write()
+            .await
+            .insert(timer_id.clone(), handle);
         timer_id
     }
 
@@ -1015,17 +1275,26 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         let ctx = self.pg_context();
         match self.host_functions.process_group_registry() {
             Some(registry) => {
-                match registry.join_group(&ctx, &group_name, &self_id, vec![]).await {
+                match registry
+                    .join_group(&ctx, &group_name, &self_id, vec![])
+                    .await
+                {
                     Ok(()) => String::new(),
                     Err(plexspaces_process_groups::ProcessGroupError::GroupNotFound(_)) => {
                         // Auto-create group and retry join (Erlang pg semantics)
                         if let Err(e) = registry.create_group(&ctx, &group_name).await {
                             // Ignore GroupAlreadyExists (race condition with another actor)
-                            if !matches!(e, plexspaces_process_groups::ProcessGroupError::GroupAlreadyExists(_)) {
+                            if !matches!(
+                                e,
+                                plexspaces_process_groups::ProcessGroupError::GroupAlreadyExists(_)
+                            ) {
                                 return format!("ERROR: Failed to create group: {}", e);
                             }
                         }
-                        match registry.join_group(&ctx, &group_name, &self_id, vec![]).await {
+                        match registry
+                            .join_group(&ctx, &group_name, &self_id, vec![])
+                            .await
+                        {
                             Ok(()) => String::new(),
                             Err(e) => format!("ERROR: {}", e),
                         }
@@ -1042,12 +1311,10 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         let self_id = self.actor_id.clone();
         let ctx = self.pg_context();
         match self.host_functions.process_group_registry() {
-            Some(registry) => {
-                match registry.leave_group(&ctx, &group_name, &self_id).await {
-                    Ok(()) => String::new(),
-                    Err(e) => format!("ERROR: {}", e),
-                }
-            }
+            Some(registry) => match registry.leave_group(&ctx, &group_name, &self_id).await {
+                Ok(()) => String::new(),
+                Err(e) => format!("ERROR: {}", e),
+            },
             None => "ERROR: ProcessGroupRegistry not configured".to_string(),
         }
     }
@@ -1056,22 +1323,25 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     async fn pg_members(&mut self, group_name: String) -> String {
         let ctx = self.pg_context();
         match self.host_functions.process_group_registry() {
-            Some(registry) => {
-                match registry.get_members(&ctx, &group_name).await {
-                    Ok(members) => {
-                        let ids: Vec<String> = members.iter().map(|m| m.to_string()).collect();
-                        serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string())
-                    }
-                    Err(e) => format!("ERROR: {}", e),
+            Some(registry) => match registry.get_members(&ctx, &group_name).await {
+                Ok(members) => {
+                    let ids: Vec<String> = members.iter().map(|m| m.to_string()).collect();
+                    serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string())
                 }
-            }
+                Err(e) => format!("ERROR: {}", e),
+            },
             None => "ERROR: ProcessGroupRegistry not configured".to_string(),
         }
     }
 
     /// Broadcast message to all other members of a process group (sender excluded).
     /// Uses msg_type for routing; payload can be data-only.
-    async fn pg_broadcast(&mut self, group_name: String, msg_type: String, payload_json: String) -> String {
+    async fn pg_broadcast(
+        &mut self,
+        group_name: String,
+        msg_type: String,
+        payload_json: String,
+    ) -> String {
         let self_id = self.actor_id.to_string();
         let ctx = self.pg_context();
         let registry = match self.host_functions.process_group_registry() {
@@ -1101,7 +1371,11 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             if member_str == self_id {
                 continue;
             }
-            if let Err(e) = self.host_functions.send_message(&self_id, &member_str, &message_type, &payload_json).await {
+            if let Err(e) = self
+                .host_functions
+                .send_message(&self_id, &member_str, &message_type, &payload_json)
+                .await
+            {
                 tracing::warn!(
                     actor_id = %self_id, group = %group_name,
                     target = %member_str, error = %e,
@@ -1129,7 +1403,8 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
                     "pool_name": handle.pool_name,
                     "checkout_id": handle.checkout_id,
                 });
-                serde_json::to_string(&json).unwrap_or_else(|_| "ERROR: serialize handle".to_string())
+                serde_json::to_string(&json)
+                    .unwrap_or_else(|_| "ERROR: serialize handle".to_string())
             }
             Err(e) => format!("ERROR: {}", e),
         }
@@ -1146,7 +1421,10 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Some(s) => s.clone(),
             None => return "ERROR: Elastic pool service not configured".to_string(),
         };
-        match svc.checkin(&pool_name, &actor_id, &checkout_id, healthy).await {
+        match svc
+            .checkin(&pool_name, &actor_id, &checkout_id, healthy)
+            .await
+        {
             Ok(()) => String::new(),
             Err(e) => format!("ERROR: {}", e),
         }
@@ -1168,9 +1446,219 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
                     "waiting_requests": m.waiting_requests,
                     "current_load": m.current_load,
                 });
-                serde_json::to_string(&json).unwrap_or_else(|_| "ERROR: serialize metrics".to_string())
+                serde_json::to_string(&json)
+                    .unwrap_or_else(|_| "ERROR: serialize metrics".to_string())
             }
             Err(e) => format!("ERROR: {}", e),
+        }
+    }
+
+    async fn create_shard_group(&mut self, request_json: String) -> String {
+        let request: SimpleCreateShardGroupRequest = match serde_json::from_str(&request_json) {
+            Ok(request) => request,
+            Err(err) => return format!("ERROR: invalid create-shard-group request: {}", err),
+        };
+        let placement = request.placement.map(|placement| NodePlacement {
+            strategy: parse_node_placement_strategy(placement.strategy.as_deref()) as i32,
+            cluster: placement.cluster,
+            node_ids: placement.node_ids,
+            required_labels: placement.required_labels,
+            avoid_node_ids: placement.avoid_node_ids,
+            resource_requirements: None,
+            affinity_labels: placement.affinity_labels,
+        });
+        let initial_state = match serde_json::to_vec(&request.initial_state) {
+            Ok(bytes) => bytes,
+            Err(err) => return format!("ERROR: invalid initial_state: {}", err),
+        };
+        let req = CreateShardGroupRequest {
+            config: Some(DataParallelConfig {
+                group_id: request.group_id.clone(),
+                shard_count: request.shard_count,
+                partition_strategy: parse_partition_strategy(request.partition_strategy.as_deref())
+                    as i32,
+                rebalance_policy: parse_rebalance_policy(request.rebalance_policy.as_deref())
+                    as i32,
+                placement,
+            }),
+            actor_type: request.actor_type,
+            shard_config: None,
+            initial_state,
+            metadata: request.metadata,
+        };
+        let ctx = self.pg_context();
+        match self.host_functions.create_shard_group(&ctx, req).await {
+            Ok(response) => {
+                let group = match response.group {
+                    Some(group) => group,
+                    None => return "ERROR: create_shard_group returned no group".to_string(),
+                };
+                let payload = serde_json::json!({
+                    "group_id": group.config.as_ref().map(|config| config.group_id.clone()).unwrap_or_default(),
+                    "actor_type": group.actor_type,
+                    "shard_actor_ids": group.shard_actor_ids,
+                });
+                serde_json::to_string(&payload)
+                    .unwrap_or_else(|_| "ERROR: serialize create_shard_group response".to_string())
+            }
+            Err(err) => format!("ERROR: {}", err),
+        }
+    }
+
+    async fn bulk_update_shard_group(&mut self, request_json: String) -> String {
+        let request: SimpleBulkUpdateRequest = match serde_json::from_str(&request_json) {
+            Ok(request) => request,
+            Err(err) => return format!("ERROR: invalid bulk-update-shard-group request: {}", err),
+        };
+        let mut updates = HashMap::with_capacity(request.updates.len());
+        for (partition_key, payload) in request.updates {
+            let mut message = match make_call_message(&payload) {
+                Ok(message) => message,
+                Err(err) => return format!("ERROR: {}", err),
+            };
+            message.sender_id = self.actor_id.to_string();
+            updates.insert(partition_key, message);
+        }
+        let req = BulkUpdateShardGroupRequest {
+            group_id: request.group_id,
+            updates,
+            consistency_level: parse_consistency_level(request.consistency_level.as_deref()) as i32,
+            timeout: request.timeout_ms.map(|timeout_ms| Duration {
+                seconds: (timeout_ms / 1000) as i64,
+                nanos: ((timeout_ms % 1000) * 1_000_000) as i32,
+            }),
+            wait_for_responses: request.wait_for_responses,
+        };
+        let ctx = self.pg_context();
+        match self.host_functions.bulk_update_shard_group(&ctx, req).await {
+            Ok(response) => {
+                let payload = serde_json::json!({
+                    "updates_sent": response.updates_sent,
+                    "updates_succeeded": response.updates_succeeded,
+                    "updates_failed": response.updates_failed,
+                    "errors": response.errors,
+                });
+                serde_json::to_string(&payload).unwrap_or_else(|_| {
+                    "ERROR: serialize bulk_update_shard_group response".to_string()
+                })
+            }
+            Err(err) => format!("ERROR: {}", err),
+        }
+    }
+
+    async fn scatter_gather(&mut self, request_json: String) -> String {
+        let request: SimpleScatterGatherRequest = match serde_json::from_str(&request_json) {
+            Ok(request) => request,
+            Err(err) => return format!("ERROR: invalid scatter-gather request: {}", err),
+        };
+        let mut query = match make_call_message(&request.query) {
+            Ok(message) => message,
+            Err(err) => return format!("ERROR: {}", err),
+        };
+        query.sender_id = self.actor_id.to_string();
+        let req = ScatterGatherRequest {
+            group_id: request.group_id,
+            query: Some(query),
+            timeout: request.timeout_ms.map(|timeout_ms| Duration {
+                seconds: (timeout_ms / 1000) as i64,
+                nanos: ((timeout_ms % 1000) * 1_000_000) as i32,
+            }),
+            aggregation: parse_aggregation_strategy(request.aggregation.as_deref()) as i32,
+            min_responses: request.min_responses,
+        };
+        let ctx = self.pg_context();
+        match self.host_functions.scatter_gather(&ctx, req).await {
+            Ok(response) => {
+                let shard_responses: Vec<serde_json::Value> = response
+                    .shard_responses
+                    .into_iter()
+                    .map(|shard| {
+                        let payload = shard
+                            .response
+                            .and_then(|message| {
+                                serde_json::from_slice::<serde_json::Value>(&message.payload).ok()
+                            })
+                            .unwrap_or(serde_json::Value::Null);
+                        serde_json::json!({
+                            "shard_id": shard.shard_id,
+                            "shard_actor_id": shard.shard_actor_id,
+                            "success": shard.success,
+                            "error": shard.error,
+                            "payload": payload,
+                        })
+                    })
+                    .collect();
+                let result = response
+                    .result
+                    .and_then(|message| {
+                        serde_json::from_slice::<serde_json::Value>(&message.payload).ok()
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                let stats = response
+                    .stats
+                    .map(|stats| {
+                        serde_json::json!({
+                            "shards_queried": stats.shards_queried,
+                            "shards_responded": stats.shards_responded,
+                            "shards_failed": stats.shards_failed,
+                        })
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                let payload = serde_json::json!({
+                    "result": result,
+                    "shard_responses": shard_responses,
+                    "stats": stats,
+                });
+                serde_json::to_string(&payload)
+                    .unwrap_or_else(|_| "ERROR: serialize scatter_gather response".to_string())
+            }
+            Err(err) => format!("ERROR: {}", err),
+        }
+    }
+
+    async fn application_metrics_add(
+        &mut self,
+        application_id: String,
+        metrics_json: String,
+    ) -> String {
+        let payload: SimpleApplicationMetricsPayload = match serde_json::from_str(&metrics_json) {
+            Ok(payload) => payload,
+            Err(err) => return format!("ERROR: invalid application metrics payload: {}", err),
+        };
+        let ctx = self.pg_context();
+        match self
+            .host_functions
+            .merge_application_metrics(
+                &ctx,
+                &application_id,
+                application_metrics_from_payload(payload),
+            )
+            .await
+        {
+            Ok(metrics) => serde_json::to_string(&application_metrics_to_json(&metrics))
+                .unwrap_or_else(|_| "ERROR: serialize application metrics response".to_string()),
+            Err(err) => format!("ERROR: {}", err),
+        }
+    }
+
+    async fn application_get_status(
+        &mut self,
+        application_id: String,
+        node_id: String,
+    ) -> String {
+        let ctx = self.pg_context();
+        match self
+            .host_functions
+            .get_application_status(&ctx, &application_id, &node_id)
+            .await
+        {
+            Ok((application, node_address)) => serde_json::to_string(&serde_json::json!({
+                "node_id": node_id,
+                "node_address": node_address,
+                "application": application_info_to_json(&application),
+            }))
+            .unwrap_or_else(|_| "ERROR: serialize application status response".to_string()),
+            Err(err) => format!("ERROR: {}", err),
         }
     }
 }
@@ -1196,10 +1684,262 @@ pub fn is_simple_actor_component(component: &wasmtime::component::Component) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use async_trait::async_trait;
+    use plexspaces_proto::actor::v1::{
+        CreateShardGroupRequest, CreateShardGroupResponse, ScatterGatherRequest,
+        ScatterGatherResponse, ShardGroup, ShardQueryResponse,
+    };
+    use std::sync::Arc;
+
     #[test]
     fn test_simple_actor_module_compiles() {
         // This test ensures the module compiles correctly
         // Actual functional tests require WASM components
+    }
+
+    struct MockMessageSender;
+
+    #[async_trait]
+    impl crate::MessageSender for MockMessageSender {
+        async fn send_message(
+            &self,
+            _from: &str,
+            _to: &str,
+            _message_type: &str,
+            _message: &str,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn ask(
+            &self,
+            _from: &str,
+            _to: &str,
+            _message_type: &str,
+            _payload: Vec<u8>,
+            _timeout_ms: u64,
+        ) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+
+        async fn spawn_actor(
+            &self,
+            _from: &str,
+            _module_ref: &str,
+            _initial_state: Vec<u8>,
+            _actor_id: Option<String>,
+            _labels: Vec<(String, String)>,
+            _durable: bool,
+        ) -> Result<String, String> {
+            Ok("worker-1".to_string())
+        }
+
+        async fn stop_actor(
+            &self,
+            _from: &str,
+            _actor_id: &str,
+            _timeout_ms: u64,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn link_actor(
+            &self,
+            _from: &str,
+            _actor_id: &str,
+            _linked_actor_id: &str,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn unlink_actor(
+            &self,
+            _from: &str,
+            _actor_id: &str,
+            _linked_actor_id: &str,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn monitor_actor(&self, _from: &str, _actor_id: &str) -> Result<u64, String> {
+            Ok(1)
+        }
+
+        async fn demonitor_actor(
+            &self,
+            _from: &str,
+            _actor_id: &str,
+            _monitor_ref: u64,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn create_shard_group(
+            &self,
+            _ctx: &RequestContext,
+            req: CreateShardGroupRequest,
+        ) -> Result<CreateShardGroupResponse, String> {
+            Ok(CreateShardGroupResponse {
+                group: Some(ShardGroup {
+                    config: req.config,
+                    actor_type: req.actor_type,
+                    shard_actor_ids: vec![
+                        "worker-0@node-a".to_string(),
+                        "worker-1@node-b".to_string(),
+                    ],
+                    state: 0,
+                    created_at: None,
+                    metadata: HashMap::new(),
+                    rebalance_status: None,
+                }),
+            })
+        }
+
+        async fn scatter_gather(
+            &self,
+            _ctx: &RequestContext,
+            _req: ScatterGatherRequest,
+        ) -> Result<ScatterGatherResponse, String> {
+            Ok(ScatterGatherResponse {
+                result: None,
+                shard_responses: vec![ShardQueryResponse {
+                    shard_id: 0,
+                    shard_actor_id: "worker-0@node-a".to_string(),
+                    response: Some(Message {
+                        payload:
+                            br#"{"max_diff":0.5,"compute_time_ms":3,"coordination_time_ms":1}"#
+                                .to_vec(),
+                        ..Default::default()
+                    }),
+                    latency: None,
+                    success: true,
+                    error: String::new(),
+                }],
+                stats: None,
+            })
+        }
+
+        async fn merge_application_metrics(
+            &self,
+            _ctx: &RequestContext,
+            _application_id: &str,
+            metrics: ApplicationMetrics,
+        ) -> Result<ApplicationMetrics, String> {
+            Ok(metrics)
+        }
+
+        async fn get_application_status(
+            &self,
+            _ctx: &RequestContext,
+            application_id: &str,
+            _node_id: &str,
+        ) -> Result<(ApplicationInfo, String), String> {
+            Ok((
+                ApplicationInfo {
+                    application_id: application_id.to_string(),
+                    name: application_id.to_string(),
+                    version: "1.0.0".to_string(),
+                    status: 2,
+                    deployed_at: None,
+                    metrics: Some(ApplicationMetrics {
+                        actor_counts: HashMap::from([
+                            ("total".to_string(), 4),
+                            ("worker".to_string(), 3),
+                        ]),
+                        supervisor_count: 1,
+                        uptime_seconds: 42,
+                        message_count: 9,
+                        error_count: 0,
+                        counter_metrics: HashMap::from([("tuple_operations".to_string(), 7)]),
+                        latency_totals_ms: HashMap::from([("compute".to_string(), 21)]),
+                        latency_max_ms: HashMap::from([("compute".to_string(), 9)]),
+                        latency_samples: HashMap::from([("compute".to_string(), 3)]),
+                    }),
+                },
+                "http://127.0.0.1:8092".to_string(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn create_shard_group_serializes_group_response() {
+        let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
+            MockMessageSender,
+        )));
+        let mut host =
+            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+        let response = host
+            .create_shard_group(
+                serde_json::json!({
+                    "group_id": "heat-group",
+                    "actor_type": "worker",
+                    "shard_count": 2,
+                    "placement": { "strategy": "from_registry" },
+                })
+                .to_string(),
+            )
+            .await;
+        assert!(response.contains("\"group_id\":\"heat-group\""));
+        assert!(response.contains("worker-0@node-a"));
+    }
+
+    #[tokio::test]
+    async fn scatter_gather_serializes_shard_payloads() {
+        let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
+            MockMessageSender,
+        )));
+        let mut host =
+            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+        let response = host
+            .scatter_gather(
+                serde_json::json!({
+                    "group_id": "heat-group",
+                    "query": { "op": "compute", "iteration": 1, "tolerance": 0.1 },
+                })
+                .to_string(),
+            )
+            .await;
+        assert!(response.contains("\"compute_time_ms\":3"));
+        assert!(response.contains("\"coordination_time_ms\":1"));
+    }
+
+    #[tokio::test]
+    async fn application_metrics_add_serializes_metrics_response() {
+        let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
+            MockMessageSender,
+        )));
+        let mut host =
+            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+        let response = host
+            .application_metrics_add(
+                "heat-diffusion-rust".to_string(),
+                serde_json::json!({
+                    "actor_counts": { "worker": 2 },
+                    "message_count": 5,
+                    "counter_metrics": { "tuple_operations": 11 },
+                })
+                .to_string(),
+            )
+            .await;
+        assert!(response.contains("\"worker\":2"));
+        assert!(response.contains("\"tuple_operations\":11"));
+    }
+
+    #[tokio::test]
+    async fn application_get_status_serializes_node_and_metrics() {
+        let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
+            MockMessageSender,
+        )));
+        let mut host =
+            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+        let response = host
+            .application_get_status(
+                "heat-diffusion-rust".to_string(),
+                "test-node-8092".to_string(),
+            )
+            .await;
+        assert!(response.contains("\"node_id\":\"test-node-8092\""));
+        assert!(response.contains("\"node_address\":\"http://127.0.0.1:8092\""));
+        assert!(response.contains("\"tuple_operations\":7"));
     }
 }

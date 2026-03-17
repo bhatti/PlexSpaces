@@ -65,10 +65,10 @@
 //! - Checkpoint lookup: O(log n) via PRIMARY KEY → < 1ms
 //! - Truncate: O(m) where m = entries to delete → < 100ms for 10K entries
 
-use crate::{Checkpoint, JournalEntry, JournalStats, ActorEvent, ActorHistory};
-use plexspaces_core::{JournalStorage, JournalError, JournalResult};
-use crate::storage::{ReminderState, ReminderRegistration};
+use crate::storage::{ReminderRegistration, ReminderState};
+use crate::{ActorEvent, ActorHistory, Checkpoint, JournalEntry, JournalStats};
 use async_trait::async_trait;
+use plexspaces_core::{JournalError, JournalResult, JournalStorage};
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use plexspaces_proto::prost_types;
 use prost::Message;
@@ -106,49 +106,62 @@ fn unix_ms_to_proto_timestamp(ms: i64) -> Option<prost_types::Timestamp> {
 #[cfg(feature = "postgres-backend")]
 fn row_to_reminder_state_pg(row: &sqlx::postgres::PgRow) -> JournalResult<ReminderState> {
     use sqlx::Row;
-    
+
     let actor_id: String = row.get("actor_id");
     let reminder_name: String = row.get("reminder_name");
-    
+
     let interval_seconds: Option<i64> = row.get("interval_seconds");
     let interval_nanos: Option<i32> = row.get("interval_nanos");
     let interval = if let (Some(secs), Some(nanos)) = (interval_seconds, interval_nanos) {
-        Some(prost_types::Duration { seconds: secs, nanos })
+        Some(prost_types::Duration {
+            seconds: secs,
+            nanos,
+        })
     } else {
         None
     };
-    
+
     let first_fire_seconds: Option<i64> = row.get("first_fire_time_seconds");
     let first_fire_nanos: Option<i32> = row.get("first_fire_time_nanos");
-    let first_fire_time = if let (Some(secs), Some(nanos)) = (first_fire_seconds, first_fire_nanos) {
-        Some(prost_types::Timestamp { seconds: secs, nanos })
+    let first_fire_time = if let (Some(secs), Some(nanos)) = (first_fire_seconds, first_fire_nanos)
+    {
+        Some(prost_types::Timestamp {
+            seconds: secs,
+            nanos,
+        })
     } else {
         None
     };
-    
+
     let callback_data: Vec<u8> = row.get("callback_data");
     let persist_across_activations: bool = row.get("persist_across_activations");
     let max_occurrences: i32 = row.get("max_occurrences");
-    
+
     let last_fired_seconds: Option<i64> = row.get("last_fired_seconds");
     let last_fired_nanos: Option<i32> = row.get("last_fired_nanos");
     let last_fired = if let (Some(secs), Some(nanos)) = (last_fired_seconds, last_fired_nanos) {
-        Some(prost_types::Timestamp { seconds: secs, nanos })
+        Some(prost_types::Timestamp {
+            seconds: secs,
+            nanos,
+        })
     } else {
         None
     };
-    
+
     let next_fire_seconds: Option<i64> = row.get("next_fire_time_seconds");
     let next_fire_nanos: Option<i32> = row.get("next_fire_time_nanos");
     let next_fire_time = if let (Some(secs), Some(nanos)) = (next_fire_seconds, next_fire_nanos) {
-        Some(prost_types::Timestamp { seconds: secs, nanos })
+        Some(prost_types::Timestamp {
+            seconds: secs,
+            nanos,
+        })
     } else {
         None
     };
-    
+
     let fire_count: i32 = row.get("fire_count");
     let is_active: bool = row.get("is_active");
-    
+
     Ok(ReminderState {
         registration: Some(ReminderRegistration {
             actor_id,
@@ -169,49 +182,62 @@ fn row_to_reminder_state_pg(row: &sqlx::postgres::PgRow) -> JournalResult<Remind
 // Helper to convert SQL row to ReminderState (SQLite)
 fn row_to_reminder_state(row: &sqlx::sqlite::SqliteRow) -> JournalResult<ReminderState> {
     use sqlx::Row;
-    
+
     let actor_id: String = row.get("actor_id");
     let reminder_name: String = row.get("reminder_name");
-    
+
     let interval_seconds: Option<i64> = row.get("interval_seconds");
     let interval_nanos: Option<i32> = row.get("interval_nanos");
     let interval = if let (Some(secs), Some(nanos)) = (interval_seconds, interval_nanos) {
-        Some(prost_types::Duration { seconds: secs, nanos })
+        Some(prost_types::Duration {
+            seconds: secs,
+            nanos,
+        })
     } else {
         None
     };
-    
+
     let first_fire_seconds: Option<i64> = row.get("first_fire_time_seconds");
     let first_fire_nanos: Option<i32> = row.get("first_fire_time_nanos");
-    let first_fire_time = if let (Some(secs), Some(nanos)) = (first_fire_seconds, first_fire_nanos) {
-        Some(prost_types::Timestamp { seconds: secs, nanos })
+    let first_fire_time = if let (Some(secs), Some(nanos)) = (first_fire_seconds, first_fire_nanos)
+    {
+        Some(prost_types::Timestamp {
+            seconds: secs,
+            nanos,
+        })
     } else {
         None
     };
-    
+
     let callback_data: Vec<u8> = row.get("callback_data");
     let persist_across_activations: i32 = row.get("persist_across_activations");
     let max_occurrences: i32 = row.get("max_occurrences");
-    
+
     let last_fired_seconds: Option<i64> = row.get("last_fired_seconds");
     let last_fired_nanos: Option<i32> = row.get("last_fired_nanos");
     let last_fired = if let (Some(secs), Some(nanos)) = (last_fired_seconds, last_fired_nanos) {
-        Some(prost_types::Timestamp { seconds: secs, nanos })
+        Some(prost_types::Timestamp {
+            seconds: secs,
+            nanos,
+        })
     } else {
         None
     };
-    
+
     let next_fire_seconds: Option<i64> = row.get("next_fire_time_seconds");
     let next_fire_nanos: Option<i32> = row.get("next_fire_time_nanos");
     let next_fire_time = if let (Some(secs), Some(nanos)) = (next_fire_seconds, next_fire_nanos) {
-        Some(prost_types::Timestamp { seconds: secs, nanos })
+        Some(prost_types::Timestamp {
+            seconds: secs,
+            nanos,
+        })
     } else {
         None
     };
-    
+
     let fire_count: i32 = row.get("fire_count");
     let is_active: i32 = row.get("is_active");
-    
+
     Ok(ReminderState {
         registration: Some(ReminderRegistration {
             actor_id,
@@ -271,9 +297,15 @@ async fn run_memory_schema_sqlite(pool: &Pool<Sqlite>) -> Result<(), String> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_journal_actor_sequence ON journal_entries (actor_id, sequence)")
         .execute(pool).await.map_err(|e| e.to_string())?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_journal_timestamp ON journal_entries (timestamp)")
-        .execute(pool).await.map_err(|e| e.to_string())?;
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_journal_entry_type ON journal_entries (entry_type)")
-        .execute(pool).await.map_err(|e| e.to_string())?;
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_journal_entry_type ON journal_entries (entry_type)",
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS checkpoints (
             actor_id TEXT NOT NULL, sequence BIGINT NOT NULL, timestamp BIGINT NOT NULL, state_data BLOB NOT NULL,
@@ -296,7 +328,9 @@ async fn run_memory_schema_sqlite(pool: &Pool<Sqlite>) -> Result<(), String> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_actor_events_actor_sequence ON actor_events(actor_id, sequence)")
         .execute(pool).await.map_err(|e| e.to_string())?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_actor_events_timestamp ON actor_events(timestamp)")
-        .execute(pool).await.map_err(|e| e.to_string())?;
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_actor_events_caused_by ON actor_events(caused_by) WHERE caused_by IS NOT NULL")
         .execute(pool).await.map_err(|e| e.to_string())?;
     sqlx::query(
@@ -338,7 +372,7 @@ impl SqliteJournalStorage {
     /// ```
     pub async fn new(path: &str) -> JournalResult<Self> {
         use tracing::{debug, error, info};
-        
+
         // SQLite connection string format for sqlx 0.7:
         // - ":memory:" for in-memory database
         // - "sqlite:///absolute/path?mode=rwc" for file-based (creates if not exists)
@@ -976,8 +1010,8 @@ impl JournalStorage for SqliteJournalStorage {
         let mut events = Vec::new();
         for row in rows {
             let metadata_json: String = row.get("metadata");
-            let metadata: HashMap<String, String> = serde_json::from_str(&metadata_json)
-                .unwrap_or_default();
+            let metadata: HashMap<String, String> =
+                serde_json::from_str(&metadata_json).unwrap_or_default();
 
             events.push(ActorEvent {
                 id: row.get("id"),
@@ -1031,8 +1065,8 @@ impl JournalStorage for SqliteJournalStorage {
         let mut events = Vec::new();
         for row in rows_to_return {
             let metadata_json: String = row.get("metadata");
-            let metadata: HashMap<String, String> = serde_json::from_str(&metadata_json)
-                .unwrap_or_default();
+            let metadata: HashMap<String, String> =
+                serde_json::from_str(&metadata_json).unwrap_or_default();
 
             events.push(ActorEvent {
                 id: row.get("id"),
@@ -1080,8 +1114,8 @@ impl JournalStorage for SqliteJournalStorage {
 
         for row in rows {
             let metadata_json: String = row.get("metadata");
-            let metadata: HashMap<String, String> = serde_json::from_str(&metadata_json)
-                .unwrap_or_default();
+            let metadata: HashMap<String, String> =
+                serde_json::from_str(&metadata_json).unwrap_or_default();
 
             let timestamp = unix_ms_to_proto_timestamp(row.get::<i64, _>("timestamp"));
             if created_at.is_none() {
@@ -1108,8 +1142,10 @@ impl JournalStorage for SqliteJournalStorage {
             actor_id: actor_id.to_string(),
             events,
             latest_sequence,
-            created_at: created_at.or_else(|| Some(prost_types::Timestamp::from(SystemTime::now()))),
-            updated_at: updated_at.or_else(|| Some(prost_types::Timestamp::from(SystemTime::now()))),
+            created_at: created_at
+                .or_else(|| Some(prost_types::Timestamp::from(SystemTime::now()))),
+            updated_at: updated_at
+                .or_else(|| Some(prost_types::Timestamp::from(SystemTime::now()))),
             metadata: HashMap::new(),
             page_response: None,
         })
@@ -1147,12 +1183,16 @@ impl JournalStorage for SqliteJournalStorage {
 
         let created_at = latest_row
             .as_ref()
-            .and_then(|r| unix_ms_to_proto_timestamp(r.get::<Option<i64>, _>("min_ts").unwrap_or(0)))
+            .and_then(|r| {
+                unix_ms_to_proto_timestamp(r.get::<Option<i64>, _>("min_ts").unwrap_or(0))
+            })
             .or_else(|| Some(prost_types::Timestamp::from(SystemTime::now())));
 
         let updated_at = latest_row
             .as_ref()
-            .and_then(|r| unix_ms_to_proto_timestamp(r.get::<Option<i64>, _>("max_ts").unwrap_or(0)))
+            .and_then(|r| {
+                unix_ms_to_proto_timestamp(r.get::<Option<i64>, _>("max_ts").unwrap_or(0))
+            })
             .or_else(|| Some(prost_types::Timestamp::from(SystemTime::now())));
 
         // Fetch page_size + 1 to check if there's more
@@ -1179,8 +1219,8 @@ impl JournalStorage for SqliteJournalStorage {
         let mut events = Vec::new();
         for row in rows_to_return {
             let metadata_json: String = row.get("metadata");
-            let metadata: HashMap<String, String> = serde_json::from_str(&metadata_json)
-                .unwrap_or_default();
+            let metadata: HashMap<String, String> =
+                serde_json::from_str(&metadata_json).unwrap_or_default();
 
             events.push(ActorEvent {
                 id: row.get("id"),
@@ -1222,7 +1262,7 @@ impl JournalStorage for SqliteJournalStorage {
         let reg = reminder_state.registration.as_ref().ok_or_else(|| {
             JournalError::Configuration("ReminderState must have registration".to_string())
         })?;
-        
+
         let interval_seconds = reg.interval.as_ref().map(|d| d.seconds);
         let interval_nanos = reg.interval.as_ref().map(|d| d.nanos);
         let first_fire_seconds = reg.first_fire_time.as_ref().map(|t| t.seconds);
@@ -1231,7 +1271,7 @@ impl JournalStorage for SqliteJournalStorage {
         let last_fired_nanos = reminder_state.last_fired.as_ref().map(|t| t.nanos);
         let next_fire_seconds = reminder_state.next_fire_time.as_ref().map(|t| t.seconds);
         let next_fire_nanos = reminder_state.next_fire_time.as_ref().map(|t| t.nanos);
-        
+
         sqlx::query(
             r#"
             INSERT OR REPLACE INTO reminders (
@@ -1323,7 +1363,7 @@ impl JournalStorage for SqliteJournalStorage {
         let reg = reminder_state.registration.as_ref().ok_or_else(|| {
             JournalError::Configuration("ReminderState must have registration".to_string())
         })?;
-        
+
         let interval_seconds = reg.interval.as_ref().map(|d| d.seconds);
         let interval_nanos = reg.interval.as_ref().map(|d| d.nanos);
         let first_fire_seconds = reg.first_fire_time.as_ref().map(|t| t.seconds);
@@ -1332,7 +1372,7 @@ impl JournalStorage for SqliteJournalStorage {
         let last_fired_nanos = reminder_state.last_fired.as_ref().map(|t| t.nanos);
         let next_fire_seconds = reminder_state.next_fire_time.as_ref().map(|t| t.seconds);
         let next_fire_nanos = reminder_state.next_fire_time.as_ref().map(|t| t.nanos);
-        
+
         sqlx::query(
             r#"
             UPDATE reminders SET
@@ -1376,11 +1416,14 @@ impl JournalStorage for SqliteJournalStorage {
         Ok(())
     }
 
-    async fn query_due_reminders(&self, before_time: SystemTime) -> JournalResult<Vec<ReminderState>> {
+    async fn query_due_reminders(
+        &self,
+        before_time: SystemTime,
+    ) -> JournalResult<Vec<ReminderState>> {
         let before_ms = system_time_to_unix_ms(before_time);
         let before_seconds = before_ms / 1000;
         let before_nanos = ((before_ms % 1000) * 1_000_000) as i32;
-        
+
         let rows = sqlx::query(
             r#"
             SELECT 
@@ -1462,7 +1505,7 @@ impl PostgresJournalStorage {
     /// ```
     pub async fn new(connection_string: &str) -> JournalResult<Self> {
         use tracing::info;
-        
+
         let pool = sqlx::postgres::PgPoolOptions::new()
             .max_connections(20)
             .connect(connection_string)
@@ -1477,7 +1520,7 @@ impl PostgresJournalStorage {
             .last()
             .unwrap_or("(hidden)")
             .to_string();
-        
+
         info!(
             db_url = %format!("postgres://...@{}", display_url),
             tables = "journal_entries, checkpoints, actor_events, reminders",
@@ -2065,8 +2108,8 @@ impl JournalStorage for PostgresJournalStorage {
         let mut events = Vec::new();
         for row in rows {
             let metadata_value: serde_json::Value = row.get("metadata");
-            let metadata: HashMap<String, String> = serde_json::from_value(metadata_value)
-                .unwrap_or_default();
+            let metadata: HashMap<String, String> =
+                serde_json::from_value(metadata_value).unwrap_or_default();
 
             let timestamp_pg: chrono::DateTime<chrono::Utc> = row.get("timestamp");
             let timestamp = Some(prost_types::Timestamp {
@@ -2126,8 +2169,8 @@ impl JournalStorage for PostgresJournalStorage {
         let mut events = Vec::new();
         for row in rows_to_return {
             let metadata_value: serde_json::Value = row.get("metadata");
-            let metadata: HashMap<String, String> = serde_json::from_value(metadata_value)
-                .unwrap_or_default();
+            let metadata: HashMap<String, String> =
+                serde_json::from_value(metadata_value).unwrap_or_default();
 
             let timestamp_pg: chrono::DateTime<chrono::Utc> = row.get("timestamp");
             let timestamp = Some(prost_types::Timestamp {
@@ -2181,8 +2224,8 @@ impl JournalStorage for PostgresJournalStorage {
 
         for row in rows {
             let metadata_value: serde_json::Value = row.get("metadata");
-            let metadata: HashMap<String, String> = serde_json::from_value(metadata_value)
-                .unwrap_or_default();
+            let metadata: HashMap<String, String> =
+                serde_json::from_value(metadata_value).unwrap_or_default();
 
             let timestamp_pg: chrono::DateTime<chrono::Utc> = row.get("timestamp");
             let timestamp = Some(prost_types::Timestamp {
@@ -2214,8 +2257,10 @@ impl JournalStorage for PostgresJournalStorage {
             actor_id: actor_id.to_string(),
             events,
             latest_sequence,
-            created_at: created_at.or_else(|| Some(prost_types::Timestamp::from(SystemTime::now()))),
-            updated_at: updated_at.or_else(|| Some(prost_types::Timestamp::from(SystemTime::now()))),
+            created_at: created_at
+                .or_else(|| Some(prost_types::Timestamp::from(SystemTime::now()))),
+            updated_at: updated_at
+                .or_else(|| Some(prost_types::Timestamp::from(SystemTime::now()))),
             metadata: HashMap::new(),
             page_response: None,
         })
@@ -2255,10 +2300,12 @@ impl JournalStorage for PostgresJournalStorage {
             .as_ref()
             .and_then(|r| {
                 r.get::<Option<chrono::DateTime<chrono::Utc>>, _>("min_ts")
-                    .map(|ts| Some(prost_types::Timestamp {
-                        seconds: ts.timestamp(),
-                        nanos: ts.timestamp_subsec_nanos() as i32,
-                    }))
+                    .map(|ts| {
+                        Some(prost_types::Timestamp {
+                            seconds: ts.timestamp(),
+                            nanos: ts.timestamp_subsec_nanos() as i32,
+                        })
+                    })
             })
             .flatten()
             .or_else(|| Some(prost_types::Timestamp::from(SystemTime::now())));
@@ -2267,10 +2314,12 @@ impl JournalStorage for PostgresJournalStorage {
             .as_ref()
             .and_then(|r| {
                 r.get::<Option<chrono::DateTime<chrono::Utc>>, _>("max_ts")
-                    .map(|ts| Some(prost_types::Timestamp {
-                        seconds: ts.timestamp(),
-                        nanos: ts.timestamp_subsec_nanos() as i32,
-                    }))
+                    .map(|ts| {
+                        Some(prost_types::Timestamp {
+                            seconds: ts.timestamp(),
+                            nanos: ts.timestamp_subsec_nanos() as i32,
+                        })
+                    })
             })
             .flatten()
             .or_else(|| Some(prost_types::Timestamp::from(SystemTime::now())));
@@ -2299,8 +2348,8 @@ impl JournalStorage for PostgresJournalStorage {
         let mut events = Vec::new();
         for row in rows_to_return {
             let metadata_value: serde_json::Value = row.get("metadata");
-            let metadata: HashMap<String, String> = serde_json::from_value(metadata_value)
-                .unwrap_or_default();
+            let metadata: HashMap<String, String> =
+                serde_json::from_value(metadata_value).unwrap_or_default();
 
             let timestamp_pg: chrono::DateTime<chrono::Utc> = row.get("timestamp");
             let timestamp = Some(prost_types::Timestamp {
@@ -2348,7 +2397,7 @@ impl JournalStorage for PostgresJournalStorage {
         let reg = reminder_state.registration.as_ref().ok_or_else(|| {
             JournalError::Configuration("ReminderState must have registration".to_string())
         })?;
-        
+
         let interval_seconds = reg.interval.as_ref().map(|d| d.seconds);
         let interval_nanos = reg.interval.as_ref().map(|d| d.nanos);
         let first_fire_seconds = reg.first_fire_time.as_ref().map(|t| t.seconds);
@@ -2357,7 +2406,7 @@ impl JournalStorage for PostgresJournalStorage {
         let last_fired_nanos = reminder_state.last_fired.as_ref().map(|t| t.nanos);
         let next_fire_seconds = reminder_state.next_fire_time.as_ref().map(|t| t.seconds);
         let next_fire_nanos = reminder_state.next_fire_time.as_ref().map(|t| t.nanos);
-        
+
         sqlx::query(
             r#"
             INSERT INTO reminders (
@@ -2464,7 +2513,7 @@ impl JournalStorage for PostgresJournalStorage {
         let reg = reminder_state.registration.as_ref().ok_or_else(|| {
             JournalError::Configuration("ReminderState must have registration".to_string())
         })?;
-        
+
         let interval_seconds = reg.interval.as_ref().map(|d| d.seconds);
         let interval_nanos = reg.interval.as_ref().map(|d| d.nanos);
         let first_fire_seconds = reg.first_fire_time.as_ref().map(|t| t.seconds);
@@ -2473,7 +2522,7 @@ impl JournalStorage for PostgresJournalStorage {
         let last_fired_nanos = reminder_state.last_fired.as_ref().map(|t| t.nanos);
         let next_fire_seconds = reminder_state.next_fire_time.as_ref().map(|t| t.seconds);
         let next_fire_nanos = reminder_state.next_fire_time.as_ref().map(|t| t.nanos);
-        
+
         sqlx::query(
             r#"
             UPDATE reminders SET
@@ -2517,11 +2566,14 @@ impl JournalStorage for PostgresJournalStorage {
         Ok(())
     }
 
-    async fn query_due_reminders(&self, before_time: SystemTime) -> JournalResult<Vec<ReminderState>> {
+    async fn query_due_reminders(
+        &self,
+        before_time: SystemTime,
+    ) -> JournalResult<Vec<ReminderState>> {
         let before_ms = system_time_to_unix_ms(before_time);
         let before_seconds = before_ms / 1000;
         let before_nanos = ((before_ms % 1000) * 1_000_000) as i32;
-        
+
         let rows = sqlx::query(
             r#"
             SELECT 

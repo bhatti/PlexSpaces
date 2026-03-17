@@ -19,7 +19,9 @@
 //! Comprehensive tests for ExitReason and ExitAction (edge cases and proto conversion)
 
 use plexspaces_core::{ExitAction, ExitReason};
-use plexspaces_proto::v1::actor::{ExitReason as ProtoExitReason, ExitAction as ProtoExitAction, ExitReasonDetails};
+use plexspaces_proto::v1::actor::{
+    ExitAction as ProtoExitAction, ExitReason as ProtoExitReason, ExitReasonDetails,
+};
 
 #[test]
 fn test_exit_reason_normal() {
@@ -83,11 +85,23 @@ fn test_exit_reason_linked_nested() {
 
 #[test]
 fn test_exit_reason_to_proto() {
-    assert_eq!(ExitReason::Normal.to_proto(), ProtoExitReason::ExitReasonNormal);
-    assert_eq!(ExitReason::Shutdown.to_proto(), ProtoExitReason::ExitReasonShutdown);
-    assert_eq!(ExitReason::Killed.to_proto(), ProtoExitReason::ExitReasonKilled);
-    assert_eq!(ExitReason::Error("test".to_string()).to_proto(), ProtoExitReason::ExitReasonError);
-    
+    assert_eq!(
+        ExitReason::Normal.to_proto(),
+        ProtoExitReason::ExitReasonNormal
+    );
+    assert_eq!(
+        ExitReason::Shutdown.to_proto(),
+        ProtoExitReason::ExitReasonShutdown
+    );
+    assert_eq!(
+        ExitReason::Killed.to_proto(),
+        ProtoExitReason::ExitReasonKilled
+    );
+    assert_eq!(
+        ExitReason::Error("test".to_string()).to_proto(),
+        ProtoExitReason::ExitReasonError
+    );
+
     let linked = ExitReason::Linked {
         actor_id: "actor1".to_string(),
         reason: Box::new(ExitReason::Normal),
@@ -103,7 +117,7 @@ fn test_exit_reason_to_proto_details() {
     let details = details.unwrap();
     assert_eq!(details.error_message, "test error");
     assert_eq!(details.linked_actor_id, "");
-    
+
     let linked_reason = ExitReason::Linked {
         actor_id: "actor1".to_string(),
         reason: Box::new(ExitReason::Error("nested".to_string())),
@@ -120,15 +134,15 @@ fn test_exit_reason_from_proto() {
     let proto = ProtoExitReason::ExitReasonNormal;
     let reason = ExitReason::from_proto(proto, None);
     assert_eq!(reason, ExitReason::Normal);
-    
+
     let proto = ProtoExitReason::ExitReasonShutdown;
     let reason = ExitReason::from_proto(proto, None);
     assert_eq!(reason, ExitReason::Shutdown);
-    
+
     let proto = ProtoExitReason::ExitReasonKilled;
     let reason = ExitReason::from_proto(proto, None);
     assert_eq!(reason, ExitReason::Killed);
-    
+
     let proto = ProtoExitReason::ExitReasonError;
     let details = Some(ExitReasonDetails {
         error_message: "test error".to_string(),
@@ -137,7 +151,7 @@ fn test_exit_reason_from_proto() {
     });
     let reason = ExitReason::from_proto(proto, details.as_ref());
     assert_eq!(reason, ExitReason::Error("test error".to_string()));
-    
+
     let proto = ProtoExitReason::ExitReasonLinked;
     let details = Some(ExitReasonDetails {
         error_message: String::new(),
@@ -155,15 +169,30 @@ fn test_exit_reason_from_proto() {
 
 #[test]
 fn test_exit_action_to_proto() {
-    assert_eq!(ExitAction::Propagate.to_proto(), ProtoExitAction::ExitActionPropagate);
-    assert_eq!(ExitAction::Handle.to_proto(), ProtoExitAction::ExitActionHandle);
+    assert_eq!(
+        ExitAction::Propagate.to_proto(),
+        ProtoExitAction::ExitActionPropagate
+    );
+    assert_eq!(
+        ExitAction::Handle.to_proto(),
+        ProtoExitAction::ExitActionHandle
+    );
 }
 
 #[test]
 fn test_exit_action_from_proto() {
-    assert_eq!(ExitAction::from_proto(ProtoExitAction::ExitActionPropagate), ExitAction::Propagate);
-    assert_eq!(ExitAction::from_proto(ProtoExitAction::ExitActionHandle), ExitAction::Handle);
-    assert_eq!(ExitAction::from_proto(ProtoExitAction::ExitActionUnspecified), ExitAction::Propagate); // Default
+    assert_eq!(
+        ExitAction::from_proto(ProtoExitAction::ExitActionPropagate),
+        ExitAction::Propagate
+    );
+    assert_eq!(
+        ExitAction::from_proto(ProtoExitAction::ExitActionHandle),
+        ExitAction::Handle
+    );
+    assert_eq!(
+        ExitAction::from_proto(ProtoExitAction::ExitActionUnspecified),
+        ExitAction::Propagate
+    ); // Default
 }
 
 #[test]
@@ -171,7 +200,7 @@ fn test_exit_reason_clone_and_debug() {
     let reason1 = ExitReason::Error("test".to_string());
     let reason2 = reason1.clone();
     assert_eq!(reason1, reason2);
-    
+
     // Test debug formatting
     let debug_str = format!("{:?}", reason1);
     assert!(debug_str.contains("Error"));
@@ -183,7 +212,7 @@ fn test_exit_action_clone_and_debug() {
     let action1 = ExitAction::Propagate;
     let action2 = action1.clone();
     assert_eq!(action1, action2);
-    
+
     // Test debug formatting
     let debug_str = format!("{:?}", action1);
     assert!(debug_str.contains("Propagate"));
@@ -211,7 +240,3 @@ fn test_exit_action_equality() {
     assert_eq!(ExitAction::Handle, ExitAction::Handle);
     assert_ne!(ExitAction::Propagate, ExitAction::Handle);
 }
-
-
-
-

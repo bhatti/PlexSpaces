@@ -187,15 +187,19 @@ impl RegistryFacet {
 
     /// Handle registry operations with observability
     #[instrument(skip(self, args), fields(operation = method))]
-    async fn handle_registry_operation(&self, method: &str, args: &[u8]) -> Result<Vec<u8>, FacetError> {
+    async fn handle_registry_operation(
+        &self,
+        method: &str,
+        args: &[u8],
+    ) -> Result<Vec<u8>, FacetError> {
         let start = Instant::now();
-        
+
         // Get tenant_id/namespace - prioritize stored values (from API request), fallback to ServiceLocator defaults
         let (tenant_id, namespace, auth_enabled) = {
             // First, try to get from stored values (set when facet was attached to actor with API tenant_id/namespace)
             let stored_tenant_id = self.tenant_id.lock().unwrap().clone();
             let stored_namespace = self.namespace.lock().unwrap().clone();
-            
+
             if !stored_tenant_id.is_empty() && !stored_namespace.is_empty() {
                 // Use stored values from API request
                 let auth_enabled = if let Some(service_locator) = &self.service_locator {
@@ -209,22 +213,32 @@ impl RegistryFacet {
                 // Fallback to empty strings - tenant/namespace must come from API request (auth)
                 // NOTE: default_tenant_id and default_namespace have been removed from NodeConfig
                 let auth_enabled = !service_locator.is_auth_disabled().await;
-                debug!(tenant_id = "", namespace = "", auth_enabled = auth_enabled, "RegistryFacet: Using empty tenant_id/namespace (must come from API request)");
+                debug!(
+                    tenant_id = "",
+                    namespace = "",
+                    auth_enabled = auth_enabled,
+                    "RegistryFacet: Using empty tenant_id/namespace (must come from API request)"
+                );
                 (String::new(), String::new(), auth_enabled)
             } else {
                 // Final fallback - use empty values
-                debug!(tenant_id = "", namespace = "", auth_enabled = false, "RegistryFacet: Using empty tenant_id/namespace (ServiceLocator not available)");
+                debug!(
+                    tenant_id = "",
+                    namespace = "",
+                    auth_enabled = false,
+                    "RegistryFacet: Using empty tenant_id/namespace (ServiceLocator not available)"
+                );
                 (String::new(), String::new(), false)
             }
         };
-        
+
         // Create request context - validation will only check tenant_id if auth is enabled
         let ctx = RequestContext::new(tenant_id.clone(), namespace.clone(), auth_enabled)
             .map_err(|e| {
                 error!(tenant_id = %tenant_id, namespace = %namespace, auth_enabled = auth_enabled, error = %e, "RegistryFacet: Failed to create RequestContext");
                 FacetError::InvalidConfig(format!("Failed to create RequestContext: {}", e))
             })?;
-        
+
         debug!(tenant_id = %tenant_id, namespace = %namespace, auth_enabled = auth_enabled, "RegistryFacet: Created RequestContext for registry operation");
 
         let result = match method {
@@ -245,22 +259,35 @@ impl RegistryFacet {
                 let args: RegisterArgs = serde_json::from_slice(args)
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
-                let object_type = args.object_type
+                let object_type = args
+                    .object_type
                     .or_else(|| self.config.default_object_type.clone())
                     .unwrap_or_else(|| "Actor".to_string());
 
                 // Convert string to ObjectType enum
                 let object_type_enum = match object_type.as_str() {
-                    "Actor" | "actor" => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor,
-                    "TupleSpace" | "tuplespace" => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeTuplespace,
-                    "Service" | "service" => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeService,
+                    "Actor" | "actor" => {
+                        plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor
+                    }
+                    "TupleSpace" | "tuplespace" => {
+                        plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeTuplespace
+                    }
+                    "Service" | "service" => {
+                        plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeService
+                    }
                     _ => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor,
                 };
 
                 let health_status_enum = args.health_status.as_ref().map(|s| match s.as_str() {
-                    "Healthy" | "healthy" => plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy,
-                    "Unhealthy" | "unhealthy" => plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnhealthy,
-                    "Unknown" | "unknown" => plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnknown,
+                    "Healthy" | "healthy" => {
+                        plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusHealthy
+                    }
+                    "Unhealthy" | "unhealthy" => {
+                        plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnhealthy
+                    }
+                    "Unknown" | "unknown" => {
+                        plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnknown
+                    }
                     _ => plexspaces_proto::object_registry::v1::HealthStatus::HealthStatusUnknown,
                 });
 
@@ -300,7 +327,7 @@ impl RegistryFacet {
                         metrics::histogram!("plexspaces_facet_registry_operation_duration_seconds", "operation" => "register_object").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_registry_operations_success_total", "operation" => "register_object").increment(1);
                         debug!(object_id = %args.object_id, duration_ms = duration.as_millis(), "Object registered");
-                        
+
                         serde_json::to_vec(&json!({"status": "ok"}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -324,13 +351,17 @@ impl RegistryFacet {
                 let args: UnregisterArgs = serde_json::from_slice(args)
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
-                match self.object_registry.unregister(&ctx, &args.object_id, args.object_type).await {
+                match self
+                    .object_registry
+                    .unregister(&ctx, &args.object_id, args.object_type)
+                    .await
+                {
                     Ok(()) => {
                         let duration = start.elapsed();
                         metrics::histogram!("plexspaces_facet_registry_operation_duration_seconds", "operation" => "unregister_object").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_registry_operations_success_total", "operation" => "unregister_object").increment(1);
                         debug!(object_id = %args.object_id, duration_ms = duration.as_millis(), "Object unregistered");
-                        
+
                         serde_json::to_vec(&json!({"status": "ok"}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -354,13 +385,17 @@ impl RegistryFacet {
                 let args: LookupArgs = serde_json::from_slice(args)
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
-                match self.object_registry.lookup(&ctx, &args.object_id, args.object_type).await {
+                match self
+                    .object_registry
+                    .lookup(&ctx, &args.object_id, args.object_type)
+                    .await
+                {
                     Ok(Some(registration)) => {
                         let duration = start.elapsed();
                         metrics::histogram!("plexspaces_facet_registry_operation_duration_seconds", "operation" => "lookup_object").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_registry_operations_success_total", "operation" => "lookup_object").increment(1);
                         debug!(object_id = %args.object_id, duration_ms = duration.as_millis(), "Object found");
-                        
+
                         let reg_json = object_registration_to_json(&registration);
                         serde_json::to_vec(&reg_json)
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
@@ -370,7 +405,7 @@ impl RegistryFacet {
                         metrics::histogram!("plexspaces_facet_registry_operation_duration_seconds", "operation" => "lookup_object").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_registry_operations_success_total", "operation" => "lookup_object", "result" => "not_found").increment(1);
                         debug!(object_id = %args.object_id, duration_ms = duration.as_millis(), "Object not found");
-                        
+
                         serde_json::to_vec(&json!({"found": false}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -398,23 +433,33 @@ impl RegistryFacet {
                 let args: DiscoverArgs = serde_json::from_slice(args)
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
 
-                match self.object_registry.discover(
-                    &ctx,
-                    args.object_type,
-                    args.name,
-                    args.labels,
-                    args.health_status,
-                    args.limit.unwrap_or(100),
-                    args.offset.unwrap_or(0),
-                ).await {
+                match self
+                    .object_registry
+                    .discover(
+                        &ctx,
+                        args.object_type,
+                        args.name,
+                        args.labels,
+                        args.health_status,
+                        args.limit.unwrap_or(100),
+                        args.offset.unwrap_or(0),
+                    )
+                    .await
+                {
                     Ok(registrations) => {
                         let duration = start.elapsed();
                         metrics::histogram!("plexspaces_facet_registry_operation_duration_seconds", "operation" => "discover_objects").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_registry_operations_success_total", "operation" => "discover_objects").increment(1);
-                        metrics::gauge!("plexspaces_facet_registry_discovered_objects_count").set(registrations.len() as f64);
-                        debug!(count = registrations.len(), duration_ms = duration.as_millis(), "Objects discovered");
-                        
-                        let regs_json: Vec<Value> = registrations.iter()
+                        metrics::gauge!("plexspaces_facet_registry_discovered_objects_count")
+                            .set(registrations.len() as f64);
+                        debug!(
+                            count = registrations.len(),
+                            duration_ms = duration.as_millis(),
+                            "Objects discovered"
+                        );
+
+                        let regs_json: Vec<Value> = registrations
+                            .iter()
                             .map(object_registration_to_json)
                             .collect();
                         serde_json::to_vec(&json!({"objects": regs_json}))
@@ -474,7 +519,7 @@ impl Facet for RegistryFacet {
 
     async fn on_attach(&mut self, actor_id: &str, config: Value) -> Result<(), FacetError> {
         metrics::counter!("plexspaces_facet_registry_attached_total").increment(1);
-        
+
         // Extract tenant_id/namespace from config if available (passed from actor context)
         // These come from the API request (HTTP/gRPC), not ServiceLocator defaults
         if let Some(config_obj) = config.as_object() {
@@ -491,7 +536,7 @@ impl Facet for RegistryFacet {
                 }
             }
         }
-        
+
         debug!(actor_id = %actor_id, "Registry capability attached to actor");
         Ok(())
     }
@@ -508,8 +553,10 @@ impl Facet for RegistryFacet {
         args: &[u8],
     ) -> Result<InterceptResult, FacetError> {
         // Intercept registry operations
-        if method == "register_object" || method == "unregister_object"
-            || method == "lookup_object" || method == "discover_objects"
+        if method == "register_object"
+            || method == "unregister_object"
+            || method == "lookup_object"
+            || method == "discover_objects"
         {
             let result = self.handle_registry_operation(method, args).await?;
             return Ok(InterceptResult::ShortCircuit(result));
@@ -533,12 +580,12 @@ impl Facet for RegistryFacet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     // In-memory object registry for testing
     struct TestObjectRegistry {
         objects: Arc<tokio::sync::RwLock<std::collections::HashMap<String, ObjectRegistration>>>,
     }
-    
+
     impl TestObjectRegistry {
         fn new() -> Self {
             Self {
@@ -546,7 +593,7 @@ mod tests {
             }
         }
     }
-    
+
     #[async_trait]
     impl ObjectRegistry for TestObjectRegistry {
         async fn register(
@@ -558,7 +605,7 @@ mod tests {
             objects.insert(registration.object_id.clone(), registration);
             Ok(())
         }
-        
+
         async fn unregister(
             &self,
             _ctx: &RequestContext,
@@ -569,7 +616,7 @@ mod tests {
             objects.remove(object_id);
             Ok(())
         }
-        
+
         async fn lookup(
             &self,
             _ctx: &RequestContext,
@@ -579,7 +626,7 @@ mod tests {
             let objects = self.objects.read().await;
             Ok(objects.get(object_id).cloned())
         }
-        
+
         async fn discover(
             &self,
             _ctx: &RequestContext,
@@ -613,7 +660,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("register_object", serde_json::to_vec(&register_args).unwrap().as_slice())
+            .before_method(
+                "register_object",
+                serde_json::to_vec(&register_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -633,7 +683,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("lookup_object", serde_json::to_vec(&lookup_args).unwrap().as_slice())
+            .before_method(
+                "lookup_object",
+                serde_json::to_vec(&lookup_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -664,7 +717,10 @@ mod tests {
         });
 
         facet
-            .before_method("register_object", serde_json::to_vec(&register_args).unwrap().as_slice())
+            .before_method(
+                "register_object",
+                serde_json::to_vec(&register_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -674,7 +730,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("unregister_object", serde_json::to_vec(&unregister_args).unwrap().as_slice())
+            .before_method(
+                "unregister_object",
+                serde_json::to_vec(&unregister_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -694,7 +753,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("lookup_object", serde_json::to_vec(&lookup_args).unwrap().as_slice())
+            .before_method(
+                "lookup_object",
+                serde_json::to_vec(&lookup_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -725,7 +787,10 @@ mod tests {
             });
 
             facet
-                .before_method("register_object", serde_json::to_vec(&register_args).unwrap().as_slice())
+                .before_method(
+                    "register_object",
+                    serde_json::to_vec(&register_args).unwrap().as_slice(),
+                )
                 .await
                 .unwrap();
         }
@@ -737,7 +802,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("discover_objects", serde_json::to_vec(&discover_args).unwrap().as_slice())
+            .before_method(
+                "discover_objects",
+                serde_json::to_vec(&discover_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 

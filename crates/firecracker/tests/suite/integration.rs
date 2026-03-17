@@ -521,13 +521,16 @@ async fn test_vm_boot_performance() {
     println!("=== VM Boot Performance ===");
     println!("Boot time: {:?}", boot_time);
     println!("Target: < 200ms (goal: 125ms)");
-    println!("Status: {}", if boot_time < Duration::from_millis(200) {
-        "✅ PASS"
-    } else if boot_time < Duration::from_secs(2) {
-        "⚠️  SLOW (but acceptable)"
-    } else {
-        "❌ FAIL"
-    });
+    println!(
+        "Status: {}",
+        if boot_time < Duration::from_millis(200) {
+            "✅ PASS"
+        } else if boot_time < Duration::from_secs(2) {
+            "⚠️  SLOW (but acceptable)"
+        } else {
+            "❌ FAIL"
+        }
+    );
 
     vm.stop().await.unwrap();
 }
@@ -572,5 +575,5 @@ async fn cleanup_test_resources(vm_id: &str) {
 // NOTE: WASM runtime integration tests removed as part of Phase 2.1 simplification.
 // WASM runtime belongs in `crates/wasm-runtime/`, not in Firecracker crate.
 // Firecracker crate now focuses only on VM lifecycle management.
-// 
+//
 // WASM-related tests should be in `crates/wasm-runtime/tests/` instead.

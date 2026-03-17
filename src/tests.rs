@@ -20,11 +20,14 @@
 
 #[cfg(test)]
 mod integration_tests {
-    use async_trait::async_trait;
     use crate::actor::{Actor as ActorStruct, ActorState};
     use crate::behavior::{GenServer, MessageType, MessageTypeExt, MockBehavior};
     use crate::core::{Actor, ActorContext, BehaviorError, BehaviorType, Message};
-    use crate::mailbox::{mailbox_config_default, Mailbox, MailboxConfig, Message as MailboxMessage, MessagePriority, OrderingStrategy};
+    use crate::mailbox::{
+        mailbox_config_default, Mailbox, MailboxConfig, Message as MailboxMessage, MessagePriority,
+        OrderingStrategy,
+    };
+    use async_trait::async_trait;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -32,7 +35,9 @@ mod integration_tests {
         // Create mailbox with priority ordering
         let mut config = mailbox_config_default();
         config.ordering_strategy = OrderingStrategy::OrderingPriority as i32;
-        let mailbox = Mailbox::new(config, "test-actor@localhost".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(config, "test-actor@localhost".to_string())
+            .await
+            .unwrap();
 
         // Enqueue messages with different priorities
         mailbox
@@ -85,7 +90,9 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_selective_receive() {
-        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor@localhost".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(mailbox_config_default(), "test-actor@localhost".to_string())
+            .await
+            .unwrap();
 
         // Enqueue multiple messages
         mailbox
@@ -122,9 +129,18 @@ mod integration_tests {
     async fn test_actor_lifecycle_with_behavior() {
         let id = "test-actor".to_string();
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), id.clone()).await.unwrap();
+        let mailbox = Mailbox::new(mailbox_config_default(), id.clone())
+            .await
+            .unwrap();
 
-        let mut actor = ActorStruct::new(id.clone(), behavior, mailbox, "test-tenant".to_string(), "test-namespace".to_string(), None);
+        let mut actor = ActorStruct::new(
+            id.clone(),
+            behavior,
+            mailbox,
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+            None,
+        );
 
         // Test initial state
         assert_eq!(actor.state().await, ActorState::Creating);
@@ -149,7 +165,9 @@ mod integration_tests {
     async fn test_become_unbecome_pattern() {
         let id = "test-actor".to_string();
         let initial_behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), id.clone()).await.unwrap();
+        let mailbox = Mailbox::new(mailbox_config_default(), id.clone())
+            .await
+            .unwrap();
 
         let actor = ActorStruct::new(
             id.clone(),
@@ -219,7 +237,8 @@ mod integration_tests {
                 if msg.payload == b"get" {
                     // Send reply if sender is present
                     if !msg.sender_id.is_empty() {
-                        let mut reply = MailboxMessage::new(self.state.count.to_string().into_bytes());
+                        let mut reply =
+                            MailboxMessage::new(self.state.count.to_string().into_bytes());
                         reply.receiver = msg.sender_id.clone();
                         reply.sender = Some(msg.receiver_id.clone());
                         if !msg.correlation_id.is_empty() {
@@ -230,11 +249,15 @@ mod integration_tests {
                             &msg.sender_id,
                             msg.receiver_id.clone(),
                             reply.to_proto(),
-                        ).await.map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
+                        )
+                        .await
+                        .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
                     }
                     Ok(())
                 } else {
-                    Err(BehaviorError::ProcessingError("Unknown request".to_string()))
+                    Err(BehaviorError::ProcessingError(
+                        "Unknown request".to_string(),
+                    ))
                 }
             }
 
@@ -269,17 +292,33 @@ mod integration_tests {
         // Test that priority values are correctly ordered
         // Use helper function to compare priority values (proto-generated enums don't implement Ord)
         use plexspaces_mailbox::message_priority_value;
-        assert!(message_priority_value(&MessagePriority::System) > message_priority_value(&MessagePriority::Highest));
-        assert!(message_priority_value(&MessagePriority::Highest) > message_priority_value(&MessagePriority::High));
-        assert!(message_priority_value(&MessagePriority::High) > message_priority_value(&MessagePriority::Normal));
-        assert!(message_priority_value(&MessagePriority::Normal) > message_priority_value(&MessagePriority::Low));
+        assert!(
+            message_priority_value(&MessagePriority::System)
+                > message_priority_value(&MessagePriority::Highest)
+        );
+        assert!(
+            message_priority_value(&MessagePriority::Highest)
+                > message_priority_value(&MessagePriority::High)
+        );
+        assert!(
+            message_priority_value(&MessagePriority::High)
+                > message_priority_value(&MessagePriority::Normal)
+        );
+        assert!(
+            message_priority_value(&MessagePriority::Normal)
+                > message_priority_value(&MessagePriority::Low)
+        );
     }
 
     #[tokio::test]
     async fn test_actor_ref_tell_ask() {
         use crate::ActorRef; // Re-exported from core
 
-        let mailbox = Arc::new(Mailbox::new(mailbox_config_default(), "test-actor@localhost".to_string()).await.unwrap());
+        let mailbox = Arc::new(
+            Mailbox::new(mailbox_config_default(), "test-actor@localhost".to_string())
+                .await
+                .unwrap(),
+        );
         let actor_ref = ActorRef::new("test-actor@localhost".to_string()).unwrap();
 
         // Test send pattern (fire and forget) - ActorRef is now pure data, use ActorService

@@ -299,10 +299,7 @@ impl FirecrackerApiClient {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn attach_network_interface(
-        &self,
-        iface: NetworkInterface,
-    ) -> FirecrackerResult<()> {
+    pub async fn attach_network_interface(&self, iface: NetworkInterface) -> FirecrackerResult<()> {
         let path = format!("/network-interfaces/{}", iface.iface_id);
         let body = serde_json::to_string(&iface)?;
         self.put(&path, body).await
@@ -606,7 +603,8 @@ mod tests {
 
     #[test]
     fn test_instance_info_deserialization() {
-        let json = r#"{"id":"test","state":"Running","vmm_version":"1.4.0","app_name":"Firecracker"}"#;
+        let json =
+            r#"{"id":"test","state":"Running","vmm_version":"1.4.0","app_name":"Firecracker"}"#;
         let info: InstanceInfo = serde_json::from_str(json).unwrap();
         assert_eq!(info.id, "test");
         assert_eq!(info.state, "Running");

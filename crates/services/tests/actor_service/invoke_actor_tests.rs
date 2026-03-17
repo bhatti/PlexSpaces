@@ -12,23 +12,24 @@
 //! - JWT authentication and tenant_id validation
 //! - Error cases (404, invalid args, etc.)
 
-use plexspaces_services::actor_service::ActorServiceImpl;
-use plexspaces_actor::{ActorBuilder, ActorFactory, actor_factory_impl::ActorFactoryImpl};
+use async_trait::async_trait;
+use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorBuilder, ActorFactory};
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{ActorRegistry, ServiceLocator as ServiceLocatorTrait, ReplyWaiterRegistry, Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, FacetManager, VirtualActorManager, RequestContext};
-use plexspaces_services::ServiceLocatorImpl;
-use plexspaces_node::create_default_service_locator;
-use plexspaces_mailbox::Message;
-use plexspaces_object_registry::{ObjectRegistry, SqliteObjectRegistryRepository};
-use plexspaces_proto::actor::v1::{
-    actor_service_server::ActorService,
-    InvokeActorRequest,
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, ActorRegistry, BehaviorError, BehaviorType, FacetManager,
+    Message, ReplyWaiterRegistry, RequestContext, ServiceLocator as ServiceLocatorTrait,
+    VirtualActorManager,
 };
+use plexspaces_mailbox::new_message;
+use plexspaces_node::create_default_service_locator;
+use plexspaces_object_registry::{ObjectRegistry, SqliteObjectRegistryRepository};
+use plexspaces_proto::actor::v1::{actor_service_server::ActorService, InvokeActorRequest};
 use plexspaces_proto::object_registry::v1::ObjectRegistration;
+use plexspaces_services::actor_service::ActorServiceImpl;
+use plexspaces_services::ServiceLocatorImpl;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::Request;
-use async_trait::async_trait;
 
 // Counter actor that responds to GET (ask) and handles POST (tell)
 struct CounterActor {
@@ -65,41 +66,47 @@ impl GenServer for CounterActor {
     ) -> Result<(), BehaviorError> {
         // Parse payload as JSON to get action
         let payload_str = String::from_utf8_lossy(&msg.payload);
-        let action: serde_json::Value = serde_json::from_str(&payload_str)
-            .unwrap_or_else(|_| {
-                // If not JSON, try to parse as simple string
-                serde_json::json!({ "action": payload_str })
-            });
-        
-        let action_str = action.get("action")
+        let action: serde_json::Value = serde_json::from_str(&payload_str).unwrap_or_else(|_| {
+            // If not JSON, try to parse as simple string
+            serde_json::json!({ "action": payload_str })
+        });
+
+        let action_str = action
+            .get("action")
             .and_then(|v| v.as_str())
             .unwrap_or("get");
-        
+
         match action_str {
             "increment" => {
                 self.count += 1;
                 // For POST (tell), we don't need to reply, but we can for testing
-                if let Some(sender_id) = &msg.sender {
+                if !msg.sender_id.is_empty() {
                     let reply = serde_json::json!({ "count": self.count });
-                    let reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
-                    let _ = ctx.send_reply(
-                        msg.correlation_id.as_deref(),
-                        sender_id,
-                        msg.receiver.clone(),
-                        reply_msg,
-                    ).await; // Ignore errors for tell pattern
+                    let reply_msg = new_message(serde_json::to_vec(&reply).unwrap());
+                    let _ = ctx
+                        .send_reply(
+                            (!msg.correlation_id.is_empty()).then_some(msg.correlation_id.as_str()),
+                            &msg.sender_id,
+                            msg.receiver_id.clone(),
+                            reply_msg,
+                        )
+                        .await; // Ignore errors for tell pattern
                 }
             }
             "get" => {
                 let reply = serde_json::json!({ "count": self.count });
-                let reply_msg = Message::new(serde_json::to_vec(&reply).unwrap());
-                if let Some(sender_id) = &msg.sender {
+                let reply_msg = new_message(serde_json::to_vec(&reply).unwrap());
+                if !msg.sender_id.is_empty() {
                     ctx.send_reply(
-                        msg.correlation_id.as_deref(),
-                        sender_id,
-                        msg.receiver.clone(),
+                        (!msg.correlation_id.is_empty()).then_some(msg.correlation_id.as_str()),
+                        &msg.sender_id,
+                        msg.receiver_id.clone(),
                         reply_msg,
-                    ).await.map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
+                    )
+                    .await
+                    .map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
+                    })?;
                 }
             }
             _ => {
@@ -121,15 +128,19 @@ async fn create_test_registry_with_actors(
     num_actors: usize,
 ) -> (Arc<ActorRegistry>, Arc<ServiceLocatorImpl>) {
     use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
-    
-    let object_repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+
+    let object_repo = Arc::new(
+        SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap(),
+    );
     let object_registry_impl = Arc::new(ObjectRegistry::new(object_repo));
-    
+
     // Simple adapter
     struct ObjectRegistryAdapter {
         inner: Arc<ObjectRegistry>,
     }
-    
+
     #[async_trait]
     impl ObjectRegistryTrait for ObjectRegistryAdapter {
         async fn lookup(
@@ -138,11 +149,18 @@ async fn create_test_registry_with_actors(
             object_id: &str,
             object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
         ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
-            let obj_type = object_type.unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
+            let obj_type = object_type.unwrap_or(
+                plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified,
+            );
             self.inner
                 .lookup(ctx, obj_type, object_id)
                 .await
-                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+                .map_err(|e| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })
         }
 
         async fn lookup_full(
@@ -154,7 +172,12 @@ async fn create_test_registry_with_actors(
             self.inner
                 .lookup_full(ctx, object_type, object_id)
                 .await
-                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+                .map_err(|e| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })
         }
 
         async fn register(
@@ -162,10 +185,12 @@ async fn create_test_registry_with_actors(
             ctx: &plexspaces_core::RequestContext,
             registration: ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            self.inner
-                .register(ctx, registration)
-                .await
-                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)
+            self.inner.register(ctx, registration).await.map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
         }
 
         async fn discover(
@@ -181,18 +206,55 @@ async fn create_test_registry_with_actors(
         ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
             Ok(vec![])
         }
+
+        async fn unregister(
+            &self,
+            ctx: &plexspaces_core::RequestContext,
+            object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner
+                .unregister(ctx, object_type, object_id)
+                .await
+                .map_err(|e| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })
+        }
+
+        async fn heartbeat(
+            &self,
+            ctx: &plexspaces_core::RequestContext,
+            object_type: plexspaces_proto::object_registry::v1::ObjectType,
+            object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.inner
+                .heartbeat(ctx, object_type, object_id)
+                .await
+                .map_err(|e| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_string(),
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                })
+        }
     }
-    
+
     let object_registry: Arc<dyn ObjectRegistryTrait> = Arc::new(ObjectRegistryAdapter {
         inner: object_registry_impl,
     });
-    
+
     let actor_registry = Arc::new(ActorRegistry::new(object_registry, node_id.to_string()));
     use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("test-node".to_string()), None, None).await;
-    service_locator.register_service(actor_registry.clone()).await;
+    let service_locator =
+        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    service_locator
+        .register_service(actor_registry.clone())
+        .await;
     // ActorFactory is already registered by create_default_service_locator
-    
+
     // Register NodeConfig
     use plexspaces_proto::node::v1::NodeConfig;
     let node_config = NodeConfig {
@@ -207,49 +269,63 @@ async fn create_test_registry_with_actors(
         metadata: std::collections::HashMap::new(),
         node_registry: None,
         grpc_address: String::new(),
-        wasm_apps_directory: String::new(),
+        ..Default::default()
     };
     service_locator.register_node_config(node_config).await;
-    
+
     // Create ActorFactory and required services
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     use plexspaces_core::FacetManagerServiceWrapper;
-    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(FacetManager::new())));
-    service_locator.register_service(virtual_actor_manager).await;
+    let facet_manager = Arc::new(FacetManagerServiceWrapper::new(Arc::new(
+        FacetManager::new(),
+    )));
+    service_locator
+        .register_service(virtual_actor_manager)
+        .await;
     service_locator.register_service(facet_manager).await;
-    
+
     let actor_factory = Arc::new(ActorFactoryImpl::new(service_locator.clone()));
-    service_locator.register_service(actor_factory.clone()).await;
-    
+    service_locator
+        .register_service(actor_factory.clone())
+        .await;
+
     // Register actors with type information using spawn_actor
-    let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id.to_string(), "default".to_string());
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        tenant_id.to_string(),
+        "default".to_string(),
+    );
     for i in 0..num_actors {
         let actor_id = format!("{}-{}@{}", actor_type, i, node_id);
-        
+
         // Use spawn_actor instead of building and spawning separately
-        let message_sender = actor_factory.spawn_actor(
-            &ctx,
-            &actor_id,
-            actor_type, // Use the provided actor_type
-            vec![], // initial_state
-            None, // config
-            std::collections::HashMap::new(), // labels
-            vec![], // facets
-        ).await
+        let message_sender = actor_factory
+            .spawn_actor(
+                &ctx,
+                &actor_id,
+                actor_type,                       // Use the provided actor_type
+                vec![],                           // initial_state
+                None,                             // config
+                std::collections::HashMap::new(), // labels
+                vec![],                           // facets
+            )
+            .await
             .map_err(|e| format!("Failed to spawn actor: {}", e))
             .unwrap();
-        
+
         // Register with type information for efficient lookup
-        actor_registry.register_actor(
-            &ctx,
-            actor_id.clone(),
-            message_sender,
-            Some(actor_type.to_string()),
-            None, // config
-            None, // instance
-        ).await;
+        actor_registry
+            .register_actor(
+                &ctx,
+                actor_id.clone(),
+                message_sender,
+                Some(actor_type.to_string()),
+                None, // config
+                None, // instance
+                Some(BehaviorType::GenServer),
+            )
+            .await;
     }
-    
+
     (actor_registry, service_locator)
 }
 
@@ -260,17 +336,21 @@ async fn create_test_actor_service(
     node_id: String,
 ) -> ActorServiceImpl {
     let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());
-    service_locator.register_service(reply_waiter_registry).await;
-    
+    service_locator
+        .register_service(reply_waiter_registry)
+        .await;
+
     ActorServiceImpl::new(service_locator, node_id)
 }
 
 #[tokio::test]
 async fn test_invoke_actor_get_success() {
     // Test: GET request successfully invokes actor with ask pattern
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 1).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-    
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
     let request = InvokeActorRequest {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
@@ -288,11 +368,11 @@ async fn test_invoke_actor_get_success() {
         msg_type_override: String::new(),
         timeout: None,
     };
-    
+
     // Actor registration is synchronous - no wait needed
-    
+
     let result = service.invoke_actor(Request::new(request)).await;
-    
+
     // Should succeed and get a reply with count
     match result {
         Ok(response) => {
@@ -326,11 +406,56 @@ async fn test_invoke_actor_get_success() {
 }
 
 #[tokio::test]
+async fn test_invoke_actor_ignores_stale_actor_type_index_entries() {
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service =
+        create_test_actor_service(actor_registry.clone(), service_locator, "node1".to_string())
+            .await;
+
+    let stale_actor_id = "stale-counter@node1".to_string();
+    let key = ("".to_string(), "default".to_string(), "counter".to_string());
+    {
+        let mut index = actor_registry.actor_type_index().write().await;
+        index
+            .entry(key)
+            .or_default()
+            .insert(0, stale_actor_id.clone());
+    }
+
+    let request = InvokeActorRequest {
+        namespace: "default".to_string(),
+        actor_type: "counter".to_string(),
+        http_method: "GET".to_string(),
+        payload: vec![],
+        headers: HashMap::new(),
+        query_params: {
+            let mut params = HashMap::new();
+            params.insert("action".to_string(), "get".to_string());
+            params
+        },
+        path: String::new(),
+        subpath: String::new(),
+        ask: false,
+        msg_type_override: String::new(),
+        timeout: None,
+    };
+
+    let result = service.invoke_actor(Request::new(request)).await;
+    assert!(
+        result.is_ok(),
+        "invoke_actor should ignore stale type index entries"
+    );
+}
+
+#[tokio::test]
 async fn test_invoke_actor_post_success() {
     // Test: POST request successfully invokes actor with tell pattern
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 1).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-    
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
     let request = InvokeActorRequest {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
@@ -348,11 +473,11 @@ async fn test_invoke_actor_post_success() {
         msg_type_override: String::new(),
         timeout: None,
     };
-    
+
     // Actor registration is synchronous - no wait needed
-    
+
     let result = service.invoke_actor(Request::new(request)).await;
-    
+
     // Should succeed (fire-and-forget); POST without invocation=call uses tell (cast)
     match result {
         Ok(response) => {
@@ -362,7 +487,10 @@ async fn test_invoke_actor_post_success() {
         }
         Err(e) => {
             // Allow internal errors for now
-            assert!(matches!(e.code(), tonic::Code::Internal | tonic::Code::Unavailable));
+            assert!(matches!(
+                e.code(),
+                tonic::Code::Internal | tonic::Code::Unavailable
+            ));
         }
     }
 }
@@ -370,8 +498,10 @@ async fn test_invoke_actor_post_success() {
 #[tokio::test]
 async fn test_invoke_actor_post_invocation_call_uses_ask() {
     // POST with msg_type_override=call (HTTP: invocation=call) must use ask pattern (request-reply)
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 1).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     let request = InvokeActorRequest {
         namespace: "default".to_string(),
@@ -384,6 +514,7 @@ async fn test_invoke_actor_post_invocation_call_uses_ask() {
         subpath: String::new(),
         ask: false,
         msg_type_override: "call".to_string(),
+        timeout: None,
     };
 
     let result = service.invoke_actor(Request::new(request)).await;
@@ -392,12 +523,23 @@ async fn test_invoke_actor_post_invocation_call_uses_ask() {
     match result {
         Ok(response) => {
             let resp = response.into_inner();
-            assert!(resp.success, "POST with invocation=call should succeed (ask path)");
-            assert!(!resp.payload.is_empty(), "Ask path should return reply payload");
+            assert!(
+                resp.success,
+                "POST with invocation=call should succeed (ask path)"
+            );
+            assert!(
+                !resp.payload.is_empty(),
+                "Ask path should return reply payload"
+            );
         }
         Err(e) => {
             assert!(
-                matches!(e.code(), tonic::Code::Internal | tonic::Code::Unavailable | tonic::Code::DeadlineExceeded),
+                matches!(
+                    e.code(),
+                    tonic::Code::Internal
+                        | tonic::Code::Unavailable
+                        | tonic::Code::DeadlineExceeded
+                ),
                 "Unexpected error: {:?}",
                 e.code()
             );
@@ -408,9 +550,11 @@ async fn test_invoke_actor_post_invocation_call_uses_ask() {
 #[tokio::test]
 async fn test_invoke_actor_missing_actor_type() {
     // Test: Missing actor_type returns InvalidArgument
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 1).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-    
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
     let request = InvokeActorRequest {
         namespace: "default".to_string(),
         actor_type: String::new(), // Empty actor_type
@@ -424,18 +568,20 @@ async fn test_invoke_actor_missing_actor_type() {
         msg_type_override: String::new(),
         timeout: None,
     };
-    
+
     let result = service.invoke_actor(Request::new(request)).await;
-    
+
     assert!(matches!(result, Err(e) if e.code() == tonic::Code::InvalidArgument));
 }
 
 #[tokio::test]
 async fn test_invoke_actor_not_found() {
     // Test: Actor type not found returns NotFound
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 0).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-    
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 0).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
     let request = InvokeActorRequest {
         namespace: "default".to_string(),
         actor_type: "nonexistent".to_string(),
@@ -449,18 +595,20 @@ async fn test_invoke_actor_not_found() {
         msg_type_override: String::new(),
         timeout: None,
     };
-    
+
     let result = service.invoke_actor(Request::new(request)).await;
-    
+
     assert!(matches!(result, Err(e) if e.code() == tonic::Code::NotFound));
 }
 
 #[tokio::test]
 async fn test_invoke_actor_multiple_actors_random_selection() {
     // Test: Multiple actors of same type - random selection works
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 3).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-    
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 3).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
     let request = InvokeActorRequest {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
@@ -474,9 +622,9 @@ async fn test_invoke_actor_multiple_actors_random_selection() {
         msg_type_override: String::new(),
         timeout: None,
     };
-    
+
     // Actor registration is synchronous - no wait needed
-    
+
     // Call multiple times - should select different actors (or same, but should work)
     for i in 0..10 {
         let result = service.invoke_actor(Request::new(request.clone())).await;
@@ -500,9 +648,11 @@ async fn test_invoke_actor_multiple_actors_random_selection() {
 #[tokio::test]
 async fn test_invoke_actor_default_tenant_id() {
     // Test: Empty tenant_id defaults to "default"
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 1).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-    
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
     let request = InvokeActorRequest {
         namespace: String::new(), // Empty - should default to "default"
         actor_type: "counter".to_string(),
@@ -516,11 +666,11 @@ async fn test_invoke_actor_default_tenant_id() {
         msg_type_override: String::new(),
         timeout: None,
     };
-    
+
     // Actor registration is synchronous - no wait needed
-    
+
     let result = service.invoke_actor(Request::new(request)).await;
-    
+
     // Should not return NotFound (should find actor in default tenant)
     match result {
         Ok(_) => {
@@ -538,13 +688,15 @@ async fn test_invoke_actor_default_tenant_id() {
 #[tokio::test]
 async fn test_invoke_actor_get_query_params_to_json() {
     // Test: GET request converts query params to JSON payload
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 1).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-    
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
     let mut query_params = HashMap::new();
     query_params.insert("key1".to_string(), "value1".to_string());
     query_params.insert("key2".to_string(), "value2".to_string());
-    
+
     let request = InvokeActorRequest {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
@@ -558,13 +710,13 @@ async fn test_invoke_actor_get_query_params_to_json() {
         msg_type_override: String::new(),
         timeout: None,
     };
-    
+
     // Actor registration is synchronous - no wait needed
-    
+
     // The handler should convert query_params to JSON
     // We can't easily test the payload without mocking, but we can verify it doesn't error
     let result = service.invoke_actor(Request::new(request)).await;
-    
+
     // Should not error on serialization
     match result {
         Ok(_) => {
@@ -583,13 +735,15 @@ async fn test_invoke_actor_get_query_params_to_json() {
 #[tokio::test]
 async fn test_invoke_actor_post_headers_preserved() {
     // Test: POST request preserves HTTP headers
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 1).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-    
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
     let mut headers = HashMap::new();
     headers.insert("X-Custom-Header".to_string(), "custom-value".to_string());
     headers.insert("Content-Type".to_string(), "application/json".to_string());
-    
+
     let request = InvokeActorRequest {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
@@ -603,11 +757,11 @@ async fn test_invoke_actor_post_headers_preserved() {
         msg_type_override: String::new(),
         timeout: None,
     };
-    
+
     // Actor registration is synchronous - no wait needed
-    
+
     let result = service.invoke_actor(Request::new(request)).await;
-    
+
     // Should succeed (headers are passed through)
     match result {
         Ok(response) => {
@@ -616,7 +770,10 @@ async fn test_invoke_actor_post_headers_preserved() {
         }
         Err(e) => {
             // Allow internal/unavailable errors
-            assert!(matches!(e.code(), tonic::Code::Internal | tonic::Code::Unavailable));
+            assert!(matches!(
+                e.code(),
+                tonic::Code::Internal | tonic::Code::Unavailable
+            ));
         }
     }
 }
@@ -624,9 +781,11 @@ async fn test_invoke_actor_post_headers_preserved() {
 #[tokio::test]
 async fn test_invoke_actor_with_namespace() {
     // Test: Invoke actor with specific namespace
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 1).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-    
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
     let request = InvokeActorRequest {
         namespace: "default".to_string(), // Using default namespace
         actor_type: "counter".to_string(),
@@ -644,11 +803,11 @@ async fn test_invoke_actor_with_namespace() {
         msg_type_override: String::new(),
         timeout: None,
     };
-    
+
     // Actor registration is synchronous - no wait needed
-    
+
     let result = service.invoke_actor(Request::new(request)).await;
-    
+
     // Should find actor in default namespace
     match result {
         Ok(response) => {
@@ -677,9 +836,11 @@ async fn test_invoke_actor_with_namespace() {
 async fn test_invoke_actor_without_tenant_id_in_path() {
     // Test: Invoke actor without tenant_id in path (should default to "default")
     // This tests the HTTP path /api/v1/actors/{namespace}/{actor_type} (without tenant_id)
-    let (actor_registry, service_locator) = create_test_registry_with_actors("node1", "counter", "default", 1).await;
-    let service = create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-    
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "counter", "default", 1).await;
+    let service =
+        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
+
     let request = InvokeActorRequest {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
@@ -697,16 +858,19 @@ async fn test_invoke_actor_without_tenant_id_in_path() {
         msg_type_override: String::new(),
         timeout: None,
     };
-    
+
     // Actor registration is synchronous - no wait needed
-    
+
     let result = service.invoke_actor(Request::new(request)).await;
-    
+
     // Should succeed with default tenant_id
     match result {
         Ok(response) => {
             let resp = response.into_inner();
-            assert!(resp.success, "InvokeActor should succeed with default tenant_id");
+            assert!(
+                resp.success,
+                "InvokeActor should succeed with default tenant_id"
+            );
         }
         Err(e) => {
             // Allow various error codes (actor might not be fully initialized, timeout, etc.)

@@ -144,7 +144,10 @@ pub async fn create_state_store(
     db_url: &str,
 ) -> Result<Arc<dyn SchedulingStateStore>, Box<dyn Error + Send + Sync>> {
     // Determine backend type from connection string
-    if db_url.contains(":memory:") || db_url.starts_with("sqlite:") || db_url.starts_with("sqlite://") {
+    if db_url.contains(":memory:")
+        || db_url.starts_with("sqlite:")
+        || db_url.starts_with("sqlite://")
+    {
         #[cfg(feature = "sqlite-backend")]
         {
             // Extract path from SQLite connection string
@@ -156,42 +159,49 @@ pub async fn create_state_store(
                 // After strip_prefix("sqlite:///"): "Users/sbhatti/plexspaces/db/plexspaces.db?mode=rwc"
                 // After split('?'): "Users/sbhatti/plexspaces/db/plexspaces.db" (no leading /)
                 // Result: "/Users/sbhatti/plexspaces/db/plexspaces.db"
-                let extracted = db_url.strip_prefix("sqlite:///")
+                let extracted = db_url
+                    .strip_prefix("sqlite:///")
                     .and_then(|s| s.split('?').next()) // Remove query parameters like ?mode=rwc
                     .unwrap_or(db_url);
                 // extracted does NOT have leading / after strip_prefix, so add it back
                 format!("/{}", extracted)
             } else if db_url.starts_with("sqlite://") {
                 // Format: "sqlite://relative/path" - no leading /
-                db_url.strip_prefix("sqlite://")
+                db_url
+                    .strip_prefix("sqlite://")
                     .and_then(|s| s.split('?').next())
                     .unwrap_or(db_url)
                     .to_string()
             } else if db_url.starts_with("sqlite:") {
                 // Format: "sqlite:path" - may or may not have leading /
-                db_url.strip_prefix("sqlite:")
+                db_url
+                    .strip_prefix("sqlite:")
                     .and_then(|s| s.split('?').next())
                     .unwrap_or(db_url)
                     .to_string()
             } else {
                 return Err("Invalid SQLite connection string format".into());
             };
-            
+
             // Ensure directory exists for file-based SQLite databases
             if path != ":memory:" && !path.is_empty() {
                 if let Some(parent) = std::path::Path::new(&path).parent() {
                     std::fs::create_dir_all(parent).map_err(|e| {
-                        format!("Failed to create database directory '{}': {}", parent.display(), e)
+                        format!(
+                            "Failed to create database directory '{}': {}",
+                            parent.display(),
+                            e
+                        )
                     })?;
                 }
             }
-            
+
             tracing::debug!(
                 db_url = %db_url,
                 extracted_path = %path,
                 "Creating scheduler state store with extracted path"
             );
-            
+
             use sql::SqliteSchedulingStateStore;
             let store = SqliteSchedulingStateStore::new(&path).await?;
             Ok(Arc::new(store))
@@ -230,7 +240,11 @@ pub async fn create_state_store(
         }
         #[cfg(not(feature = "sqlite-backend"))]
         {
-            Err(format!("Unsupported database URL: {} (and sqlite-backend not enabled)", db_url).into())
+            Err(format!(
+                "Unsupported database URL: {} (and sqlite-backend not enabled)",
+                db_url
+            )
+            .into())
         }
     }
 }

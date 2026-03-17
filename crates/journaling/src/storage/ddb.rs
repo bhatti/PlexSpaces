@@ -85,8 +85,7 @@
 //! - Sort Key: `next_fire_time` (Number)
 //! - Purpose: Efficient query for due reminders
 
-use crate::{Checkpoint, JournalEntry, JournalStats, ActorEvent, ActorHistory};
-use plexspaces_core::{JournalStorage, JournalError, JournalResult};
+use crate::{ActorEvent, ActorHistory, Checkpoint, JournalEntry, JournalStats};
 use async_trait::async_trait;
 use aws_sdk_dynamodb::{
     error::ProvideErrorMetadata,
@@ -97,6 +96,7 @@ use aws_sdk_dynamodb::{
     Client as DynamoDbClient,
 };
 use chrono::Utc;
+use plexspaces_core::{JournalError, JournalResult, JournalStorage};
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use plexspaces_proto::timer::v1::ReminderState;
 use prost::Message;
@@ -143,9 +143,11 @@ impl DynamoDBJournalStorage {
 
         // Create tables if they don't exist
         Self::ensure_entries_table_exists(&client, &format!("{}-entries", table_prefix)).await?;
-        Self::ensure_checkpoints_table_exists(&client, &format!("{}-checkpoints", table_prefix)).await?;
+        Self::ensure_checkpoints_table_exists(&client, &format!("{}-checkpoints", table_prefix))
+            .await?;
         Self::ensure_events_table_exists(&client, &format!("{}-events", table_prefix)).await?;
-        Self::ensure_reminders_table_exists(&client, &format!("{}-reminders", table_prefix)).await?;
+        Self::ensure_reminders_table_exists(&client, &format!("{}-reminders", table_prefix))
+            .await?;
 
         let duration = start_time.elapsed();
         metrics::histogram!(
@@ -183,10 +185,18 @@ impl DynamoDBJournalStorage {
             Err(e) => {
                 // Table doesn't exist, create it
                 let error_msg = format!("{}", e);
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_msg.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_msg.clone());
 
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         error = %e,
                         error_code = %error_code,
@@ -207,25 +217,33 @@ impl DynamoDBJournalStorage {
             .attribute_name("pk")
             .key_type(KeyType::Hash)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build key schema: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build key schema: {}", e))
+            })?;
 
         let sk_key_schema = KeySchemaElement::builder()
             .attribute_name("sk")
             .key_type(KeyType::Range)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build key schema: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build key schema: {}", e))
+            })?;
 
         let pk_attr = AttributeDefinition::builder()
             .attribute_name("pk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let sk_attr = AttributeDefinition::builder()
             .attribute_name("sk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let create_table_result = client
             .create_table()
@@ -294,10 +312,18 @@ impl DynamoDBJournalStorage {
             Err(e) => {
                 // Table doesn't exist, create it
                 let error_msg = format!("{}", e);
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_msg.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_msg.clone());
 
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         error = %e,
                         error_code = %error_code,
@@ -318,50 +344,66 @@ impl DynamoDBJournalStorage {
             .attribute_name("pk")
             .key_type(KeyType::Hash)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build key schema: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build key schema: {}", e))
+            })?;
 
         let sk_key_schema = KeySchemaElement::builder()
             .attribute_name("sk")
             .key_type(KeyType::Range)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build key schema: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build key schema: {}", e))
+            })?;
 
         let pk_attr = AttributeDefinition::builder()
             .attribute_name("pk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let sk_attr = AttributeDefinition::builder()
             .attribute_name("sk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         // GSI for querying due reminders
         let is_active_attr = AttributeDefinition::builder()
             .attribute_name("is_active")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let next_fire_time_attr = AttributeDefinition::builder()
             .attribute_name("next_fire_time")
             .attribute_type(ScalarAttributeType::N)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let gsi_pk = KeySchemaElement::builder()
             .attribute_name("is_active")
             .key_type(KeyType::Hash)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let gsi_sk = KeySchemaElement::builder()
             .attribute_name("next_fire_time")
             .key_type(KeyType::Range)
             .build()
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                crate::JournalError::Storage(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let gsi_projection = Projection::builder()
             .projection_type(ProjectionType::All)
@@ -412,10 +454,7 @@ impl DynamoDBJournalStorage {
 
     /// Wait for table to become active.
     #[instrument(skip(client), fields(table_name = %table_name))]
-    async fn wait_for_table_active(
-        client: &DynamoDbClient,
-        table_name: &str,
-    ) -> JournalResult<()> {
+    async fn wait_for_table_active(client: &DynamoDbClient, table_name: &str) -> JournalResult<()> {
         use aws_sdk_dynamodb::types::TableStatus;
 
         let mut attempts = 0;
@@ -427,7 +466,9 @@ impl DynamoDBJournalStorage {
                 .table_name(table_name)
                 .send()
                 .await
-                .map_err(|e| crate::JournalError::Storage(format!("Failed to describe table: {}", e)))?;
+                .map_err(|e| {
+                    crate::JournalError::Storage(format!("Failed to describe table: {}", e))
+                })?;
 
             if let Some(status) = describe_result.table().and_then(|t| t.table_status()) {
                 match status {
@@ -454,7 +495,9 @@ impl DynamoDBJournalStorage {
                     }
                 }
             } else {
-                return Err(crate::JournalError::Storage("Table status not available".to_string()));
+                return Err(crate::JournalError::Storage(
+                    "Table status not available".to_string(),
+                ));
             }
         }
     }
@@ -470,37 +513,76 @@ impl JournalStorage for DynamoDBJournalStorage {
 
         // Serialize entry to binary
         let mut entry_data = Vec::new();
-        entry.encode(&mut entry_data)
+        entry
+            .encode(&mut entry_data)
             .map_err(|e| crate::JournalError::Storage(format!("Failed to encode entry: {}", e)))?;
 
-        let timestamp_secs = entry.timestamp.as_ref().map(|ts| ts.seconds).unwrap_or(Utc::now().timestamp());
+        let timestamp_secs = entry
+            .timestamp
+            .as_ref()
+            .map(|ts| ts.seconds)
+            .unwrap_or(Utc::now().timestamp());
         let now_secs = Utc::now().timestamp();
 
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S(sk));
-        item.insert("actor_id".to_string(), AttributeValue::S(entry.actor_id.clone()));
-        item.insert("sequence".to_string(), AttributeValue::N(entry.sequence.to_string()));
-        item.insert("entry_data".to_string(), AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(entry_data)));
-        item.insert("timestamp".to_string(), AttributeValue::N(timestamp_secs.to_string()));
-        item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
+        item.insert(
+            "actor_id".to_string(),
+            AttributeValue::S(entry.actor_id.clone()),
+        );
+        item.insert(
+            "sequence".to_string(),
+            AttributeValue::N(entry.sequence.to_string()),
+        );
+        item.insert(
+            "entry_data".to_string(),
+            AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(entry_data)),
+        );
+        item.insert(
+            "timestamp".to_string(),
+            AttributeValue::N(timestamp_secs.to_string()),
+        );
+        item.insert(
+            "created_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
 
         // Extract entry type for filtering
         let entry_type = if let Some(entry_variant) = &entry.entry {
             match entry_variant {
-                plexspaces_proto::journaling::v1::journal_entry::Entry::MessageReceived(_) => "MESSAGE_RECEIVED",
-                plexspaces_proto::journaling::v1::journal_entry::Entry::MessageProcessed(_) => "MESSAGE_PROCESSED",
-                plexspaces_proto::journaling::v1::journal_entry::Entry::StateChanged(_) => "STATE_CHANGED",
-                plexspaces_proto::journaling::v1::journal_entry::Entry::SideEffectExecuted(_) => "SIDE_EFFECT_EXECUTED",
-                plexspaces_proto::journaling::v1::journal_entry::Entry::TimerScheduled(_) => "TIMER_SCHEDULED",
-                plexspaces_proto::journaling::v1::journal_entry::Entry::TimerFired(_) => "TIMER_FIRED",
-                plexspaces_proto::journaling::v1::journal_entry::Entry::PromiseCreated(_) => "PROMISE_CREATED",
-                plexspaces_proto::journaling::v1::journal_entry::Entry::PromiseResolved(_) => "PROMISE_RESOLVED",
+                plexspaces_proto::journaling::v1::journal_entry::Entry::MessageReceived(_) => {
+                    "MESSAGE_RECEIVED"
+                }
+                plexspaces_proto::journaling::v1::journal_entry::Entry::MessageProcessed(_) => {
+                    "MESSAGE_PROCESSED"
+                }
+                plexspaces_proto::journaling::v1::journal_entry::Entry::StateChanged(_) => {
+                    "STATE_CHANGED"
+                }
+                plexspaces_proto::journaling::v1::journal_entry::Entry::SideEffectExecuted(_) => {
+                    "SIDE_EFFECT_EXECUTED"
+                }
+                plexspaces_proto::journaling::v1::journal_entry::Entry::TimerScheduled(_) => {
+                    "TIMER_SCHEDULED"
+                }
+                plexspaces_proto::journaling::v1::journal_entry::Entry::TimerFired(_) => {
+                    "TIMER_FIRED"
+                }
+                plexspaces_proto::journaling::v1::journal_entry::Entry::PromiseCreated(_) => {
+                    "PROMISE_CREATED"
+                }
+                plexspaces_proto::journaling::v1::journal_entry::Entry::PromiseResolved(_) => {
+                    "PROMISE_RESOLVED"
+                }
             }
         } else {
             "UNKNOWN"
         };
-        item.insert("entry_type".to_string(), AttributeValue::S(entry_type.to_string()));
+        item.insert(
+            "entry_type".to_string(),
+            AttributeValue::S(entry_type.to_string()),
+        );
 
         match self
             .client
@@ -532,7 +614,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(crate::JournalError::Storage(format!("DynamoDB put_item failed: {}", e)))
+                Err(crate::JournalError::Storage(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -558,20 +643,40 @@ impl JournalStorage for DynamoDBJournalStorage {
                 let sk = format!("ENTRY#{}", entry.sequence);
 
                 let mut entry_data = Vec::new();
-                entry.encode(&mut entry_data)
-                    .map_err(|e| crate::JournalError::Storage(format!("Failed to encode entry: {}", e)))?;
+                entry.encode(&mut entry_data).map_err(|e| {
+                    crate::JournalError::Storage(format!("Failed to encode entry: {}", e))
+                })?;
 
-                let timestamp_secs = entry.timestamp.as_ref().map(|ts| ts.seconds).unwrap_or(Utc::now().timestamp());
+                let timestamp_secs = entry
+                    .timestamp
+                    .as_ref()
+                    .map(|ts| ts.seconds)
+                    .unwrap_or(Utc::now().timestamp());
                 let now_secs = Utc::now().timestamp();
 
                 let mut item = HashMap::new();
                 item.insert("pk".to_string(), AttributeValue::S(pk));
                 item.insert("sk".to_string(), AttributeValue::S(sk));
-                item.insert("actor_id".to_string(), AttributeValue::S(entry.actor_id.clone()));
-                item.insert("sequence".to_string(), AttributeValue::N(entry.sequence.to_string()));
-                item.insert("entry_data".to_string(), AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(entry_data)));
-                item.insert("timestamp".to_string(), AttributeValue::N(timestamp_secs.to_string()));
-                item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
+                item.insert(
+                    "actor_id".to_string(),
+                    AttributeValue::S(entry.actor_id.clone()),
+                );
+                item.insert(
+                    "sequence".to_string(),
+                    AttributeValue::N(entry.sequence.to_string()),
+                );
+                item.insert(
+                    "entry_data".to_string(),
+                    AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(entry_data)),
+                );
+                item.insert(
+                    "timestamp".to_string(),
+                    AttributeValue::N(timestamp_secs.to_string()),
+                );
+                item.insert(
+                    "created_at".to_string(),
+                    AttributeValue::N(now_secs.to_string()),
+                );
 
                 let entry_type = if let Some(entry_variant) = &entry.entry {
                     match entry_variant {
@@ -587,17 +692,22 @@ impl JournalStorage for DynamoDBJournalStorage {
                 } else {
                     "UNKNOWN"
                 };
-                item.insert("entry_type".to_string(), AttributeValue::S(entry_type.to_string()));
+                item.insert(
+                    "entry_type".to_string(),
+                    AttributeValue::S(entry_type.to_string()),
+                );
 
                 let put_request = aws_sdk_dynamodb::types::PutRequest::builder()
                     .set_item(Some(item))
                     .build()
-                    .map_err(|e| crate::JournalError::Storage(format!("Failed to build put request: {}", e)))?;
-                
+                    .map_err(|e| {
+                        crate::JournalError::Storage(format!("Failed to build put request: {}", e))
+                    })?;
+
                 let write_request = aws_sdk_dynamodb::types::WriteRequest::builder()
                     .put_request(put_request)
                     .build();
-                
+
                 write_requests.push(write_request);
 
                 if entry.sequence < first_sequence {
@@ -701,7 +811,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                 }
                 Err(e) => {
                     error!(error = %e, actor_id = %actor_id, "Failed to replay journal entries");
-                    return Err(crate::JournalError::Storage(format!("DynamoDB query failed: {}", e)));
+                    return Err(crate::JournalError::Storage(format!(
+                        "DynamoDB query failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -777,11 +890,16 @@ impl JournalStorage for DynamoDBJournalStorage {
                     "result" => "not_found"
                 )
                 .increment(1);
-                Err(crate::JournalError::CheckpointNotFound(actor_id.to_string()))
+                Err(crate::JournalError::CheckpointNotFound(
+                    actor_id.to_string(),
+                ))
             }
             Err(e) => {
                 error!(error = %e, actor_id = %actor_id, "Failed to get checkpoint");
-                Err(crate::JournalError::Storage(format!("DynamoDB get_item failed: {}", e)))
+                Err(crate::JournalError::Storage(format!(
+                    "DynamoDB get_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -793,20 +911,43 @@ impl JournalStorage for DynamoDBJournalStorage {
 
         // Serialize checkpoint to binary
         let mut checkpoint_data = Vec::new();
-        checkpoint.encode(&mut checkpoint_data)
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to encode checkpoint: {}", e)))?;
+        checkpoint.encode(&mut checkpoint_data).map_err(|e| {
+            crate::JournalError::Storage(format!("Failed to encode checkpoint: {}", e))
+        })?;
 
-        let timestamp_secs = checkpoint.timestamp.as_ref().map(|ts| ts.seconds).unwrap_or(Utc::now().timestamp());
+        let timestamp_secs = checkpoint
+            .timestamp
+            .as_ref()
+            .map(|ts| ts.seconds)
+            .unwrap_or(Utc::now().timestamp());
         let now_secs = Utc::now().timestamp();
 
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
-        item.insert("sk".to_string(), AttributeValue::S("CHECKPOINT".to_string()));
-        item.insert("actor_id".to_string(), AttributeValue::S(checkpoint.actor_id.clone()));
-        item.insert("sequence".to_string(), AttributeValue::N(checkpoint.sequence.to_string()));
-        item.insert("checkpoint_data".to_string(), AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(checkpoint_data)));
-        item.insert("timestamp".to_string(), AttributeValue::N(timestamp_secs.to_string()));
-        item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
+        item.insert(
+            "sk".to_string(),
+            AttributeValue::S("CHECKPOINT".to_string()),
+        );
+        item.insert(
+            "actor_id".to_string(),
+            AttributeValue::S(checkpoint.actor_id.clone()),
+        );
+        item.insert(
+            "sequence".to_string(),
+            AttributeValue::N(checkpoint.sequence.to_string()),
+        );
+        item.insert(
+            "checkpoint_data".to_string(),
+            AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(checkpoint_data)),
+        );
+        item.insert(
+            "timestamp".to_string(),
+            AttributeValue::N(timestamp_secs.to_string()),
+        );
+        item.insert(
+            "created_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
 
         match self
             .client
@@ -838,7 +979,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(crate::JournalError::Storage(format!("DynamoDB put_item failed: {}", e)))
+                Err(crate::JournalError::Storage(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -888,7 +1032,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                 }
                 Err(e) => {
                     error!(error = %e, actor_id = %actor_id, "Failed to query entries for truncation");
-                    return Err(crate::JournalError::Storage(format!("DynamoDB query failed: {}", e)));
+                    return Err(crate::JournalError::Storage(format!(
+                        "DynamoDB query failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -905,12 +1052,17 @@ impl JournalStorage for DynamoDBJournalStorage {
                     .key("pk", AttributeValue::S(pk_val.clone()))
                     .key("sk", AttributeValue::S(sk_val.clone()))
                     .build()
-                    .map_err(|e| crate::JournalError::Storage(format!("Failed to build delete request: {}", e)))?;
-                
+                    .map_err(|e| {
+                        crate::JournalError::Storage(format!(
+                            "Failed to build delete request: {}",
+                            e
+                        ))
+                    })?;
+
                 let write_request = aws_sdk_dynamodb::types::WriteRequest::builder()
                     .delete_request(delete_request)
                     .build();
-                
+
                 write_requests.push(write_request);
             }
 
@@ -978,7 +1130,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                     .table_name(&table_name)
                     .key_condition_expression("pk = :pk AND begins_with(sk, :sk_prefix)")
                     .expression_attribute_values(":pk", AttributeValue::S(pk.clone()))
-                    .expression_attribute_values(":sk_prefix", AttributeValue::S("ENTRY#".to_string()))
+                    .expression_attribute_values(
+                        ":sk_prefix",
+                        AttributeValue::S("ENTRY#".to_string()),
+                    )
                     .select(aws_sdk_dynamodb::types::Select::AllAttributes);
 
                 if let Some(lek) = last_evaluated_key {
@@ -1013,15 +1168,15 @@ impl JournalStorage for DynamoDBJournalStorage {
             stats.total_entries = entry_count;
             stats.entries_by_actor.insert(aid.to_string(), entry_count);
             if let Some(ts) = oldest_ts {
-                stats.oldest_entry = chrono::DateTime::from_timestamp(ts, 0)
-                    .map(|dt| prost_types::Timestamp {
+                stats.oldest_entry =
+                    chrono::DateTime::from_timestamp(ts, 0).map(|dt| prost_types::Timestamp {
                         seconds: dt.timestamp(),
                         nanos: dt.timestamp_subsec_nanos() as i32,
                     });
             }
             if let Some(ts) = newest_ts {
-                stats.newest_entry = chrono::DateTime::from_timestamp(ts, 0)
-                    .map(|dt| prost_types::Timestamp {
+                stats.newest_entry =
+                    chrono::DateTime::from_timestamp(ts, 0).map(|dt| prost_types::Timestamp {
                         seconds: dt.timestamp(),
                         nanos: dt.timestamp_subsec_nanos() as i32,
                     });
@@ -1095,22 +1250,45 @@ impl JournalStorage for DynamoDBJournalStorage {
 
         // Serialize event to binary
         let mut event_data = Vec::new();
-        event.encode(&mut event_data)
+        event
+            .encode(&mut event_data)
             .map_err(|e| crate::JournalError::Storage(format!("Failed to encode event: {}", e)))?;
 
-        let timestamp_secs = event.timestamp.as_ref().map(|ts| ts.seconds).unwrap_or(Utc::now().timestamp());
+        let timestamp_secs = event
+            .timestamp
+            .as_ref()
+            .map(|ts| ts.seconds)
+            .unwrap_or(Utc::now().timestamp());
         let now_secs = Utc::now().timestamp();
 
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S(sk));
-        item.insert("actor_id".to_string(), AttributeValue::S(event.actor_id.clone()));
-        item.insert("sequence".to_string(), AttributeValue::N(event.sequence.to_string()));
-        item.insert("event_type".to_string(), AttributeValue::S(event.event_type.clone()));
-        item.insert("event_data".to_string(), AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(event_data)));
+        item.insert(
+            "actor_id".to_string(),
+            AttributeValue::S(event.actor_id.clone()),
+        );
+        item.insert(
+            "sequence".to_string(),
+            AttributeValue::N(event.sequence.to_string()),
+        );
+        item.insert(
+            "event_type".to_string(),
+            AttributeValue::S(event.event_type.clone()),
+        );
+        item.insert(
+            "event_data".to_string(),
+            AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(event_data)),
+        );
         // event_data already inserted above
-        item.insert("timestamp".to_string(), AttributeValue::N(timestamp_secs.to_string()));
-        item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
+        item.insert(
+            "timestamp".to_string(),
+            AttributeValue::N(timestamp_secs.to_string()),
+        );
+        item.insert(
+            "created_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
 
         match self
             .client
@@ -1142,7 +1320,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(crate::JournalError::Storage(format!("DynamoDB put_item failed: {}", e)))
+                Err(crate::JournalError::Storage(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -1167,32 +1348,57 @@ impl JournalStorage for DynamoDBJournalStorage {
                 let sk = format!("EVENT#{}", event.sequence);
 
                 let mut event_data = Vec::new();
-                event.encode(&mut event_data)
-                    .map_err(|e| crate::JournalError::Storage(format!("Failed to encode event: {}", e)))?;
+                event.encode(&mut event_data).map_err(|e| {
+                    crate::JournalError::Storage(format!("Failed to encode event: {}", e))
+                })?;
 
-                let timestamp_secs = event.timestamp.as_ref().map(|ts| ts.seconds).unwrap_or(Utc::now().timestamp());
+                let timestamp_secs = event
+                    .timestamp
+                    .as_ref()
+                    .map(|ts| ts.seconds)
+                    .unwrap_or(Utc::now().timestamp());
                 let now_secs = Utc::now().timestamp();
 
                 let mut item = HashMap::new();
                 item.insert("pk".to_string(), AttributeValue::S(pk));
                 item.insert("sk".to_string(), AttributeValue::S(sk));
-                item.insert("actor_id".to_string(), AttributeValue::S(event.actor_id.clone()));
-                item.insert("sequence".to_string(), AttributeValue::N(event.sequence.to_string()));
-                item.insert("event_type".to_string(), AttributeValue::S(event.event_type.clone()));
-                item.insert("event_data".to_string(), AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(event_data)));
+                item.insert(
+                    "actor_id".to_string(),
+                    AttributeValue::S(event.actor_id.clone()),
+                );
+                item.insert(
+                    "sequence".to_string(),
+                    AttributeValue::N(event.sequence.to_string()),
+                );
+                item.insert(
+                    "event_type".to_string(),
+                    AttributeValue::S(event.event_type.clone()),
+                );
+                item.insert(
+                    "event_data".to_string(),
+                    AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(event_data)),
+                );
                 // event_data already inserted above
-                item.insert("timestamp".to_string(), AttributeValue::N(timestamp_secs.to_string()));
-                item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
+                item.insert(
+                    "timestamp".to_string(),
+                    AttributeValue::N(timestamp_secs.to_string()),
+                );
+                item.insert(
+                    "created_at".to_string(),
+                    AttributeValue::N(now_secs.to_string()),
+                );
 
                 let put_request = aws_sdk_dynamodb::types::PutRequest::builder()
                     .set_item(Some(item))
                     .build()
-                    .map_err(|e| crate::JournalError::Storage(format!("Failed to build put request: {}", e)))?;
-                
+                    .map_err(|e| {
+                        crate::JournalError::Storage(format!("Failed to build put request: {}", e))
+                    })?;
+
                 let write_request = aws_sdk_dynamodb::types::WriteRequest::builder()
                     .put_request(put_request)
                     .build();
-                
+
                 write_requests.push(write_request);
 
                 if event.sequence < first_sequence {
@@ -1295,7 +1501,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                 }
                 Err(e) => {
                     error!(error = %e, actor_id = %actor_id, "Failed to replay events");
-                    return Err(crate::JournalError::Storage(format!("DynamoDB query failed: {}", e)));
+                    return Err(crate::JournalError::Storage(format!(
+                        "DynamoDB query failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -1396,7 +1605,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                 }
                 Err(e) => {
                     error!(error = %e, actor_id = %actor_id, "Failed to replay events paginated");
-                    return Err(crate::JournalError::Storage(format!("DynamoDB query failed: {}", e)));
+                    return Err(crate::JournalError::Storage(format!(
+                        "DynamoDB query failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -1477,15 +1689,17 @@ impl JournalStorage for DynamoDBJournalStorage {
     async fn register_reminder(&self, reminder_state: &ReminderState) -> JournalResult<()> {
         let start_time = std::time::Instant::now();
         let table_name = format!("{}-reminders", self.table_prefix);
-        let registration = reminder_state.registration.as_ref()
-            .ok_or_else(|| crate::JournalError::Storage("ReminderState missing registration".to_string()))?;
+        let registration = reminder_state.registration.as_ref().ok_or_else(|| {
+            crate::JournalError::Storage("ReminderState missing registration".to_string())
+        })?;
         let pk = registration.actor_id.clone();
         let sk = format!("REMINDER#{}", registration.reminder_name);
 
         // Serialize reminder state to binary
         let mut reminder_data = Vec::new();
-        reminder_state.encode(&mut reminder_data)
-            .map_err(|e| crate::JournalError::Storage(format!("Failed to encode reminder: {}", e)))?;
+        reminder_state.encode(&mut reminder_data).map_err(|e| {
+            crate::JournalError::Storage(format!("Failed to encode reminder: {}", e))
+        })?;
 
         let next_fire_time_secs = reminder_state
             .next_fire_time
@@ -1497,12 +1711,30 @@ impl JournalStorage for DynamoDBJournalStorage {
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S(sk));
-        item.insert("actor_id".to_string(), AttributeValue::S(registration.actor_id.clone()));
-        item.insert("reminder_name".to_string(), AttributeValue::S(registration.reminder_name.clone()));
-        item.insert("reminder_data".to_string(), AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(reminder_data)));
-        item.insert("next_fire_time".to_string(), AttributeValue::N(next_fire_time_secs.to_string()));
-        item.insert("is_active".to_string(), AttributeValue::S(if reminder_state.is_active { "1" } else { "0" }.to_string()));
-        item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
+        item.insert(
+            "actor_id".to_string(),
+            AttributeValue::S(registration.actor_id.clone()),
+        );
+        item.insert(
+            "reminder_name".to_string(),
+            AttributeValue::S(registration.reminder_name.clone()),
+        );
+        item.insert(
+            "reminder_data".to_string(),
+            AttributeValue::B(aws_sdk_dynamodb::primitives::Blob::new(reminder_data)),
+        );
+        item.insert(
+            "next_fire_time".to_string(),
+            AttributeValue::N(next_fire_time_secs.to_string()),
+        );
+        item.insert(
+            "is_active".to_string(),
+            AttributeValue::S(if reminder_state.is_active { "1" } else { "0" }.to_string()),
+        );
+        item.insert(
+            "created_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
 
         match self
             .client
@@ -1534,7 +1766,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(crate::JournalError::Storage(format!("DynamoDB put_item failed: {}", e)))
+                Err(crate::JournalError::Storage(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -1576,7 +1811,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(crate::JournalError::Storage(format!("DynamoDB delete_item failed: {}", e)))
+                Err(crate::JournalError::Storage(format!(
+                    "DynamoDB delete_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -1596,7 +1834,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                 .table_name(&table_name)
                 .key_condition_expression("pk = :pk AND begins_with(sk, :sk_prefix)")
                 .expression_attribute_values(":pk", AttributeValue::S(pk.clone()))
-                .expression_attribute_values(":sk_prefix", AttributeValue::S("REMINDER#".to_string()));
+                .expression_attribute_values(
+                    ":sk_prefix",
+                    AttributeValue::S("REMINDER#".to_string()),
+                );
 
             if let Some(lek) = last_evaluated_key {
                 query = query.set_exclusive_start_key(Some(lek));
@@ -1634,7 +1875,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                 }
                 Err(e) => {
                     error!(error = %e, actor_id = %actor_id, "Failed to load reminders");
-                    return Err(crate::JournalError::Storage(format!("DynamoDB query failed: {}", e)));
+                    return Err(crate::JournalError::Storage(format!(
+                        "DynamoDB query failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -1661,10 +1905,14 @@ impl JournalStorage for DynamoDBJournalStorage {
         self.register_reminder(reminder_state).await
     }
 
-    async fn query_due_reminders(&self, before_time: SystemTime) -> JournalResult<Vec<ReminderState>> {
+    async fn query_due_reminders(
+        &self,
+        before_time: SystemTime,
+    ) -> JournalResult<Vec<ReminderState>> {
         let start_time = std::time::Instant::now();
         let table_name = format!("{}-reminders", self.table_prefix);
-        let before_time_secs = before_time.duration_since(std::time::UNIX_EPOCH)
+        let before_time_secs = before_time
+            .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_secs() as i64;
 
@@ -1680,7 +1928,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                 .index_name("next_fire_time_index")
                 .key_condition_expression("is_active = :active AND next_fire_time <= :before_time")
                 .expression_attribute_values(":active", AttributeValue::S("1".to_string()))
-                .expression_attribute_values(":before_time", AttributeValue::N(before_time_secs.to_string()));
+                .expression_attribute_values(
+                    ":before_time",
+                    AttributeValue::N(before_time_secs.to_string()),
+                );
 
             if let Some(lek) = last_evaluated_key {
                 query = query.set_exclusive_start_key(Some(lek));
@@ -1714,7 +1965,10 @@ impl JournalStorage for DynamoDBJournalStorage {
                 }
                 Err(e) => {
                     error!(error = %e, "Failed to query due reminders");
-                    return Err(crate::JournalError::Storage(format!("DynamoDB query failed: {}", e)));
+                    return Err(crate::JournalError::Storage(format!(
+                        "DynamoDB query failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -1736,4 +1990,3 @@ impl JournalStorage for DynamoDBJournalStorage {
         Ok(reminders)
     }
 }
-

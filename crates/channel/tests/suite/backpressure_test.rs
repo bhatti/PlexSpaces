@@ -11,7 +11,7 @@
 
 use plexspaces_channel::{Channel, InMemoryChannel};
 use plexspaces_proto::channel::v1::{
-    ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee,
+    ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
 };
 use plexspaces_proto::common::v1::Message;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -67,7 +67,10 @@ async fn test_bounded_channel_backpressure_blocks_sender() {
 
     // Wait a bit to ensure send is blocked
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(!send_complete.load(Ordering::Relaxed), "Send should be blocked");
+    assert!(
+        !send_complete.load(Ordering::Relaxed),
+        "Send should be blocked"
+    );
 
     // Receive one message to free up space
     let _messages = channel.receive(1).await.unwrap();
@@ -329,8 +332,7 @@ async fn test_capacity_configuration() {
         // Verify we're at capacity by checking stats
         let stats = channel.get_stats().await.unwrap();
         assert_eq!(
-            stats.messages_pending,
-            capacity as u64,
+            stats.messages_pending, capacity as u64,
             "Channel should be at capacity {}",
             capacity
         );
@@ -340,8 +342,8 @@ async fn test_capacity_configuration() {
 /// Test that backpressure works with send timeout
 #[tokio::test]
 async fn test_backpressure_with_timeout() {
-    use prost_types::Duration as ProtoDuration;
     use plexspaces_proto::channel::v1::channel_config;
+    use prost_types::Duration as ProtoDuration;
 
     let mut config = ChannelConfig {
         name: "timeout-backpressure".to_string(),
@@ -389,4 +391,3 @@ async fn test_backpressure_with_timeout() {
         plexspaces_channel::ChannelError::Timeout(_)
     ));
 }
-

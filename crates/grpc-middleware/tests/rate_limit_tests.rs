@@ -5,8 +5,7 @@
 
 use plexspaces_grpc_middleware::chain::InterceptorChain;
 use plexspaces_proto::grpc::v1::{
-    InterceptorRequest, MiddlewareConfig, MiddlewareSpec, MiddlewareType,
-    RateLimitMiddlewareConfig,
+    InterceptorRequest, MiddlewareConfig, MiddlewareSpec, MiddlewareType, RateLimitMiddlewareConfig,
 };
 
 #[tokio::test]
@@ -23,9 +22,7 @@ async fn test_rate_limit_allows_requests_within_limit() {
             middleware_type: MiddlewareType::MiddlewareTypeRateLimit as i32,
             enabled: true,
             priority: 40,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::RateLimit(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::RateLimit(config)),
         }],
     };
 
@@ -66,9 +63,7 @@ async fn test_rate_limit_rejects_requests_exceeding_limit() {
             middleware_type: MiddlewareType::MiddlewareTypeRateLimit as i32,
             enabled: true,
             priority: 40,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::RateLimit(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::RateLimit(config)),
         }],
     };
 
@@ -120,9 +115,7 @@ async fn test_rate_limit_per_ip_strategy() {
             middleware_type: MiddlewareType::MiddlewareTypeRateLimit as i32,
             enabled: true,
             priority: 40,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::RateLimit(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::RateLimit(config)),
         }],
     };
 
@@ -161,7 +154,7 @@ async fn test_rate_limit_per_ip_strategy() {
 async fn test_rate_limit_burst_size() {
     let config = RateLimitMiddlewareConfig {
         refill_rate: 1.0, // Very low rate (1 token/sec)
-        burst_size: 5, // But allow burst of 5
+        burst_size: 5,    // But allow burst of 5
         per_client: true,
         status_code: 429,
     };
@@ -171,9 +164,7 @@ async fn test_rate_limit_burst_size() {
             middleware_type: MiddlewareType::MiddlewareTypeRateLimit as i32,
             enabled: true,
             priority: 40,
-            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::RateLimit(
-                config,
-            )),
+            config: Some(plexspaces_proto::grpc::v1::middleware_spec::Config::RateLimit(config)),
         }],
     };
 
@@ -192,11 +183,6 @@ async fn test_rate_limit_burst_size() {
         };
 
         let result = chain.before_request(&context).await;
-        assert!(
-            result.is_ok(),
-            "Burst request {} should be allowed",
-            i
-        );
+        assert!(result.is_ok(), "Burst request {} should be allowed", i);
     }
 }
-

@@ -24,8 +24,10 @@
 //! the concrete implementation.
 
 use async_trait::async_trait;
+use plexspaces_proto::system::v1::{
+    DetailedHealthCheck, NodeHealthState, NodeReadinessStatus, ServingStatus,
+};
 use prost_types::Duration;
-use plexspaces_proto::system::v1::{DetailedHealthCheck, NodeHealthState, NodeReadinessStatus, ServingStatus};
 
 /// Trait for health reporting
 ///
@@ -138,4 +140,3 @@ pub trait HealthReporter: Send + Sync {
     /// Readiness check for Kubernetes. Returns false if node should not receive requests.
     async fn is_ready(&self) -> bool;
 }
-

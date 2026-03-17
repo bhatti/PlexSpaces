@@ -256,10 +256,10 @@ pub use plexspaces_proto::journaling::v1::{
     CheckpointManagerStats,
     CompressionType,
     DurabilityConfig,
+    EventSourcingConfig,
     // Phase 2: Execution Context (RESTATE-inspired deterministic replay)
     ExecutionContext,
     ExecutionMode,
-    EventSourcingConfig,
     GetLatestCheckpointRequest,
     GetStatsRequest,
     JournalEntry,
@@ -283,11 +283,7 @@ pub use plexspaces_proto::journaling::v1::{
 };
 
 // Re-export timer types
-pub use plexspaces_proto::timer::v1::{
-    ReminderRegistration,
-    ReminderState,
-    TimerRegistration,
-};
+pub use plexspaces_proto::timer::v1::{ReminderRegistration, ReminderState, TimerRegistration};
 
 // Core modules
 mod storage;
@@ -295,7 +291,7 @@ pub use storage::*;
 // Re-export create_journal_storage for convenience
 pub use storage::create_journal_storage;
 // Re-export JournalStorage trait from core (trait is defined in core to avoid circular dependencies)
-pub use plexspaces_core::{JournalStorage, JournalError, JournalResult};
+pub use plexspaces_core::{JournalError, JournalResult, JournalStorage};
 
 // Phase 2: Execution context for deterministic replay
 mod execution_context;
@@ -319,8 +315,10 @@ pub use state_loader::StateLoader;
 
 // Phase 8.5: Virtual Actor facet for Orleans-style lifecycle
 mod virtual_actor_facet;
-pub use plexspaces_common::{ActivationStrategy, to_config_str};
-pub use virtual_actor_facet::{VirtualActorFacet, virtual_actor_facet_to_lifecycle_facet, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY};
+pub use plexspaces_common::{to_config_str, ActivationStrategy};
+pub use virtual_actor_facet::{
+    virtual_actor_facet_to_lifecycle_facet, VirtualActorFacet, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY,
+};
 // VirtualActorLifecycleState is re-exported from core (defined there to avoid circular dependencies)
 pub use plexspaces_core::VirtualActorLifecycleState;
 
@@ -342,9 +340,6 @@ pub use plexspaces_core::ActivationProvider;
 // Facet factories for journaling-related facets
 pub mod facet_factories;
 pub use facet_factories::{
+    DurabilityFacetFactory, EventSourcingFacetFactory, ReminderFacetFactory, TimerFacetFactory,
     VirtualActorFacetFactory,
-    DurabilityFacetFactory,
-    TimerFacetFactory,
-    ReminderFacetFactory,
-    EventSourcingFacetFactory,
 };

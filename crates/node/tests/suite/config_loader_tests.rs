@@ -6,8 +6,8 @@
 use plexspaces_node::config_loader::{ConfigLoader, ConfigLoaderError};
 use plexspaces_proto::node::v1::ReleaseSpec;
 use std::env;
-use tempfile::NamedTempFile;
 use std::io::Write;
+use tempfile::NamedTempFile;
 
 #[tokio::test]
 async fn test_load_release_spec_from_yaml() {
@@ -55,16 +55,17 @@ async fn test_env_var_substitution() {
     // Use unique env var names to avoid conflicts with other tests
     let node_id_var = "TEST_ENV_SUB_NODE_ID";
     let grpc_addr_var = "TEST_ENV_SUB_GRPC_ADDR";
-    
+
     // Ensure clean state - remove vars if they exist
     env::remove_var(node_id_var);
     env::remove_var(grpc_addr_var);
-    
+
     // Set env vars right before use to avoid race conditions
     env::set_var(node_id_var, "env-node-123");
     env::set_var(grpc_addr_var, "0.0.0.0:9999");
 
-    let yaml_content = format!(r#"
+    let yaml_content = format!(
+        r#"
 name: "test-release"
 version: "1.0.0"
 description: "Test release"
@@ -88,7 +89,9 @@ shutdown:
   global_timeout_seconds: 30
   grace_period_seconds: 5
   grpc_drain_timeout_seconds: 10
-"#, node_id_var, grpc_addr_var, grpc_addr_var);
+"#,
+        node_id_var, grpc_addr_var, grpc_addr_var
+    );
 
     let mut file = NamedTempFile::new().unwrap();
     file.write_all(yaml_content.as_bytes()).unwrap();
@@ -99,7 +102,16 @@ shutdown:
 
     assert_eq!(spec.node.as_ref().unwrap().id, "env-node-123");
     assert_eq!(spec.node.as_ref().unwrap().listen_addr, "0.0.0.0:9999");
-    assert_eq!(spec.runtime.as_ref().unwrap().grpc.as_ref().unwrap().address, "0.0.0.0:9999");
+    assert_eq!(
+        spec.runtime
+            .as_ref()
+            .unwrap()
+            .grpc
+            .as_ref()
+            .unwrap()
+            .address,
+        "0.0.0.0:9999"
+    );
 
     // Clean up
     env::remove_var(node_id_var);
@@ -110,7 +122,7 @@ shutdown:
 async fn test_env_var_with_default() {
     // Ensure env var is not set - should use default
     env::remove_var("TEST_NODE_ID");
-    
+
     let yaml_content = r#"
 name: "test-release"
 version: "1.0.0"
@@ -145,7 +157,7 @@ shutdown:
     let spec = loader.load_release_spec(&path).await.unwrap();
 
     assert_eq!(spec.node.as_ref().unwrap().id, "default-node");
-    
+
     // Clean up
     env::remove_var("TEST_NODE_ID");
 }
@@ -241,7 +253,7 @@ shutdown:
 
     // Clean up env var
     env::remove_var("JWT_SECRET");
-    
+
     match result {
         Ok(spec) => {
             assert!(spec.runtime.as_ref().unwrap().security.is_some());
@@ -300,7 +312,9 @@ shutdown:
 #[tokio::test]
 async fn test_missing_file_returns_error() {
     let loader = ConfigLoader::new();
-    let result = loader.load_release_spec("/nonexistent/path/release.yaml").await;
+    let result = loader
+        .load_release_spec("/nonexistent/path/release.yaml")
+        .await;
 
     assert!(result.is_err());
 }
@@ -322,4 +336,3 @@ invalid: [unclosed
 
     assert!(result.is_err());
 }
-

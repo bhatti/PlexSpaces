@@ -63,6 +63,7 @@
 //! ```
 
 use async_trait::async_trait;
+use metrics;
 use plexspaces_common::{from_config_str, ActivationStrategy};
 use plexspaces_core::VirtualActorLifecycleFacet as VirtualActorLifecycleFacetTrait;
 use plexspaces_core::VirtualActorLifecycleState;
@@ -71,7 +72,6 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
-use metrics;
 use tracing;
 
 /// Virtual Actor Facet for automatic activation/deactivation
@@ -86,10 +86,10 @@ use tracing;
 pub struct VirtualActorFacet {
     /// Facet configuration (immutable)
     config: Value,
-    
+
     /// Facet priority (immutable)
     priority: i32,
-    
+
     /// Actor ID this facet is attached to
     actor_id: Arc<RwLock<Option<String>>>,
 
@@ -127,7 +127,9 @@ impl VirtualActorFacet {
     pub fn new(config: Value, priority: i32) -> Self {
         // Validate and parse config
         // Use constants from plexspaces-common for defaults (matches RuntimeConfig.default_virtual_actor_config)
-        use plexspaces_common::virtual_actor_config::{DEFAULT_IDLE_TIMEOUT_SECONDS, DEFAULT_ACTIVATION_STRATEGY};
+        use plexspaces_common::virtual_actor_config::{
+            DEFAULT_ACTIVATION_STRATEGY, DEFAULT_IDLE_TIMEOUT_SECONDS,
+        };
         let idle_timeout = config
             .get("idle_timeout")
             .and_then(|v| v.as_str())
@@ -224,7 +226,7 @@ impl VirtualActorFacet {
         *is_activating = true;
         true
     }
-    
+
     /// Get activation strategy
     pub async fn get_activation_strategy(&self) -> ActivationStrategy {
         self.activation_strategy.read().await.clone()
@@ -236,7 +238,7 @@ impl VirtualActorLifecycleFacetTrait for VirtualActorFacet {
     async fn get_activation_strategy(&self) -> ActivationStrategy {
         self.activation_strategy.read().await.clone()
     }
-    
+
     async fn get_lifecycle_state(&self) -> VirtualActorLifecycleState {
         let last_activated = *self.last_activated.read().await;
         let last_accessed = *self.last_accessed.read().await;
@@ -252,7 +254,7 @@ impl VirtualActorLifecycleFacetTrait for VirtualActorFacet {
             idle_timeout,
         }
     }
-    
+
     async fn should_activate(&self) -> bool {
         let is_activating = *self.is_activating.read().await;
         if is_activating {
@@ -261,7 +263,7 @@ impl VirtualActorLifecycleFacetTrait for VirtualActorFacet {
         let last_activated = *self.last_activated.read().await;
         last_activated.is_none()
     }
-    
+
     async fn should_deactivate(&self) -> bool {
         let last_accessed = *self.last_accessed.read().await;
         let idle_timeout = *self.idle_timeout.read().await;
@@ -273,7 +275,7 @@ impl VirtualActorLifecycleFacetTrait for VirtualActorFacet {
         }
         false
     }
-    
+
     async fn start_activation(&self) -> bool {
         let mut is_activating = self.is_activating.write().await;
         if *is_activating {
@@ -282,7 +284,7 @@ impl VirtualActorLifecycleFacetTrait for VirtualActorFacet {
         *is_activating = true;
         true
     }
-    
+
     async fn mark_activated(&self) {
         let now = SystemTime::now();
         *self.last_activated.write().await = Some(now);
@@ -290,11 +292,11 @@ impl VirtualActorLifecycleFacetTrait for VirtualActorFacet {
         *self.is_activating.write().await = false;
         *self.activation_count.write().await += 1;
     }
-    
+
     async fn mark_deactivated(&self) {
         *self.is_activating.write().await = false;
     }
-    
+
     async fn update_access_time(&self) {
         *self.last_accessed.write().await = Some(SystemTime::now());
     }
@@ -315,13 +317,13 @@ impl VirtualActorLifecycleFacetTrait for VirtualActorFacet {
 /// `Facet` trait to the specific `VirtualActorLifecycleFacet` trait required by
 /// `VirtualActorManager`.
 pub fn facet_to_lifecycle_facet(
-    facet: Box<dyn plexspaces_facet::Facet>
+    facet: Box<dyn plexspaces_facet::Facet>,
 ) -> Option<Box<dyn plexspaces_core::VirtualActorLifecycleFacet>> {
     // Check if facet is VirtualActorFacet by checking facet_type
     if facet.facet_type() != "virtual_actor" {
         return None;
     }
-    
+
     // Downcast to VirtualActorFacet using as_any()
     if let Some(virtual_facet_ref) = facet.as_any().downcast_ref::<VirtualActorFacet>() {
         // We can't directly convert &VirtualActorFacet to Box<dyn VirtualActorLifecycleFacet>
@@ -345,7 +347,7 @@ pub fn facet_to_lifecycle_facet(
 /// Use this when you have a `VirtualActorFacet` instance and need to pass it to
 /// `VirtualActorManager::register()`.
 pub fn virtual_actor_facet_to_lifecycle_facet(
-    facet: VirtualActorFacet
+    facet: VirtualActorFacet,
 ) -> Box<dyn plexspaces_core::VirtualActorLifecycleFacet> {
     Box::new(facet)
 }
@@ -358,11 +360,11 @@ impl Facet for VirtualActorFacet {
     fn facet_type(&self) -> &str {
         "virtual_actor"
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -396,26 +398,27 @@ impl Facet for VirtualActorFacet {
     ) -> Result<(), FacetError> {
         // Mark for deactivation on EXIT
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            actor_id = %actor_id,
-            "VirtualActorFacet handling EXIT signal - marking for deactivation"
-        );
+            tracing::debug!(
+                actor_id = %actor_id,
+                "VirtualActorFacet handling EXIT signal - marking for deactivation"
+            );
         }
-        
+
         // Clear activation state
         *self.last_activated.write().await = None;
         *self.last_accessed.write().await = None;
         *self.is_activating.write().await = false;
-        
+
         metrics::counter!("plexspaces_virtual_actor_facet_exit_total",
             "actor_id" => actor_id.to_string()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         tracing::info!(
             actor_id = %actor_id,
             "VirtualActorFacet marked for deactivation on EXIT signal"
         );
-        
+
         Ok(())
     }
 
@@ -436,22 +439,23 @@ impl Facet for VirtualActorFacet {
     ) -> Result<(), FacetError> {
         // Log DOWN notification for observability
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            actor_id = %actor_id,
-            monitored_id = %monitored_id,
-            reason = ?reason,
-            "VirtualActorFacet received DOWN notification (no action needed)"
-        );
+            tracing::debug!(
+                actor_id = %actor_id,
+                monitored_id = %monitored_id,
+                reason = ?reason,
+                "VirtualActorFacet received DOWN notification (no action needed)"
+            );
         }
-        
+
         metrics::counter!("plexspaces_virtual_actor_facet_down_total",
             "actor_id" => actor_id.to_string(),
             "monitored_id" => monitored_id.to_string()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         Ok(())
     }
-    
+
     async fn before_method(
         &self,
         _method: &str,
@@ -481,11 +485,11 @@ impl Facet for VirtualActorFacet {
         // Don't interfere with error handling
         Ok(ErrorHandling::Propagate)
     }
-    
+
     fn get_config(&self) -> Value {
         self.config.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }
@@ -561,7 +565,10 @@ mod tests {
         });
 
         let mut facet = VirtualActorFacet::new(config.clone(), 100);
-        facet.on_attach("actor-123", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-123", serde_json::json!({}))
+            .await
+            .unwrap();
 
         let state = facet.get_lifecycle_state().await;
         assert_eq!(state.idle_timeout, Duration::from_secs(600));
@@ -662,4 +669,3 @@ mod tests {
         assert_eq!(parse_duration(""), None);
     }
 }
-

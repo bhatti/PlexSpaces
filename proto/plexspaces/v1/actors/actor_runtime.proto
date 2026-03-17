@@ -923,16 +923,12 @@ message NodePlacement {
   repeated string node_ids = 3;
   // Node must match all labels (Kubernetes-inspired). Used by scheduler for node selection.
   map<string, string> required_labels = 4;
-  // Preferred node IDs (hint; scheduler may prefer these when scoring)
-  repeated string preferred_node_ids = 5 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
   // Avoid node IDs (anti-affinity; scheduler excludes these)
-  repeated string avoid_node_ids = 6 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
+  repeated string avoid_node_ids = 5 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
   // CPU, memory, disk, GPU requirements. Scheduler filters by NodeCapacity.available.
-  plexspaces.common.v1.ResourceSpec resource_requirements = 7;
+  plexspaces.common.v1.ResourceSpec resource_requirements = 6;
   // Affinity labels (co-location hint; scheduler may prefer nodes with matching labels)
-  map<string, string> affinity_labels = 8;
-  // Single preferred node (convenience; equivalent to preferred_node_ids with one element)
-  string preferred_node_id = 9 [(buf.validate.field).string.max_len = 255];
+  map<string, string> affinity_labels = 7;
 }
 
 message CreateShardGroupRequest {
@@ -3231,4 +3227,3 @@ message ActorHealth {
   // For FAILED status: reason for failure
   optional string failure_reason = 3;
 }
-

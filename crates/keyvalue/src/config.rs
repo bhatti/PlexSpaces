@@ -237,7 +237,8 @@ impl KVConfig {
                 }
                 return Err(KVError::ConfigError(format!(
                     "Unknown backend type: {}. Valid options: {}",
-                    other, valid_options.join(", ")
+                    other,
+                    valid_options.join(", ")
                 )));
             }
         };
@@ -284,7 +285,10 @@ pub async fn create_keyvalue_from_env() -> KVResult<Arc<dyn KeyValueStore>> {
 /// - `Arc<dyn plexspaces_common::KeyValueStore>` (common trait for WASM actors via ServiceLocator)
 ///
 /// Each backend type implements both traits, so both Arc references point to the same underlying store.
-pub async fn create_keyvalue_stores_from_env() -> KVResult<(Arc<dyn KeyValueStore>, Arc<dyn plexspaces_common::KeyValueStore>)> {
+pub async fn create_keyvalue_stores_from_env() -> KVResult<(
+    Arc<dyn KeyValueStore>,
+    Arc<dyn plexspaces_common::KeyValueStore>,
+)> {
     let config = KVConfig::from_env()?;
     create_keyvalue_stores_from_config(config).await
 }
@@ -294,7 +298,12 @@ pub async fn create_keyvalue_stores_from_env() -> KVResult<(Arc<dyn KeyValueStor
 /// Returns a tuple of:
 /// - `Arc<dyn KeyValueStore>` (rich trait for ProcessGroupRegistry and internal services)
 /// - `Arc<dyn plexspaces_common::KeyValueStore>` (common trait for WASM actors via ServiceLocator)
-pub async fn create_keyvalue_stores_from_config(config: KVConfig) -> KVResult<(Arc<dyn KeyValueStore>, Arc<dyn plexspaces_common::KeyValueStore>)> {
+pub async fn create_keyvalue_stores_from_config(
+    config: KVConfig,
+) -> KVResult<(
+    Arc<dyn KeyValueStore>,
+    Arc<dyn plexspaces_common::KeyValueStore>,
+)> {
     match config.backend {
         BackendType::InMemory => {
             #[cfg(feature = "sql-backend")]
@@ -308,7 +317,8 @@ pub async fn create_keyvalue_stores_from_config(config: KVConfig) -> KVResult<(A
             #[cfg(not(feature = "sql-backend"))]
             {
                 Err(KVError::ConfigError(
-                    "InMemory backend requires 'sql-backend' feature (uses SQLite :memory:)".to_string(),
+                    "InMemory backend requires 'sql-backend' feature (uses SQLite :memory:)"
+                        .to_string(),
                 ))
             }
         }
@@ -366,9 +376,16 @@ pub async fn create_keyvalue_stores_from_config(config: KVConfig) -> KVResult<(A
         } => {
             use crate::ddb::DynamoDBKVStore;
             let table_name = format!("{}{}", table_prefix, "keyvalue");
-            let store = Arc::new(DynamoDBKVStore::new(region, table_name, endpoint_url)
-                .await
-                .map_err(|e| KVError::ConfigError(format!("Failed to create DynamoDB keyvalue store: {}", e)))?);
+            let store = Arc::new(
+                DynamoDBKVStore::new(region, table_name, endpoint_url)
+                    .await
+                    .map_err(|e| {
+                        KVError::ConfigError(format!(
+                            "Failed to create DynamoDB keyvalue store: {}",
+                            e
+                        ))
+                    })?,
+            );
             let rich: Arc<dyn KeyValueStore> = store.clone();
             let common: Arc<dyn plexspaces_common::KeyValueStore> = store;
             Ok((rich, common))
@@ -377,9 +394,9 @@ pub async fn create_keyvalue_stores_from_config(config: KVConfig) -> KVResult<(A
         #[cfg(feature = "blob-backend")]
         BackendType::BlobFromEnv { config } => {
             use crate::blob::BlobKVStore;
-            let store = Arc::new(BlobKVStore::new(config)
-                .await
-                .map_err(|e| KVError::ConfigError(format!("Failed to create blob keyvalue store: {}", e)))?);
+            let store = Arc::new(BlobKVStore::new(config).await.map_err(|e| {
+                KVError::ConfigError(format!("Failed to create blob keyvalue store: {}", e))
+            })?);
             let rich: Arc<dyn KeyValueStore> = store.clone();
             let common: Arc<dyn plexspaces_common::KeyValueStore> = store;
             Ok((rich, common))
@@ -412,7 +429,8 @@ pub async fn create_keyvalue_from_config(config: KVConfig) -> KVResult<Arc<dyn K
             #[cfg(not(feature = "sql-backend"))]
             {
                 Err(KVError::ConfigError(
-                    "InMemory backend requires 'sql-backend' feature (uses SQLite :memory:)".to_string(),
+                    "InMemory backend requires 'sql-backend' feature (uses SQLite :memory:)"
+                        .to_string(),
                 ))
             }
         }
@@ -467,10 +485,11 @@ pub async fn create_keyvalue_from_config(config: KVConfig) -> KVResult<Arc<dyn K
             let table_name = format!("{}{}", table_prefix, "keyvalue");
             let store = DynamoDBKVStore::new(region, table_name, endpoint_url)
                 .await
-                .map_err(|e| KVError::ConfigError(format!("Failed to create DynamoDB keyvalue store: {}", e)))?;
+                .map_err(|e| {
+                    KVError::ConfigError(format!("Failed to create DynamoDB keyvalue store: {}", e))
+                })?;
             Ok(Arc::new(store))
         }
-
 
         #[cfg(feature = "blob-backend")]
         BackendType::BlobFromEnv { config } => {
@@ -478,12 +497,11 @@ pub async fn create_keyvalue_from_config(config: KVConfig) -> KVResult<Arc<dyn K
             // Create blob keyvalue store directly from config
             // Uses object_store directly - no SQL database needed
             // Simple, reliable design: just uses MinIO/S3 directly
-            let kv = BlobKVStore::new(config)
-                .await
-                .map_err(|e| KVError::ConfigError(format!("Failed to create blob keyvalue store: {}", e)))?;
+            let kv = BlobKVStore::new(config).await.map_err(|e| {
+                KVError::ConfigError(format!("Failed to create blob keyvalue store: {}", e))
+            })?;
             Ok(Arc::new(kv))
         }
-
     }
 }
 
@@ -498,7 +516,7 @@ mod tests {
         // BackendType doesn't implement PartialEq, so we can't use assert_eq!
         // Just verify it's created successfully
         match config.backend {
-            BackendType::InMemory => {},
+            BackendType::InMemory => {}
             _ => panic!("Default should be InMemory"),
         }
     }
@@ -512,7 +530,7 @@ mod tests {
         let config = KVConfig::from_env().unwrap();
         // BackendType doesn't implement PartialEq, verify with pattern matching
         match config.backend {
-            BackendType::InMemory => {},
+            BackendType::InMemory => {}
             _ => panic!("Default should be InMemory"),
         }
     }
@@ -529,7 +547,7 @@ mod tests {
         match config.backend {
             BackendType::Sqlite { path } => {
                 assert_eq!(path, "/tmp/test.db".to_string());
-            },
+            }
             _ => panic!("Expected Sqlite backend"),
         }
 
@@ -548,10 +566,13 @@ mod tests {
         let config = KVConfig::from_env().unwrap();
         // BackendType doesn't implement PartialEq, verify with pattern matching
         match config.backend {
-            BackendType::PostgreSQL { connection_string, pool_size } => {
+            BackendType::PostgreSQL {
+                connection_string,
+                pool_size,
+            } => {
                 assert_eq!(connection_string, "postgres://localhost/test".to_string());
                 assert_eq!(pool_size, 5);
-            },
+            }
             _ => panic!("Expected PostgreSQL backend"),
         }
 
@@ -573,7 +594,7 @@ mod tests {
             BackendType::Redis { url, namespace } => {
                 assert_eq!(url, "redis://localhost:6379".to_string());
                 assert_eq!(namespace, "test:".to_string());
-            },
+            }
             _ => panic!("Expected Redis backend"),
         }
 
@@ -595,7 +616,7 @@ mod tests {
             Err(e) => {
                 let error_msg = format!("{}", e);
                 assert!(error_msg.contains("Unknown backend type"));
-            },
+            }
             Ok(_) => panic!("Expected error for invalid backend"),
         }
 
@@ -611,7 +632,7 @@ mod tests {
         match config.backend {
             BackendType::Sqlite { path } => {
                 assert_eq!(path, ":memory:".to_string());
-            },
+            }
             _ => panic!("Expected Sqlite backend"),
         }
     }
@@ -621,7 +642,10 @@ mod tests {
         let config = KVConfig::new(BackendType::InMemory);
         let kv = create_keyvalue_from_config(config).await.unwrap();
 
-        let ctx = plexspaces_common::RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+        let ctx = plexspaces_common::RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "default".to_string(),
+        );
         kv.put(&ctx, "test", b"value".to_vec()).await.unwrap();
         let value = kv.get(&ctx, "test").await.unwrap();
         assert_eq!(value, Some(b"value".to_vec()));
@@ -633,7 +657,10 @@ mod tests {
         std::env::remove_var("PLEXSPACES_KV_BACKEND");
 
         let kv = create_keyvalue_from_env().await.unwrap();
-        let ctx = plexspaces_common::RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+        let ctx = plexspaces_common::RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "default".to_string(),
+        );
         kv.put(&ctx, "test", b"value".to_vec()).await.unwrap();
         let value = kv.get(&ctx, "test").await.unwrap();
         assert_eq!(value, Some(b"value".to_vec()));

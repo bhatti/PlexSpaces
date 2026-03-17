@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS object_registrations (
 );
 CREATE INDEX IF NOT EXISTS idx_object_registrations_type ON object_registrations(tenant_id, namespace, object_type);
 CREATE INDEX IF NOT EXISTS idx_object_registrations_node ON object_registrations(tenant_id, namespace, node_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_object_registrations_unique_node_registration ON object_registrations(tenant_id, namespace, node_id) WHERE object_type = 7 AND node_id IS NOT NULL AND node_id <> '';
 CREATE INDEX IF NOT EXISTS idx_object_registrations_heartbeat ON object_registrations(tenant_id, namespace, last_heartbeat);
 CREATE INDEX IF NOT EXISTS idx_object_registrations_health ON object_registrations(tenant_id, namespace, health_status);
 CREATE INDEX IF NOT EXISTS idx_object_registrations_category ON object_registrations(tenant_id, namespace, object_category);

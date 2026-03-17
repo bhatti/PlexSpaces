@@ -46,13 +46,13 @@ pub struct VirtualActorFacetFactory;
 impl FacetFactory for VirtualActorFacetFactory {
     async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
         use crate::VirtualActorFacet;
-        
+
         let priority = config
             .get("priority")
             .and_then(|v| v.as_i64())
             .map(|p| p as i32)
             .unwrap_or(100);
-        
+
         Ok(Box::new(VirtualActorFacet::new(config, priority)))
     }
 
@@ -90,19 +90,19 @@ impl FacetFactory for DurabilityFacetFactory {
     async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
         use crate::DurabilityFacet;
         use plexspaces_core::JournalStorage;
-        
+
         // Get JournalStorage from ServiceLocator
         let journal_storage = self.service_locator.get_journal_storage().await
             .ok_or_else(|| FacetError::InvalidConfig(
                 "JournalStorage not found in ServiceLocator. Ensure JournalStorage is registered during service initialization.".to_string()
             ))?;
-        
+
         let priority = config
             .get("priority")
             .and_then(|v| v.as_i64())
             .map(|p| p as i32)
             .unwrap_or(90);
-        
+
         Ok(Box::new(DurabilityFacet::new(
             journal_storage,
             config,
@@ -143,19 +143,19 @@ impl TimerFacetFactory {
 impl FacetFactory for TimerFacetFactory {
     async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
         use crate::timer_facet::{TimerFacet, TIMER_FACET_DEFAULT_PRIORITY};
-        
+
         let priority = config
             .get("priority")
             .and_then(|v| v.as_i64())
             .map(|p| p as i32)
             .unwrap_or(TIMER_FACET_DEFAULT_PRIORITY);
-        
+
         // Check if distributed locking is enabled in config
         let use_distributed_locking = config
             .get("enable_distributed_locking")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        
+
         let timer_facet = if use_distributed_locking {
             #[cfg(feature = "locks")]
             {
@@ -164,11 +164,14 @@ impl FacetFactory for TimerFacetFactory {
                     .ok_or_else(|| FacetError::InvalidConfig(
                         "LockManager not found in ServiceLocator. Required for distributed timer locking.".to_string()
                     ))?;
-                
-                let node_id = self.service_locator.get_node_config().await
+
+                let node_id = self
+                    .service_locator
+                    .get_node_config()
+                    .await
                     .and_then(|cfg| Some(cfg.id.clone()))
                     .unwrap_or_else(|| "unknown".to_string());
-                
+
                 TimerFacet::with_lock_manager(
                     lock_manager,
                     node_id,
@@ -186,7 +189,7 @@ impl FacetFactory for TimerFacetFactory {
         } else {
             TimerFacet::new(config, priority, self.service_locator.clone())
         };
-        
+
         Ok(Box::new(timer_facet))
     }
 
@@ -224,19 +227,19 @@ impl FacetFactory for ReminderFacetFactory {
     async fn create(&self, config: Value) -> Result<Box<dyn Facet>, FacetError> {
         use crate::reminder_facet::{ReminderFacet, REMINDER_FACET_DEFAULT_PRIORITY};
         use plexspaces_core::JournalStorage;
-        
+
         // Get JournalStorage from ServiceLocator
         let journal_storage = self.service_locator.get_journal_storage().await
             .ok_or_else(|| FacetError::InvalidConfig(
                 "JournalStorage not found in ServiceLocator. Ensure JournalStorage is registered during service initialization.".to_string()
             ))?;
-        
+
         let priority = config
             .get("priority")
             .and_then(|v| v.as_i64())
             .map(|p| p as i32)
             .unwrap_or(REMINDER_FACET_DEFAULT_PRIORITY);
-        
+
         Ok(Box::new(ReminderFacet::new(
             journal_storage,
             config,
@@ -286,7 +289,7 @@ impl FacetFactory for EventSourcingFacetFactory {
         // which requires concrete types, not trait objects.
         // This is a limitation that needs to be addressed by refactoring EventSourcingFacet
         // to use Arc<dyn JournalStorage> like DurabilityFacet does.
-        
+
         Err(FacetError::InvalidConfig(
             "EventSourcingFacet requires a concrete JournalStorage type. Consider using DurabilityFacet or refactoring EventSourcingFacet to use trait objects.".to_string()
         ))
@@ -305,27 +308,29 @@ impl FacetFactory for EventSourcingFacetFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_services::ServiceLocatorImpl;
-    use plexspaces_core::{JournalStorage, LockManager};
     use crate::SqliteJournalStorage;
-    use plexspaces_locks::SqliteLockManager;
     use plexspaces_actor::test_service_locator::TestServiceLocatorStub;
+    use plexspaces_core::{JournalStorage, LockManager};
+    use plexspaces_locks::SqliteLockManager;
+    use plexspaces_services::ServiceLocatorImpl;
     use std::collections::HashMap;
 
     /// Helper to create a test ServiceLocator with JournalStorage
     async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
         let service_locator = Arc::new(ServiceLocatorImpl::new());
-        
+
         // Register JournalStorage
-        let journal_storage: Arc<dyn JournalStorage> = 
+        let journal_storage: Arc<dyn JournalStorage> =
             Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-        service_locator.register_journal_storage(journal_storage).await;
-        
+        service_locator
+            .register_journal_storage(journal_storage)
+            .await;
+
         // Register LockManager (for TimerFacet with distributed locking)
-        let lock_manager: Arc<dyn LockManager + Send + Sync> = 
+        let lock_manager: Arc<dyn LockManager + Send + Sync> =
             Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
         service_locator.register_lock_manager(lock_manager).await;
-        
+
         // Register NodeConfig
         let node_config = plexspaces_proto::node::v1::NodeConfig {
             id: "test-node".to_string(),
@@ -333,12 +338,12 @@ mod tests {
             ..Default::default()
         };
         service_locator.register_node_config(node_config).await;
-        
+
         // Register a minimal ActorService for TimerFacet/ReminderFacet
-        use plexspaces_core::{ActorService, Message, ActorRef};
-        
+        use plexspaces_core::{ActorRef, ActorService, Message};
+
         struct MockActorService;
-        
+
         #[async_trait::async_trait]
         impl ActorService for MockActorService {
             async fn spawn_actor(
@@ -349,7 +354,7 @@ mod tests {
             ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
                 Err("Not implemented for tests".into())
             }
-            
+
             async fn send(
                 &self,
                 _actor_id: &str,
@@ -358,27 +363,27 @@ mod tests {
                 Ok("message-id".to_string())
             }
         }
-        
+
         let actor_service: Arc<dyn ActorService> = Arc::new(MockActorService);
         service_locator.register_actor_service(actor_service).await;
-        
+
         service_locator
     }
 
     #[tokio::test]
     async fn test_virtual_actor_facet_factory() {
         let factory = VirtualActorFacetFactory;
-        
+
         let config = serde_json::json!({
             "priority": 100,
             "idle_timeout": "5m"
         });
-        
+
         let facet = factory.create(config).await;
         assert!(facet.is_ok());
         let facet = facet.unwrap();
         assert_eq!(facet.facet_type(), "virtual_actor");
-        
+
         let metadata = factory.metadata();
         assert_eq!(metadata.facet_type, "virtual_actor");
         assert_eq!(metadata.priority, 100);
@@ -387,11 +392,11 @@ mod tests {
     #[tokio::test]
     async fn test_virtual_actor_facet_factory_custom_priority() {
         let factory = VirtualActorFacetFactory;
-        
+
         let config = serde_json::json!({
             "priority": 150
         });
-        
+
         let facet = factory.create(config).await.unwrap();
         assert_eq!(facet.get_priority(), 150);
     }
@@ -400,16 +405,16 @@ mod tests {
     async fn test_durability_facet_factory() {
         let service_locator = create_test_service_locator().await;
         let factory = DurabilityFacetFactory::new(service_locator);
-        
+
         let config = serde_json::json!({
             "priority": 90
         });
-        
+
         let facet = factory.create(config).await;
         assert!(facet.is_ok());
         let facet = facet.unwrap();
         assert_eq!(facet.facet_type(), "durability");
-        
+
         let metadata = factory.metadata();
         assert_eq!(metadata.facet_type, "durability");
     }
@@ -418,7 +423,7 @@ mod tests {
     async fn test_durability_facet_factory_no_journal_storage() {
         let service_locator = Arc::new(ServiceLocatorImpl::new());
         let factory = DurabilityFacetFactory::new(service_locator);
-        
+
         let config = serde_json::json!({});
         let result = factory.create(config).await;
         assert!(result.is_err());
@@ -434,16 +439,16 @@ mod tests {
     async fn test_timer_facet_factory() {
         let service_locator = create_test_service_locator().await;
         let factory = TimerFacetFactory::new(service_locator);
-        
+
         let config = serde_json::json!({
             "priority": 50
         });
-        
+
         let facet = factory.create(config).await;
         assert!(facet.is_ok());
         let facet = facet.unwrap();
         assert_eq!(facet.facet_type(), "timer");
-        
+
         let metadata = factory.metadata();
         assert_eq!(metadata.facet_type, "timer");
     }
@@ -452,12 +457,12 @@ mod tests {
     async fn test_timer_facet_factory_with_distributed_locking() {
         let service_locator = create_test_service_locator().await;
         let factory = TimerFacetFactory::new(service_locator);
-        
+
         let config = serde_json::json!({
             "priority": 50,
             "enable_distributed_locking": true
         });
-        
+
         let facet = factory.create(config).await;
         assert!(facet.is_ok());
         let facet = facet.unwrap();
@@ -468,11 +473,11 @@ mod tests {
     async fn test_timer_facet_factory_distributed_locking_no_lock_manager() {
         let service_locator = Arc::new(ServiceLocatorImpl::new());
         let factory = TimerFacetFactory::new(service_locator);
-        
+
         let config = serde_json::json!({
             "enable_distributed_locking": true
         });
-        
+
         #[cfg(feature = "locks")]
         {
             let result = factory.create(config).await;
@@ -484,7 +489,7 @@ mod tests {
                 _ => panic!("Expected InvalidConfig error"),
             }
         }
-        
+
         #[cfg(not(feature = "locks"))]
         {
             let result = factory.create(config).await;
@@ -502,16 +507,16 @@ mod tests {
     async fn test_reminder_facet_factory() {
         let service_locator = create_test_service_locator().await;
         let factory = ReminderFacetFactory::new(service_locator);
-        
+
         let config = serde_json::json!({
             "priority": 50
         });
-        
+
         let facet = factory.create(config).await;
         assert!(facet.is_ok());
         let facet = facet.unwrap();
         assert_eq!(facet.facet_type(), "reminder");
-        
+
         let metadata = factory.metadata();
         assert_eq!(metadata.facet_type, "reminder");
     }
@@ -520,7 +525,7 @@ mod tests {
     async fn test_reminder_facet_factory_no_journal_storage() {
         let service_locator = Arc::new(ServiceLocatorImpl::new());
         let factory = ReminderFacetFactory::new(service_locator);
-        
+
         let config = serde_json::json!({});
         let result = factory.create(config).await;
         assert!(result.is_err());
@@ -536,7 +541,7 @@ mod tests {
     async fn test_event_sourcing_facet_factory() {
         let service_locator = create_test_service_locator().await;
         let factory = EventSourcingFacetFactory::new(service_locator);
-        
+
         let config = serde_json::json!({});
         let result = factory.create(config).await;
         // EventSourcingFacetFactory returns an error because EventSourcingFacet uses generics
@@ -547,7 +552,7 @@ mod tests {
             }
             _ => panic!("Expected InvalidConfig error about concrete type"),
         }
-        
+
         let metadata = factory.metadata();
         assert_eq!(metadata.facet_type, "event_sourcing");
     }
@@ -555,25 +560,25 @@ mod tests {
     #[tokio::test]
     async fn test_journaling_factories_extract_priority_from_config() {
         let service_locator = create_test_service_locator().await;
-        
+
         // Test VirtualActorFacetFactory with custom priority
         let factory = VirtualActorFacetFactory;
         let config = serde_json::json!({ "priority": 150 });
         let facet = factory.create(config).await.unwrap();
         assert_eq!(facet.get_priority(), 150);
-        
+
         // Test DurabilityFacetFactory with custom priority
         let factory = DurabilityFacetFactory::new(service_locator.clone());
         let config = serde_json::json!({ "priority": 120 });
         let facet = factory.create(config).await.unwrap();
         assert_eq!(facet.get_priority(), 120);
-        
+
         // Test TimerFacetFactory with custom priority
         let factory = TimerFacetFactory::new(service_locator.clone());
         let config = serde_json::json!({ "priority": 75 });
         let facet = factory.create(config).await.unwrap();
         assert_eq!(facet.get_priority(), 75);
-        
+
         // Test ReminderFacetFactory with custom priority
         let factory = ReminderFacetFactory::new(service_locator);
         let config = serde_json::json!({ "priority": 80 });
@@ -584,29 +589,35 @@ mod tests {
     #[tokio::test]
     async fn test_journaling_factories_use_default_priority() {
         let service_locator = create_test_service_locator().await;
-        
+
         // Test VirtualActorFacetFactory uses default priority
         let factory = VirtualActorFacetFactory;
         let config = serde_json::json!({});
         let facet = factory.create(config).await.unwrap();
         assert_eq!(facet.get_priority(), 100);
-        
+
         // Test DurabilityFacetFactory uses default priority
         let factory = DurabilityFacetFactory::new(service_locator.clone());
         let config = serde_json::json!({});
         let facet = factory.create(config).await.unwrap();
         assert_eq!(facet.get_priority(), 90);
-        
+
         // Test TimerFacetFactory uses default priority
         let factory = TimerFacetFactory::new(service_locator.clone());
         let config = serde_json::json!({});
         let facet = factory.create(config).await.unwrap();
-        assert_eq!(facet.get_priority(), crate::timer_facet::TIMER_FACET_DEFAULT_PRIORITY);
-        
+        assert_eq!(
+            facet.get_priority(),
+            crate::timer_facet::TIMER_FACET_DEFAULT_PRIORITY
+        );
+
         // Test ReminderFacetFactory uses default priority
         let factory = ReminderFacetFactory::new(service_locator);
         let config = serde_json::json!({});
         let facet = factory.create(config).await.unwrap();
-        assert_eq!(facet.get_priority(), crate::reminder_facet::REMINDER_FACET_DEFAULT_PRIORITY);
+        assert_eq!(
+            facet.get_priority(),
+            crate::reminder_facet::REMINDER_FACET_DEFAULT_PRIORITY
+        );
     }
 }

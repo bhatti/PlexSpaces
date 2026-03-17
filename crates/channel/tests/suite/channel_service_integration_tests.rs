@@ -9,7 +9,9 @@ mod tests {
     use async_trait::async_trait;
     use futures::StreamExt;
     use plexspaces_channel::{Channel, InMemoryChannel};
-    use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
+    use plexspaces_proto::channel::v1::{
+        ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
+    };
     use plexspaces_proto::common::v1::Message as ProtoMessage;
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -35,7 +37,10 @@ mod tests {
         async fn subscribe_to_topic(
             &self,
             topic_name: &str,
-        ) -> Result<futures::stream::BoxStream<'static, TestMessage>, Box<dyn std::error::Error + Send + Sync>>;
+        ) -> Result<
+            futures::stream::BoxStream<'static, TestMessage>,
+            Box<dyn std::error::Error + Send + Sync>,
+        >;
 
         async fn receive_from_queue(
             &self,
@@ -175,8 +180,10 @@ mod tests {
         async fn subscribe_to_topic(
             &self,
             topic_name: &str,
-        ) -> Result<futures::stream::BoxStream<'static, TestMessage>, Box<dyn std::error::Error + Send + Sync>>
-        {
+        ) -> Result<
+            futures::stream::BoxStream<'static, TestMessage>,
+            Box<dyn std::error::Error + Send + Sync>,
+        > {
             let channel = self.get_or_create_channel(topic_name).await?;
 
             let stream = channel
@@ -216,17 +223,16 @@ mod tests {
         ) -> Result<Option<TestMessage>, Box<dyn std::error::Error + Send + Sync>> {
             let channel = self.get_or_create_channel(queue_name).await?;
 
-            let messages = if timeout.is_some() {
-                channel
-                    .try_receive(1)
-                    .await
-                    .map_err(|e| format!("Failed to receive from queue {}: {}", queue_name, e))?
-            } else {
-                channel
-                    .receive(1)
-                    .await
-                    .map_err(|e| format!("Failed to receive from queue {}: {}", queue_name, e))?
-            };
+            let messages =
+                if timeout.is_some() {
+                    channel.try_receive(1).await.map_err(|e| {
+                        format!("Failed to receive from queue {}: {}", queue_name, e)
+                    })?
+                } else {
+                    channel.receive(1).await.map_err(|e| {
+                        format!("Failed to receive from queue {}: {}", queue_name, e)
+                    })?
+                };
 
             if messages.is_empty() {
                 return Ok(None);
@@ -259,7 +265,7 @@ mod tests {
     async fn test_channel_service_send_to_queue() {
         let service = IntegrationChannelService::new();
         let msg = TestMessage::new(b"test payload".to_vec());
-        
+
         let result = service.send_to_queue("test-queue", msg).await;
         assert!(result.is_ok());
     }
@@ -268,7 +274,7 @@ mod tests {
     async fn test_channel_service_publish_to_topic() {
         let service = IntegrationChannelService::new();
         let msg = TestMessage::new(b"test payload".to_vec());
-        
+
         let result = service.publish_to_topic("test-topic", msg).await;
         assert!(result.is_ok());
     }
@@ -276,20 +282,22 @@ mod tests {
     #[tokio::test]
     async fn test_channel_service_receive_from_queue() {
         let service = IntegrationChannelService::new();
-        
+
         // Send a message first
         let msg = TestMessage::new(b"test payload".to_vec());
         service.send_to_queue("test-queue", msg).await.unwrap();
-        
+
         // Try to receive (with timeout to avoid blocking)
-        let result = service.receive_from_queue("test-queue", Some(Duration::from_millis(100))).await;
+        let result = service
+            .receive_from_queue("test-queue", Some(Duration::from_millis(100)))
+            .await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_channel_service_subscribe_to_topic() {
         let service = IntegrationChannelService::new();
-        
+
         let result = service.subscribe_to_topic("test-topic").await;
         assert!(result.is_ok());
     }
@@ -298,14 +306,14 @@ mod tests {
     async fn test_channel_service_roundtrip() {
         let service = IntegrationChannelService::new();
         let queue_name = "roundtrip-queue";
-        
+
         // Send multiple messages
         for i in 0..3 {
             let mut msg = TestMessage::new(format!("message-{}", i).into_bytes());
             msg.sender = Some("test-sender".to_string());
             service.send_to_queue(queue_name, msg).await.unwrap();
         }
-        
+
         // Receive messages
         for _ in 0..3 {
             let received = service
@@ -319,4 +327,3 @@ mod tests {
         }
     }
 }
-

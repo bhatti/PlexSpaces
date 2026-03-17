@@ -24,12 +24,12 @@
 //! 3. Uses ActorFactory for all actor operations
 //! 4. Handles both existing and new actors correctly
 
-use std::sync::Arc;
-use plexspaces_core::{ActorRegistry, VirtualActorManager, RequestContext, ServiceLocator};
-use plexspaces_actor::ActorFactory;
-use plexspaces_proto::actor::v1::GetOrActivateActorRequest;
-use tonic::Status;
 use crate::ServiceLocatorImpl;
+use plexspaces_actor::ActorFactory;
+use plexspaces_core::{ActorRegistry, RequestContext, ServiceLocator, VirtualActorManager};
+use plexspaces_proto::actor::v1::GetOrActivateActorRequest;
+use std::sync::Arc;
+use tonic::Status;
 
 /// Unified get_or_activate_actor implementation
 ///
@@ -57,24 +57,26 @@ pub async fn get_or_activate_actor_impl(
     if req.actor_id.is_empty() {
         return Err(Status::invalid_argument("actor_id is required"));
     }
-    
+
     let actor_id: plexspaces_core::ActorId = req.actor_id.clone();
-    
+
     // Get required services
     let actor_registry: Arc<ActorRegistry> = service_locator
         .actor_registry()
         .await
         .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
-    
+
     let virtual_actor_manager: Arc<VirtualActorManager> = service_locator
         .virtual_actor_manager()
         .await
         .ok_or_else(|| Status::internal("VirtualActorManager not found in ServiceLocator"))?;
-    
+
     use plexspaces_actor::ActorFactory;
-    let actor_factory: Arc<dyn ActorFactory> = service_locator.get_actor_factory().await
+    let actor_factory: Arc<dyn ActorFactory> = service_locator
+        .get_actor_factory()
+        .await
         .ok_or_else(|| Status::internal("ActorFactory not found in ServiceLocator"))?;
-    
+
     // Use RequestContext from request for routing lookup (respects tenant/namespace)
     // Try to lookup routing - if it fails, assume actor doesn't exist (will create it)
     let routing = actor_registry
@@ -82,7 +84,7 @@ pub async fn get_or_activate_actor_impl(
         .await
         .ok()
         .flatten();
-    
+
     let (was_activated, final_actor_id) = match routing {
         Some(routing_info) if routing_info.is_local => {
             // Actor ID points to local node
@@ -90,7 +92,7 @@ pub async fn get_or_activate_actor_impl(
             if actor_registry.lookup_actor(&actor_id).await.is_some() {
                 // Actor exists and is active
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(actor_id = %actor_id, "Actor already exists and is active");
+                    tracing::debug!(actor_id = %actor_id, "Actor already exists and is active");
                 }
                 (false, actor_id)
             } else {
@@ -99,7 +101,7 @@ pub async fn get_or_activate_actor_impl(
                 if virtual_actor_manager.is_virtual(&actor_id).await {
                     // Virtual actor - activate it
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(actor_id = %actor_id, "Virtual actor exists but not active - activating");
+                        tracing::debug!(actor_id = %actor_id, "Virtual actor exists but not active - activating");
                     }
                     actor_factory
                         .activate_virtual_actor(&actor_id)
@@ -116,10 +118,10 @@ pub async fn get_or_activate_actor_impl(
                             "actor_type is required when creating new actor",
                         ));
                     }
-                    
+
                     // Create actor using ActorFactory
                     if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(actor_id = %actor_id, "Actor not found - creating new actor");
+                        tracing::debug!(actor_id = %actor_id, "Actor not found - creating new actor");
                     }
                     actor_factory
                         .spawn_actor(
@@ -132,9 +134,7 @@ pub async fn get_or_activate_actor_impl(
                             vec![], // facets (empty - facets should be attached via config or separate API)
                         )
                         .await
-                        .map_err(|e| {
-                            Status::internal(format!("Failed to spawn actor: {}", e))
-                        })?;
+                        .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
                     (true, actor_id)
                 }
             }
@@ -142,7 +142,7 @@ pub async fn get_or_activate_actor_impl(
         Some(_) => {
             // Actor exists on remote node - return remote ActorRef
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(actor_id = %actor_id, "Actor exists on remote node");
+                tracing::debug!(actor_id = %actor_id, "Actor exists on remote node");
             }
             (false, actor_id)
         }
@@ -154,7 +154,7 @@ pub async fn get_or_activate_actor_impl(
                     "actor_type is required when creating new actor",
                 ));
             }
-            
+
             // CRITICAL: Check if this is a virtual actor type (for WASM and Rust applications)
             // If so, we need to recreate facets from VirtualActorMetadata
             // Supports all facets: virtual_actor, durability, timer, reminder, etc.
@@ -163,27 +163,38 @@ pub async fn get_or_activate_actor_impl(
             if let Some(manager) = &virtual_actor_manager {
                 if let Some(type_metadata) = manager.get_virtual_actor_type(&req.actor_type).await {
                     // Virtual actor type - recreate facets from metadata using facet helpers
-                    if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
-                        let facet_registry: Arc<plexspaces_facet::FacetRegistry> = facet_registry_wrapper.inner_clone();
-                        
+                    if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await
+                    {
+                        let facet_registry: Arc<plexspaces_facet::FacetRegistry> =
+                            facet_registry_wrapper.inner_clone();
+
                         // Create all facets from stored config (supports all facet types)
                         if let Some(facet_config) = &type_metadata.facet_config {
                             use plexspaces_facet::facet_helpers::create_facets_from_config;
-                            facets_to_attach = create_facets_from_config(facet_config, &facet_registry).await;
+                            facets_to_attach =
+                                create_facets_from_config(facet_config, &facet_registry).await;
                         }
                     }
                 }
             }
-            
+
             // Use actor_id factory to build actor_id with proper format
             use plexspaces_core::actor_id::{build_actor_id, parse_actor_id};
             let local_actor_id = if let Ok(parsed) = parse_actor_id(&actor_id) {
                 // Rebuild with local node_id
-                build_actor_id(&parsed.id, &parsed.actor_type, parsed.namespace.as_deref(), local_node_id)
+                build_actor_id(
+                    &parsed.id,
+                    &parsed.actor_type,
+                    parsed.namespace.as_deref(),
+                    local_node_id,
+                )
             } else {
-                return Err(tonic::Status::invalid_argument(format!("Invalid actor ID format: {}", actor_id)));
+                return Err(tonic::Status::invalid_argument(format!(
+                    "Invalid actor ID format: {}",
+                    actor_id
+                )));
             };
-            
+
             // CRITICAL: Build init config for WASM actors from template if available
             // This preserves the config structure from ApplicationSpec's ChildSpec.args
             // so virtual WASM actors activated via HTTP receive proper config
@@ -191,13 +202,20 @@ pub async fn get_or_activate_actor_impl(
                 // Check if this is a virtual actor type with init_config_template
                 let mut state = req.initial_state.clone();
                 if let Some(manager) = &virtual_actor_manager {
-                    if let Some(type_metadata) = manager.get_virtual_actor_type(&req.actor_type).await {
+                    if let Some(type_metadata) =
+                        manager.get_virtual_actor_type(&req.actor_type).await
+                    {
                         if let Some(ref template) = type_metadata.init_config_template {
                             // Parse template JSON and replace actor_id
-                            if let Ok(mut config_json) = serde_json::from_slice::<serde_json::Value>(template) {
+                            if let Ok(mut config_json) =
+                                serde_json::from_slice::<serde_json::Value>(template)
+                            {
                                 if let Some(config_obj) = config_json.as_object_mut() {
                                     // Replace actor_id with actual local_actor_id
-                                    config_obj.insert("actor_id".to_string(), serde_json::Value::String(local_actor_id.clone()));
+                                    config_obj.insert(
+                                        "actor_id".to_string(),
+                                        serde_json::Value::String(local_actor_id.clone()),
+                                    );
                                     // Serialize back to bytes
                                     if let Ok(updated_config) = serde_json::to_vec(&config_json) {
                                         state = updated_config;
@@ -216,10 +234,10 @@ pub async fn get_or_activate_actor_impl(
                 }
                 state
             };
-            
+
             // Create actor using ActorFactory
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(actor_id = %local_actor_id, "Actor doesn't exist - creating new actor");
+                tracing::debug!(actor_id = %local_actor_id, "Actor doesn't exist - creating new actor");
             }
             actor_factory
                 .spawn_actor(
@@ -232,14 +250,11 @@ pub async fn get_or_activate_actor_impl(
                     facets_to_attach, // Pass virtual actor facets if this is a virtual actor type
                 )
                 .await
-                .map_err(|e| {
-                    Status::internal(format!("Failed to spawn actor: {}", e))
-                })?;
-            
+                .map_err(|e| Status::internal(format!("Failed to spawn actor: {}", e)))?;
+
             (true, local_actor_id)
         }
     };
-    
+
     Ok((was_activated, final_actor_id))
 }
-

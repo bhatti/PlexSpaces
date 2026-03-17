@@ -185,7 +185,13 @@ impl KeyValueStore for RedisKVStore {
     /// List keys matching prefix
     async fn list(&self, ctx: &RequestContext, prefix: &str) -> KVResult<Vec<String>> {
         let mut conn = self.manager.clone();
-        let pattern = format!("{}:{}:{}:{}*", self.namespace, ctx.tenant_id(), ctx.namespace(), prefix);
+        let pattern = format!(
+            "{}:{}:{}:{}*",
+            self.namespace,
+            ctx.tenant_id(),
+            ctx.namespace(),
+            prefix
+        );
 
         // Use SCAN instead of KEYS for better performance
         let keys: Vec<String> = redis::cmd("SCAN")
@@ -198,16 +204,27 @@ impl KeyValueStore for RedisKVStore {
             .map_err(|e| KVError::BackendError(format!("Redis SCAN failed: {}", e)))?;
 
         // Remove namespace/tenant/namespace prefix to return just the key
-        let prefix_to_remove = format!("{}:{}:{}:", self.namespace, ctx.tenant_id(), ctx.namespace());
-        Ok(keys.into_iter()
+        let prefix_to_remove = format!(
+            "{}:{}:{}:",
+            self.namespace,
+            ctx.tenant_id(),
+            ctx.namespace()
+        );
+        Ok(keys
+            .into_iter()
             .filter_map(|k| k.strip_prefix(&prefix_to_remove).map(|s| s.to_string()))
             .collect())
     }
 
     /// Get multiple values
-    async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>> {
+    async fn multi_get(
+        &self,
+        ctx: &RequestContext,
+        keys: &[&str],
+    ) -> KVResult<Vec<Option<Vec<u8>>>> {
         let mut conn = self.manager.clone();
-        let prefixed: Vec<String> = keys.iter()
+        let prefixed: Vec<String> = keys
+            .iter()
             .map(|k| self.prefixed_key(ctx.tenant_id(), ctx.namespace(), k))
             .collect();
 
@@ -226,7 +243,10 @@ impl KeyValueStore for RedisKVStore {
         // Use pipeline for efficiency
         let mut pipe = redis::pipe();
         for (key, value) in entries {
-            pipe.set(self.prefixed_key(ctx.tenant_id(), ctx.namespace(), key), value.clone());
+            pipe.set(
+                self.prefixed_key(ctx.tenant_id(), ctx.namespace(), key),
+                value.clone(),
+            );
         }
 
         pipe.query_async::<()>(&mut conn)
@@ -237,7 +257,13 @@ impl KeyValueStore for RedisKVStore {
     }
 
     /// Store key-value with TTL
-    async fn put_with_ttl(&self, ctx: &RequestContext, key: &str, value: Vec<u8>, ttl: Duration) -> KVResult<()> {
+    async fn put_with_ttl(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        value: Vec<u8>,
+        ttl: Duration,
+    ) -> KVResult<()> {
         let mut conn = self.manager.clone();
         let prefixed = self.prefixed_key(ctx.tenant_id(), ctx.namespace(), key);
         let ttl_secs = ttl.as_secs();
@@ -286,7 +312,13 @@ impl KeyValueStore for RedisKVStore {
     }
 
     /// Compare-and-swap operation
-    async fn cas(&self, ctx: &RequestContext, key: &str, expected: Option<Vec<u8>>, new: Vec<u8>) -> KVResult<bool> {
+    async fn cas(
+        &self,
+        ctx: &RequestContext,
+        key: &str,
+        expected: Option<Vec<u8>>,
+        new: Vec<u8>,
+    ) -> KVResult<bool> {
         let mut conn = self.manager.clone();
         let prefixed = self.prefixed_key(ctx.tenant_id(), ctx.namespace(), key);
 
@@ -361,7 +393,11 @@ impl KeyValueStore for RedisKVStore {
     }
 
     /// Watch for changes to keys matching prefix
-    async fn watch_prefix(&self, ctx: &RequestContext, _prefix: &str) -> KVResult<mpsc::Receiver<KVEvent>> {
+    async fn watch_prefix(
+        &self,
+        ctx: &RequestContext,
+        _prefix: &str,
+    ) -> KVResult<mpsc::Receiver<KVEvent>> {
         // TODO: Implement Redis keyspace notifications
         // Requires CONFIG SET notify-keyspace-events and separate connection
         // For now, return empty channel (not implemented yet)
@@ -370,7 +406,11 @@ impl KeyValueStore for RedisKVStore {
     }
 
     /// Delete all keys matching prefix
-    async fn clear_prefix(&self, ctx: &plexspaces_common::RequestContext, prefix: &str) -> KVResult<usize> {
+    async fn clear_prefix(
+        &self,
+        ctx: &plexspaces_common::RequestContext,
+        prefix: &str,
+    ) -> KVResult<usize> {
         let keys = self.list(ctx, prefix).await?;
         let mut count = 0usize;
 
@@ -383,7 +423,11 @@ impl KeyValueStore for RedisKVStore {
     }
 
     /// Count keys matching prefix
-    async fn count_prefix(&self, ctx: &plexspaces_common::RequestContext, prefix: &str) -> KVResult<usize> {
+    async fn count_prefix(
+        &self,
+        ctx: &plexspaces_common::RequestContext,
+        prefix: &str,
+    ) -> KVResult<usize> {
         let keys = self.list(ctx, prefix).await?;
         Ok(keys.len())
     }
@@ -427,9 +471,9 @@ crate::impl_common_keyvalue_store!(RedisKVStore);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_common::RequestContext;
     use plexspaces_common::skip_if_unavailable;
     use plexspaces_common::test_helpers::redis_available;
+    use plexspaces_common::RequestContext;
 
     // Helper to create test store (requires running Redis instance)
     async fn create_test_store() -> RedisKVStore {
@@ -521,8 +565,14 @@ mod tests {
         let store = create_test_store().await;
         let ctx = test_ctx();
 
-        store.put(&ctx, "prefix:key1", b"v1".to_vec()).await.unwrap();
-        store.put(&ctx, "prefix:key2", b"v2".to_vec()).await.unwrap();
+        store
+            .put(&ctx, "prefix:key1", b"v1".to_vec())
+            .await
+            .unwrap();
+        store
+            .put(&ctx, "prefix:key2", b"v2".to_vec())
+            .await
+            .unwrap();
         store.put(&ctx, "other:key", b"v3".to_vec()).await.unwrap();
 
         let keys = store.list(&ctx, "prefix:").await.unwrap();

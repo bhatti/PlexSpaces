@@ -20,10 +20,10 @@
 
 #[cfg(test)]
 mod tests {
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
     use plexspaces_grpc_middleware::auth::AuthInterceptor;
     use plexspaces_grpc_middleware::chain::Interceptor;
     use plexspaces_proto::grpc::v1::{AuthMethod, AuthMiddlewareConfig};
-    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 
     // Test JWT claims structure
     #[derive(serde::Serialize, serde::Deserialize)]
@@ -266,7 +266,13 @@ mod tests {
             decision.decision,
             plexspaces_proto::grpc::v1::InterceptorDecision::InterceptorDecisionDeny as i32
         );
-        assert!(decision.error_message.contains("Missing Authorization header"), "Expected 'Missing Authorization header' in error: {}", decision.error_message);
+        assert!(
+            decision
+                .error_message
+                .contains("Missing Authorization header"),
+            "Expected 'Missing Authorization header' in error: {}",
+            decision.error_message
+        );
     }
 
     #[tokio::test]
@@ -317,11 +323,20 @@ mod tests {
             decision.decision,
             plexspaces_proto::grpc::v1::InterceptorDecision::InterceptorDecisionAllow as i32
         );
-        
+
         // Check that tenant_id was added to headers
-        assert_eq!(decision.modified_headers.get("x-tenant-id"), Some(&"tenant-456".to_string()));
-        assert_eq!(decision.modified_headers.get("x-user-id"), Some(&"user123".to_string()));
-        assert_eq!(decision.modified_headers.get("x-user-roles"), Some(&"admin,user".to_string()));
+        assert_eq!(
+            decision.modified_headers.get("x-tenant-id"),
+            Some(&"tenant-456".to_string())
+        );
+        assert_eq!(
+            decision.modified_headers.get("x-user-id"),
+            Some(&"user123".to_string())
+        );
+        assert_eq!(
+            decision.modified_headers.get("x-user-roles"),
+            Some(&"admin,user".to_string())
+        );
     }
 
     #[tokio::test]
@@ -372,11 +387,13 @@ mod tests {
             decision.decision,
             plexspaces_proto::grpc::v1::InterceptorDecision::InterceptorDecisionAllow as i32
         );
-        
+
         // tenant_id header should not be present (empty tenant_id)
         assert!(!decision.modified_headers.contains_key("x-tenant-id"));
         // But user_id should still be present
-        assert_eq!(decision.modified_headers.get("x-user-id"), Some(&"user123".to_string()));
+        assert_eq!(
+            decision.modified_headers.get("x-user-id"),
+            Some(&"user123".to_string())
+        );
     }
 }
-

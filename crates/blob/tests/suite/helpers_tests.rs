@@ -18,16 +18,16 @@
 
 //! Tests for helper functions
 
+use chrono::{Duration, Utc};
 use plexspaces_blob::helpers::*;
 use plexspaces_proto::storage::v1::BlobMetadata;
-use chrono::{Duration, Utc};
 use prost_types::Timestamp;
 
 #[test]
 fn test_datetime_to_timestamp() {
     let dt = Utc::now();
     let ts = datetime_to_timestamp(dt);
-    
+
     assert!(ts.seconds > 0);
     assert!(ts.nanos >= 0);
 }
@@ -36,10 +36,10 @@ fn test_datetime_to_timestamp() {
 fn test_timestamp_to_datetime() {
     let dt = Utc::now();
     let ts = datetime_to_timestamp(dt);
-    
+
     let converted = timestamp_to_datetime(Some(ts));
     assert!(converted.is_some());
-    
+
     let converted_dt = converted.unwrap();
     // Should be within 1 second (allowing for rounding)
     assert!((converted_dt.timestamp() - dt.timestamp()).abs() <= 1);

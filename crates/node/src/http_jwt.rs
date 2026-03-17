@@ -37,11 +37,7 @@
 
 // Re-export everything from grpc-middleware JWT module
 pub use plexspaces_grpc_middleware::jwt::{
-    validate_bearer_token,
-    validate_jwt_token,
-    resolve_tenant_id,
-    JwtClaims,
-    AUTH_REQUIRED_HINT,
+    resolve_tenant_id, validate_bearer_token, validate_jwt_token, JwtClaims, AUTH_REQUIRED_HINT,
 };
 
 // ============================================================================

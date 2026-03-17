@@ -41,7 +41,11 @@ impl PoolRegistry {
     }
 
     /// Register an existing pool under a name (e.g. created elsewhere).
-    pub async fn register_pool(&self, name: String, pool: ElasticPool) -> Result<(), PoolServiceError> {
+    pub async fn register_pool(
+        &self,
+        name: String,
+        pool: ElasticPool,
+    ) -> Result<(), PoolServiceError> {
         let mut pools = self.pools.write().await;
         if pools.contains_key(&name) {
             return Err(PoolServiceError::InvalidConfig(format!(

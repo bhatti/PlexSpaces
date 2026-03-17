@@ -39,8 +39,7 @@ use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 
 /// Hint message for auth-related errors
-pub const AUTH_REQUIRED_HINT: &str =
-    " For local testing, set PLEXSPACES_DISABLE_AUTH=1.";
+pub const AUTH_REQUIRED_HINT: &str = " For local testing, set PLEXSPACES_DISABLE_AUTH=1.";
 
 /// JWT claims extracted from token
 ///
@@ -124,15 +123,11 @@ impl JwtClaims {
     ) -> plexspaces_common::RequestContext {
         // Since we have validated JWT, we know tenant_id is present
         // Use new() which validates tenant_id when auth_enabled
-        let ctx = plexspaces_common::RequestContext::new(
-            self.tenant_id.clone(),
-            namespace,
-            auth_enabled,
-        )
-        .expect("JWT claims have validated tenant_id");
+        let ctx =
+            plexspaces_common::RequestContext::new(self.tenant_id.clone(), namespace, auth_enabled)
+                .expect("JWT claims have validated tenant_id");
 
-        ctx.with_user_id(self.sub.clone())
-           .with_admin(self.is_admin)
+        ctx.with_user_id(self.sub.clone()).with_admin(self.is_admin)
     }
 
     /// Convert JWT claims to RequestContext with default namespace
@@ -140,7 +135,10 @@ impl JwtClaims {
     /// ## Purpose
     /// Convenience method when namespace is not available from request.
     /// Uses empty string as namespace.
-    pub fn to_request_context_default(&self, auth_enabled: bool) -> plexspaces_common::RequestContext {
+    pub fn to_request_context_default(
+        &self,
+        auth_enabled: bool,
+    ) -> plexspaces_common::RequestContext {
         self.to_request_context(String::new(), auth_enabled)
     }
 }
@@ -356,7 +354,9 @@ mod tests {
     fn test_validate_bearer_token_missing_header() {
         let result = validate_bearer_token(TEST_SECRET, None);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Missing or invalid Authorization header"));
+        assert!(result
+            .unwrap_err()
+            .contains("Missing or invalid Authorization header"));
     }
 
     #[test]
@@ -364,7 +364,9 @@ mod tests {
         let token = create_test_token("tenant-123", "user-456", 3600);
         let result = validate_bearer_token(TEST_SECRET, Some(&token));
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Missing or invalid Authorization header"));
+        assert!(result
+            .unwrap_err()
+            .contains("Missing or invalid Authorization header"));
     }
 
     #[test]

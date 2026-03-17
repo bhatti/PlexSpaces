@@ -10,14 +10,14 @@
 // - actor_context_reply_tests.rs (2 tests)
 // Total: 12 tests
 
-use plexspaces_core::{
-    ActorContext, ActorService, ChannelService, Message, ObjectRegistry, ProcessGroupService,
-    RequestContext, TupleSpaceProvider,
-};
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use plexspaces_channel::{Channel, InMemoryChannel};
+use plexspaces_core::{
+    ActorContext, ActorService, ChannelService, Message, ObjectRegistry, ProcessGroupService,
+    RequestContext, TupleSpaceProvider,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,7 +35,11 @@ fn create_test_message(payload: Vec<u8>) -> Message {
     }
 }
 
-fn create_test_message_with_sender(payload: Vec<u8>, sender_id: &str, correlation_id: &str) -> Message {
+fn create_test_message_with_sender(
+    payload: Vec<u8>,
+    sender_id: &str,
+    correlation_id: &str,
+) -> Message {
     Message {
         id: Ulid::new().to_string(),
         payload,
@@ -163,7 +167,7 @@ impl IntegrationChannelService {
         }
 
         use plexspaces_proto::channel::v1::{
-            ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee,
+            ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
         };
         let config = ChannelConfig {
             name: name.to_string(),
@@ -638,7 +642,11 @@ async fn test_integration_channel_send_receive() {
     let received = service
         .receive_from_queue(queue_name, Some(Duration::from_secs(1)))
         .await;
-    assert!(received.is_ok(), "Failed to receive message: {:?}", received);
+    assert!(
+        received.is_ok(),
+        "Failed to receive message: {:?}",
+        received
+    );
 
     let msg = received.unwrap();
     assert!(msg.is_some(), "No message received");
@@ -676,7 +684,8 @@ async fn test_integration_channel_pubsub() {
 #[tokio::test]
 async fn test_join_group_records_tenant_info() {
     let service = MockProcessGroupService::new();
-    let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "namespace-abc".to_string());
+    let ctx =
+        RequestContext::new_without_auth("tenant-123".to_string(), "namespace-abc".to_string());
 
     service
         .join_group(&ctx, "test-group", "actor-1", vec![])
@@ -694,7 +703,8 @@ async fn test_join_group_records_tenant_info() {
 #[tokio::test]
 async fn test_leave_group_records_tenant_info() {
     let service = MockProcessGroupService::new();
-    let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "namespace-abc".to_string());
+    let ctx =
+        RequestContext::new_without_auth("tenant-123".to_string(), "namespace-abc".to_string());
 
     service
         .leave_group(&ctx, "test-group", "actor-1")
@@ -712,7 +722,8 @@ async fn test_leave_group_records_tenant_info() {
 #[tokio::test]
 async fn test_publish_to_group_records_tenant_info() {
     let service = MockProcessGroupService::new();
-    let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "namespace-abc".to_string());
+    let ctx =
+        RequestContext::new_without_auth("tenant-123".to_string(), "namespace-abc".to_string());
 
     let message = create_test_message(b"test payload".to_vec());
     let count = service
@@ -740,7 +751,8 @@ async fn test_reply_with_sender_id() {
         sent_messages: sent_messages.clone(),
     });
 
-    let original_msg = create_test_message_with_sender(b"request".to_vec(), "sender-actor", "corr-123");
+    let original_msg =
+        create_test_message_with_sender(b"request".to_vec(), "sender-actor", "corr-123");
 
     let reply_msg = Message {
         id: Ulid::new().to_string(),

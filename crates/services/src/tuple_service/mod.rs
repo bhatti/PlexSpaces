@@ -49,7 +49,6 @@ use plexspaces_tuplespace::{
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-
 /// gRPC service implementation for TupleSpace operations
 pub struct TupleSpaceServiceImpl {
     /// ServiceLocator for accessing TupleSpaceProvider
@@ -221,8 +220,8 @@ impl TupleSpaceServiceImpl {
     /// Convert internal Tuple to proto Tuple
     fn convert_internal_tuple_to_proto(tuple: &Tuple) -> ProtoTuple {
         use plexspaces_proto::tuplespace::v1::Lease as ProtoLease;
-        use prost_types::{Timestamp, Duration as ProtoDuration};
-        
+        use prost_types::{Duration as ProtoDuration, Timestamp};
+
         // Convert lease if present
         let lease = tuple.lease().map(|lease| {
             let expires_at = lease.expires_at();
@@ -232,7 +231,7 @@ impl TupleSpaceServiceImpl {
             } else {
                 chrono::Duration::zero()
             };
-            
+
             ProtoLease {
                 ttl: Some(ProtoDuration {
                     seconds: ttl_duration.num_seconds(),
@@ -246,15 +245,15 @@ impl TupleSpaceServiceImpl {
                 }),
             }
         });
-        
+
         // Convert metadata (proto expects map<string, Value>, but we have map<string, string>)
         // Note: Tuple doesn't expose metadata() method, so we'll leave it empty for now
         // TODO: Add metadata() accessor to Tuple if needed
         // For now, metadata is not exposed, so we'll use empty map
-        
+
         let proto_metadata = std::collections::HashMap::new();
         // Metadata conversion will be implemented when Tuple exposes metadata accessor
-        
+
         ProtoTuple {
             id: ulid::Ulid::new().to_string(), // Assign ULID
             fields: tuple
@@ -302,11 +301,11 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         let metadata = request.metadata().clone();
         let req = request.into_inner();
         let start = std::time::Instant::now();
-        
+
         // Record metrics
         metrics::counter!("plexspaces_node_tuplespace_write_requests_total").increment(1);
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!("TupleSpace write requested");
+            tracing::debug!("TupleSpace write requested");
         }
 
         // Validate request
@@ -318,18 +317,28 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(e.to_string()))?;
-        
+        let _ctx = plexspaces_core::request_context_from_grpc_request(
+            &metadata,
+            labels,
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         // Get TupleSpaceProvider from ServiceLocator
-        let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
+        let tuplespace_provider = self
+            .service_locator
+            .get_tuplespace_provider()
+            .await
             .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
         // Convert and write tuples
         let mut tuple_ids = Vec::new();
         for proto_tuple in &req.tuples {
             let tuple = Self::convert_proto_tuple_to_internal(proto_tuple)?;
-            tuplespace_provider.write(tuple).await
+            tuplespace_provider
+                .write(tuple)
+                .await
                 .map_err(|e| Self::tuplespace_error_to_status(e))?;
             // Use ID from proto tuple if provided, otherwise generate new one
             let tuple_id = if !proto_tuple.id.is_empty() {
@@ -347,8 +356,9 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         }
 
         let elapsed = start.elapsed();
-        metrics::histogram!("plexspaces_node_tuplespace_write_duration_seconds").record(elapsed.as_secs_f64());
-        
+        metrics::histogram!("plexspaces_node_tuplespace_write_duration_seconds")
+            .record(elapsed.as_secs_f64());
+
         Ok(Response::new(WriteResponse { tuple_ids }))
     }
 
@@ -370,15 +380,25 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(e.to_string()))?;
-        
+        let _ctx = plexspaces_core::request_context_from_grpc_request(
+            &metadata,
+            labels,
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         // Get TupleSpaceProvider from ServiceLocator
-        let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
+        let tuplespace_provider = self
+            .service_locator
+            .get_tuplespace_provider()
+            .await
             .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
         // Read tuples
-        let tuples = tuplespace_provider.read(&pattern).await
+        let tuples = tuplespace_provider
+            .read(&pattern)
+            .await
             .map_err(|e| Self::tuplespace_error_to_status(e))?;
 
         // Update stats
@@ -388,7 +408,8 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         }
 
         // Convert to proto
-        let proto_tuples: Vec<ProtoTuple> = tuples.iter()
+        let proto_tuples: Vec<ProtoTuple> = tuples
+            .iter()
             .map(|t| Self::convert_internal_tuple_to_proto(t))
             .collect();
 
@@ -416,15 +437,25 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(e.to_string()))?;
-        
+        let _ctx = plexspaces_core::request_context_from_grpc_request(
+            &metadata,
+            labels,
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         // Get TupleSpaceProvider from ServiceLocator
-        let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
+        let tuplespace_provider = self
+            .service_locator
+            .get_tuplespace_provider()
+            .await
             .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
         // Take tuple
-        let tuple = tuplespace_provider.take(&pattern).await
+        let tuple = tuplespace_provider
+            .take(&pattern)
+            .await
             .map_err(|e| Self::tuplespace_error_to_status(e))?;
 
         // Update stats
@@ -467,15 +498,25 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(e.to_string()))?;
-        
+        let _ctx = plexspaces_core::request_context_from_grpc_request(
+            &metadata,
+            labels,
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         // Get TupleSpaceProvider from ServiceLocator
-        let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
+        let tuplespace_provider = self
+            .service_locator
+            .get_tuplespace_provider()
+            .await
             .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
         // Count tuples
-        let count = tuplespace_provider.count(&pattern).await
+        let count = tuplespace_provider
+            .count(&pattern)
+            .await
             .map_err(|e| Self::tuplespace_error_to_status(e))?;
 
         Ok(Response::new(CountResponse {
@@ -504,20 +545,28 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(e.to_string()))?;
-        
+        let _ctx = plexspaces_core::request_context_from_grpc_request(
+            &metadata,
+            labels,
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         // Get TupleSpaceProvider from ServiceLocator
-        let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
+        let tuplespace_provider = self
+            .service_locator
+            .get_tuplespace_provider()
+            .await
             .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
         // Check if tuples exist
-        let count = tuplespace_provider.count(&pattern).await
+        let count = tuplespace_provider
+            .count(&pattern)
+            .await
             .map_err(|e| Self::tuplespace_error_to_status(e))?;
 
-        Ok(Response::new(ExistsResponse {
-            exists: count > 0,
-        }))
+        Ok(Response::new(ExistsResponse { exists: count > 0 }))
     }
 
     // See docs/BARRIER_REFACTORING_PLAN.md for migration guide and examples.
@@ -579,19 +628,30 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(e.to_string()))?;
-        
+        let _ctx = plexspaces_core::request_context_from_grpc_request(
+            &metadata,
+            labels,
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         // Get TupleSpaceProvider from ServiceLocator
-        let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
+        let tuplespace_provider = self
+            .service_locator
+            .get_tuplespace_provider()
+            .await
             .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
         // Clear all tuples using wildcard pattern
         use plexspaces_tuplespace::{Pattern, PatternField};
         let wildcard_pattern = Pattern::new(vec![PatternField::Wildcard]);
         loop {
-            match tuplespace_provider.take(&wildcard_pattern).await
-                .map_err(|e| Self::tuplespace_error_to_status(e))? {
+            match tuplespace_provider
+                .take(&wildcard_pattern)
+                .await
+                .map_err(|e| Self::tuplespace_error_to_status(e))?
+            {
                 Some(_) => {
                     // Continue taking until no more tuples
                 }
@@ -636,23 +696,34 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
         // CRITICAL: Must have valid tenant context - do NOT fallback to internal()
         // This ensures tenant isolation for all TupleSpace operations
         let labels = &std::collections::HashMap::new();
-            let _ctx = plexspaces_core::request_context_from_grpc_request(&metadata, labels, &self.service_locator).await
-            .map_err(|e| Status::unauthenticated(e.to_string()))?;
-        
+        let _ctx = plexspaces_core::request_context_from_grpc_request(
+            &metadata,
+            labels,
+            &self.service_locator,
+        )
+        .await
+        .map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         // Get TupleSpaceProvider from ServiceLocator
-        let tuplespace_provider = self.service_locator.get_tuplespace_provider().await
+        let tuplespace_provider = self
+            .service_locator
+            .get_tuplespace_provider()
+            .await
             .ok_or_else(|| Status::internal("TupleSpaceProvider not available"))?;
 
         // Get tuple count using wildcard pattern
         use plexspaces_tuplespace::{Pattern, PatternField};
         let wildcard_pattern = Pattern::new(vec![PatternField::Wildcard]);
-        let tuple_count = tuplespace_provider.count(&wildcard_pattern).await
+        let tuple_count = tuplespace_provider
+            .count(&wildcard_pattern)
+            .await
             .map_err(|e| Self::tuplespace_error_to_status(e))? as u64;
 
         // Get operation stats from service
         let op_stats = self.stats.read().await;
-        let total_operations = op_stats.write_operations + op_stats.read_operations + op_stats.take_operations;
-        use plexspaces_proto::tuplespace::v1::{StorageStats, GetStatsResponse};
+        let total_operations =
+            op_stats.write_operations + op_stats.read_operations + op_stats.take_operations;
+        use plexspaces_proto::tuplespace::v1::{GetStatsResponse, StorageStats};
         Ok(Response::new(GetStatsResponse {
             stats: Some(StorageStats {
                 tuple_count,

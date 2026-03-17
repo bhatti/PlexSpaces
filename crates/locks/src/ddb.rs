@@ -63,11 +63,17 @@
 //! - Tracing: Distributed tracing with tenant context
 //! - Logging: Structured logging with request context
 
-use crate::{AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions, RenewLockOptions};
+use crate::{
+    AcquireLockOptions, Lock, LockError, LockManager, LockResult, ReleaseLockOptions,
+    RenewLockOptions,
+};
 use async_trait::async_trait;
 use aws_sdk_dynamodb::{
     error::ProvideErrorMetadata,
-    types::{AttributeDefinition, AttributeValue, BillingMode, GlobalSecondaryIndex, KeySchemaElement, KeyType, Projection, ProjectionType, ScalarAttributeType, TimeToLiveSpecification},
+    types::{
+        AttributeDefinition, AttributeValue, BillingMode, GlobalSecondaryIndex, KeySchemaElement,
+        KeyType, Projection, ProjectionType, ScalarAttributeType, TimeToLiveSpecification,
+    },
     Client as DynamoDbClient,
 };
 use chrono::{DateTime, Utc};
@@ -153,7 +159,8 @@ impl DynamoDBLockManager {
         metrics::histogram!(
             "plexspaces_locks_ddb_init_duration_seconds",
             "backend" => "dynamodb"
-        ).record(duration.as_secs_f64());
+        )
+        .record(duration.as_secs_f64());
 
         tracing::info!(
             table = %table_name,
@@ -179,12 +186,7 @@ impl DynamoDBLockManager {
     #[instrument(skip(client), fields(table_name = %table_name))]
     async fn ensure_table_exists(client: &DynamoDbClient, table_name: &str) -> LockResult<()> {
         // Check if table exists
-        match client
-            .describe_table()
-            .table_name(table_name)
-            .send()
-            .await
-        {
+        match client.describe_table().table_name(table_name).send().await {
             Ok(_) => {
                 debug!(table_name = %table_name, "DynamoDB table already exists");
                 return Ok(());
@@ -194,15 +196,17 @@ impl DynamoDBLockManager {
                 let error_msg = format!("{}", e);
                 let error_code = e.code().unwrap_or("unknown");
                 let error_message = e.message().unwrap_or(&error_msg);
-                
+
                 debug!(
                     table_name = %table_name,
                     error_code = %error_code,
                     error_message = %error_message,
                     "DynamoDB describe_table result"
                 );
-                
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         table_name = %table_name,
                         error_code = %error_code,
@@ -237,37 +241,49 @@ impl DynamoDBLockManager {
             .attribute_name("pk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| LockError::BackendError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                LockError::BackendError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let sk_attr = AttributeDefinition::builder()
             .attribute_name("sk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| LockError::BackendError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                LockError::BackendError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let tenant_id_attr = AttributeDefinition::builder()
             .attribute_name("tenant_id")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| LockError::BackendError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                LockError::BackendError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let namespace_expires_attr = AttributeDefinition::builder()
             .attribute_name("namespace_expires")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| LockError::BackendError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                LockError::BackendError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let gsi_pk_schema = KeySchemaElement::builder()
             .attribute_name("tenant_id")
             .key_type(KeyType::Hash)
             .build()
-            .map_err(|e| LockError::BackendError(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                LockError::BackendError(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let gsi_sk_schema = KeySchemaElement::builder()
             .attribute_name("namespace_expires")
             .key_type(KeyType::Range)
             .build()
-            .map_err(|e| LockError::BackendError(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                LockError::BackendError(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let gsi_projection = Projection::builder()
             .projection_type(ProjectionType::All)
@@ -332,9 +348,7 @@ impl DynamoDBLockManager {
                 .table_name(table_name)
                 .send()
                 .await
-                .map_err(|e| {
-                    LockError::BackendError(format!("Failed to describe table: {}", e))
-                })?;
+                .map_err(|e| LockError::BackendError(format!("Failed to describe table: {}", e)))?;
 
             if let Some(status) = describe_result.table().and_then(|t| t.table_status()) {
                 match status {
@@ -458,13 +472,17 @@ impl DynamoDBLockManager {
             .get("lease_duration_secs")
             .and_then(|v| v.as_n().ok())
             .and_then(|s| s.parse::<u32>().ok())
-            .ok_or_else(|| LockError::BackendError("Missing or invalid lease_duration_secs".to_string()))?;
+            .ok_or_else(|| {
+                LockError::BackendError("Missing or invalid lease_duration_secs".to_string())
+            })?;
 
         let last_heartbeat_secs = item
             .get("last_heartbeat")
             .and_then(|v| v.as_n().ok())
             .and_then(|s| s.parse::<i64>().ok())
-            .ok_or_else(|| LockError::BackendError("Missing or invalid last_heartbeat".to_string()))?;
+            .ok_or_else(|| {
+                LockError::BackendError("Missing or invalid last_heartbeat".to_string())
+            })?;
 
         let locked = item
             .get("locked")
@@ -481,7 +499,8 @@ impl DynamoDBLockManager {
 
         // Convert UNIX timestamps to Timestamp
         let expires_at = SystemTime::UNIX_EPOCH + Duration::from_secs(expires_at_secs as u64);
-        let last_heartbeat = SystemTime::UNIX_EPOCH + Duration::from_secs(last_heartbeat_secs as u64);
+        let last_heartbeat =
+            SystemTime::UNIX_EPOCH + Duration::from_secs(last_heartbeat_secs as u64);
 
         Ok(Lock {
             lock_key,
@@ -516,10 +535,22 @@ impl DynamoDBLockManager {
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S("LOCK".to_string()));
-        item.insert("tenant_id".to_string(), AttributeValue::S(tenant_id.to_string()));
-        item.insert("namespace_expires".to_string(), AttributeValue::S(namespace_expires));
-        item.insert("holder_id".to_string(), AttributeValue::S(lock.holder_id.clone()));
-        item.insert("version".to_string(), AttributeValue::S(lock.version.clone()));
+        item.insert(
+            "tenant_id".to_string(),
+            AttributeValue::S(tenant_id.to_string()),
+        );
+        item.insert(
+            "namespace_expires".to_string(),
+            AttributeValue::S(namespace_expires),
+        );
+        item.insert(
+            "holder_id".to_string(),
+            AttributeValue::S(lock.holder_id.clone()),
+        );
+        item.insert(
+            "version".to_string(),
+            AttributeValue::S(lock.version.clone()),
+        );
         item.insert(
             "expires_at".to_string(),
             AttributeValue::N(expires_at_secs.to_string()),
@@ -565,7 +596,11 @@ impl LockManager for DynamoDBLockManager {
             lease_duration_secs = options.lease_duration_secs
         )
     )]
-    async fn acquire_lock(&self, ctx: &RequestContext, options: AcquireLockOptions) -> LockResult<Lock> {
+    async fn acquire_lock(
+        &self,
+        ctx: &RequestContext,
+        options: AcquireLockOptions,
+    ) -> LockResult<Lock> {
         let start_time = std::time::Instant::now();
         let pk = Self::composite_key(ctx, &options.lock_key);
         let now = Utc::now();
@@ -594,8 +629,12 @@ impl LockManager for DynamoDBLockManager {
                     "plexspaces_locks_ddb_acquire_errors_total",
                     "backend" => "dynamodb",
                     "error_type" => "get_item_failed"
-                ).increment(1);
-                return Err(LockError::BackendError(format!("DynamoDB get_item failed: {}", e)));
+                )
+                .increment(1);
+                return Err(LockError::BackendError(format!(
+                    "DynamoDB get_item failed: {}",
+                    e
+                )));
             }
         };
 
@@ -603,8 +642,16 @@ impl LockManager for DynamoDBLockManager {
             // Lock exists, check if expired or held by same holder
             let existing_lock = Self::item_to_lock(&item)?;
             let expires_dt = DateTime::<Utc>::from_timestamp(
-                existing_lock.expires_at.as_ref().map(|t| t.seconds).unwrap_or(0),
-                existing_lock.expires_at.as_ref().map(|t| t.nanos as u32).unwrap_or(0),
+                existing_lock
+                    .expires_at
+                    .as_ref()
+                    .map(|t| t.seconds)
+                    .unwrap_or(0),
+                existing_lock
+                    .expires_at
+                    .as_ref()
+                    .map(|t| t.nanos as u32)
+                    .unwrap_or(0),
             )
             .ok_or_else(|| LockError::BackendError("Invalid expiration timestamp".to_string()))?;
 
@@ -618,7 +665,8 @@ impl LockManager for DynamoDBLockManager {
                 metrics::counter!(
                     "plexspaces_locks_ddb_acquire_already_held_total",
                     "backend" => "dynamodb"
-                ).increment(1);
+                )
+                .increment(1);
                 return Err(LockError::LockAlreadyHeld(existing_holder_id));
             }
 
@@ -628,12 +676,14 @@ impl LockManager for DynamoDBLockManager {
                 metrics::histogram!(
                     "plexspaces_locks_ddb_acquire_duration_seconds",
                     "backend" => "dynamodb"
-                ).record(duration.as_secs_f64());
+                )
+                .record(duration.as_secs_f64());
                 metrics::counter!(
                     "plexspaces_locks_ddb_acquire_total",
                     "backend" => "dynamodb",
                     "result" => "existing"
-                ).increment(1);
+                )
+                .increment(1);
                 return Ok(existing_lock);
             }
 
@@ -680,7 +730,10 @@ impl LockManager for DynamoDBLockManager {
                 // But if we do, use version check
                 update_request = update_request
                     .condition_expression("version = :old_version")
-                    .expression_attribute_values(":old_version", AttributeValue::S(existing_version));
+                    .expression_attribute_values(
+                        ":old_version",
+                        AttributeValue::S(existing_version),
+                    );
             }
 
             match update_request.send().await {
@@ -689,12 +742,14 @@ impl LockManager for DynamoDBLockManager {
                     metrics::histogram!(
                         "plexspaces_locks_ddb_acquire_duration_seconds",
                         "backend" => "dynamodb"
-                    ).record(duration.as_secs_f64());
+                    )
+                    .record(duration.as_secs_f64());
                     metrics::counter!(
                         "plexspaces_locks_ddb_acquire_total",
                         "backend" => "dynamodb",
                         "result" => "success"
-                    ).increment(1);
+                    )
+                    .increment(1);
 
                     debug!(
                         lock_key = %options.lock_key,
@@ -714,8 +769,11 @@ impl LockManager for DynamoDBLockManager {
                             "plexspaces_locks_ddb_acquire_errors_total",
                             "backend" => "dynamodb",
                             "error_type" => "conditional_check_failed"
-                        ).increment(1);
-                        Err(LockError::LockAlreadyHeld("Lock acquired by another process".to_string()))
+                        )
+                        .increment(1);
+                        Err(LockError::LockAlreadyHeld(
+                            "Lock acquired by another process".to_string(),
+                        ))
                     } else {
                         error!(
                             error = %e,
@@ -726,8 +784,12 @@ impl LockManager for DynamoDBLockManager {
                             "plexspaces_locks_ddb_acquire_errors_total",
                             "backend" => "dynamodb",
                             "error_type" => "put_item_failed"
-                        ).increment(1);
-                        Err(LockError::BackendError(format!("DynamoDB put_item failed: {}", e)))
+                        )
+                        .increment(1);
+                        Err(LockError::BackendError(format!(
+                            "DynamoDB put_item failed: {}",
+                            e
+                        )))
                     }
                 }
             }
@@ -768,12 +830,14 @@ impl LockManager for DynamoDBLockManager {
                     metrics::histogram!(
                         "plexspaces_locks_ddb_acquire_duration_seconds",
                         "backend" => "dynamodb"
-                    ).record(duration.as_secs_f64());
+                    )
+                    .record(duration.as_secs_f64());
                     metrics::counter!(
                         "plexspaces_locks_ddb_acquire_total",
                         "backend" => "dynamodb",
                         "result" => "success"
-                    ).increment(1);
+                    )
+                    .increment(1);
 
                     debug!(
                         lock_key = %options.lock_key,
@@ -793,8 +857,11 @@ impl LockManager for DynamoDBLockManager {
                             "plexspaces_locks_ddb_acquire_errors_total",
                             "backend" => "dynamodb",
                             "error_type" => "concurrent_creation"
-                        ).increment(1);
-                        Err(LockError::LockAlreadyHeld("Lock created concurrently".to_string()))
+                        )
+                        .increment(1);
+                        Err(LockError::LockAlreadyHeld(
+                            "Lock created concurrently".to_string(),
+                        ))
                     } else {
                         error!(
                             error = %e,
@@ -805,8 +872,12 @@ impl LockManager for DynamoDBLockManager {
                             "plexspaces_locks_ddb_acquire_errors_total",
                             "backend" => "dynamodb",
                             "error_type" => "put_item_failed"
-                        ).increment(1);
-                        Err(LockError::BackendError(format!("DynamoDB put_item failed: {}", e)))
+                        )
+                        .increment(1);
+                        Err(LockError::BackendError(format!(
+                            "DynamoDB put_item failed: {}",
+                            e
+                        )))
                     }
                 }
             }
@@ -823,7 +894,11 @@ impl LockManager for DynamoDBLockManager {
             namespace = %ctx.namespace()
         )
     )]
-    async fn renew_lock(&self, ctx: &RequestContext, options: RenewLockOptions) -> LockResult<Lock> {
+    async fn renew_lock(
+        &self,
+        ctx: &RequestContext,
+        options: RenewLockOptions,
+    ) -> LockResult<Lock> {
         let start_time = std::time::Instant::now();
         let pk = Self::composite_key(ctx, &options.lock_key);
         let now = Utc::now();
@@ -849,63 +924,56 @@ impl LockManager for DynamoDBLockManager {
                     "plexspaces_locks_ddb_renew_errors_total",
                     "backend" => "dynamodb",
                     "error_type" => "get_item_failed"
-                ).increment(1);
+                )
+                .increment(1);
                 LockError::BackendError(format!("DynamoDB get_item failed: {}", e))
             })?;
 
-        let item = get_result
-            .item()
-            .cloned()
-            .ok_or_else(|| {
-                metrics::counter!(
-                    "plexspaces_locks_ddb_renew_errors_total",
-                    "backend" => "dynamodb",
-                    "error_type" => "not_found"
-                ).increment(1);
-                LockError::LockNotFound(options.lock_key.clone())
-            })?;
+        let item = get_result.item().cloned().ok_or_else(|| {
+            metrics::counter!(
+                "plexspaces_locks_ddb_renew_errors_total",
+                "backend" => "dynamodb",
+                "error_type" => "not_found"
+            )
+            .increment(1);
+            LockError::LockNotFound(options.lock_key.clone())
+        })?;
 
         let existing_lock = Self::item_to_lock(&item)?;
 
         let existing_version = existing_lock.version.clone();
         let existing_holder_id = existing_lock.holder_id.clone();
-        let request_version = options.version.clone();
 
-        if existing_version != request_version {
-            metrics::counter!(
-                "plexspaces_locks_ddb_renew_errors_total",
-                "backend" => "dynamodb",
-                "error_type" => "version_mismatch"
-            ).increment(1);
-            return Err(LockError::VersionMismatch {
-                expected: existing_version,
-                actual: request_version,
-            });
-        }
         if existing_holder_id != options.holder_id {
             metrics::counter!(
                 "plexspaces_locks_ddb_renew_errors_total",
                 "backend" => "dynamodb",
                 "error_type" => "wrong_holder"
-            ).increment(1);
+            )
+            .increment(1);
             return Err(LockError::InvalidHolderId(existing_holder_id));
         }
 
         // Check if expired
         if let Some(expires) = &existing_lock.expires_at {
             let expires_dt = DateTime::<Utc>::from_timestamp(expires.seconds, expires.nanos as u32)
-                .ok_or_else(|| LockError::BackendError("Invalid expiration timestamp".to_string()))?;
+                .ok_or_else(|| {
+                    LockError::BackendError("Invalid expiration timestamp".to_string())
+                })?;
             if expires_dt < now {
                 metrics::counter!(
                     "plexspaces_locks_ddb_renew_errors_total",
                     "backend" => "dynamodb",
                     "error_type" => "expired"
-                ).increment(1);
+                )
+                .increment(1);
                 return Err(LockError::LockExpired(options.lock_key.clone()));
             }
         }
 
         // Renew lock with new version
+        // Same-holder renewals are reentrant. A stale version from another task on the same
+        // node should not fail as long as the holder still owns a live lease.
         let new_version = Ulid::new().to_string();
         let renewed_lock = Lock {
             lock_key: options.lock_key.clone(),
@@ -937,7 +1005,7 @@ impl LockManager for DynamoDBLockManager {
             .table_name(&self.table_name)
             .set_item(Some(item))
             .condition_expression("version = :old_version")
-            .expression_attribute_values(":old_version", AttributeValue::S(request_version.clone()))
+            .expression_attribute_values(":old_version", AttributeValue::S(existing_version.clone()))
             .send()
             .await
         {
@@ -946,12 +1014,14 @@ impl LockManager for DynamoDBLockManager {
                 metrics::histogram!(
                     "plexspaces_locks_ddb_renew_duration_seconds",
                     "backend" => "dynamodb"
-                ).record(duration.as_secs_f64());
+                )
+                .record(duration.as_secs_f64());
                 metrics::counter!(
                     "plexspaces_locks_ddb_renew_total",
                     "backend" => "dynamodb",
                     "result" => "success"
-                ).increment(1);
+                )
+                .increment(1);
 
                 debug!(
                     lock_key = %options.lock_key,
@@ -972,10 +1042,11 @@ impl LockManager for DynamoDBLockManager {
                         "plexspaces_locks_ddb_renew_errors_total",
                         "backend" => "dynamodb",
                         "error_type" => "version_mismatch"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     Err(LockError::VersionMismatch {
                         expected: existing_version,
-                        actual: request_version,
+                        actual: options.version.clone(),
                     })
                 } else {
                     error!(
@@ -987,8 +1058,12 @@ impl LockManager for DynamoDBLockManager {
                         "plexspaces_locks_ddb_renew_errors_total",
                         "backend" => "dynamodb",
                         "error_type" => "put_item_failed"
-                    ).increment(1);
-                    Err(LockError::BackendError(format!("DynamoDB put_item failed: {}", e)))
+                    )
+                    .increment(1);
+                    Err(LockError::BackendError(format!(
+                        "DynamoDB put_item failed: {}",
+                        e
+                    )))
                 }
             }
         }
@@ -1005,7 +1080,11 @@ impl LockManager for DynamoDBLockManager {
             namespace = %ctx.namespace()
         )
     )]
-    async fn release_lock(&self, ctx: &RequestContext, options: ReleaseLockOptions) -> LockResult<()> {
+    async fn release_lock(
+        &self,
+        ctx: &RequestContext,
+        options: ReleaseLockOptions,
+    ) -> LockResult<()> {
         let start_time = std::time::Instant::now();
         let pk = Self::composite_key(ctx, &options.lock_key);
 
@@ -1028,21 +1107,20 @@ impl LockManager for DynamoDBLockManager {
                     "plexspaces_locks_ddb_release_errors_total",
                     "backend" => "dynamodb",
                     "error_type" => "get_item_failed"
-                ).increment(1);
+                )
+                .increment(1);
                 LockError::BackendError(format!("DynamoDB get_item failed: {}", e))
             })?;
 
-        let item = get_result
-            .item()
-            .cloned()
-            .ok_or_else(|| {
-                metrics::counter!(
-                    "plexspaces_locks_ddb_release_errors_total",
-                    "backend" => "dynamodb",
-                    "error_type" => "not_found"
-                ).increment(1);
-                LockError::LockNotFound(options.lock_key.clone())
-            })?;
+        let item = get_result.item().cloned().ok_or_else(|| {
+            metrics::counter!(
+                "plexspaces_locks_ddb_release_errors_total",
+                "backend" => "dynamodb",
+                "error_type" => "not_found"
+            )
+            .increment(1);
+            LockError::LockNotFound(options.lock_key.clone())
+        })?;
 
         let existing_lock = Self::item_to_lock(&item)?;
 
@@ -1055,7 +1133,8 @@ impl LockManager for DynamoDBLockManager {
                 "plexspaces_locks_ddb_release_errors_total",
                 "backend" => "dynamodb",
                 "error_type" => "version_mismatch"
-            ).increment(1);
+            )
+            .increment(1);
             return Err(LockError::VersionMismatch {
                 expected: existing_version,
                 actual: request_version.clone(),
@@ -1066,7 +1145,8 @@ impl LockManager for DynamoDBLockManager {
                 "plexspaces_locks_ddb_release_errors_total",
                 "backend" => "dynamodb",
                 "error_type" => "wrong_holder"
-            ).increment(1);
+            )
+            .increment(1);
             return Err(LockError::InvalidHolderId(existing_holder_id));
         }
 
@@ -1088,12 +1168,14 @@ impl LockManager for DynamoDBLockManager {
                     metrics::histogram!(
                         "plexspaces_locks_ddb_release_duration_seconds",
                         "backend" => "dynamodb"
-                    ).record(duration.as_secs_f64());
+                    )
+                    .record(duration.as_secs_f64());
                     metrics::counter!(
                         "plexspaces_locks_ddb_release_total",
                         "backend" => "dynamodb",
                         "result" => "deleted"
-                    ).increment(1);
+                    )
+                    .increment(1);
 
                     debug!(
                         lock_key = %options.lock_key,
@@ -1109,7 +1191,8 @@ impl LockManager for DynamoDBLockManager {
                             "plexspaces_locks_ddb_release_errors_total",
                             "backend" => "dynamodb",
                             "error_type" => "version_mismatch"
-                        ).increment(1);
+                        )
+                        .increment(1);
                         Err(LockError::VersionMismatch {
                             expected: existing_version,
                             actual: request_version.clone(),
@@ -1124,8 +1207,12 @@ impl LockManager for DynamoDBLockManager {
                             "plexspaces_locks_ddb_release_errors_total",
                             "backend" => "dynamodb",
                             "error_type" => "delete_item_failed"
-                        ).increment(1);
-                        Err(LockError::BackendError(format!("DynamoDB delete_item failed: {}", e)))
+                        )
+                        .increment(1);
+                        Err(LockError::BackendError(format!(
+                            "DynamoDB delete_item failed: {}",
+                            e
+                        )))
                     }
                 }
             }
@@ -1135,7 +1222,16 @@ impl LockManager for DynamoDBLockManager {
             updated_lock.locked = false;
 
             let now_secs = Utc::now().timestamp();
-            let item = self.lock_to_item(ctx, &updated_lock, updated_lock.expires_at.as_ref().map(|t| t.seconds).unwrap_or(now_secs), now_secs);
+            let item = self.lock_to_item(
+                ctx,
+                &updated_lock,
+                updated_lock
+                    .expires_at
+                    .as_ref()
+                    .map(|t| t.seconds)
+                    .unwrap_or(now_secs),
+                now_secs,
+            );
 
             match self
                 .client
@@ -1143,7 +1239,10 @@ impl LockManager for DynamoDBLockManager {
                 .table_name(&self.table_name)
                 .set_item(Some(item))
                 .condition_expression("version = :old_version")
-                .expression_attribute_values(":old_version", AttributeValue::S(request_version.clone()))
+                .expression_attribute_values(
+                    ":old_version",
+                    AttributeValue::S(request_version.clone()),
+                )
                 .send()
                 .await
             {
@@ -1152,12 +1251,14 @@ impl LockManager for DynamoDBLockManager {
                     metrics::histogram!(
                         "plexspaces_locks_ddb_release_duration_seconds",
                         "backend" => "dynamodb"
-                    ).record(duration.as_secs_f64());
+                    )
+                    .record(duration.as_secs_f64());
                     metrics::counter!(
                         "plexspaces_locks_ddb_release_total",
                         "backend" => "dynamodb",
                         "result" => "unlocked"
-                    ).increment(1);
+                    )
+                    .increment(1);
 
                     debug!(
                         lock_key = %options.lock_key,
@@ -1173,7 +1274,8 @@ impl LockManager for DynamoDBLockManager {
                             "plexspaces_locks_ddb_release_errors_total",
                             "backend" => "dynamodb",
                             "error_type" => "version_mismatch"
-                        ).increment(1);
+                        )
+                        .increment(1);
                         Err(LockError::VersionMismatch {
                             expected: existing_version,
                             actual: request_version.clone(),
@@ -1188,8 +1290,12 @@ impl LockManager for DynamoDBLockManager {
                             "plexspaces_locks_ddb_release_errors_total",
                             "backend" => "dynamodb",
                             "error_type" => "put_item_failed"
-                        ).increment(1);
-                        Err(LockError::BackendError(format!("DynamoDB put_item failed: {}", e)))
+                        )
+                        .increment(1);
+                        Err(LockError::BackendError(format!(
+                            "DynamoDB put_item failed: {}",
+                            e
+                        )))
                     }
                 }
             }
@@ -1222,7 +1328,8 @@ impl LockManager for DynamoDBLockManager {
                 metrics::histogram!(
                     "plexspaces_locks_ddb_get_duration_seconds",
                     "backend" => "dynamodb"
-                ).record(duration.as_secs_f64());
+                )
+                .record(duration.as_secs_f64());
 
                 if let Some(item) = result.item().cloned() {
                     let lock = Self::item_to_lock(&item)?;
@@ -1230,14 +1337,16 @@ impl LockManager for DynamoDBLockManager {
                         "plexspaces_locks_ddb_get_total",
                         "backend" => "dynamodb",
                         "result" => "found"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     Ok(Some(lock))
                 } else {
                     metrics::counter!(
                         "plexspaces_locks_ddb_get_total",
                         "backend" => "dynamodb",
                         "result" => "not_found"
-                    ).increment(1);
+                    )
+                    .increment(1);
                     Ok(None)
                 }
             }
@@ -1251,10 +1360,13 @@ impl LockManager for DynamoDBLockManager {
                     "plexspaces_locks_ddb_get_errors_total",
                     "backend" => "dynamodb",
                     "error_type" => "get_item_failed"
-                ).increment(1);
-                Err(LockError::BackendError(format!("DynamoDB get_item failed: {}", e)))
+                )
+                .increment(1);
+                Err(LockError::BackendError(format!(
+                    "DynamoDB get_item failed: {}",
+                    e
+                )))
             }
         }
     }
 }
-

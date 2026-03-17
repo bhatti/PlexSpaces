@@ -60,6 +60,9 @@ pub mod http_gateway;
 
 // Health checker moved to plexspaces-core
 
+// Wrapper so NodeServiceServer and NodeConnectivity share the same Arc<NodeServiceImpl>
+mod node_service_handler;
+
 // Health module - consolidated health checking and service functionality
 pub mod health;
 pub use health::circuit_breaker as health_checker_circuit_breaker;
@@ -85,7 +88,7 @@ pub mod external_dependency_checkers;
 
 // Application implementations moved to plexspaces-application crate
 // Re-export for backward compatibility
-pub use plexspaces_application::{WasmApplication, SpecApplication};
+pub use plexspaces_application::{SpecApplication, WasmApplication};
 
 // Firecracker VM service moved to plexspaces-services/firecracker_service
 
@@ -111,8 +114,8 @@ impl plexspaces_core::Service for Node {
 
 // Config module - consolidated configuration loading and bootstrapping
 pub mod config;
-pub use config::loader::ConfigLoader;
 pub use config::bootstrap::{ConfigBootstrap, ConfigError};
+pub use config::loader::ConfigLoader;
 // Backward compatibility aliases
 pub use config::bootstrap as config_bootstrap;
 pub use config::loader as config_loader;
@@ -122,12 +125,12 @@ pub mod wasm_apps_loader;
 
 pub mod metrics_helper;
 pub mod service_locator_helpers;
-pub use service_locator_helpers::create_default_service_locator;
 pub use metrics_helper::CoordinationComputeTracker;
+pub use service_locator_helpers::create_default_service_locator;
 
 // Health service helpers (uses health module)
-pub use health::helpers::{create_and_register_health_service, create_default_health_service};
 pub use health::helpers as health_service_helpers;
+pub use health::helpers::{create_and_register_health_service, create_default_health_service};
 
 // Object registry helper functions
 pub mod object_registry_helpers;

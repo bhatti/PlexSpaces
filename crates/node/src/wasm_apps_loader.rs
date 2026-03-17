@@ -223,7 +223,10 @@ fn load_wasm_app(app_dir: &Path, app_name: &str) -> Result<WasmAppInfo, WasmApps
 ///
 /// This is the public entry point for parsing TOML config files into ApplicationSpec.
 /// Used by both WASM auto-deploy and HTTP multipart deploy.
-pub fn parse_app_config_toml(toml_str: &str, app_name: &str) -> Result<ApplicationSpec, WasmAppsLoaderError> {
+pub fn parse_app_config_toml(
+    toml_str: &str,
+    app_name: &str,
+) -> Result<ApplicationSpec, WasmAppsLoaderError> {
     // Parse the TOML file - it should match our ApplicationSpec structure
     let parsed: toml::Value = toml::from_str(toml_str)?;
 
@@ -234,16 +237,24 @@ pub fn parse_app_config_toml(toml_str: &str, app_name: &str) -> Result<Applicati
         .unwrap_or("1.0.0")
         .to_string();
 
-    // Extract namespace from TOML config (optional).
-    // Actor IDs use name:namespace@node_id format.
-    // If not set in TOML, leave empty so the application_service can default
-    // to application_id (from the deploy request), which is the correct namespace
-    // for HTTP-deployed apps (e.g., "ray-ps" for /api/v1/actors/ray-ps/parameter-server).
+    // WASM app namespaces isolate actors by deployed app name. Persisted specs and
+    // startup replay use the app directory name when namespace is omitted.
     let namespace = parsed
         .get("namespace")
         .and_then(|v| v.as_str())
-        .unwrap_or("")
+        .unwrap_or(app_name)
         .to_string();
+
+    let seed_nodes = parsed
+        .get("seed_nodes")
+        .and_then(|v| v.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
 
     // Extract supervisor configuration
     let supervisor = if let Some(sup_table) = parsed.get("supervisor") {
@@ -256,6 +267,7 @@ pub fn parse_app_config_toml(toml_str: &str, app_name: &str) -> Result<Applicati
         name: app_name.to_string(),
         namespace,
         version,
+        seed_nodes,
         supervisor,
         ..Default::default()
     })
@@ -349,7 +361,9 @@ fn parse_supervisor_spec(value: &toml::Value) -> Result<SupervisorSpec, WasmApps
 /// ## Error Handling
 /// - Invalid facets are logged as warnings but don't fail the entire child parsing
 /// - This allows graceful degradation: one bad facet doesn't prevent other facets from being attached
-fn parse_child_spec(value: &toml::Value) -> Result<plexspaces_proto::application::v1::ChildSpec, WasmAppsLoaderError> {
+fn parse_child_spec(
+    value: &toml::Value,
+) -> Result<plexspaces_proto::application::v1::ChildSpec, WasmAppsLoaderError> {
     use plexspaces_proto::application::v1::{ChildSpec, ChildType, RestartPolicy};
     use plexspaces_proto::common::v1::Facet;
     use std::collections::HashMap;
@@ -357,9 +371,12 @@ fn parse_child_spec(value: &toml::Value) -> Result<plexspaces_proto::application
     let id = value
         .get("id")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| WasmAppsLoaderError::Deployment(
-            format!("ChildSpec 'id' field is required in supervisor.children[]. Found in child: {:?}", value)
-        ))?
+        .ok_or_else(|| {
+            WasmAppsLoaderError::Deployment(format!(
+                "ChildSpec 'id' field is required in supervisor.children[]. Found in child: {:?}",
+                value
+            ))
+        })?
         .to_string();
 
     let child_type_str = value
@@ -477,7 +494,9 @@ fn parse_child_spec(value: &toml::Value) -> Result<plexspaces_proto::application
 /// - `type` (string) → `Facet.r#type`
 /// - `priority` (int32) → `Facet.priority`
 /// - `config` (table) → `Facet.config` (map<string, string>)
-fn parse_facet_from_toml(value: &toml::Value) -> Result<plexspaces_proto::common::v1::Facet, WasmAppsLoaderError> {
+fn parse_facet_from_toml(
+    value: &toml::Value,
+) -> Result<plexspaces_proto::common::v1::Facet, WasmAppsLoaderError> {
     use plexspaces_proto::common::v1::Facet;
     use std::collections::HashMap;
 
@@ -533,6 +552,7 @@ fn parse_facet_from_toml(value: &toml::Value) -> Result<plexspaces_proto::common
 pub async fn deploy_all_from_directory(
     base_path: &Path,
     service_locator: Arc<dyn ServiceLocator>,
+    node_connectivity: Option<Arc<dyn plexspaces_core::NodeConnectivity>>,
 ) -> Result<Vec<String>, WasmAppsLoaderError> {
     let apps = scan_wasm_apps_directory(base_path)?;
 
@@ -544,7 +564,7 @@ pub async fn deploy_all_from_directory(
     let mut deployed = Vec::new();
 
     for app in apps {
-        match deploy_wasm_app(&app, service_locator.clone()).await {
+        match deploy_wasm_app(&app, service_locator.clone(), node_connectivity.clone()).await {
             Ok(app_id) => {
                 tracing::info!(
                     app_name = %app.name,
@@ -577,11 +597,12 @@ pub async fn deploy_all_from_directory(
 async fn deploy_wasm_app(
     app: &WasmAppInfo,
     service_locator: Arc<dyn ServiceLocator>,
+    node_connectivity: Option<Arc<dyn plexspaces_core::NodeConnectivity>>,
 ) -> Result<String, WasmAppsLoaderError> {
+    use plexspaces_proto::application::v1::application_service_server::ApplicationService;
     use plexspaces_proto::application::v1::DeployApplicationRequest;
     use plexspaces_proto::wasm::v1::WasmModule;
     use plexspaces_services::application_service::ApplicationServiceImpl;
-    use plexspaces_proto::application::v1::application_service_server::ApplicationService;
 
     // Create WasmModule
     let wasm_module = WasmModule {
@@ -608,7 +629,7 @@ async fn deploy_wasm_app(
     };
 
     // Deploy using ApplicationService
-    let app_service = ApplicationServiceImpl::new(service_locator);
+    let app_service = ApplicationServiceImpl::new(service_locator, node_connectivity);
     let grpc_request = tonic::Request::new(request);
 
     let response = app_service
@@ -622,7 +643,9 @@ async fn deploy_wasm_app(
         Ok(inner.application_id)
     } else {
         Err(WasmAppsLoaderError::Deployment(
-            inner.error.unwrap_or_else(|| "Unknown deployment error".to_string()),
+            inner
+                .error
+                .unwrap_or_else(|| "Unknown deployment error".to_string()),
         ))
     }
 }
@@ -649,7 +672,7 @@ mod tests {
     #[test]
     fn test_parse_supervisor_spec() {
         use plexspaces_proto::application::v1::SupervisionStrategy;
-        
+
         let toml_str = r#"
 [supervisor]
 strategy = "one_for_one"
@@ -663,8 +686,11 @@ restart = "permanent"
 "#;
         let parsed: toml::Value = toml::from_str(toml_str).unwrap();
         let supervisor = parse_supervisor_spec(parsed.get("supervisor").unwrap()).unwrap();
-        
-        assert_eq!(supervisor.strategy, SupervisionStrategy::SupervisionStrategyOneForOne as i32);
+
+        assert_eq!(
+            supervisor.strategy,
+            SupervisionStrategy::SupervisionStrategyOneForOne as i32
+        );
         assert_eq!(supervisor.max_restarts, 10);
         assert_eq!(supervisor.children.len(), 1);
         assert_eq!(supervisor.children[0].id, "worker-1");
@@ -673,7 +699,7 @@ restart = "permanent"
     #[test]
     fn test_parse_supervisor_spec_with_facets() {
         use plexspaces_proto::application::v1::SupervisionStrategy;
-        
+
         let toml_str = r#"
 [supervisor]
 strategy = "one_for_one"
@@ -691,17 +717,88 @@ facets = [
 "#;
         let parsed: toml::Value = toml::from_str(toml_str).unwrap();
         let supervisor = parse_supervisor_spec(parsed.get("supervisor").unwrap()).unwrap();
-        
-        assert_eq!(supervisor.strategy, SupervisionStrategy::SupervisionStrategyOneForOne as i32);
+
+        assert_eq!(
+            supervisor.strategy,
+            SupervisionStrategy::SupervisionStrategyOneForOne as i32
+        );
         assert_eq!(supervisor.max_restarts, 10);
         assert_eq!(supervisor.children.len(), 1);
         assert_eq!(supervisor.children[0].id, "task-queue");
-        
+
         // Verify facets were parsed
-        assert_eq!(supervisor.children[0].facets.len(), 1, "Should have 1 facet");
+        assert_eq!(
+            supervisor.children[0].facets.len(),
+            1,
+            "Should have 1 facet"
+        );
         assert_eq!(supervisor.children[0].facets[0].r#type, "locks");
         assert_eq!(supervisor.children[0].facets[0].priority, 50);
-        assert!(supervisor.children[0].facets[0].config.is_empty(), "Config should be empty map");
+        assert!(
+            supervisor.children[0].facets[0].config.is_empty(),
+            "Config should be empty map"
+        );
+    }
+
+    #[test]
+    fn test_parse_app_config_preserves_seed_nodes_and_args() {
+        let toml_str = r#"
+version = "1.0.0"
+namespace = "heat-diffusion-rust"
+seed_nodes = ["localhost:8091", "localhost:8093"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "leader"
+type = "leader"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "leader" }
+
+[[supervisor.children]]
+id = "worker"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "worker" }
+"#;
+
+        let spec = parse_app_config_toml(toml_str, "heat-diffusion-rust").unwrap();
+
+        assert_eq!(spec.namespace, "heat-diffusion-rust");
+        assert_eq!(
+            spec.seed_nodes,
+            vec!["localhost:8091".to_string(), "localhost:8093".to_string()]
+        );
+
+        let supervisor = spec.supervisor.expect("supervisor should be parsed");
+        assert_eq!(supervisor.children.len(), 2);
+        assert_eq!(
+            supervisor.children[0].args.get("role"),
+            Some(&"leader".to_string())
+        );
+        assert_eq!(
+            supervisor.children[1].args.get("role"),
+            Some(&"worker".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_app_config_defaults_namespace_to_app_name() {
+        let toml_str = r#"
+version = "1.0.0"
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 1
+"#;
+
+        let spec = parse_app_config_toml(toml_str, "heat-diffusion-rust").unwrap();
+        assert_eq!(spec.namespace, "heat-diffusion-rust");
     }
 
     #[test]
@@ -713,12 +810,11 @@ config = { key1 = "value1", key2 = "value2" }
 "#;
         let parsed: toml::Value = toml::from_str(toml_str).unwrap();
         let facet = parse_facet_from_toml(&parsed).unwrap();
-        
+
         assert_eq!(facet.r#type, "locks");
         assert_eq!(facet.priority, 50);
         assert_eq!(facet.config.len(), 2);
         assert_eq!(facet.config.get("key1"), Some(&"value1".to_string()));
         assert_eq!(facet.config.get("key2"), Some(&"value2".to_string()));
     }
-
 }

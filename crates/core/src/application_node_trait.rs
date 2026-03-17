@@ -38,5 +38,3 @@ pub trait ApplicationNode: Send + Sync {
     /// Get node listen address (gRPC server address)
     fn listen_addr(&self) -> &str;
 }
-
-

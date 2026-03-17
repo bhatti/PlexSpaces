@@ -105,31 +105,58 @@ struct MemoryStore {
 
 #[async_trait]
 impl KeyValueStore for MemoryStore {
-    async fn get(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> KeyValueStoreResult<Option<Vec<u8>>> {
+    async fn get(
+        &self,
+        _ctx: &plexspaces_common::RequestContext,
+        key: &str,
+    ) -> KeyValueStoreResult<Option<Vec<u8>>> {
         Ok(self.data.read().await.get(key).cloned())
     }
 
-    async fn put(&self, _ctx: &plexspaces_common::RequestContext, key: &str, value: Vec<u8>) -> KeyValueStoreResult<()> {
+    async fn put(
+        &self,
+        _ctx: &plexspaces_common::RequestContext,
+        key: &str,
+        value: Vec<u8>,
+    ) -> KeyValueStoreResult<()> {
         self.data.write().await.insert(key.to_string(), value);
         Ok(())
     }
 
-    async fn put_with_ttl(&self, _ctx: &plexspaces_common::RequestContext, key: &str, value: Vec<u8>, _ttl: std::time::Duration) -> KeyValueStoreResult<()> {
+    async fn put_with_ttl(
+        &self,
+        _ctx: &plexspaces_common::RequestContext,
+        key: &str,
+        value: Vec<u8>,
+        _ttl: std::time::Duration,
+    ) -> KeyValueStoreResult<()> {
         // In-memory store ignores TTL (no background expiry thread)
         self.data.write().await.insert(key.to_string(), value);
         Ok(())
     }
 
-    async fn delete(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> KeyValueStoreResult<()> {
+    async fn delete(
+        &self,
+        _ctx: &plexspaces_common::RequestContext,
+        key: &str,
+    ) -> KeyValueStoreResult<()> {
         self.data.write().await.remove(key);
         Ok(())
     }
 
-    async fn exists(&self, _ctx: &plexspaces_common::RequestContext, key: &str) -> KeyValueStoreResult<bool> {
+    async fn exists(
+        &self,
+        _ctx: &plexspaces_common::RequestContext,
+        key: &str,
+    ) -> KeyValueStoreResult<bool> {
         Ok(self.data.read().await.contains_key(key))
     }
 
-    async fn list_keys(&self, _ctx: &plexspaces_common::RequestContext, prefix: &str) -> KeyValueStoreResult<Vec<String>> {
+    async fn list_keys(
+        &self,
+        _ctx: &plexspaces_common::RequestContext,
+        prefix: &str,
+    ) -> KeyValueStoreResult<Vec<String>> {
         Ok(self
             .data
             .read()
@@ -140,7 +167,13 @@ impl KeyValueStore for MemoryStore {
             .collect())
     }
 
-    async fn cas(&self, _ctx: &plexspaces_common::RequestContext, key: &str, expected: Option<Vec<u8>>, new_value: Vec<u8>) -> KeyValueStoreResult<bool> {
+    async fn cas(
+        &self,
+        _ctx: &plexspaces_common::RequestContext,
+        key: &str,
+        expected: Option<Vec<u8>>,
+        new_value: Vec<u8>,
+    ) -> KeyValueStoreResult<bool> {
         let mut data = self.data.write().await;
         let current = data.get(key).cloned();
         if current == expected {
@@ -151,9 +184,15 @@ impl KeyValueStore for MemoryStore {
         }
     }
 
-    async fn increment(&self, _ctx: &plexspaces_common::RequestContext, key: &str, delta: i64) -> KeyValueStoreResult<i64> {
+    async fn increment(
+        &self,
+        _ctx: &plexspaces_common::RequestContext,
+        key: &str,
+        delta: i64,
+    ) -> KeyValueStoreResult<i64> {
         let mut data = self.data.write().await;
-        let current: i64 = data.get(key)
+        let current: i64 = data
+            .get(key)
             .and_then(|v| String::from_utf8(v.clone()).ok())
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
@@ -175,25 +214,28 @@ impl KeyValueFacet {
         let config_clone = config.clone();
         let kv_config = serde_json::from_value::<KeyValueConfig>(config_clone)
             .unwrap_or_else(|_| KeyValueConfig::default());
-        Self::with_config_internal(kv_config, config, priority)
-            .unwrap_or_else(|_| {
-                // Fallback to default if config parsing fails
-                KeyValueFacet {
-                    config_value: serde_json::json!({}),
-                    priority,
-                    store: Arc::new(RwLock::new(Box::new(MemoryStore {
-                        data: Arc::new(RwLock::new(HashMap::new())),
-                    }))),
-                    config: KeyValueConfig::default(),
-                    metrics: Arc::new(RwLock::new(KeyValueMetrics::default())),
-                    tenant_id: std::sync::Mutex::new(String::new()),
-                    namespace: std::sync::Mutex::new(String::new()),
-                }
-            })
+        Self::with_config_internal(kv_config, config, priority).unwrap_or_else(|_| {
+            // Fallback to default if config parsing fails
+            KeyValueFacet {
+                config_value: serde_json::json!({}),
+                priority,
+                store: Arc::new(RwLock::new(Box::new(MemoryStore {
+                    data: Arc::new(RwLock::new(HashMap::new())),
+                }))),
+                config: KeyValueConfig::default(),
+                metrics: Arc::new(RwLock::new(KeyValueMetrics::default())),
+                tenant_id: std::sync::Mutex::new(String::new()),
+                namespace: std::sync::Mutex::new(String::new()),
+            }
+        })
     }
 
     /// Internal helper to create with specific configuration
-    fn with_config_internal(config: KeyValueConfig, config_value: Value, priority: i32) -> Result<Self, FacetError> {
+    fn with_config_internal(
+        config: KeyValueConfig,
+        config_value: Value,
+        priority: i32,
+    ) -> Result<Self, FacetError> {
         let store: Box<dyn KeyValueStore> = match config.store_type.as_str() {
             "memory" => Box::new(MemoryStore {
                 data: Arc::new(RwLock::new(HashMap::new())),
@@ -225,7 +267,7 @@ impl KeyValueFacet {
             namespace: std::sync::Mutex::new(String::new()),
         })
     }
-    
+
     /// Create with specific configuration
     pub fn with_config(config: KeyValueConfig) -> Result<Self, FacetError> {
         let config_value = serde_json::to_value(&config).unwrap_or(serde_json::json!({}));
@@ -233,7 +275,7 @@ impl KeyValueFacet {
     }
 
     /// Handle KV operations
-    /// 
+    ///
     /// Uses tenant_id/namespace stored when facet was attached (from API request).
     /// Falls back to empty strings if not set (which will use defaults from node config).
     async fn handle_kv_operation(&self, method: &str, args: &[u8]) -> Result<Vec<u8>, FacetError> {
@@ -242,10 +284,18 @@ impl KeyValueFacet {
         let namespace = self.namespace.lock().unwrap().clone();
         // Use empty strings if not set (will use defaults from node config in RequestContext)
         let ctx = plexspaces_common::RequestContext::new_without_auth(
-            if tenant_id.is_empty() { String::new() } else { tenant_id },
-            if namespace.is_empty() { String::new() } else { namespace }
+            if tenant_id.is_empty() {
+                String::new()
+            } else {
+                tenant_id
+            },
+            if namespace.is_empty() {
+                String::new()
+            } else {
+                namespace
+            },
         );
-        
+
         match method {
             "kv_get" => {
                 let key: String = serde_json::from_slice(args)
@@ -284,7 +334,12 @@ impl KeyValueFacet {
                 let effective_ttl = args.ttl.or(self.config.default_ttl);
                 if let Some(ttl_secs) = effective_ttl {
                     store
-                        .put_with_ttl(&ctx, &args.key, args.value, std::time::Duration::from_secs(ttl_secs))
+                        .put_with_ttl(
+                            &ctx,
+                            &args.key,
+                            args.value,
+                            std::time::Duration::from_secs(ttl_secs),
+                        )
                         .await
                         .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?;
                 } else {
@@ -344,11 +399,11 @@ impl Facet for KeyValueFacet {
     fn facet_type(&self) -> &str {
         "keyvalue" // Capability facets use simple names, namespace/contract in metadata if needed
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -426,11 +481,11 @@ impl Facet for KeyValueFacet {
             }
         }))
     }
-    
+
     fn get_config(&self) -> Value {
         self.config_value.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }

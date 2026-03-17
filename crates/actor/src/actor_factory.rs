@@ -37,4 +37,3 @@
 // ActorFactory trait moved to plexspaces-core crate
 // Re-export for backward compatibility
 pub use plexspaces_core::ActorFactory;
-

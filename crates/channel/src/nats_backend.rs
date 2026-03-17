@@ -46,7 +46,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelProvider, ChannelConfig, ChannelStats, NatsConfig,
+    channel_config, ChannelConfig, ChannelProvider, ChannelStats, NatsConfig,
 };
 use plexspaces_proto::common::v1::Message;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -115,12 +115,14 @@ impl NatsChannel {
 
         // Build connection options
         let mut opts = async_nats::ConnectOptions::new();
-        
+
         // Set connection timeout
         if let Some(ref timeout) = nats_config.connect_timeout {
             let timeout_secs = timeout.seconds as u64;
             let timeout_nanos = timeout.nanos as u64;
-            opts = opts.connection_timeout(Duration::from_secs(timeout_secs) + Duration::from_nanos(timeout_nanos));
+            opts = opts.connection_timeout(
+                Duration::from_secs(timeout_secs) + Duration::from_nanos(timeout_nanos),
+            );
         } else {
             opts = opts.connection_timeout(Duration::from_secs(5));
         }
@@ -194,7 +196,7 @@ impl Channel for NatsChannel {
 
         let payload = Self::serialize_message(&message)?;
         let subject = self.subject.clone();
-        
+
         self.client
             .publish(subject, payload.into())
             .await
@@ -226,21 +228,19 @@ impl Channel for NatsChannel {
 
         while count < max_messages {
             match tokio::time::timeout(Duration::from_secs(5), subscriber.next()).await {
-                Ok(Some(msg)) => {
-                    match Self::deserialize_message(&msg.payload) {
-                        Ok(channel_msg) => {
-                            messages.push(channel_msg);
-                            count += 1;
-                            self.stats.messages_received.fetch_add(1, Ordering::Relaxed);
-                        }
-                        Err(e) => {
-                            self.stats.errors.fetch_add(1, Ordering::Relaxed);
-                            tracing::warn!("Failed to deserialize NATS message: {}", e);
-                        }
+                Ok(Some(msg)) => match Self::deserialize_message(&msg.payload) {
+                    Ok(channel_msg) => {
+                        messages.push(channel_msg);
+                        count += 1;
+                        self.stats.messages_received.fetch_add(1, Ordering::Relaxed);
                     }
-                }
+                    Err(e) => {
+                        self.stats.errors.fetch_add(1, Ordering::Relaxed);
+                        tracing::warn!("Failed to deserialize NATS message: {}", e);
+                    }
+                },
                 Ok(None) => break, // Stream ended
-                Err(_) => break,    // Timeout
+                Err(_) => break,   // Timeout
             }
         }
 
@@ -267,21 +267,19 @@ impl Channel for NatsChannel {
 
         while count < max_messages {
             match tokio::time::timeout(Duration::from_millis(100), subscriber.next()).await {
-                Ok(Some(msg)) => {
-                    match Self::deserialize_message(&msg.payload) {
-                        Ok(channel_msg) => {
-                            messages.push(channel_msg);
-                            count += 1;
-                            self.stats.messages_received.fetch_add(1, Ordering::Relaxed);
-                        }
-                        Err(e) => {
-                            self.stats.errors.fetch_add(1, Ordering::Relaxed);
-                            tracing::warn!("Failed to deserialize NATS message: {}", e);
-                        }
+                Ok(Some(msg)) => match Self::deserialize_message(&msg.payload) {
+                    Ok(channel_msg) => {
+                        messages.push(channel_msg);
+                        count += 1;
+                        self.stats.messages_received.fetch_add(1, Ordering::Relaxed);
                     }
-                }
+                    Err(e) => {
+                        self.stats.errors.fetch_add(1, Ordering::Relaxed);
+                        tracing::warn!("Failed to deserialize NATS message: {}", e);
+                    }
+                },
                 Ok(None) => break, // Stream ended
-                Err(_) => break,    // Timeout (non-blocking)
+                Err(_) => break,   // Timeout (non-blocking)
             }
         }
 
@@ -337,22 +335,22 @@ impl Channel for NatsChannel {
 
     async fn ack(&self, message_id: &str) -> ChannelResult<()> {
         use crate::observability::{backend_name, record_channel_ack};
-        
+
         // NATS: Basic pub/sub doesn't require explicit ACK (messages delivered immediately)
         // JetStream would require ACK, but that's not implemented in this basic version
         // This is a no-op for compatibility with the Channel trait
-        
+
         self.stats.messages_acked.fetch_add(1, Ordering::Relaxed);
-        
+
         let backend = backend_name(self.config.provider);
         record_channel_ack(&self.config.name, message_id, backend);
-        
+
         Ok(())
     }
 
     async fn nack(&self, message_id: &str, requeue: bool) -> ChannelResult<()> {
-        use crate::observability::{backend_name, record_channel_nack, record_channel_dlq};
-        
+        use crate::observability::{backend_name, record_channel_dlq, record_channel_nack};
+
         // Get retry/DLQ config from channel config
         let _max_retries = if self.config.max_retries > 0 {
             self.config.max_retries
@@ -372,13 +370,13 @@ impl Channel for NatsChannel {
             if dlq_enabled && !self.config.dead_letter_queue.is_empty() {
                 // Create DLQ subject
                 let _dlq_subject = format!("{}.dlq", self.config.dead_letter_queue);
-                
+
                 // Note: To send to DLQ, we need the original message
                 // In a full implementation with JetStream, we'd:
                 // 1. Maintain a cache of unacked messages
                 // 2. Read the message from the original subject
                 // 3. Publish to DLQ subject with additional metadata
-                // 
+                //
                 // For now, we log and rely on the mailbox to handle retry tracking
                 // Basic NATS pub/sub doesn't support DLQ without JetStream
                 record_channel_dlq(

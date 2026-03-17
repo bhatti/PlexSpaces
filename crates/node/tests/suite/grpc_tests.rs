@@ -12,16 +12,13 @@ use plexspaces_actor::{ActorBuilder, ActorRef};
 use plexspaces_core::{Actor, ActorContext, ActorId, BehaviorError, BehaviorType, Message};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{grpc_client::RemoteActorClient, Node, NodeBuilder};
-use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_proto::{
-    common::v1::Message as ProtoMessageCommon,
-    actor::v1::SendMessageRequest,
-    ActorService as ActorServiceTrait,
-    ActorServiceServer,
+    actor::v1::SendMessageRequest, common::v1::Message as ProtoMessageCommon,
+    ActorService as ActorServiceTrait, ActorServiceServer,
 };
+use plexspaces_services::actor_service::ActorServiceImpl;
 use std::sync::Arc;
 use tonic::{transport::Server, Request};
-
 
 use super::test_helpers::spawn_actor_helper;
 
@@ -97,7 +94,7 @@ impl Actor for TestBehavior {
 
 /// Helper to start a gRPC server for testing
 async fn start_test_server(node: Arc<Node>) -> String {
-    use plexspaces_services::actor_service::ActorServiceImpl as ActorServiceImpl;
+    use plexspaces_services::actor_service::ActorServiceImpl;
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
@@ -288,9 +285,7 @@ async fn test_client_with_invalid_message() {
 
     assert!(result.is_err(), "Expected validation error");
     let err = result.unwrap_err();
-    assert!(
-        err.contains("receiver") || err.contains("Missing receiver") || err.contains("empty")
-    );
+    assert!(err.contains("receiver") || err.contains("Missing receiver") || err.contains("empty"));
 }
 
 // =============================================================================
@@ -313,7 +308,9 @@ async fn test_send_message_missing_message() {
     assert!(response.is_err(), "Should fail for missing message");
     let err = response.unwrap_err();
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
-    assert!(err.message().contains("Message is required") || err.message().contains("Missing message"));
+    assert!(
+        err.message().contains("Message is required") || err.message().contains("Missing message")
+    );
 }
 
 #[tokio::test]
@@ -334,7 +331,10 @@ async fn test_send_message_missing_receiver() {
     assert!(response.is_err(), "Should fail for empty receiver");
     let err = response.unwrap_err();
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
-    assert!(err.message().contains("Receiver ID is required") || err.message().contains("Missing receiver"));
+    assert!(
+        err.message().contains("Receiver ID is required")
+            || err.message().contains("Missing receiver")
+    );
 }
 
 #[tokio::test]
@@ -375,16 +375,17 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
     let node = Arc::new(NodeBuilder::new("test-node-unimpl").build().await);
     let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
-    let result = ActorServiceTrait::create_actor(&service, Request::new(
-            plexspaces_proto::actor::v1::CreateActorRequest {
-                actor_type: String::new(),
-                initial_state: vec![],
-                config: None,
-                labels: std::collections::HashMap::new(),
-                namespace: "default".to_string(),
-            },
-        ))
-        .await;
+    let result = ActorServiceTrait::create_actor(
+        &service,
+        Request::new(plexspaces_proto::actor::v1::CreateActorRequest {
+            actor_type: String::new(),
+            initial_state: vec![],
+            config: None,
+            labels: std::collections::HashMap::new(),
+            namespace: "default".to_string(),
+        }),
+    )
+    .await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(
@@ -393,15 +394,16 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
         "create_actor is implemented and returns InvalidArgument for empty actor_type"
     );
 
-    let result = ActorServiceTrait::list_actors(&service, Request::new(
-            plexspaces_proto::actor::v1::ListActorsRequest {
-                page_request: None,
-                actor_type: String::new(),
-                state: 0,
-                node_id: String::new(),
-            },
-        ))
-        .await;
+    let result = ActorServiceTrait::list_actors(
+        &service,
+        Request::new(plexspaces_proto::actor::v1::ListActorsRequest {
+            page_request: None,
+            actor_type: String::new(),
+            state: 0,
+            node_id: String::new(),
+        }),
+    )
+    .await;
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -410,13 +412,14 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
             || err.code() == tonic::Code::Internal
     );
 
-    let result = ActorServiceTrait::delete_actor(&service, Request::new(
-            plexspaces_proto::actor::v1::DeleteActorRequest {
-                actor_id: "test".to_string(),
-                force: false,
-            },
-        ))
-        .await;
+    let result = ActorServiceTrait::delete_actor(
+        &service,
+        Request::new(plexspaces_proto::actor::v1::DeleteActorRequest {
+            actor_id: "test".to_string(),
+            force: false,
+        }),
+    )
+    .await;
     assert!(result.is_err());
     assert_eq!(result.unwrap_err().code(), tonic::Code::Unimplemented);
 }
@@ -455,7 +458,10 @@ async fn test_message_with_headers_via_service() {
 #[tokio::test]
 async fn test_concurrent_message_sends_via_service() {
     let (node, _actor_ref) = create_test_node_with_actor("test-node-svc-conc").await;
-    let service = Arc::new(ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string()));
+    let service = Arc::new(ActorServiceImpl::new(
+        node.service_locator(),
+        node.id().as_str().to_string(),
+    ));
 
     let mut handles = vec![];
     for i in 0..5 {

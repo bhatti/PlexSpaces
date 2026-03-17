@@ -23,8 +23,8 @@ mod tests {
     use plexspaces_grpc_middleware::auth::AuthInterceptor;
     use plexspaces_grpc_middleware::chain::Interceptor;
     use plexspaces_proto::grpc::v1::{AuthMethod, AuthMiddlewareConfig};
-    use plexspaces_proto::security::v1::MtlsConfig;
     use plexspaces_proto::prost_types;
+    use plexspaces_proto::security::v1::MtlsConfig;
 
     #[test]
     fn test_mtls_config_creation() {
@@ -175,4 +175,3 @@ mod tests {
     // - Integration with gRPC server TLS configuration
     // These will be added as the implementation progresses.
 }
-

@@ -28,11 +28,11 @@
 //! - Rollback on dependency startup failure
 //! - Edge cases (no dependencies, self-dependency, etc.)
 
-use crate::{ApplicationController, ApplicationError};
 use crate::{Application, ApplicationNode};
-use plexspaces_proto::application::v1::ApplicationStatus;
-use plexspaces_proto::application::v1::ApplicationSpec;
+use crate::{ApplicationController, ApplicationError};
 use async_trait::async_trait;
+use plexspaces_proto::application::v1::ApplicationSpec;
+use plexspaces_proto::application::v1::ApplicationStatus;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -67,7 +67,11 @@ struct MockApp {
 }
 
 impl MockApp {
-    fn new(name: impl Into<String>, startup_order: Arc<RwLock<Vec<String>>>, shutdown_order: Arc<RwLock<Vec<String>>>) -> Self {
+    fn new(
+        name: impl Into<String>,
+        startup_order: Arc<RwLock<Vec<String>>>,
+        shutdown_order: Arc<RwLock<Vec<String>>>,
+    ) -> Self {
         Self {
             name: name.into(),
             version: "1.0.0".to_string(),
@@ -123,7 +127,10 @@ impl Application for MockApp {
         }
 
         if self.should_fail_start {
-            Err(ApplicationError::StartupFailed(format!("Start failed for {}", self.name)))
+            Err(ApplicationError::StartupFailed(format!(
+                "Start failed for {}",
+                self.name
+            )))
         } else {
             Ok(())
         }
@@ -141,7 +148,10 @@ impl Application for MockApp {
         }
 
         if self.should_fail_stop {
-            Err(ApplicationError::ShutdownFailed(format!("Stop failed for {}", self.name)))
+            Err(ApplicationError::ShutdownFailed(format!(
+                "Stop failed for {}",
+                self.name
+            )))
         } else {
             Ok(())
         }
@@ -168,7 +178,11 @@ async fn test_dependency_chain_startup() {
     controller.set_node(mock_node).await;
 
     // C has no dependencies
-    let app_c = Box::new(MockApp::new("app-c", startup_order.clone(), shutdown_order.clone()));
+    let app_c = Box::new(MockApp::new(
+        "app-c",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_c = ApplicationSpec {
         name: "app-c".to_string(),
         version: "1.0.0".to_string(),
@@ -182,7 +196,11 @@ async fn test_dependency_chain_startup() {
     controller.load(app_c, config_c).await.unwrap();
 
     // B depends on C
-    let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()));
+    let app_b = Box::new(MockApp::new(
+        "app-b",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
@@ -196,7 +214,11 @@ async fn test_dependency_chain_startup() {
     controller.load(app_b, config_b).await.unwrap();
 
     // A depends on B
-    let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
+    let app_a = Box::new(MockApp::new(
+        "app-a",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
@@ -235,7 +257,11 @@ async fn test_multiple_dependencies_startup() {
     controller.set_node(mock_node).await;
 
     // B and C have no dependencies
-    let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()));
+    let app_b = Box::new(MockApp::new(
+        "app-b",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
@@ -248,7 +274,11 @@ async fn test_multiple_dependencies_startup() {
     };
     controller.load(app_b, config_b).await.unwrap();
 
-    let app_c = Box::new(MockApp::new("app-c", startup_order.clone(), shutdown_order.clone()));
+    let app_c = Box::new(MockApp::new(
+        "app-c",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_c = ApplicationSpec {
         name: "app-c".to_string(),
         version: "1.0.0".to_string(),
@@ -262,7 +292,11 @@ async fn test_multiple_dependencies_startup() {
     controller.load(app_c, config_c).await.unwrap();
 
     // A depends on both B and C
-    let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
+    let app_a = Box::new(MockApp::new(
+        "app-a",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
@@ -302,7 +336,11 @@ async fn test_missing_dependency() {
     controller.set_node(mock_node).await;
 
     // A depends on non-existent B
-    let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
+    let app_a = Box::new(MockApp::new(
+        "app-a",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
@@ -319,9 +357,11 @@ async fn test_missing_dependency() {
     let result = controller.start("app-a", HashMap::new()).await;
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
-    assert!(error_msg.contains("dependency") || 
-            error_msg.contains("not found") ||
-            error_msg.contains("app-b"));
+    assert!(
+        error_msg.contains("dependency")
+            || error_msg.contains("not found")
+            || error_msg.contains("app-b")
+    );
 }
 
 /// Test: Circular dependency detection
@@ -338,7 +378,11 @@ async fn test_circular_dependency() {
     controller.set_node(mock_node).await;
 
     // A depends on B
-    let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
+    let app_a = Box::new(MockApp::new(
+        "app-a",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
@@ -352,7 +396,11 @@ async fn test_circular_dependency() {
     controller.load(app_a, config_a).await.unwrap();
 
     // B depends on A (circular!)
-    let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()));
+    let app_b = Box::new(MockApp::new(
+        "app-b",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
@@ -369,9 +417,11 @@ async fn test_circular_dependency() {
     let result = controller.start("app-a", HashMap::new()).await;
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
-    assert!(error_msg.contains("circular") || 
-            error_msg.contains("cycle") ||
-            error_msg.contains("dependency"));
+    assert!(
+        error_msg.contains("circular")
+            || error_msg.contains("cycle")
+            || error_msg.contains("dependency")
+    );
 }
 
 /// Test: Rollback on dependency startup failure
@@ -388,8 +438,9 @@ async fn test_rollback_on_dependency_failure() {
     controller.set_node(mock_node).await;
 
     // B fails to start
-    let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone())
-        .with_start_failure());
+    let app_b = Box::new(
+        MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()).with_start_failure(),
+    );
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
@@ -403,7 +454,11 @@ async fn test_rollback_on_dependency_failure() {
     controller.load(app_b, config_b).await.unwrap();
 
     // A depends on B
-    let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
+    let app_a = Box::new(MockApp::new(
+        "app-a",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
@@ -421,9 +476,15 @@ async fn test_rollback_on_dependency_failure() {
     assert!(result.is_err());
 
     // Verify A was not started
-    assert_eq!(controller.get_status("app-a").await.unwrap(), ApplicationStatus::ApplicationStatusLoading);
+    assert_eq!(
+        controller.get_status("app-a").await.unwrap(),
+        ApplicationStatus::ApplicationStatusLoading
+    );
     // B should be in failed state
-    assert_eq!(controller.get_status("app-b").await.unwrap(), ApplicationStatus::ApplicationStatusFailed);
+    assert_eq!(
+        controller.get_status("app-b").await.unwrap(),
+        ApplicationStatus::ApplicationStatusFailed
+    );
 }
 
 /// Test: Reverse dependency order for shutdown
@@ -441,7 +502,11 @@ async fn test_reverse_dependency_shutdown() {
     controller.set_node(mock_node).await;
 
     // B has no dependencies
-    let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()));
+    let app_b = Box::new(MockApp::new(
+        "app-b",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
@@ -455,7 +520,11 @@ async fn test_reverse_dependency_shutdown() {
     controller.load(app_b, config_b).await.unwrap();
 
     // A depends on B
-    let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
+    let app_a = Box::new(MockApp::new(
+        "app-a",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
@@ -480,9 +549,12 @@ async fn test_reverse_dependency_shutdown() {
     // Verify shutdown order: A should be stopped
     let order = shutdown_order.read().await;
     assert!(order.contains(&"app-a".to_string()));
-    
+
     // A should be stopped
-    assert_eq!(controller.get_status("app-a").await.unwrap(), ApplicationStatus::ApplicationStatusStopped);
+    assert_eq!(
+        controller.get_status("app-a").await.unwrap(),
+        ApplicationStatus::ApplicationStatusStopped
+    );
     // B should still be running (unless we implement dependent tracking)
     // For now, B remains running which is correct if it has no other dependents
 }
@@ -500,7 +572,11 @@ async fn test_no_dependencies() {
     });
     controller.set_node(mock_node).await;
 
-    let app = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
+    let app = Box::new(MockApp::new(
+        "app-a",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
@@ -515,7 +591,10 @@ async fn test_no_dependencies() {
 
     // Should start without issues
     controller.start("app-a", HashMap::new()).await.unwrap();
-    assert_eq!(controller.get_status("app-a").await.unwrap(), ApplicationStatus::ApplicationStatusRunning);
+    assert_eq!(
+        controller.get_status("app-a").await.unwrap(),
+        ApplicationStatus::ApplicationStatusRunning
+    );
 }
 
 /// Test: Already running dependency should not restart
@@ -532,7 +611,11 @@ async fn test_already_running_dependency() {
     controller.set_node(mock_node).await;
 
     // Start B first
-    let app_b = Box::new(MockApp::new("app-b", startup_order.clone(), shutdown_order.clone()));
+    let app_b = Box::new(MockApp::new(
+        "app-b",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_b = ApplicationSpec {
         name: "app-b".to_string(),
         version: "1.0.0".to_string(),
@@ -547,7 +630,11 @@ async fn test_already_running_dependency() {
     controller.start("app-b", HashMap::new()).await.unwrap();
 
     // A depends on B
-    let app_a = Box::new(MockApp::new("app-a", startup_order.clone(), shutdown_order.clone()));
+    let app_a = Box::new(MockApp::new(
+        "app-a",
+        startup_order.clone(),
+        shutdown_order.clone(),
+    ));
     let config_a = ApplicationSpec {
         name: "app-a".to_string(),
         version: "1.0.0".to_string(),
@@ -569,7 +656,3 @@ async fn test_already_running_dependency() {
     assert_eq!(order.len(), initial_order_len + 1);
     assert_eq!(order.last().unwrap(), "app-a");
 }
-
-
-
-

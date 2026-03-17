@@ -18,10 +18,10 @@
 
 //! Repository trait and implementations for blob metadata storage
 
-use async_trait::async_trait;
 use crate::BlobResult;
-use plexspaces_proto::storage::v1::BlobMetadata;
+use async_trait::async_trait;
 use plexspaces_core::RequestContext;
+use plexspaces_proto::storage::v1::BlobMetadata;
 
 /// Repository trait for blob metadata storage
 ///
@@ -38,11 +38,7 @@ pub trait BlobRepository: Send + Sync {
     /// ## Returns
     /// Blob metadata if found, None otherwise.
     /// Only returns blobs belonging to the tenant in the context.
-    async fn get(
-        &self,
-        ctx: &RequestContext,
-        blob_id: &str,
-    ) -> BlobResult<Option<BlobMetadata>>;
+    async fn get(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<Option<BlobMetadata>>;
 
     /// Get blob metadata by SHA256
     ///
@@ -67,11 +63,7 @@ pub trait BlobRepository: Send + Sync {
     ///
     /// ## Notes
     /// The metadata's tenant_id and namespace must match the context.
-    async fn save(
-        &self,
-        ctx: &RequestContext,
-        metadata: &BlobMetadata,
-    ) -> BlobResult<()>;
+    async fn save(&self, ctx: &RequestContext, metadata: &BlobMetadata) -> BlobResult<()>;
 
     /// Update blob metadata
     ///
@@ -81,11 +73,7 @@ pub trait BlobRepository: Send + Sync {
     ///
     /// ## Notes
     /// Only updates blobs belonging to the tenant in the context.
-    async fn update(
-        &self,
-        ctx: &RequestContext,
-        metadata: &BlobMetadata,
-    ) -> BlobResult<()>;
+    async fn update(&self, ctx: &RequestContext, metadata: &BlobMetadata) -> BlobResult<()>;
 
     /// Delete blob metadata
     ///
@@ -95,11 +83,7 @@ pub trait BlobRepository: Send + Sync {
     ///
     /// ## Notes
     /// Only deletes blobs belonging to the tenant in the context.
-    async fn delete(
-        &self,
-        ctx: &RequestContext,
-        blob_id: &str,
-    ) -> BlobResult<()>;
+    async fn delete(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<()>;
 
     /// List blobs with filtering
     ///
@@ -129,11 +113,8 @@ pub trait BlobRepository: Send + Sync {
     /// ## Returns
     /// List of expired blobs.
     /// Only returns blobs belonging to the tenant in the context.
-    async fn find_expired(
-        &self,
-        ctx: &RequestContext,
-        limit: i64,
-    ) -> BlobResult<Vec<BlobMetadata>>;
+    async fn find_expired(&self, ctx: &RequestContext, limit: i64)
+        -> BlobResult<Vec<BlobMetadata>>;
 }
 
 /// Filters for listing blobs

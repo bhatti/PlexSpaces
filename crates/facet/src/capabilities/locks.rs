@@ -59,7 +59,9 @@ use std::time::Instant;
 
 use crate::{Facet, FacetError, InterceptResult};
 use plexspaces_common::RequestContext;
-use plexspaces_proto::locks::prv::{AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions};
+use plexspaces_proto::locks::prv::{
+    AcquireLockOptions, Lock, ReleaseLockOptions, RenewLockOptions,
+};
 use tracing::{debug, error, info, instrument, warn};
 
 /// Convert Lock proto struct to JSON Value (Lock doesn't implement Serialize)
@@ -103,11 +105,23 @@ impl Default for LockConfig {
 #[async_trait]
 pub trait LockManager: Send + Sync {
     /// Acquire a lock
-    async fn acquire_lock(&self, ctx: &RequestContext, options: AcquireLockOptions) -> Result<Lock, String>;
+    async fn acquire_lock(
+        &self,
+        ctx: &RequestContext,
+        options: AcquireLockOptions,
+    ) -> Result<Lock, String>;
     /// Renew a lock
-    async fn renew_lock(&self, ctx: &RequestContext, options: RenewLockOptions) -> Result<Lock, String>;
+    async fn renew_lock(
+        &self,
+        ctx: &RequestContext,
+        options: RenewLockOptions,
+    ) -> Result<Lock, String>;
     /// Release a lock
-    async fn release_lock(&self, ctx: &RequestContext, options: ReleaseLockOptions) -> Result<(), String>;
+    async fn release_lock(
+        &self,
+        ctx: &RequestContext,
+        options: ReleaseLockOptions,
+    ) -> Result<(), String>;
     /// Get current lock state
     async fn get_lock(&self, ctx: &RequestContext, lock_key: &str) -> Result<Option<Lock>, String>;
 }
@@ -150,9 +164,13 @@ impl LockFacet {
 
     /// Handle lock operations with observability
     #[instrument(skip(self, args), fields(operation = method))]
-    async fn handle_lock_operation(&self, method: &str, args: &[u8]) -> Result<Vec<u8>, FacetError> {
+    async fn handle_lock_operation(
+        &self,
+        method: &str,
+        args: &[u8],
+    ) -> Result<Vec<u8>, FacetError> {
         let start = Instant::now();
-        
+
         // Create request context - locks facet doesn't have access to ServiceLocator or actor context
         // TODO: Extract tenant/namespace from actor context when available (similar to RegistryFacet)
         // For now, use empty strings (locks will work but without tenant/namespace isolation)
@@ -161,7 +179,7 @@ impl LockFacet {
         let result = match method {
             "acquire_lock" => {
                 metrics::counter!("plexspaces_facet_locks_operations_total", "operation" => "acquire_lock").increment(1);
-                
+
                 #[derive(Deserialize)]
                 struct AcquireArgs {
                     lock_key: String,
@@ -178,7 +196,8 @@ impl LockFacet {
                         FacetError::InvalidConfig(e.to_string())
                     })?;
 
-                let lease_duration = args.lease_duration_secs
+                let lease_duration = args
+                    .lease_duration_secs
                     .or(self.config.default_lease_secs)
                     .unwrap_or(30);
 
@@ -197,7 +216,7 @@ impl LockFacet {
                         metrics::histogram!("plexspaces_facet_locks_operation_duration_seconds", "operation" => "acquire_lock").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_locks_operations_success_total", "operation" => "acquire_lock").increment(1);
                         info!(lock_key = %lock.lock_key, holder_id = %lock.holder_id, version = %lock.version, lease_secs = lock.lease_duration_secs, duration_ms = duration.as_millis(), "🔒 LockFacet: Lock acquired");
-                        
+
                         let lock_json = lock_to_json(&lock);
                         serde_json::to_vec(&lock_json)
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
@@ -206,11 +225,18 @@ impl LockFacet {
                         let duration = start.elapsed();
                         let error_str = e.to_string();
                         metrics::histogram!("plexspaces_facet_locks_operation_duration_seconds", "operation" => "acquire_lock").record(duration.as_secs_f64());
-                        
+
                         // Check if it's a lock contention error (already held)
-                        if error_str.contains("already held") || error_str.contains("LockAlreadyHeld") {
+                        if error_str.contains("already held")
+                            || error_str.contains("LockAlreadyHeld")
+                        {
                             let current_holder = if error_str.contains("already held by:") {
-                                error_str.split("already held by: ").nth(1).unwrap_or("unknown").trim().to_string()
+                                error_str
+                                    .split("already held by: ")
+                                    .nth(1)
+                                    .unwrap_or("unknown")
+                                    .trim()
+                                    .to_string()
                             } else {
                                 "unknown".to_string()
                             };
@@ -226,7 +252,7 @@ impl LockFacet {
             }
             "release_lock" => {
                 metrics::counter!("plexspaces_facet_locks_operations_total", "operation" => "release_lock").increment(1);
-                
+
                 #[derive(Deserialize)]
                 struct ReleaseArgs {
                     lock_key: String,
@@ -254,7 +280,7 @@ impl LockFacet {
                         metrics::histogram!("plexspaces_facet_locks_operation_duration_seconds", "operation" => "release_lock").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_locks_operations_success_total", "operation" => "release_lock").increment(1);
                         info!(lock_key = %args.lock_key, holder_id = %args.holder_id, duration_ms = duration.as_millis(), "🔓 LockFacet: Lock released");
-                        
+
                         serde_json::to_vec(&json!({"status": "ok"}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -269,7 +295,7 @@ impl LockFacet {
             }
             "renew_lock" => {
                 metrics::counter!("plexspaces_facet_locks_operations_total", "operation" => "renew_lock").increment(1);
-                
+
                 #[derive(Deserialize)]
                 struct RenewArgs {
                     lock_key: String,
@@ -284,7 +310,8 @@ impl LockFacet {
                         FacetError::InvalidConfig(e.to_string())
                     })?;
 
-                let lease_duration = args.lease_duration_secs
+                let lease_duration = args
+                    .lease_duration_secs
                     .or(self.config.default_lease_secs)
                     .unwrap_or(30);
 
@@ -302,7 +329,7 @@ impl LockFacet {
                         metrics::histogram!("plexspaces_facet_locks_operation_duration_seconds", "operation" => "renew_lock").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_locks_operations_success_total", "operation" => "renew_lock").increment(1);
                         info!(lock_key = %lock.lock_key, holder_id = %lock.holder_id, version = %lock.version, lease_secs = lock.lease_duration_secs, duration_ms = duration.as_millis(), "🔄 LockFacet: Lock renewed (heartbeat)");
-                        
+
                         let lock_json = lock_to_json(&lock);
                         serde_json::to_vec(&lock_json)
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
@@ -318,7 +345,7 @@ impl LockFacet {
             }
             "try_acquire_lock" => {
                 metrics::counter!("plexspaces_facet_locks_operations_total", "operation" => "try_acquire_lock").increment(1);
-                
+
                 #[derive(Deserialize)]
                 struct TryAcquireArgs {
                     lock_key: String,
@@ -332,7 +359,8 @@ impl LockFacet {
                         FacetError::InvalidConfig(e.to_string())
                     })?;
 
-                let lease_duration = args.lease_duration_secs
+                let lease_duration = args
+                    .lease_duration_secs
                     .or(self.config.default_lease_secs)
                     .unwrap_or(30);
 
@@ -351,7 +379,7 @@ impl LockFacet {
                         metrics::histogram!("plexspaces_facet_locks_operation_duration_seconds", "operation" => "try_acquire_lock").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_locks_operations_success_total", "operation" => "try_acquire_lock").increment(1);
                         info!(lock_key = %lock.lock_key, holder_id = %lock.holder_id, version = %lock.version, lease_secs = lock.lease_duration_secs, duration_ms = duration.as_millis(), "🔒 LockFacet: Lock acquired (try_acquire_lock)");
-                        
+
                         let lock_json = lock_to_json(&lock);
                         serde_json::to_vec(&lock_json)
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
@@ -361,20 +389,29 @@ impl LockFacet {
                         metrics::histogram!("plexspaces_facet_locks_operation_duration_seconds", "operation" => "try_acquire_lock").record(duration.as_secs_f64());
                         // Check if error is "lock already held" - that's expected for try_acquire
                         let error_str = e.to_string();
-                        if error_str.contains("already held") || error_str.contains("LockAlreadyHeld") {
+                        if error_str.contains("already held")
+                            || error_str.contains("LockAlreadyHeld")
+                        {
                             // Extract current holder from error message (format: "Lock already held by: {holder_id}")
                             let current_holder = if error_str.contains("already held by:") {
-                                error_str.split("already held by: ").nth(1).unwrap_or("unknown").trim().to_string()
+                                error_str
+                                    .split("already held by: ")
+                                    .nth(1)
+                                    .unwrap_or("unknown")
+                                    .trim()
+                                    .to_string()
                             } else if error_str.contains("LockAlreadyHeld") {
                                 // Try to extract from error string
-                                error_str.split("LockAlreadyHeld").nth(1)
+                                error_str
+                                    .split("LockAlreadyHeld")
+                                    .nth(1)
                                     .and_then(|s| s.split('"').nth(1))
                                     .unwrap_or("unknown")
                                     .to_string()
                             } else {
                                 "unknown".to_string()
                             };
-                            
+
                             metrics::counter!("plexspaces_facet_locks_operations_success_total", "operation" => "try_acquire_lock", "result" => "not_acquired").increment(1);
                             warn!(lock_key = %args.lock_key, holder_id = %args.holder_id, current_holder = %current_holder, duration_ms = duration.as_millis(), "⚔️  LockFacet: Try acquire failed - lock already held by another worker");
                             serde_json::to_vec(&json!({"acquired": false, "reason": error_str}))
@@ -389,7 +426,7 @@ impl LockFacet {
             }
             "get_lock" => {
                 metrics::counter!("plexspaces_facet_locks_operations_total", "operation" => "get_lock").increment(1);
-                
+
                 let lock_key: String = serde_json::from_slice(args)
                     .map_err(|e| {
                         metrics::counter!("plexspaces_facet_locks_errors_total", "operation" => "get_lock", "error" => "deserialization").increment(1);
@@ -402,7 +439,7 @@ impl LockFacet {
                         metrics::histogram!("plexspaces_facet_locks_operation_duration_seconds", "operation" => "get_lock").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_locks_operations_success_total", "operation" => "get_lock").increment(1);
                         info!(lock_key = %lock_key, holder_id = %lock.holder_id, version = %lock.version, lease_secs = lock.lease_duration_secs, duration_ms = duration.as_millis(), "🔍 LockFacet: Lock retrieved");
-                        
+
                         let lock_json = lock_to_json(&lock);
                         serde_json::to_vec(&lock_json)
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
@@ -412,7 +449,7 @@ impl LockFacet {
                         metrics::histogram!("plexspaces_facet_locks_operation_duration_seconds", "operation" => "get_lock").record(duration.as_secs_f64());
                         metrics::counter!("plexspaces_facet_locks_operations_success_total", "operation" => "get_lock", "result" => "not_found").increment(1);
                         debug!(lock_key = %lock_key, duration_ms = duration.as_millis(), "Lock not found");
-                        
+
                         serde_json::to_vec(&json!({"found": false}))
                             .map_err(|e| FacetError::InterceptionFailed(e.to_string()))
                     }
@@ -467,8 +504,11 @@ impl Facet for LockFacet {
         args: &[u8],
     ) -> Result<InterceptResult, FacetError> {
         // Intercept lock operations
-        if method == "acquire_lock" || method == "release_lock" || method == "renew_lock"
-            || method == "try_acquire_lock" || method == "get_lock"
+        if method == "acquire_lock"
+            || method == "release_lock"
+            || method == "renew_lock"
+            || method == "try_acquire_lock"
+            || method == "get_lock"
         {
             info!(method = %method, args_len = args.len(), "🔧 LockFacet: Intercepting lock operation");
             let result = self.handle_lock_operation(method, args).await?;
@@ -494,12 +534,12 @@ impl Facet for LockFacet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     // In-memory lock manager for testing
     struct TestLockManager {
         locks: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Lock>>>,
     }
-    
+
     impl TestLockManager {
         fn new() -> Self {
             Self {
@@ -507,10 +547,14 @@ mod tests {
             }
         }
     }
-    
+
     #[async_trait]
     impl LockManager for TestLockManager {
-        async fn acquire_lock(&self, _ctx: &RequestContext, options: AcquireLockOptions) -> Result<Lock, String> {
+        async fn acquire_lock(
+            &self,
+            _ctx: &RequestContext,
+            options: AcquireLockOptions,
+        ) -> Result<Lock, String> {
             let mut locks = self.locks.write().await;
             // Check if lock already exists and is locked
             if let Some(existing_lock) = locks.get(&options.lock_key) {
@@ -531,10 +575,15 @@ mod tests {
             locks.insert(options.lock_key, lock.clone());
             Ok(lock)
         }
-        
-        async fn renew_lock(&self, _ctx: &RequestContext, options: RenewLockOptions) -> Result<Lock, String> {
+
+        async fn renew_lock(
+            &self,
+            _ctx: &RequestContext,
+            options: RenewLockOptions,
+        ) -> Result<Lock, String> {
             let mut locks = self.locks.write().await;
-            let lock = locks.get_mut(&options.lock_key)
+            let lock = locks
+                .get_mut(&options.lock_key)
                 .ok_or_else(|| "Lock not found".to_string())?;
             if lock.version != options.version {
                 return Err("Version mismatch".to_string());
@@ -543,10 +592,15 @@ mod tests {
             lock.lease_duration_secs = options.lease_duration_secs;
             Ok(lock.clone())
         }
-        
-        async fn release_lock(&self, _ctx: &RequestContext, options: ReleaseLockOptions) -> Result<(), String> {
+
+        async fn release_lock(
+            &self,
+            _ctx: &RequestContext,
+            options: ReleaseLockOptions,
+        ) -> Result<(), String> {
             let mut locks = self.locks.write().await;
-            let lock = locks.get(&options.lock_key)
+            let lock = locks
+                .get(&options.lock_key)
                 .ok_or_else(|| "Lock not found".to_string())?;
             if lock.version != options.version {
                 return Err("Version mismatch".to_string());
@@ -560,8 +614,12 @@ mod tests {
             }
             Ok(())
         }
-        
-        async fn get_lock(&self, _ctx: &RequestContext, lock_key: &str) -> Result<Option<Lock>, String> {
+
+        async fn get_lock(
+            &self,
+            _ctx: &RequestContext,
+            lock_key: &str,
+        ) -> Result<Option<Lock>, String> {
             let locks = self.locks.read().await;
             Ok(locks.get(lock_key).cloned())
         }
@@ -584,7 +642,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("acquire_lock", serde_json::to_vec(&acquire_args).unwrap().as_slice())
+            .before_method(
+                "acquire_lock",
+                serde_json::to_vec(&acquire_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -610,7 +671,12 @@ mod tests {
         });
 
         let release_result = facet
-            .before_method("release_lock", serde_json::to_vec(&release_args_with_version).unwrap().as_slice())
+            .before_method(
+                "release_lock",
+                serde_json::to_vec(&release_args_with_version)
+                    .unwrap()
+                    .as_slice(),
+            )
             .await
             .unwrap();
 
@@ -640,7 +706,10 @@ mod tests {
         });
 
         let result1 = facet
-            .before_method("try_acquire_lock", serde_json::to_vec(&try_acquire_args).unwrap().as_slice())
+            .before_method(
+                "try_acquire_lock",
+                serde_json::to_vec(&try_acquire_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -655,7 +724,10 @@ mod tests {
 
         // ACT: Try acquire again (should fail - already held)
         let result2 = facet
-            .before_method("try_acquire_lock", serde_json::to_vec(&try_acquire_args).unwrap().as_slice())
+            .before_method(
+                "try_acquire_lock",
+                serde_json::to_vec(&try_acquire_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -680,7 +752,10 @@ mod tests {
         // ACT: Get lock that doesn't exist
         let get_args = serde_json::json!("resource-3");
         let result = facet
-            .before_method("get_lock", serde_json::to_vec(&get_args).unwrap().as_slice())
+            .before_method(
+                "get_lock",
+                serde_json::to_vec(&get_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -701,12 +776,18 @@ mod tests {
         });
 
         facet
-            .before_method("acquire_lock", serde_json::to_vec(&acquire_args).unwrap().as_slice())
+            .before_method(
+                "acquire_lock",
+                serde_json::to_vec(&acquire_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
         let result = facet
-            .before_method("get_lock", serde_json::to_vec(&get_args).unwrap().as_slice())
+            .before_method(
+                "get_lock",
+                serde_json::to_vec(&get_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -743,7 +824,10 @@ mod tests {
         });
 
         let acquire_result = facet
-            .before_method("acquire_lock", serde_json::to_vec(&acquire_args).unwrap().as_slice())
+            .before_method(
+                "acquire_lock",
+                serde_json::to_vec(&acquire_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -762,7 +846,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("renew_lock", serde_json::to_vec(&renew_args).unwrap().as_slice())
+            .before_method(
+                "renew_lock",
+                serde_json::to_vec(&renew_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -772,7 +859,10 @@ mod tests {
                 let renewed_lock_json: serde_json::Value = serde_json::from_slice(&data).unwrap();
                 assert_eq!(renewed_lock_json["lock_key"], "resource-4");
                 assert_eq!(renewed_lock_json["lease_duration_secs"], 60);
-                assert_ne!(renewed_lock_json["version"].as_str().unwrap(), version.as_str()); // Version should change
+                assert_ne!(
+                    renewed_lock_json["version"].as_str().unwrap(),
+                    version.as_str()
+                ); // Version should change
             }
             _ => panic!("Expected short circuit"),
         }
@@ -794,7 +884,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("renew_lock", serde_json::to_vec(&renew_args).unwrap().as_slice())
+            .before_method(
+                "renew_lock",
+                serde_json::to_vec(&renew_args).unwrap().as_slice(),
+            )
             .await;
 
         // ASSERT: Should return error
@@ -816,7 +909,10 @@ mod tests {
         });
 
         facet
-            .before_method("acquire_lock", serde_json::to_vec(&acquire_args).unwrap().as_slice())
+            .before_method(
+                "acquire_lock",
+                serde_json::to_vec(&acquire_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 
@@ -829,7 +925,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("release_lock", serde_json::to_vec(&release_args).unwrap().as_slice())
+            .before_method(
+                "release_lock",
+                serde_json::to_vec(&release_args).unwrap().as_slice(),
+            )
             .await;
 
         // ASSERT: Should return error
@@ -844,10 +943,7 @@ mod tests {
         facet.on_attach("test-actor", Value::Null).await.unwrap();
 
         // ACT: Send non-lock message
-        let result = facet
-            .before_method("other_message", b"{}")
-            .await
-            .unwrap();
+        let result = facet.before_method("other_message", b"{}").await.unwrap();
 
         // ASSERT: Should continue (not short-circuit)
         match result {
@@ -866,9 +962,7 @@ mod tests {
         facet.on_attach("test-actor", Value::Null).await.unwrap();
 
         // ACT: Send invalid JSON
-        let result = facet
-            .before_method("acquire_lock", b"invalid json")
-            .await;
+        let result = facet.before_method("acquire_lock", b"invalid json").await;
 
         // ASSERT: Should return error
         assert!(result.is_err());
@@ -902,7 +996,10 @@ mod tests {
         });
 
         let result = facet
-            .before_method("acquire_lock", serde_json::to_vec(&acquire_args).unwrap().as_slice())
+            .before_method(
+                "acquire_lock",
+                serde_json::to_vec(&acquire_args).unwrap().as_slice(),
+            )
             .await
             .unwrap();
 

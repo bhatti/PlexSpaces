@@ -22,8 +22,8 @@
 //! This is the foundation for the future high-level SDK.
 
 use plexspaces_proto::{
-    v1::actor::{SendMessageRequest, SpawnActorRequest, SpawnActorResponse},
     common::v1::Message as ProtoMessage,
+    v1::actor::{SendMessageRequest, SpawnActorRequest, SpawnActorResponse},
     ActorServiceClient,
 };
 use tonic::{transport::Channel, Request};
@@ -193,7 +193,7 @@ impl RemoteActorClient {
             initial_state: initial_state.unwrap_or_default(),
             config,
             labels,
-            facets: vec![], // No facets for basic spawn
+            facets: vec![],           // No facets for basic spawn
             namespace: String::new(), // Use default namespace (from JWT in production)
         });
 

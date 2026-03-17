@@ -218,9 +218,15 @@ impl ExecutionContext {
                         )
                         .await
                         .map_err(|e| {
-                            BehaviorError::ProcessingError(format!("Failed to journal result: {}", e))
+                            BehaviorError::ProcessingError(format!(
+                                "Failed to journal result: {}",
+                                e
+                            ))
                         })?;
-                    self.cached_effects.write().await.insert(key.clone(), result_bytes);
+                    self.cached_effects
+                        .write()
+                        .await
+                        .insert(key.clone(), result_bytes);
                     return Ok(result);
                 }
                 Err(e) => {
@@ -346,7 +352,9 @@ mod tests {
 
         // Test ctx.run() with None = single attempt
         let result = ctx
-            .run("test_op", None, || -> Result<String, String> { Ok("hello".to_string()) })
+            .run("test_op", None, || -> Result<String, String> {
+                Ok("hello".to_string())
+            })
             .await;
 
         assert!(result.is_ok());
@@ -532,7 +540,10 @@ mod tests {
                 max_interval_ms: 2,
                 ..default_retry_config()
             };
-            let _ = ctx.run("op_cached", Some(&config), || Ok::<i32, String>(77)).await.unwrap();
+            let _ = ctx
+                .run("op_cached", Some(&config), || Ok::<i32, String>(77))
+                .await
+                .unwrap();
         }
 
         let mut ctx = ExecutionContext::new(actor_id.clone(), journal.clone());

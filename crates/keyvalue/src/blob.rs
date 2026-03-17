@@ -54,12 +54,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use object_store::{
-    aws::AmazonS3Builder,
-    azure::MicrosoftAzureBuilder,
-    gcp::GoogleCloudStorageBuilder,
-    local::LocalFileSystem,
-    path::Path as ObjectPath,
-    ObjectMeta, ObjectStore,
+    aws::AmazonS3Builder, azure::MicrosoftAzureBuilder, gcp::GoogleCloudStorageBuilder,
+    local::LocalFileSystem, path::Path as ObjectPath, ObjectMeta, ObjectStore,
 };
 use plexspaces_common::RequestContext;
 use std::collections::HashMap;
@@ -100,12 +96,9 @@ impl BlobKVConfig {
     pub fn from_env() -> Self {
         use std::env;
         Self {
-            prefix: env::var("BLOB_PREFIX")
-                .unwrap_or_else(|_| "/plexspaces".to_string()),
-            backend: env::var("BLOB_BACKEND")
-                .unwrap_or_else(|_| "minio".to_string()),
-            bucket: env::var("BLOB_BUCKET")
-                .unwrap_or_else(|_| "plexspaces".to_string()),
+            prefix: env::var("BLOB_PREFIX").unwrap_or_else(|_| "/plexspaces".to_string()),
+            backend: env::var("BLOB_BACKEND").unwrap_or_else(|_| "minio".to_string()),
+            bucket: env::var("BLOB_BUCKET").unwrap_or_else(|_| "plexspaces".to_string()),
             endpoint: env::var("BLOB_ENDPOINT").ok(),
             region: env::var("BLOB_REGION").ok(),
             access_key_id: env::var("BLOB_ACCESS_KEY_ID")
@@ -128,8 +121,7 @@ impl BlobKVConfig {
     pub async fn build_object_store(&self) -> Result<Arc<dyn ObjectStore>, KVError> {
         let store: Arc<dyn ObjectStore> = match self.backend.as_str() {
             "s3" => {
-                let mut builder = AmazonS3Builder::new()
-                    .with_bucket_name(&self.bucket);
+                let mut builder = AmazonS3Builder::new().with_bucket_name(&self.bucket);
 
                 if let Some(ref region) = self.region {
                     builder = builder.with_region(region);
@@ -170,8 +162,7 @@ impl BlobKVConfig {
                 })?)
             }
             "gcp" => {
-                let mut builder = GoogleCloudStorageBuilder::new()
-                    .with_bucket_name(&self.bucket);
+                let mut builder = GoogleCloudStorageBuilder::new().with_bucket_name(&self.bucket);
 
                 if let Some(ref service_account) = self.gcp_service_account_json {
                     builder = builder.with_service_account_path(service_account);
@@ -198,12 +189,9 @@ impl BlobKVConfig {
                     KVError::ConfigError(format!("Failed to build Azure store: {}", e))
                 })?)
             }
-            "local" => {
-                Arc::new(
-                    LocalFileSystem::new_with_prefix("/")
-                        .map_err(|e| KVError::ConfigError(format!("Failed to create local filesystem store: {}", e)))?
-                )
-            }
+            "local" => Arc::new(LocalFileSystem::new_with_prefix("/").map_err(|e| {
+                KVError::ConfigError(format!("Failed to create local filesystem store: {}", e))
+            })?),
             _ => {
                 return Err(KVError::ConfigError(format!(
                     "Unsupported backend: {}",
@@ -255,10 +243,7 @@ impl BlobKVStore {
     }
 
     /// Create with custom object store (for testing).
-    pub fn with_object_store(
-        config: BlobKVConfig,
-        object_store: Arc<dyn ObjectStore>,
-    ) -> Self {
+    pub fn with_object_store(config: BlobKVConfig, object_store: Arc<dyn ObjectStore>) -> Self {
         Self {
             object_store,
             config,
@@ -364,7 +349,10 @@ impl KeyValueStore for BlobKVStore {
             }
             Err(e) => {
                 error!(error = %e, "Failed to check object existence");
-                Err(KVError::StorageError(format!("Failed to check object: {}", e)))
+                Err(KVError::StorageError(format!(
+                    "Failed to check object: {}",
+                    e
+                )))
             }
         }
     }
@@ -424,7 +412,10 @@ impl KeyValueStore for BlobKVStore {
             }
             Err(e) => {
                 error!(error = %e, "Failed to delete object");
-                Err(KVError::StorageError(format!("Failed to delete object: {}", e)))
+                Err(KVError::StorageError(format!(
+                    "Failed to delete object: {}",
+                    e
+                )))
             }
         }
     }
@@ -434,7 +425,10 @@ impl KeyValueStore for BlobKVStore {
         match self.object_store.head(&path).await {
             Ok(_) => Ok(true),
             Err(object_store::Error::NotFound { .. }) => Ok(false),
-            Err(e) => Err(KVError::StorageError(format!("Failed to check object: {}", e))),
+            Err(e) => Err(KVError::StorageError(format!(
+                "Failed to check object: {}",
+                e
+            ))),
         }
     }
 
@@ -442,7 +436,7 @@ impl KeyValueStore for BlobKVStore {
     async fn list(&self, ctx: &RequestContext, prefix: &str) -> KVResult<Vec<String>> {
         let start = Instant::now();
         trace!("Listing keys with prefix");
-        
+
         // List all objects for this tenant/namespace, then filter by key prefix
         // This is simpler than trying to match the exact prefix path
         let base_path = self.list_prefix_path(ctx, "");
@@ -464,7 +458,10 @@ impl KeyValueStore for BlobKVStore {
                 }
                 Err(e) => {
                     error!(error = %e, "Failed to list objects");
-                    return Err(KVError::StorageError(format!("Failed to list objects: {}", e)));
+                    return Err(KVError::StorageError(format!(
+                        "Failed to list objects: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -479,9 +476,14 @@ impl KeyValueStore for BlobKVStore {
         Ok(keys)
     }
 
-    async fn multi_get(&self, ctx: &RequestContext, keys: &[&str]) -> KVResult<Vec<Option<Vec<u8>>>> {
+    async fn multi_get(
+        &self,
+        ctx: &RequestContext,
+        keys: &[&str],
+    ) -> KVResult<Vec<Option<Vec<u8>>>> {
         // Fetch all keys in parallel
-        let mut handles: Vec<tokio::task::JoinHandle<Result<Option<Vec<u8>>, KVError>>> = Vec::new();
+        let mut handles: Vec<tokio::task::JoinHandle<Result<Option<Vec<u8>>, KVError>>> =
+            Vec::new();
         for key in keys {
             let key_str = key.to_string();
             let store = Arc::clone(&self.object_store);
@@ -490,7 +492,10 @@ impl KeyValueStore for BlobKVStore {
             let namespace = ctx.namespace().to_string();
             handles.push(tokio::spawn(async move {
                 let normalized_prefix = config.prefix.trim_end_matches('/');
-                let path = format!("{}/keyvalue/{}/{}/{}", normalized_prefix, tenant_id, namespace, key_str);
+                let path = format!(
+                    "{}/keyvalue/{}/{}/{}",
+                    normalized_prefix, tenant_id, namespace, key_str
+                );
                 let obj_path = ObjectPath::from(path);
 
                 match store.get(&obj_path).await {
@@ -501,7 +506,10 @@ impl KeyValueStore for BlobKVStore {
                         Ok(Some(bytes.to_vec()))
                     }
                     Err(object_store::Error::NotFound { .. }) => Ok(None),
-                    Err(e) => Err(KVError::StorageError(format!("Failed to get object: {}", e))),
+                    Err(e) => Err(KVError::StorageError(format!(
+                        "Failed to get object: {}",
+                        e
+                    ))),
                 }
             }));
         }
@@ -537,28 +545,23 @@ impl KeyValueStore for BlobKVStore {
         // Since object_store doesn't directly support expiration,
         // we'll use last_modified + ttl for expiration checking
         // In production, you might want to use S3 lifecycle policies or scheduled cleanup
-        
+
         // For now, just put the object - TTL checking will be done in get()
         // by comparing last_modified + ttl with current time
         // Note: This is a limitation - we'd need to store TTL metadata separately
         // or use object tags/metadata
-        
+
         // Store TTL in object name or use a separate metadata object
         // For simplicity, we'll just put it and handle expiration in get()
         self.put(ctx, key, value).await?;
-        
+
         // TODO: Store TTL metadata (could use object tags or separate metadata object)
         // For now, TTL is best-effort based on last_modified
         warn!("TTL support is limited - expiration checking requires metadata storage");
         Ok(())
     }
 
-    async fn refresh_ttl(
-        &self,
-        ctx: &RequestContext,
-        key: &str,
-        ttl: StdDuration,
-    ) -> KVResult<()> {
+    async fn refresh_ttl(&self, ctx: &RequestContext, key: &str, ttl: StdDuration) -> KVResult<()> {
         // Get current value
         let value = self
             .get(ctx, key)
@@ -579,7 +582,10 @@ impl KeyValueStore for BlobKVStore {
                 Ok(None)
             }
             Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(KVError::StorageError(format!("Failed to check object: {}", e))),
+            Err(e) => Err(KVError::StorageError(format!(
+                "Failed to check object: {}",
+                e
+            ))),
         }
     }
 
@@ -648,7 +654,11 @@ impl KeyValueStore for BlobKVStore {
         ))
     }
 
-    async fn watch_prefix(&self, _ctx: &RequestContext, _prefix: &str) -> KVResult<Receiver<KVEvent>> {
+    async fn watch_prefix(
+        &self,
+        _ctx: &RequestContext,
+        _prefix: &str,
+    ) -> KVResult<Receiver<KVEvent>> {
         // Watch is not supported for object store
         Err(KVError::NotSupported(
             "Watch operations are not supported for blob backend".to_string(),
@@ -676,7 +686,7 @@ impl KeyValueStore for BlobKVStore {
         // List all keyvalue objects for this tenant/namespace
         let list_path = self.list_prefix_path(ctx, "");
         let mut stream = self.object_store.list(Some(&list_path));
-        
+
         let mut total_keys = 0;
         let mut total_size = 0;
 
@@ -688,7 +698,10 @@ impl KeyValueStore for BlobKVStore {
                 }
                 Err(e) => {
                     error!(error = %e, "Failed to list objects for stats");
-                    return Err(KVError::StorageError(format!("Failed to list objects: {}", e)));
+                    return Err(KVError::StorageError(format!(
+                        "Failed to list objects: {}",
+                        e
+                    )));
                 }
             }
         }

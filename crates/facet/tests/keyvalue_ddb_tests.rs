@@ -23,8 +23,8 @@
 
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
-    use plexspaces_facet::capabilities::keyvalue::{KeyValueStore, DynamoDBStore};
     use plexspaces_common::RequestContext;
+    use plexspaces_facet::capabilities::keyvalue::{DynamoDBStore, KeyValueStore};
 
     use plexspaces_common::test_helpers::dynamodb_local_available;
 
@@ -43,7 +43,7 @@ mod ddb_tests {
         let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
             .or_else(|_| std::env::var("PLEXSPACES_DDB_ENDPOINT_URL"))
             .unwrap_or_else(|_| "http://localhost:8000".to_string());
-        
+
         DynamoDBStore::new(
             "us-east-1".to_string(),
             "plexspaces-facet-keyvalue-test".to_string(),
@@ -62,7 +62,10 @@ mod ddb_tests {
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         // Set a value
-        store.set(&ctx, "key1", b"value1".to_vec(), None).await.unwrap();
+        store
+            .set(&ctx, "key1", b"value1".to_vec(), None)
+            .await
+            .unwrap();
 
         // Get the value
         let value = store.get(&ctx, "key1").await.unwrap();
@@ -89,8 +92,14 @@ mod ddb_tests {
         let store = create_ddb_store().await;
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
-        store.set(&ctx, "key1", b"value1".to_vec(), None).await.unwrap();
-        store.set(&ctx, "key1", b"value2".to_vec(), None).await.unwrap();
+        store
+            .set(&ctx, "key1", b"value1".to_vec(), None)
+            .await
+            .unwrap();
+        store
+            .set(&ctx, "key1", b"value2".to_vec(), None)
+            .await
+            .unwrap();
 
         let value = store.get(&ctx, "key1").await.unwrap();
         assert_eq!(value, Some(b"value2".to_vec()));
@@ -104,7 +113,10 @@ mod ddb_tests {
         let store = create_ddb_store().await;
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
-        store.set(&ctx, "key1", b"value1".to_vec(), None).await.unwrap();
+        store
+            .set(&ctx, "key1", b"value1".to_vec(), None)
+            .await
+            .unwrap();
         let deleted = store.delete(&ctx, "key1").await.unwrap();
         assert!(deleted);
 
@@ -133,7 +145,10 @@ mod ddb_tests {
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         assert!(!store.exists(&ctx, "key1").await.unwrap());
-        store.set(&ctx, "key1", b"value1".to_vec(), None).await.unwrap();
+        store
+            .set(&ctx, "key1", b"value1".to_vec(), None)
+            .await
+            .unwrap();
         assert!(store.exists(&ctx, "key1").await.unwrap());
         store.delete(&ctx, "key1").await.unwrap();
         assert!(!store.exists(&ctx, "key1").await.unwrap());
@@ -147,9 +162,18 @@ mod ddb_tests {
         let store = create_ddb_store().await;
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
-        store.set(&ctx, "actor:alice", b"ref1".to_vec(), None).await.unwrap();
-        store.set(&ctx, "actor:bob", b"ref2".to_vec(), None).await.unwrap();
-        store.set(&ctx, "node:node1", b"info".to_vec(), None).await.unwrap();
+        store
+            .set(&ctx, "actor:alice", b"ref1".to_vec(), None)
+            .await
+            .unwrap();
+        store
+            .set(&ctx, "actor:bob", b"ref2".to_vec(), None)
+            .await
+            .unwrap();
+        store
+            .set(&ctx, "node:node1", b"info".to_vec(), None)
+            .await
+            .unwrap();
 
         let keys = store.list_keys(&ctx, "actor:").await.unwrap();
         assert_eq!(keys.len(), 2);
@@ -165,7 +189,10 @@ mod ddb_tests {
         let store = create_ddb_store().await;
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
-        store.set(&ctx, "key1", b"value1".to_vec(), Some(1)).await.unwrap();
+        store
+            .set(&ctx, "key1", b"value1".to_vec(), Some(1))
+            .await
+            .unwrap();
 
         // Should exist immediately
         assert!(store.exists(&ctx, "key1").await.unwrap());
@@ -186,12 +213,23 @@ mod ddb_tests {
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "default".to_string());
         let ctx2 = RequestContext::new_without_auth("tenant2".to_string(), "default".to_string());
 
-        store.set(&ctx1, "key1", b"value1".to_vec(), None).await.unwrap();
-        store.set(&ctx2, "key1", b"value2".to_vec(), None).await.unwrap();
+        store
+            .set(&ctx1, "key1", b"value1".to_vec(), None)
+            .await
+            .unwrap();
+        store
+            .set(&ctx2, "key1", b"value2".to_vec(), None)
+            .await
+            .unwrap();
 
         // Each tenant should see their own value
-        assert_eq!(store.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(store.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            store.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            store.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
     }
 }
-

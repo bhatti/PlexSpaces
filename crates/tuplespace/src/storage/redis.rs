@@ -51,9 +51,9 @@ use plexspaces_proto::tuplespace::v1::StorageStats;
 #[cfg(feature = "redis-backend")]
 use redis::{aio::ConnectionManager, AsyncCommands, Client};
 #[cfg(feature = "redis-backend")]
-use std::time::Duration;
-#[cfg(feature = "redis-backend")]
 use std::sync::Arc;
+#[cfg(feature = "redis-backend")]
+use std::time::Duration;
 #[cfg(feature = "redis-backend")]
 use tracing::{debug, instrument, trace};
 
@@ -156,7 +156,8 @@ impl RedisStorage {
         };
 
         // Mask password in URL for logging
-        let display_url = config.connection_string
+        let display_url = config
+            .connection_string
             .split('@')
             .last()
             .map(|s| format!("redis://...@{}", s))
@@ -247,7 +248,7 @@ impl RedisStorage {
     async fn notify_tuple_written(&self) -> Result<(), TupleSpaceError> {
         let mut conn = self.conn.clone();
         let queue_key = self.notification_queue_key();
-        
+
         // Push notification to queue (non-blocking, fire-and-forget)
         // Use LPUSH with a simple marker (we'll check for matching tuples after BLPOP)
         redis::cmd("LPUSH")
@@ -256,7 +257,7 @@ impl RedisStorage {
             .query_async::<_, ()>(&mut conn)
             .await
             .map_err(|e| TupleSpaceError::BackendError(format!("LPUSH failed: {}", e)))?;
-        
+
         Ok(())
     }
 
@@ -458,7 +459,10 @@ impl TupleSpaceStorage for RedisStorage {
         if !stored_tuples.is_empty() {
             let latency_us = start.elapsed().as_micros() as u64;
             self.record_operation("read", latency_us);
-            debug!(count = stored_tuples.len(), latency_us, "Tuples read from Redis");
+            debug!(
+                count = stored_tuples.len(),
+                latency_us, "Tuples read from Redis"
+            );
             return Ok(stored_tuples.into_iter().map(|s| s.tuple).collect());
         }
 
@@ -535,7 +539,10 @@ impl TupleSpaceStorage for RedisStorage {
 
             let latency_us = start.elapsed().as_micros() as u64;
             self.record_operation("take", latency_us);
-            debug!(count = stored_tuples.len(), latency_us, "Tuples taken from Redis");
+            debug!(
+                count = stored_tuples.len(),
+                latency_us, "Tuples taken from Redis"
+            );
             return Ok(stored_tuples.into_iter().map(|s| s.tuple).collect());
         }
 
@@ -588,7 +595,10 @@ impl TupleSpaceStorage for RedisStorage {
 
                     let latency_us = start.elapsed().as_micros() as u64;
                     self.record_operation("take", latency_us);
-                    debug!(count = stored_tuples.len(), latency_us, "Tuples taken from Redis (after blocking)");
+                    debug!(
+                        count = stored_tuples.len(),
+                        latency_us, "Tuples taken from Redis (after blocking)"
+                    );
                     return Ok(stored_tuples.into_iter().map(|s| s.tuple).collect());
                 }
                 // No match, continue waiting
@@ -765,9 +775,7 @@ impl TupleSpaceStorage for RedisStorage {
             .arg(&message_json)
             .query_async::<_, ()>(&mut conn)
             .await
-            .map_err(|e| {
-                TupleSpaceError::BackendError(format!("PUBLISH failed: {}", e))
-            })?;
+            .map_err(|e| TupleSpaceError::BackendError(format!("PUBLISH failed: {}", e)))?;
 
         Ok(())
     }
@@ -811,22 +819,24 @@ impl TupleSpaceStorage for RedisStorage {
             }
 
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("Subscribed to Redis channel: {}", channel);
+                tracing::debug!("Subscribed to Redis channel: {}", channel);
             }
 
             // Read messages from the subscription
             // Redis SUBSCRIBE returns messages in the format: ["message", channel, payload]
             loop {
-                let result: Result<redis::Value, redis::RedisError> = redis::cmd("")
-                    .query_async(&mut pubsub_conn)
-                    .await;
+                let result: Result<redis::Value, redis::RedisError> =
+                    redis::cmd("").query_async(&mut pubsub_conn).await;
 
                 match result {
                     Ok(redis::Value::Bulk(values)) => {
                         // Message format: ["message", channel, payload]
                         if values.len() >= 3 {
-                            if let (redis::Value::Data(msg_type), redis::Value::Data(_ch), redis::Value::Data(payload)) =
-                                (&values[0], &values[1], &values[2])
+                            if let (
+                                redis::Value::Data(msg_type),
+                                redis::Value::Data(_ch),
+                                redis::Value::Data(payload),
+                            ) = (&values[0], &values[1], &values[2])
                             {
                                 if msg_type == b"message" {
                                     // Deserialize the watch event message from bytes
@@ -835,13 +845,16 @@ impl TupleSpaceStorage for RedisStorage {
                                             if tx.send(event).await.is_err() {
                                                 // Receiver dropped, exit
                                                 if tracing::enabled!(tracing::Level::DEBUG) {
-                                                tracing::debug!("Watch event receiver dropped, stopping subscription");
+                                                    tracing::debug!("Watch event receiver dropped, stopping subscription");
                                                 }
                                                 break;
                                             }
                                         }
                                         Err(e) => {
-                                            tracing::warn!("Failed to deserialize watch event: {}", e);
+                                            tracing::warn!(
+                                                "Failed to deserialize watch event: {}",
+                                                e
+                                            );
                                         }
                                     }
                                 }
@@ -967,7 +980,10 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].fields()[0], TupleField::String("blocking-test".to_string()));
+        assert_eq!(
+            results[0].fields()[0],
+            TupleField::String("blocking-test".to_string())
+        );
         assert!(elapsed.as_millis() >= 50, "Should have waited for tuple");
         assert!(elapsed.as_millis() < 5000, "Should not have timed out");
 
@@ -995,7 +1011,10 @@ mod tests {
 
         assert_eq!(results.len(), 0, "Should return empty on timeout");
         assert!(elapsed.as_millis() >= 450, "Should have waited for timeout");
-        assert!(elapsed.as_millis() < 1000, "Should not wait longer than timeout");
+        assert!(
+            elapsed.as_millis() < 1000,
+            "Should not wait longer than timeout"
+        );
 
         // Cleanup
         storage.clear().await.unwrap();
@@ -1041,7 +1060,10 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].fields()[0], TupleField::String("blocking-take-test".to_string()));
+        assert_eq!(
+            results[0].fields()[0],
+            TupleField::String("blocking-take-test".to_string())
+        );
         assert!(elapsed.as_millis() >= 50, "Should have waited for tuple");
         assert!(elapsed.as_millis() < 5000, "Should not have timed out");
 

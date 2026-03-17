@@ -27,9 +27,9 @@ use plexspaces_proto::system::v1::{
 use prost_types::Duration;
 use std::collections::HashMap;
 use std::time::Duration as StdDuration;
-use tonic::Request;
 use tokio::time::sleep;
 use tokio::time::timeout as tokio_timeout;
+use tonic::Request;
 
 /// Node client for connectivity operations
 pub struct NodeClient {
@@ -83,13 +83,13 @@ impl NodeClient {
     }
 
     /// Create a new NodeClient connected to the specified node with custom health check config
-    /// 
+    ///
     /// ## Health-Aware Connection Flow (Kubernetes-inspired)
     /// 1. Check liveness (if enabled): Is node alive? If not, retry with exponential backoff
     /// 2. Connect to NodeService: Establish gRPC connection
     /// 3. Verify with ping: Ensure connection works
     /// 4. Wait for readiness (if enabled): Poll until node is ready to serve requests
-    /// 
+    ///
     /// ## Retry Strategy (Erlang-inspired)
     /// - Exponential backoff with jitter: delay = min(initial_delay * 2^attempt, max_delay) + jitter
     /// - Retries on: connection failures, liveness failures, ping failures
@@ -100,7 +100,7 @@ impl NodeClient {
     ) -> Result<Self> {
         let addr = node_addr.into();
         let mut last_error = None;
-        
+
         // Step 1: Check liveness (if enabled) - ensures node is alive before connecting
         if config.check_liveness {
             for attempt in 0..=config.max_retries {
@@ -124,7 +124,7 @@ impl NodeClient {
                     }
                 }
             }
-            
+
             if last_error.is_some() {
                 return Err(anyhow::anyhow!(
                     "Node {} failed liveness checks after {} attempts: {}",
@@ -134,7 +134,7 @@ impl NodeClient {
                 ));
             }
         }
-        
+
         // Step 2: Connect to NodeService with retry
         let mut node_client = None;
         for attempt in 0..=config.max_retries {
@@ -147,11 +147,13 @@ impl NodeClient {
                         system_client: None,
                         node_addr: addr.clone(),
                     };
-                    
+
                     match tokio_timeout(
                         config.health_check_timeout,
                         temp_client.ping("client".to_string(), 1),
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(Ok(_)) => {
                             node_client = Some(temp_client);
                             break;
@@ -184,19 +186,23 @@ impl NodeClient {
                 }
             }
         }
-        
-        let mut client = node_client.ok_or_else(|| anyhow::anyhow!(
-            "Failed to connect to node {} after {} attempts: {}",
-            addr,
-            config.max_retries + 1,
-            last_error.unwrap_or_else(|| "Unknown error".to_string())
-        ))?;
-        
+
+        let mut client = node_client.ok_or_else(|| {
+            anyhow::anyhow!(
+                "Failed to connect to node {} after {} attempts: {}",
+                addr,
+                config.max_retries + 1,
+                last_error.unwrap_or_else(|| "Unknown error".to_string())
+            )
+        })?;
+
         // Step 4: Wait for readiness (if enabled)
         if config.wait_for_readiness {
-            client.wait_for_readiness(config.readiness_timeout, config.readiness_poll_interval).await?;
+            client
+                .wait_for_readiness(config.readiness_timeout, config.readiness_poll_interval)
+                .await?;
         }
-        
+
         Ok(client)
     }
 
@@ -223,10 +229,7 @@ impl NodeClient {
     /// Check if node is alive (liveness probe) - SDK wrapper around core SystemService
     /// Uses core SystemServiceClient from proto crate
     #[cfg(feature = "grpc")]
-    async fn check_liveness_once(
-        addr: &str,
-        timeout_duration: StdDuration,
-    ) -> Result<bool> {
+    async fn check_liveness_once(addr: &str, timeout_duration: StdDuration) -> Result<bool> {
         // Use core SystemServiceClient (from proto crate)
         match SystemServiceClient::connect(addr.to_string()).await {
             Ok(mut client) => {
@@ -238,7 +241,7 @@ impl NodeClient {
                         Ok(inner.is_alive)
                     }
                     Ok(Err(_)) => Ok(false), // gRPC error means not alive
-                    Err(_) => Ok(false), // Timeout means not alive
+                    Err(_) => Ok(false),     // Timeout means not alive
                 }
             }
             Err(_) => Ok(false), // Can't connect means not alive
@@ -246,10 +249,7 @@ impl NodeClient {
     }
 
     #[cfg(not(feature = "grpc"))]
-    async fn check_liveness_once(
-        _addr: &str,
-        _timeout: StdDuration,
-    ) -> Result<bool> {
+    async fn check_liveness_once(_addr: &str, _timeout: StdDuration) -> Result<bool> {
         // Without grpc feature, assume alive (fallback to ping-based check)
         Ok(true)
     }
@@ -262,7 +262,7 @@ impl NodeClient {
         poll_interval: StdDuration,
     ) -> Result<()> {
         let start = std::time::Instant::now();
-        
+
         loop {
             if start.elapsed() > timeout {
                 return Err(anyhow::anyhow!(
@@ -271,7 +271,7 @@ impl NodeClient {
                     timeout
                 ));
             }
-            
+
             match self.check_readiness_once().await {
                 Ok(true) => return Ok(()),
                 Ok(false) => {
@@ -305,7 +305,7 @@ impl NodeClient {
                     }
                 }
             }
-            
+
             // Call core SystemService.readiness_probe() API
             if let Some(ref mut client) = self.system_client {
                 let request = Request::new(ReadinessProbeRequest {});
@@ -320,7 +320,7 @@ impl NodeClient {
                 Err(anyhow::anyhow!("SystemService client not available"))
             }
         }
-        
+
         #[cfg(not(feature = "grpc"))]
         {
             // Without grpc feature, assume ready (fallback)
@@ -336,14 +336,14 @@ impl NodeClient {
         let base_delay = config.initial_delay.as_millis() as u64;
         let exponential_delay = base_delay.saturating_mul(1 << attempt.min(10)); // Cap at 2^10
         let capped_delay = exponential_delay.min(config.max_delay.as_millis() as u64);
-        
+
         // Add jitter (0-25% of delay) - simple deterministic jitter based on attempt
         let jitter_range = capped_delay / 4;
         let jitter = (attempt as u64 * 7) % jitter_range; // Simple deterministic jitter
-        
+
         // Cap final result at max_delay (jitter can push it over)
         let final_delay = (capped_delay + jitter).min(config.max_delay.as_millis() as u64);
-        
+
         StdDuration::from_millis(final_delay)
     }
 
@@ -380,7 +380,13 @@ impl NodeClient {
         cluster: Option<String>,
         timeout_secs: u64,
     ) -> Result<ConnectNodesResponse> {
-        self.connect_nodes_with_health_check(addresses, cluster, timeout_secs, HealthCheckConfig::default()).await
+        self.connect_nodes_with_health_check(
+            addresses,
+            cluster,
+            timeout_secs,
+            HealthCheckConfig::default(),
+        )
+        .await
     }
 
     /// Connect to remote nodes with custom health check configuration
@@ -408,7 +414,7 @@ impl NodeClient {
 
         if health_config.check_liveness {
             use futures::future::join_all;
-            
+
             // Retry liveness checks with exponential backoff for each node
             let mut liveness_tasks = Vec::new();
             for addr in &addresses {
@@ -417,7 +423,12 @@ impl NodeClient {
                 liveness_tasks.push(async move {
                     let mut is_alive = false;
                     for attempt in 0..=config_clone.max_retries {
-                        match Self::check_liveness_once(&addr_clone, config_clone.health_check_timeout).await {
+                        match Self::check_liveness_once(
+                            &addr_clone,
+                            config_clone.health_check_timeout,
+                        )
+                        .await
+                        {
                             Ok(true) => {
                                 is_alive = true;
                                 break; // Node is alive, stop retrying
@@ -425,7 +436,8 @@ impl NodeClient {
                             Ok(false) | Err(_) => {
                                 is_alive = false;
                                 if attempt < config_clone.max_retries {
-                                    let delay = Self::exponential_backoff_internal(attempt, &config_clone);
+                                    let delay =
+                                        Self::exponential_backoff_internal(attempt, &config_clone);
                                     sleep(delay).await;
                                     continue;
                                 }
@@ -437,7 +449,7 @@ impl NodeClient {
             }
 
             let results = join_all(liveness_tasks).await;
-            
+
             for (addr, result) in results {
                 match result {
                     Ok(true) => {
@@ -463,7 +475,7 @@ impl NodeClient {
         // to handle cases where nodes are starting up slowly in Docker
         let mut resp_opt: Option<ConnectNodesResponse> = None;
         let mut last_error: Option<String> = None;
-        
+
         for attempt in 0..=health_config.max_retries {
             let req = ConnectNodesRequest {
                 node_addresses: alive_nodes.clone(),
@@ -495,7 +507,8 @@ impl NodeClient {
             None => {
                 // All retries failed, mark all nodes as failed
                 let mut all_failed = HashMap::new();
-                let error_msg = last_error.unwrap_or_else(|| "ConnectNodes API failed after retries".to_string());
+                let error_msg = last_error
+                    .unwrap_or_else(|| "ConnectNodes API failed after retries".to_string());
                 for addr in alive_nodes {
                     all_failed.insert(addr, error_msg.clone());
                 }
@@ -575,25 +588,25 @@ mod tests {
     #[test]
     fn test_exponential_backoff_internal() {
         let config = HealthCheckConfig::default();
-        
+
         // Test exponential backoff calculation
         // Formula: min(initial * 2^attempt, max) + jitter
-        
+
         // Attempt 0: should be around initial_delay + small jitter
         let delay_0 = NodeClient::exponential_backoff_internal(0, &config);
         assert!(delay_0 >= config.initial_delay);
         assert!(delay_0 <= config.initial_delay + config.initial_delay / 4); // Max jitter is 25%
-        
+
         // Attempt 1: should be around initial_delay * 2 + jitter
         let delay_1 = NodeClient::exponential_backoff_internal(1, &config);
         assert!(delay_1 >= config.initial_delay * 2);
         assert!(delay_1 <= config.initial_delay * 2 + (config.initial_delay * 2) / 4);
-        
+
         // Attempt 10+: should be capped at max_delay (including jitter)
         let delay_10 = NodeClient::exponential_backoff_internal(10, &config);
         // Note: With jitter, delay can be slightly over max_delay, but we cap it in the function
         assert!(delay_10 <= config.max_delay + config.max_delay / 4); // Allow for max jitter (25%)
-        
+
         // Verify config values are reasonable
         assert!(config.initial_delay < config.max_delay);
         assert!(config.health_check_timeout > StdDuration::ZERO);
@@ -609,7 +622,10 @@ mod tests {
         assert_eq!(config.max_delay, StdDuration::from_secs(10));
         assert_eq!(config.health_check_timeout, StdDuration::from_secs(10)); // Increased timeout
         assert_eq!(config.readiness_timeout, StdDuration::from_secs(60)); // Increased for Docker
-        assert_eq!(config.readiness_poll_interval, StdDuration::from_millis(1000)); // Longer poll interval
+        assert_eq!(
+            config.readiness_poll_interval,
+            StdDuration::from_millis(1000)
+        ); // Longer poll interval
         assert!(config.check_liveness);
         assert!(config.wait_for_readiness);
     }

@@ -23,9 +23,9 @@
 
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
-    use plexspaces_tuplespace::{Tuple, TupleField, Pattern, PatternField};
-    use plexspaces_tuplespace::storage::{TupleSpaceStorage, DynamoDBStorage};
     use chrono::Duration;
+    use plexspaces_tuplespace::storage::{DynamoDBStorage, TupleSpaceStorage};
+    use plexspaces_tuplespace::{Pattern, PatternField, Tuple, TupleField};
     use std::time::Duration as StdDuration;
 
     use plexspaces_common::test_helpers::dynamodb_local_available;
@@ -45,7 +45,7 @@ mod ddb_tests {
         let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
             .or_else(|_| std::env::var("PLEXSPACES_DDB_ENDPOINT_URL"))
             .unwrap_or_else(|_| "http://localhost:8000".to_string());
-        
+
         DynamoDBStorage::new(
             "us-east-1".to_string(),
             "plexspaces-tuplespace-test".to_string(),
@@ -70,10 +70,7 @@ mod ddb_tests {
         let storage = create_ddb_storage().await;
         let key = unique_key("key");
 
-        let tuple = Tuple::new(vec![
-            TupleField::String(key),
-            TupleField::Integer(42),
-        ]);
+        let tuple = Tuple::new(vec![TupleField::String(key), TupleField::Integer(42)]);
 
         let tuple_id = storage.write(tuple).await.unwrap();
         assert!(!tuple_id.is_empty());
@@ -88,8 +85,14 @@ mod ddb_tests {
         let prefix = unique_key("key");
 
         let tuples = vec![
-            Tuple::new(vec![TupleField::String(format!("{}1", prefix)), TupleField::Integer(1)]),
-            Tuple::new(vec![TupleField::String(format!("{}2", prefix)), TupleField::Integer(2)]),
+            Tuple::new(vec![
+                TupleField::String(format!("{}1", prefix)),
+                TupleField::Integer(1),
+            ]),
+            Tuple::new(vec![
+                TupleField::String(format!("{}2", prefix)),
+                TupleField::Integer(2),
+            ]),
         ];
 
         let tuple_ids = storage.write_batch(tuples).await.unwrap();
@@ -129,15 +132,21 @@ mod ddb_tests {
         let storage = create_ddb_storage().await;
         let prefix = unique_key("test");
 
-        storage.write(Tuple::new(vec![
-            TupleField::String(format!("{}1", prefix)),
-            TupleField::Integer(1),
-        ])).await.unwrap();
+        storage
+            .write(Tuple::new(vec![
+                TupleField::String(format!("{}1", prefix)),
+                TupleField::Integer(1),
+            ]))
+            .await
+            .unwrap();
 
-        storage.write(Tuple::new(vec![
-            TupleField::String(format!("{}2", prefix)),
-            TupleField::Integer(2),
-        ])).await.unwrap();
+        storage
+            .write(Tuple::new(vec![
+                TupleField::String(format!("{}2", prefix)),
+                TupleField::Integer(2),
+            ]))
+            .await
+            .unwrap();
 
         // Use a pattern that matches our test tuples specifically
         let pattern = Pattern::new(vec![
@@ -146,8 +155,15 @@ mod ddb_tests {
         ]);
 
         // Read all tuples and filter to our test prefix
-        let all_results = storage.read(Pattern::new(vec![PatternField::Wildcard, PatternField::Wildcard]), None).await.unwrap();
-        let results: Vec<_> = all_results.into_iter()
+        let all_results = storage
+            .read(
+                Pattern::new(vec![PatternField::Wildcard, PatternField::Wildcard]),
+                None,
+            )
+            .await
+            .unwrap();
+        let results: Vec<_> = all_results
+            .into_iter()
             .filter(|t| {
                 if let Some(TupleField::String(s)) = t.fields().first() {
                     s.starts_with(&prefix)
@@ -197,10 +213,13 @@ mod ddb_tests {
         let key = unique_key("key");
 
         for i in 1..=5 {
-            storage.write(Tuple::new(vec![
-                TupleField::String(key.clone()),
-                TupleField::Integer(i),
-            ])).await.unwrap();
+            storage
+                .write(Tuple::new(vec![
+                    TupleField::String(key.clone()),
+                    TupleField::Integer(i),
+                ]))
+                .await
+                .unwrap();
         }
 
         let pattern = Pattern::new(vec![
@@ -227,10 +246,13 @@ mod ddb_tests {
 
         assert!(!storage.exists(pattern.clone()).await.unwrap());
 
-        storage.write(Tuple::new(vec![
-            TupleField::String(key),
-            TupleField::Integer(42),
-        ])).await.unwrap();
+        storage
+            .write(Tuple::new(vec![
+                TupleField::String(key),
+                TupleField::Integer(42),
+            ]))
+            .await
+            .unwrap();
 
         assert!(storage.exists(pattern).await.unwrap());
     }
@@ -244,10 +266,13 @@ mod ddb_tests {
         let key = unique_key("key");
 
         for i in 1..=5 {
-            storage.write(Tuple::new(vec![
-                TupleField::String(key.clone()),
-                TupleField::Integer(i),
-            ])).await.unwrap();
+            storage
+                .write(Tuple::new(vec![
+                    TupleField::String(key.clone()),
+                    TupleField::Integer(i),
+                ]))
+                .await
+                .unwrap();
         }
 
         // Take all our test tuples to remove them
@@ -269,8 +294,14 @@ mod ddb_tests {
         }
         let storage = create_ddb_storage().await;
 
-        storage.write(Tuple::new(vec![TupleField::Integer(1)])).await.unwrap();
-        storage.write(Tuple::new(vec![TupleField::Integer(2)])).await.unwrap();
+        storage
+            .write(Tuple::new(vec![TupleField::Integer(1)]))
+            .await
+            .unwrap();
+        storage
+            .write(Tuple::new(vec![TupleField::Integer(2)]))
+            .await
+            .unwrap();
 
         let stats = storage.stats().await.unwrap();
         assert!(stats.tuple_count >= 2);
@@ -293,7 +324,10 @@ mod ddb_tests {
 
         let tuple_id = storage.write(tuple).await.unwrap();
 
-        let new_expiry = storage.renew_lease(&tuple_id, Some(std::time::Duration::from_secs(120))).await.unwrap();
+        let new_expiry = storage
+            .renew_lease(&tuple_id, Some(std::time::Duration::from_secs(120)))
+            .await
+            .unwrap();
         assert!(new_expiry > chrono::Utc::now());
     }
 
@@ -333,10 +367,13 @@ mod ddb_tests {
         let storage = create_ddb_storage().await;
         let key = unique_key("key");
 
-        storage.write(Tuple::new(vec![
-            TupleField::String(key),
-            TupleField::Integer(42),
-        ])).await.unwrap();
+        storage
+            .write(Tuple::new(vec![
+                TupleField::String(key),
+                TupleField::Integer(42),
+            ]))
+            .await
+            .unwrap();
 
         use plexspaces_tuplespace::FieldType;
         let pattern = Pattern::new(vec![
@@ -368,19 +405,23 @@ mod ddb_tests {
         let storage_clone = storage.clone();
         let pattern_for_read = pattern.clone();
         let read_handle = tokio::spawn(async move {
-            storage_clone.read(pattern_for_read, Some(std::time::Duration::from_secs(5))).await
+            storage_clone
+                .read(pattern_for_read, Some(std::time::Duration::from_secs(5)))
+                .await
         });
 
         // Wait a bit, then write tuple
         tokio::time::sleep(StdDuration::from_millis(100)).await;
-        storage.write(Tuple::new(vec![
-            TupleField::String(key),
-            TupleField::Integer(42),
-        ])).await.unwrap();
+        storage
+            .write(Tuple::new(vec![
+                TupleField::String(key),
+                TupleField::Integer(42),
+            ]))
+            .await
+            .unwrap();
 
         // Read should complete
         let results = read_handle.await.unwrap().unwrap();
         assert_eq!(results.len(), 1);
     }
 }
-

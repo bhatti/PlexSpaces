@@ -314,6 +314,34 @@ impl ObjectRegistryImpl {
         registration.tenant_id = tenant_id.to_string();
         registration.namespace = namespace.to_string();
 
+        if registration.object_type == ObjectType::ObjectTypeNode as i32
+            && !registration.node_id.is_empty()
+        {
+            let existing = self
+                .repository
+                .discover(
+                    ctx,
+                    &DiscoverFilter {
+                        object_type: Some(ObjectType::ObjectTypeNode),
+                        node_id: Some(registration.node_id.clone()),
+                        ..Default::default()
+                    },
+                    0,
+                    2,
+                )
+                .await?;
+
+            if existing
+                .iter()
+                .any(|item| item.object_id != registration.object_id)
+            {
+                return Err(ObjectRegistryError::InvalidInput(format!(
+                    "node_id '{}' is already registered to a different node object",
+                    registration.node_id
+                )));
+            }
+        }
+
         // Set timestamps
         let now = chrono::Utc::now();
         registration.created_at = Some(prost_types::Timestamp {
@@ -352,7 +380,9 @@ impl ObjectRegistryImpl {
         if !self.repository.exists(ctx, object_id).await? {
             return Err(ObjectRegistryError::ObjectNotFound(format!(
                 "Object '{}' not found in tenant '{}', namespace '{}'",
-                object_id, ctx.tenant_id(), ctx.namespace()
+                object_id,
+                ctx.tenant_id(),
+                ctx.namespace()
             )));
         }
 
@@ -480,7 +510,10 @@ impl ObjectRegistryImpl {
             ..Default::default()
         };
 
-        let results = self.repository.discover(ctx, &filter, offset, limit).await?;
+        let results = self
+            .repository
+            .discover(ctx, &filter, offset, limit)
+            .await?;
 
         // Filter by tenant if not admin
         if ctx.is_admin() {
@@ -630,12 +663,12 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
     > {
         let obj_type = object_type
             .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeUnspecified);
-        self.lookup(ctx, obj_type, object_id)
-            .await
-            .map_err(|e| {
-                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                    as Box<dyn std::error::Error + Send + Sync>
-            })
+        self.lookup(ctx, obj_type, object_id).await.map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
     }
 
     async fn lookup_full(
@@ -684,8 +717,10 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
         )
         .await
         .map_err(|e| {
-            Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                as Box<dyn std::error::Error + Send + Sync>
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
         })
     }
 
@@ -698,8 +733,10 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.unregister(ctx, object_type, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                    as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 
@@ -712,8 +749,10 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
         self.heartbeat(ctx, object_type, object_id)
             .await
             .map_err(|e| {
-                Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-                    as Box<dyn std::error::Error + Send + Sync>
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
             })
     }
 }
@@ -736,14 +775,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_and_lookup() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry = ObjectRegistryImpl::new(repo);
 
         let ctx = RequestContext::new_without_auth(
             "test-tenant".to_string(),
             "test-namespace".to_string(),
         );
-        let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
+        let registration =
+            create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
         registry.register(&ctx, registration.clone()).await.unwrap();
 
         let found = registry
@@ -759,7 +803,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_upsert() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry = ObjectRegistryImpl::new(repo);
 
         let ctx = RequestContext::new_without_auth(
@@ -785,14 +833,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_unregister() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry = ObjectRegistryImpl::new(repo);
 
         let ctx = RequestContext::new_without_auth(
             "test-tenant".to_string(),
             "test-namespace".to_string(),
         );
-        let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
+        let registration =
+            create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
         registry.register(&ctx, registration).await.unwrap();
 
         registry
@@ -809,15 +862,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_heartbeat() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+    async fn test_register_rejects_duplicate_node_id_for_node_objects() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry = ObjectRegistryImpl::new(repo);
 
         let ctx = RequestContext::new_without_auth(
             "test-tenant".to_string(),
             "test-namespace".to_string(),
         );
-        let registration = create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
+
+        let mut reg1 = create_test_registration("node-1", ObjectType::ObjectTypeNode);
+        reg1.node_id = "node-1".to_string();
+        reg1.object_category = "Node".to_string();
+        registry.register(&ctx, reg1).await.unwrap();
+
+        let mut reg2 = create_test_registration("_unknown_1", ObjectType::ObjectTypeNode);
+        reg2.node_id = "node-1".to_string();
+        reg2.object_category = "Node".to_string();
+
+        let result = registry.register(&ctx, reg2).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+
+        let ctx = RequestContext::new_without_auth(
+            "test-tenant".to_string(),
+            "test-namespace".to_string(),
+        );
+        let registration =
+            create_test_registration("test-actor@node1", ObjectType::ObjectTypeActor);
         registry.register(&ctx, registration).await.unwrap();
 
         // Update heartbeat
@@ -837,7 +922,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_discover_by_type() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry = ObjectRegistryImpl::new(repo);
 
         let ctx = RequestContext::new_without_auth(
@@ -873,7 +962,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_tenant_isolation() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry = ObjectRegistryImpl::new(repo);
 
         let ctx1 =
@@ -894,7 +987,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_count() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry = ObjectRegistryImpl::new(repo);
 
         let ctx = RequestContext::new_without_auth(
@@ -920,7 +1017,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_health_status() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry = ObjectRegistryImpl::new(repo);
 
         let ctx = RequestContext::new_without_auth(

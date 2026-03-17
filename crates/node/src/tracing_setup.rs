@@ -30,12 +30,7 @@
 //! - OpenTelemetry integration is optional (can be enabled via feature flags)
 //! - Supports multiple exporters (OTLP, Jaeger, Zipkin)
 
-use tracing_subscriber::{
-    fmt,
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
-    EnvFilter,
-};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 /// Initialize tracing with OpenTelemetry support
 ///
@@ -58,8 +53,7 @@ use tracing_subscriber::{
 /// ```
 pub async fn init_tracing() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Get log level from environment or use default
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     // Create tracing subscriber with formatting
     let subscriber = tracing_subscriber::registry()

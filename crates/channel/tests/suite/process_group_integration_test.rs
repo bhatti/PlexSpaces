@@ -35,7 +35,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use plexspaces_channel::{Channel, ChannelError};
-use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
+use plexspaces_proto::channel::v1::{
+    ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
+};
 use plexspaces_proto::common::v1::Message;
 use tokio::sync::RwLock;
 
@@ -84,7 +86,7 @@ impl MarketFeedSubscriber {
     async fn process_message(&self, message: &Message) -> bool {
         // Extract symbol from message headers
         let symbol = message.headers.get("symbol").cloned().unwrap_or_default();
-        
+
         if self.subscribed_symbols.contains(&symbol) {
             let mut counts = self.message_counts.write().await;
             if let Some(count) = counts.get_mut(&symbol) {
@@ -126,11 +128,15 @@ fn create_quote_message(symbol: &str, price: f64, volume: u64) -> Message {
     headers.insert("price".to_string(), price.to_string());
     headers.insert("volume".to_string(), volume.to_string());
     headers.insert("content-type".to_string(), "application/json".to_string());
-    
+
     Message {
         id: ulid::Ulid::new().to_string(),
         channel: "market-feed".to_string(),
-        payload: format!(r#"{{"symbol":"{}","price":{},"volume":{}}}"#, symbol, price, volume).into_bytes(),
+        payload: format!(
+            r#"{{"symbol":"{}","price":{},"volume":{}}}"#,
+            symbol, price, volume
+        )
+        .into_bytes(),
         headers,
         timestamp: Some(prost_types::Timestamp {
             seconds: chrono::Utc::now().timestamp(),
@@ -146,9 +152,14 @@ fn create_quote_message(symbol: &str, price: f64, volume: u64) -> Message {
 
 #[tokio::test]
 async fn test_inmemory_channel_market_feed() {
-    let config = create_channel_config("market-feed-memory", ChannelProvider::ChannelProviderInMemory);
-    let channel = plexspaces_channel::InMemoryChannel::new(config).await.unwrap();
-    
+    let config = create_channel_config(
+        "market-feed-memory",
+        ChannelProvider::ChannelProviderInMemory,
+    );
+    let channel = plexspaces_channel::InMemoryChannel::new(config)
+        .await
+        .unwrap();
+
     run_market_feed_test(Arc::new(channel), "InMemory").await;
 }
 
@@ -158,8 +169,9 @@ async fn test_inmemory_channel_market_feed() {
 
 #[tokio::test]
 async fn test_sqlite_channel_market_feed() {
-    let config = create_channel_config("market-feed-sqlite", ChannelProvider::ChannelProviderSqlite);
-    
+    let config =
+        create_channel_config("market-feed-sqlite", ChannelProvider::ChannelProviderSqlite);
+
     // Create SQLite channel (uses in-memory by default for tests)
     let mut sqlite_config = config.clone();
     sqlite_config.backend_config = Some(
@@ -170,10 +182,10 @@ async fn test_sqlite_channel_market_feed() {
                 wal_mode: true,
                 cleanup_acked: true,
                 cleanup_age_seconds: 3600,
-            }
-        )
+            },
+        ),
     );
-    
+
     match plexspaces_channel::create_channel(sqlite_config).await {
         Ok(channel) => {
             run_market_feed_test(Arc::from(channel), "SQLite").await;
@@ -194,7 +206,7 @@ async fn test_kafka_channel_market_feed() {
         eprintln!("Skipping Kafka test - KAFKA_BROKERS not set");
         return;
     }
-    
+
     let brokers = std::env::var("KAFKA_BROKERS").unwrap();
     let config = ChannelConfig {
         name: "market-feed-kafka".to_string(),
@@ -211,12 +223,12 @@ async fn test_kafka_channel_market_feed() {
                     partitions: 1,
                     replication_factor: 1,
                     ..Default::default()
-                }
-            )
+                },
+            ),
         ),
         ..Default::default()
     };
-    
+
     match plexspaces_channel::create_channel(config).await {
         Ok(channel) => {
             run_market_feed_test(Arc::from(channel), "Kafka").await;
@@ -237,7 +249,7 @@ async fn test_nats_channel_market_feed() {
         eprintln!("Skipping NATS test - NATS_URL not set");
         return;
     }
-    
+
     let servers = std::env::var("NATS_URL").unwrap();
     let config = ChannelConfig {
         name: "market-feed-nats".to_string(),
@@ -252,12 +264,12 @@ async fn test_nats_channel_market_feed() {
                     subject: "market-feed-test".to_string(),
                     queue_group: "market-feed-test-group".to_string(),
                     ..Default::default()
-                }
-            )
+                },
+            ),
         ),
         ..Default::default()
     };
-    
+
     match plexspaces_channel::create_channel(config).await {
         Ok(channel) => {
             run_market_feed_test(Arc::from(channel), "NATS").await;
@@ -278,11 +290,12 @@ async fn test_sqs_channel_market_feed() {
         eprintln!("Skipping SQS test - AWS_REGION or SQS_QUEUE_PREFIX not set");
         return;
     }
-    
+
     let region = std::env::var("AWS_REGION").unwrap();
-    let prefix = std::env::var("SQS_QUEUE_PREFIX").unwrap_or_else(|_| "plexspaces-test-".to_string());
+    let prefix =
+        std::env::var("SQS_QUEUE_PREFIX").unwrap_or_else(|_| "plexspaces-test-".to_string());
     let endpoint = std::env::var("SQS_ENDPOINT_URL").ok();
-    
+
     let config = ChannelConfig {
         name: "market-feed-sqs".to_string(),
         provider: ChannelProvider::ChannelProviderSqs as i32,
@@ -298,12 +311,12 @@ async fn test_sqs_channel_market_feed() {
                     visibility_timeout_seconds: 30,
                     message_retention_period_seconds: 345600,
                     ..Default::default()
-                }
-            )
+                },
+            ),
         ),
         ..Default::default()
     };
-    
+
     match plexspaces_channel::create_channel(config).await {
         Ok(channel) => {
             run_market_feed_test(Arc::from(channel), "SQS").await;
@@ -327,11 +340,14 @@ async fn test_sqs_channel_market_feed() {
 
 /// Run the market feed test scenario
 async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
-    println!("\n=== Running Market Feed Test with {} backend ===\n", backend_name);
-    
+    println!(
+        "\n=== Running Market Feed Test with {} backend ===\n",
+        backend_name
+    );
+
     // Stock symbols
     let symbols = vec!["AAPL", "GOOG", "META", "AMZN", "MSFT"];
-    
+
     // Create subscribers with different symbol sets
     let subscribers = vec![
         MarketFeedSubscriber::new("trader-1", vec!["AAPL".to_string(), "GOOG".to_string()]),
@@ -339,13 +355,13 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
         MarketFeedSubscriber::new("trader-3", vec!["MSFT".to_string(), "AAPL".to_string()]),
         MarketFeedSubscriber::new("analyst-1", symbols.iter().map(|s| s.to_string()).collect()),
     ];
-    
+
     // Message counts to send per symbol
     let messages_per_symbol = 10;
-    
+
     // Subscribe all subscribers (simulated - in real test would use channel.subscribe())
     // For this test, we'll publish messages and then receive them
-    
+
     // Send messages for each symbol
     let mut sent_counts: HashMap<String, u64> = HashMap::new();
     for symbol in &symbols {
@@ -353,7 +369,7 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
             let price = 100.0 + (i as f64 * 0.5);
             let volume = 1000 + (i as u64 * 100);
             let message = create_quote_message(symbol, price, volume);
-            
+
             match channel.send(message).await {
                 Ok(_) => {
                     *sent_counts.entry(symbol.to_string()).or_insert(0) += 1;
@@ -364,15 +380,15 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
             }
         }
     }
-    
+
     println!("Sent messages per symbol:");
     for (symbol, count) in &sent_counts {
         println!("  {}: {}", symbol, count);
     }
-    
+
     // Wait for messages to be delivered
     tokio::time::sleep(Duration::from_millis(500)).await;
-    
+
     // Receive messages and distribute to subscribers
     let received_messages = match channel.receive(100).await {
         Ok(messages) => messages,
@@ -381,44 +397,54 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
             vec![]
         }
     };
-    
+
     println!("\nReceived {} messages total", received_messages.len());
-    
+
     // Process messages through subscribers
     for message in &received_messages {
         for subscriber in &subscribers {
             subscriber.process_message(message).await;
         }
     }
-    
+
     // Verify subscriber counts
     println!("\nSubscriber message counts:");
     for subscriber in &subscribers {
-        println!("  {} (subscribed to {:?}):", subscriber.name, subscriber.subscribed_symbols);
+        println!(
+            "  {} (subscribed to {:?}):",
+            subscriber.name, subscriber.subscribed_symbols
+        );
         for symbol in &subscriber.subscribed_symbols {
             let count = subscriber.get_count(symbol).await;
             println!("    {}: {}", symbol, count);
         }
         println!("    Total: {}", subscriber.get_total());
     }
-    
+
     // Get channel stats
     let stats = channel.get_stats().await.unwrap_or_default();
     println!("\nChannel stats:");
     println!("  Messages sent: {}", stats.messages_sent);
     println!("  Messages received: {}", stats.messages_received);
     println!("  Messages pending: {}", stats.messages_pending);
-    
+
     // Assertions
     let total_sent: u64 = sent_counts.values().sum();
-    assert_eq!(total_sent, (symbols.len() * messages_per_symbol) as u64, 
-        "Should have sent {} messages", symbols.len() * messages_per_symbol);
-    
+    assert_eq!(
+        total_sent,
+        (symbols.len() * messages_per_symbol) as u64,
+        "Should have sent {} messages",
+        symbols.len() * messages_per_symbol
+    );
+
     // The analyst subscriber should have received all messages
     let analyst = &subscribers[3];
-    assert_eq!(analyst.get_total(), received_messages.len() as u64,
-        "Analyst should have processed all received messages");
-    
+    assert_eq!(
+        analyst.get_total(),
+        received_messages.len() as u64,
+        "Analyst should have processed all received messages"
+    );
+
     println!("\n=== {} backend test passed! ===\n", backend_name);
 }
 
@@ -429,27 +455,35 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
 #[tokio::test]
 async fn test_multi_node_market_feed() {
     println!("\n=== Multi-Node Market Feed Test ===\n");
-    
+
     // This test simulates multiple nodes with actors subscribing to different quotes
     // Uses in-memory channels for simplicity
-    
+
     // Create channels for each "node"
     let node1_channel = Arc::new(
-        plexspaces_channel::InMemoryChannel::new(
-            create_channel_config("node1-market", ChannelProvider::ChannelProviderInMemory)
-        ).await.unwrap()
+        plexspaces_channel::InMemoryChannel::new(create_channel_config(
+            "node1-market",
+            ChannelProvider::ChannelProviderInMemory,
+        ))
+        .await
+        .unwrap(),
     );
-    
+
     let node2_channel = Arc::new(
-        plexspaces_channel::InMemoryChannel::new(
-            create_channel_config("node2-market", ChannelProvider::ChannelProviderInMemory)
-        ).await.unwrap()
+        plexspaces_channel::InMemoryChannel::new(create_channel_config(
+            "node2-market",
+            ChannelProvider::ChannelProviderInMemory,
+        ))
+        .await
+        .unwrap(),
     );
-    
+
     // Create subscribers on each node
-    let node1_subscriber = MarketFeedSubscriber::new("node1-trader", vec!["AAPL".to_string(), "GOOG".to_string()]);
-    let node2_subscriber = MarketFeedSubscriber::new("node2-trader", vec!["META".to_string(), "AMZN".to_string()]);
-    
+    let node1_subscriber =
+        MarketFeedSubscriber::new("node1-trader", vec!["AAPL".to_string(), "GOOG".to_string()]);
+    let node2_subscriber =
+        MarketFeedSubscriber::new("node2-trader", vec!["META".to_string(), "AMZN".to_string()]);
+
     // Send quotes to each node's channel
     for i in 0..5 {
         // Node 1 receives AAPL and GOOG
@@ -457,35 +491,49 @@ async fn test_multi_node_market_feed() {
         let goog_msg = create_quote_message("GOOG", 2800.0 + i as f64, 500);
         node1_channel.send(aapl_msg).await.unwrap();
         node1_channel.send(goog_msg).await.unwrap();
-        
+
         // Node 2 receives META and AMZN
         let meta_msg = create_quote_message("META", 300.0 + i as f64, 2000);
         let amzn_msg = create_quote_message("AMZN", 3400.0 + i as f64, 800);
         node2_channel.send(meta_msg).await.unwrap();
         node2_channel.send(amzn_msg).await.unwrap();
     }
-    
+
     // Wait for messages
     tokio::time::sleep(Duration::from_millis(100)).await;
-    
+
     // Receive and process on each node
     let node1_messages = node1_channel.receive(100).await.unwrap();
     for msg in &node1_messages {
         node1_subscriber.process_message(msg).await;
     }
-    
+
     let node2_messages = node2_channel.receive(100).await.unwrap();
     for msg in &node2_messages {
         node2_subscriber.process_message(msg).await;
     }
-    
+
     // Verify counts
-    println!("Node 1 subscriber received {} messages", node1_subscriber.get_total());
-    println!("Node 2 subscriber received {} messages", node2_subscriber.get_total());
-    
-    assert_eq!(node1_subscriber.get_total(), 10, "Node 1 should receive 10 messages (5 AAPL + 5 GOOG)");
-    assert_eq!(node2_subscriber.get_total(), 10, "Node 2 should receive 10 messages (5 META + 5 AMZN)");
-    
+    println!(
+        "Node 1 subscriber received {} messages",
+        node1_subscriber.get_total()
+    );
+    println!(
+        "Node 2 subscriber received {} messages",
+        node2_subscriber.get_total()
+    );
+
+    assert_eq!(
+        node1_subscriber.get_total(),
+        10,
+        "Node 1 should receive 10 messages (5 AAPL + 5 GOOG)"
+    );
+    assert_eq!(
+        node2_subscriber.get_total(),
+        10,
+        "Node 2 should receive 10 messages (5 META + 5 AMZN)"
+    );
+
     println!("\n=== Multi-Node Market Feed Test Passed! ===\n");
 }
 
@@ -496,11 +544,11 @@ async fn test_multi_node_market_feed() {
 #[tokio::test]
 async fn test_channel_backend_priority_selection() {
     use plexspaces_proto::channel::v1::ChannelProvider;
-    
+
     println!("\n=== Channel Backend Priority Selection Test ===\n");
-    
+
     // Test that undefined backend (0) selects the appropriate backend based on config
-    
+
     // With no config, should default to InMemory
     let config_no_backend = ChannelConfig {
         name: "test-priority".to_string(),
@@ -511,12 +559,12 @@ async fn test_channel_backend_priority_selection() {
         backend_config: None,
         ..Default::default()
     };
-    
+
     // Backend 0 is InMemory in the proto enum
     let backend = ChannelProvider::try_from(config_no_backend.provider)
         .unwrap_or(ChannelProvider::ChannelProviderInMemory);
     assert_eq!(backend, ChannelProvider::ChannelProviderInMemory);
-    
+
     // With Kafka config, should use Kafka
     let config_kafka = ChannelConfig {
         name: "test-kafka".to_string(),
@@ -530,16 +578,16 @@ async fn test_channel_backend_priority_selection() {
                     brokers: vec!["localhost:9092".to_string()],
                     topic: "test".to_string(),
                     ..Default::default()
-                }
-            )
+                },
+            ),
         ),
         ..Default::default()
     };
-    
+
     let backend_kafka = ChannelProvider::try_from(config_kafka.provider)
         .unwrap_or(ChannelProvider::ChannelProviderInMemory);
     assert_eq!(backend_kafka, ChannelProvider::ChannelProviderKafka);
-    
+
     println!("Backend priority selection verified!");
     println!("\n=== Channel Backend Priority Selection Test Passed! ===\n");
 }
@@ -551,15 +599,21 @@ async fn test_channel_backend_priority_selection() {
 #[tokio::test]
 async fn test_high_throughput_market_feed() {
     println!("\n=== High-Throughput Market Feed Test ===\n");
-    
+
     let config = create_channel_config("high-throughput", ChannelProvider::ChannelProviderInMemory);
-    let channel = Arc::new(plexspaces_channel::InMemoryChannel::new(config).await.unwrap());
-    
-    let symbols = vec!["AAPL", "GOOG", "META", "AMZN", "MSFT", "NFLX", "TSLA", "NVDA"];
+    let channel = Arc::new(
+        plexspaces_channel::InMemoryChannel::new(config)
+            .await
+            .unwrap(),
+    );
+
+    let symbols = vec![
+        "AAPL", "GOOG", "META", "AMZN", "MSFT", "NFLX", "TSLA", "NVDA",
+    ];
     let messages_per_symbol = 100;
-    
+
     let start = std::time::Instant::now();
-    
+
     // Send many messages concurrently
     let mut handles = vec![];
     for symbol in &symbols {
@@ -573,31 +627,38 @@ async fn test_high_throughput_market_feed() {
         });
         handles.push(handle);
     }
-    
+
     // Wait for all sends to complete
     for handle in handles {
         handle.await.unwrap();
     }
-    
+
     let send_duration = start.elapsed();
     let total_messages = symbols.len() * messages_per_symbol;
-    
+
     println!("Sent {} messages in {:?}", total_messages, send_duration);
-    println!("Throughput: {:.2} messages/second", 
-        total_messages as f64 / send_duration.as_secs_f64());
-    
+    println!(
+        "Throughput: {:.2} messages/second",
+        total_messages as f64 / send_duration.as_secs_f64()
+    );
+
     // Receive all messages
     tokio::time::sleep(Duration::from_millis(100)).await;
     let received = channel.receive(1000).await.unwrap();
-    
+
     println!("Received {} messages", received.len());
-    
+
     let stats = channel.get_stats().await.unwrap_or_default();
-    println!("Channel stats: sent={}, received={}, pending={}",
-        stats.messages_sent, stats.messages_received, stats.messages_pending);
-    
-    assert_eq!(stats.messages_sent, total_messages as u64,
-        "Should have sent {} messages", total_messages);
-    
+    println!(
+        "Channel stats: sent={}, received={}, pending={}",
+        stats.messages_sent, stats.messages_received, stats.messages_pending
+    );
+
+    assert_eq!(
+        stats.messages_sent, total_messages as u64,
+        "Should have sent {} messages",
+        total_messages
+    );
+
     println!("\n=== High-Throughput Market Feed Test Passed! ===\n");
 }

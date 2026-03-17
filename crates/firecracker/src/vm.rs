@@ -260,8 +260,7 @@ impl FirecrackerVm {
 
         // Generate socket path if not specified
         if self.config.socket_path.is_empty() {
-            self.config.socket_path =
-                format!("/tmp/firecracker-{}.sock", self.config.vm_id);
+            self.config.socket_path = format!("/tmp/firecracker-{}.sock", self.config.vm_id);
         }
 
         // Remove old socket if it exists
@@ -269,24 +268,20 @@ impl FirecrackerVm {
 
         // Spawn Firecracker process
         let mut cmd = Command::new(&self.firecracker_binary);
-        cmd.arg("--api-sock")
-            .arg(&self.config.socket_path);
-        
+        cmd.arg("--api-sock").arg(&self.config.socket_path);
+
         // Add --no-seccomp flag if requested (needed in Docker/emulated environments)
         if self.no_seccomp {
             cmd.arg("--no-seccomp");
         }
-        
+
         let mut child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| {
-                FirecrackerError::VmCreationFailed(format!(
-                    "Failed to spawn Firecracker: {}",
-                    e
-                ))
+                FirecrackerError::VmCreationFailed(format!("Failed to spawn Firecracker: {}", e))
             })?;
 
         // Wait for socket to be created (up to 1 second)
@@ -305,16 +300,17 @@ impl FirecrackerVm {
                     use tokio::io::AsyncReadExt;
                     let _ = stderr.read_to_string(&mut stderr_output).await;
                 }
-                
+
                 let error_msg = if !stderr_output.trim().is_empty() {
                     format!(
                         "Firecracker process exited with status: {}. Stderr: {}",
-                        status, stderr_output.trim()
+                        status,
+                        stderr_output.trim()
                     )
                 } else {
                     format!("Firecracker process exited with status: {}", status)
                 };
-                
+
                 return Err(FirecrackerError::VmCreationFailed(error_msg));
             }
         }
@@ -328,7 +324,7 @@ impl FirecrackerVm {
                     use tokio::io::AsyncReadExt;
                     let _ = stderr.read_to_string(&mut stderr_output).await;
                 }
-                
+
                 let error_msg = if !stderr_output.trim().is_empty() {
                     format!(
                         "Firecracker process exited with status: {} before socket was created. Stderr: {}",
@@ -340,10 +336,10 @@ impl FirecrackerVm {
                         status
                     )
                 };
-                
+
                 return Err(FirecrackerError::VmCreationFailed(error_msg));
             }
-            
+
             return Err(FirecrackerError::VmCreationFailed(
                 "Firecracker socket not created within timeout".to_string(),
             ));
@@ -680,6 +676,9 @@ mod tests {
         let mut vm = FirecrackerVm::create(config).await.unwrap();
 
         vm.set_firecracker_binary("/custom/path/firecracker");
-        assert_eq!(vm.firecracker_binary, PathBuf::from("/custom/path/firecracker"));
+        assert_eq!(
+            vm.firecracker_binary,
+            PathBuf::from("/custom/path/firecracker")
+        );
     }
 }

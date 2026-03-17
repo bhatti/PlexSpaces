@@ -29,9 +29,7 @@
 
 use plexspaces_core::{ObjectRegistry, RequestContext};
 use plexspaces_proto::{
-    common::v1::ResourceSpec,
-    node::v1::NodeCapacity,
-    object_registry::v1::ObjectType,
+    common::v1::ResourceSpec, node::v1::NodeCapacity, object_registry::v1::ObjectType,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -113,7 +111,7 @@ impl CapacityTracker {
                 None, // capabilities
                 None, // labels (we'll filter by node labels separately)
                 None, // health_status
-                0, // offset
+                0,    // offset
                 1000, // limit
             )
             .await
@@ -211,14 +209,10 @@ impl CapacityTracker {
                 .unwrap_or_else(|| total.cpu_cores - allocated.cpu_cores),
             memory_bytes: Self::get_metric_f64(&registration.metrics, "available_memory_mb")
                 .map(|mb| (mb * 1024.0 * 1024.0) as u64)
-                .unwrap_or_else(|| {
-                    total.memory_bytes.saturating_sub(allocated.memory_bytes)
-                }),
+                .unwrap_or_else(|| total.memory_bytes.saturating_sub(allocated.memory_bytes)),
             disk_bytes: Self::get_metric_f64(&registration.metrics, "available_disk_mb")
                 .map(|mb| (mb * 1024.0 * 1024.0) as u64)
-                .unwrap_or_else(|| {
-                    total.disk_bytes.saturating_sub(allocated.disk_bytes)
-                }),
+                .unwrap_or_else(|| total.disk_bytes.saturating_sub(allocated.disk_bytes)),
             gpu_count: Self::get_metric_f64(&registration.metrics, "available_gpu_count")
                 .map(|g| g as u32)
                 .unwrap_or_else(|| total.gpu_count.saturating_sub(allocated.gpu_count)),
@@ -241,10 +235,7 @@ impl CapacityTracker {
     }
 
     /// Get metric value as f64 from metrics map
-    fn get_metric_f64(
-        metrics: &HashMap<String, f64>,
-        key: &str,
-    ) -> Option<f64> {
+    fn get_metric_f64(metrics: &HashMap<String, f64>, key: &str) -> Option<f64> {
         metrics.get(key).copied()
     }
 
@@ -254,9 +245,9 @@ impl CapacityTracker {
         node_labels: &HashMap<String, String>,
     ) -> bool {
         // All required labels must be present and match
-        required_labels.iter().all(|(key, value)| {
-            node_labels.get(key).map_or(false, |v| v == value)
-        })
+        required_labels
+            .iter()
+            .all(|(key, value)| node_labels.get(key).map_or(false, |v| v == value))
     }
 }
 
@@ -272,7 +263,7 @@ mod tests {
         labels: HashMap<String, String>,
     ) -> ObjectRegistration {
         use plexspaces_proto::common::v1::Metadata;
-        
+
         ObjectRegistration {
             object_id: node_id.to_string(),
             object_name: node_id.to_string(),
@@ -293,7 +284,7 @@ mod tests {
                 updated_by: String::new(),
             }),
             health_status: 1, // Healthy
-            labels: vec![], // Labels are in metadata, not here
+            labels: vec![],   // Labels are in metadata, not here
             metrics,
             created_at: None,
             updated_at: None,
@@ -324,15 +315,24 @@ mod tests {
 
         assert!(capacity.total.is_some());
         assert_eq!(capacity.total.as_ref().unwrap().cpu_cores, 4.0);
-        assert_eq!(capacity.total.as_ref().unwrap().memory_bytes, 8192 * 1024 * 1024);
+        assert_eq!(
+            capacity.total.as_ref().unwrap().memory_bytes,
+            8192 * 1024 * 1024
+        );
 
         assert!(capacity.allocated.is_some());
         assert_eq!(capacity.allocated.as_ref().unwrap().cpu_cores, 1.0);
-        assert_eq!(capacity.allocated.as_ref().unwrap().memory_bytes, 1024 * 1024 * 1024);
+        assert_eq!(
+            capacity.allocated.as_ref().unwrap().memory_bytes,
+            1024 * 1024 * 1024
+        );
 
         assert!(capacity.available.is_some());
         assert_eq!(capacity.available.as_ref().unwrap().cpu_cores, 3.0);
-        assert_eq!(capacity.available.as_ref().unwrap().memory_bytes, 7168 * 1024 * 1024);
+        assert_eq!(
+            capacity.available.as_ref().unwrap().memory_bytes,
+            7168 * 1024 * 1024
+        );
     }
 
     #[tokio::test]
@@ -351,13 +351,20 @@ mod tests {
 
         assert!(capacity.available.is_some());
         assert_eq!(capacity.available.as_ref().unwrap().cpu_cores, 3.0);
-        assert_eq!(capacity.available.as_ref().unwrap().memory_bytes, 7168 * 1024 * 1024);
+        assert_eq!(
+            capacity.available.as_ref().unwrap().memory_bytes,
+            7168 * 1024 * 1024
+        );
     }
 
     #[tokio::test]
     async fn test_get_node_capacity() {
         use plexspaces_core::RequestContext;
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
 
         // Register a node
@@ -381,19 +388,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_node_capacity_not_found() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
         let tracker = CapacityTracker::new(registry);
         let ctx = RequestContext::new_without_auth(String::new(), String::new());
 
-        let capacity = tracker.get_node_capacity(&ctx, "nonexistent").await.unwrap();
+        let capacity = tracker
+            .get_node_capacity(&ctx, "nonexistent")
+            .await
+            .unwrap();
         assert!(capacity.is_none());
     }
 
     #[tokio::test]
     async fn test_list_node_capacities() {
         use plexspaces_core::RequestContext;
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
 
         // Register two nodes
@@ -421,13 +439,22 @@ mod tests {
         registry.register(&ctx, registration2).await.unwrap();
 
         // Verify nodes are registered before creating tracker
-        let node1 = registry.lookup(&ctx, "node-1", Some(ObjectType::ObjectTypeNode)).await.unwrap();
-        let node2 = registry.lookup(&ctx, "node-2", Some(ObjectType::ObjectTypeNode)).await.unwrap();
+        let node1 = registry
+            .lookup(&ctx, "node-1", Some(ObjectType::ObjectTypeNode))
+            .await
+            .unwrap();
+        let node2 = registry
+            .lookup(&ctx, "node-2", Some(ObjectType::ObjectTypeNode))
+            .await
+            .unwrap();
         assert!(node1.is_some(), "node-1 should be registered");
         assert!(node2.is_some(), "node-2 should be registered");
-        
+
         let tracker = CapacityTracker::new(registry);
-        let capacities = tracker.list_node_capacities(&ctx, None, None).await.unwrap();
+        let capacities = tracker
+            .list_node_capacities(&ctx, None, None)
+            .await
+            .unwrap();
 
         assert_eq!(capacities.len(), 2);
         assert!(capacities.contains_key("node-1"));
@@ -436,7 +463,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_node_capacities_filter_by_labels() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
 
         // Register two nodes with different labels
@@ -458,11 +489,17 @@ mod tests {
         registry.register(&ctx, registration2).await.unwrap();
 
         // Verify nodes are registered before creating tracker
-        let node1 = registry.lookup(&ctx, "node-1", Some(ObjectType::ObjectTypeNode)).await.unwrap();
-        let node2 = registry.lookup(&ctx, "node-2", Some(ObjectType::ObjectTypeNode)).await.unwrap();
+        let node1 = registry
+            .lookup(&ctx, "node-1", Some(ObjectType::ObjectTypeNode))
+            .await
+            .unwrap();
+        let node2 = registry
+            .lookup(&ctx, "node-2", Some(ObjectType::ObjectTypeNode))
+            .await
+            .unwrap();
         assert!(node1.is_some(), "node-1 should be registered");
         assert!(node2.is_some(), "node-2 should be registered");
-        
+
         let tracker = CapacityTracker::new(registry);
 
         // Filter by zone=us-west
@@ -481,7 +518,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_node_capacities_filter_by_min_resources() {
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry: Arc<dyn ObjectRegistry> = Arc::new(ObjectRegistryImpl::new(repo));
 
         // Register two nodes with different capacities
@@ -505,11 +546,17 @@ mod tests {
         registry.register(&ctx, registration2).await.unwrap();
 
         // Verify nodes are registered before creating tracker
-        let node1 = registry.lookup(&ctx, "node-1", Some(ObjectType::ObjectTypeNode)).await.unwrap();
-        let node2 = registry.lookup(&ctx, "node-2", Some(ObjectType::ObjectTypeNode)).await.unwrap();
+        let node1 = registry
+            .lookup(&ctx, "node-1", Some(ObjectType::ObjectTypeNode))
+            .await
+            .unwrap();
+        let node2 = registry
+            .lookup(&ctx, "node-2", Some(ObjectType::ObjectTypeNode))
+            .await
+            .unwrap();
         assert!(node1.is_some(), "node-1 should be registered");
         assert!(node2.is_some(), "node-2 should be registered");
-        
+
         let tracker = CapacityTracker::new(registry);
 
         // Filter by minimum 4 CPU cores
@@ -522,7 +569,11 @@ mod tests {
         };
 
         let capacities = tracker
-            .list_node_capacities(&RequestContext::new_without_auth(String::new(), String::new()), None, Some(&min_resources))
+            .list_node_capacities(
+                &RequestContext::new_without_auth(String::new(), String::new()),
+                None,
+                Some(&min_resources),
+            )
             .await
             .unwrap();
 

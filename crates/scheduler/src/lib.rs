@@ -31,15 +31,15 @@
 //! - **Node Selector**: Selects best node based on resources and labels
 //! - **Capacity Tracker**: Tracks node capacity via ObjectRegistry
 
-pub mod service;
 pub mod background;
-pub mod state_store;
-pub mod node_selector;
 pub mod capacity_tracker;
+pub mod node_selector;
+pub mod service;
+pub mod state_store;
 pub mod task_router;
 
 pub use service::SchedulingServiceImpl;
-pub use task_router::{TaskRouter, RoutingStrategy, TaskRouterError, TaskRouterResult};
+pub use task_router::{RoutingStrategy, TaskRouter, TaskRouterError, TaskRouterResult};
 
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 pub use state_store::sql::SqliteSchedulingStateStore;

@@ -64,12 +64,18 @@ pub enum ElasticPoolError {
 impl From<ElasticPoolError> for ElasticPoolErrorProto {
     fn from(err: ElasticPoolError) -> Self {
         match err {
-            ElasticPoolError::PoolNotFound(_) => ElasticPoolErrorProto::ElasticPoolErrorPoolNotFound,
-            ElasticPoolError::CheckoutTimeout(_) => ElasticPoolErrorProto::ElasticPoolErrorCheckoutTimeout,
+            ElasticPoolError::PoolNotFound(_) => {
+                ElasticPoolErrorProto::ElasticPoolErrorPoolNotFound
+            }
+            ElasticPoolError::CheckoutTimeout(_) => {
+                ElasticPoolErrorProto::ElasticPoolErrorCheckoutTimeout
+            }
             ElasticPoolError::PoolExhausted => ElasticPoolErrorProto::ElasticPoolErrorPoolExhausted,
             ElasticPoolError::CircuitOpen => ElasticPoolErrorProto::ElasticPoolErrorCircuitOpen,
             ElasticPoolError::PoolDraining => ElasticPoolErrorProto::ElasticPoolErrorPoolDraining,
-            ElasticPoolError::InvalidConfig(_) => ElasticPoolErrorProto::ElasticPoolErrorInvalidConfig,
+            ElasticPoolError::InvalidConfig(_) => {
+                ElasticPoolErrorProto::ElasticPoolErrorInvalidConfig
+            }
             ElasticPoolError::ActorError(_) => ElasticPoolErrorProto::ElasticPoolErrorActorError,
         }
     }
@@ -78,14 +84,24 @@ impl From<ElasticPoolError> for ElasticPoolErrorProto {
 impl From<ElasticPoolErrorProto> for ElasticPoolError {
     fn from(proto: ElasticPoolErrorProto) -> Self {
         match proto {
-            ElasticPoolErrorProto::ElasticPoolErrorUnspecified => ElasticPoolError::ActorError("Unspecified error".to_string()),
-            ElasticPoolErrorProto::ElasticPoolErrorPoolNotFound => ElasticPoolError::PoolNotFound("Pool not found".to_string()),
-            ElasticPoolErrorProto::ElasticPoolErrorCheckoutTimeout => ElasticPoolError::CheckoutTimeout(Duration::from_secs(0)),
+            ElasticPoolErrorProto::ElasticPoolErrorUnspecified => {
+                ElasticPoolError::ActorError("Unspecified error".to_string())
+            }
+            ElasticPoolErrorProto::ElasticPoolErrorPoolNotFound => {
+                ElasticPoolError::PoolNotFound("Pool not found".to_string())
+            }
+            ElasticPoolErrorProto::ElasticPoolErrorCheckoutTimeout => {
+                ElasticPoolError::CheckoutTimeout(Duration::from_secs(0))
+            }
             ElasticPoolErrorProto::ElasticPoolErrorPoolExhausted => ElasticPoolError::PoolExhausted,
             ElasticPoolErrorProto::ElasticPoolErrorCircuitOpen => ElasticPoolError::CircuitOpen,
             ElasticPoolErrorProto::ElasticPoolErrorPoolDraining => ElasticPoolError::PoolDraining,
-            ElasticPoolErrorProto::ElasticPoolErrorInvalidConfig => ElasticPoolError::InvalidConfig("Invalid config".to_string()),
-            ElasticPoolErrorProto::ElasticPoolErrorActorError => ElasticPoolError::ActorError("Actor error".to_string()),
+            ElasticPoolErrorProto::ElasticPoolErrorInvalidConfig => {
+                ElasticPoolError::InvalidConfig("Invalid config".to_string())
+            }
+            ElasticPoolErrorProto::ElasticPoolErrorActorError => {
+                ElasticPoolError::ActorError("Actor error".to_string())
+            }
         }
     }
 }
@@ -852,11 +868,17 @@ mod tests {
 
         pool.pause_scaling().await.unwrap();
         let metrics = pool.get_metrics().await.unwrap();
-        assert_eq!(metrics.scaling_state, ScalingState::ScalingStatePaused as i32);
+        assert_eq!(
+            metrics.scaling_state,
+            ScalingState::ScalingStatePaused as i32
+        );
 
         pool.resume_scaling().await.unwrap();
         let metrics = pool.get_metrics().await.unwrap();
-        assert_eq!(metrics.scaling_state, ScalingState::ScalingStateStable as i32);
+        assert_eq!(
+            metrics.scaling_state,
+            ScalingState::ScalingStateStable as i32
+        );
     }
 
     #[tokio::test]

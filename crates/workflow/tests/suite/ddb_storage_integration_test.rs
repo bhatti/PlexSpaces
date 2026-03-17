@@ -24,8 +24,8 @@
 
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
-    use plexspaces_workflow::*;
     use plexspaces_core::RequestContext;
+    use plexspaces_workflow::*;
     use serde_json::json;
     use std::collections::HashMap;
     use std::time::Duration;
@@ -47,7 +47,7 @@ mod ddb_tests {
         let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
             .or_else(|_| std::env::var("PLEXSPACES_DDB_ENDPOINT_URL"))
             .unwrap_or_else(|_| "http://localhost:8000".to_string());
-        
+
         DynamoDBWorkflowStorage::new(
             "us-east-1".to_string(),
             "plexspaces-workflow-test".to_string(),
@@ -69,7 +69,7 @@ mod ddb_tests {
         let unique_id = Ulid::new().to_string();
         RequestContext::new_without_auth(format!("tenant2-{}", unique_id), "default".to_string())
     }
-    
+
     /// Helper to create a default test RequestContext with unique tenant ID
     fn default_ctx() -> RequestContext {
         use ulid::Ulid;
@@ -99,7 +99,10 @@ mod ddb_tests {
 
         storage.save_definition(&ctx, &definition).await.unwrap();
 
-        let retrieved = storage.get_definition(&ctx, "test-workflow", "1.0").await.unwrap();
+        let retrieved = storage
+            .get_definition(&ctx, "test-workflow", "1.0")
+            .await
+            .unwrap();
         assert_eq!(retrieved.id, "test-workflow");
         assert_eq!(retrieved.name, "Test Workflow");
         assert_eq!(retrieved.version, "1.0");
@@ -126,7 +129,10 @@ mod ddb_tests {
         definition.name = "Updated Workflow".to_string();
         storage.save_definition(&ctx, &definition).await.unwrap();
 
-        let retrieved = storage.get_definition(&ctx, "test-workflow", "1.0").await.unwrap();
+        let retrieved = storage
+            .get_definition(&ctx, "test-workflow", "1.0")
+            .await
+            .unwrap();
         assert_eq!(retrieved.name, "Updated Workflow");
     }
 
@@ -201,7 +207,10 @@ mod ddb_tests {
         storage.save_definition(&ctx, &def1).await.unwrap();
         storage.save_definition(&ctx, &def2).await.unwrap();
 
-        let definitions = storage.list_definitions(&ctx, Some("Credit")).await.unwrap();
+        let definitions = storage
+            .list_definitions(&ctx, Some("Credit"))
+            .await
+            .unwrap();
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].name, "Credit Workflow");
     }
@@ -223,7 +232,10 @@ mod ddb_tests {
         };
 
         storage.save_definition(&ctx, &definition).await.unwrap();
-        storage.delete_definition(&ctx, "test-workflow", "1.0").await.unwrap();
+        storage
+            .delete_definition(&ctx, "test-workflow", "1.0")
+            .await
+            .unwrap();
 
         let result = storage.get_definition(&ctx, "test-workflow", "1.0").await;
         assert!(result.is_err());
@@ -253,7 +265,13 @@ mod ddb_tests {
 
         // Create execution
         let execution_id = storage
-            .create_execution(&ctx, "test-workflow", "1.0", json!({"input": "test"}), HashMap::new())
+            .create_execution(
+                &ctx,
+                "test-workflow",
+                "1.0",
+                json!({"input": "test"}),
+                HashMap::new(),
+            )
             .await
             .unwrap();
 
@@ -321,7 +339,10 @@ mod ddb_tests {
             .await
             .unwrap();
 
-        storage.update_execution_status(&ctx, &execution_id, ExecutionStatus::Running).await.unwrap();
+        storage
+            .update_execution_status(&ctx, &execution_id, ExecutionStatus::Running)
+            .await
+            .unwrap();
 
         let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         assert_eq!(execution.status, ExecutionStatus::Running);
@@ -352,16 +373,29 @@ mod ddb_tests {
 
         // Update with correct version
         storage
-            .update_execution_status_with_version(&ctx, &execution_id, ExecutionStatus::Running, Some(1))
+            .update_execution_status_with_version(
+                &ctx,
+                &execution_id,
+                ExecutionStatus::Running,
+                Some(1),
+            )
             .await
             .unwrap();
 
         // Try to update with wrong version (should fail)
         let result = storage
-            .update_execution_status_with_version(&ctx, &execution_id, ExecutionStatus::Completed, Some(1))
+            .update_execution_status_with_version(
+                &ctx,
+                &execution_id,
+                ExecutionStatus::Completed,
+                Some(1),
+            )
             .await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), WorkflowError::ConcurrentUpdate(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            WorkflowError::ConcurrentUpdate(_)
+        ));
     }
 
     #[tokio::test]
@@ -427,7 +461,10 @@ mod ddb_tests {
         let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         let version = execution.version;
 
-        storage.transfer_ownership(&ctx, &execution_id, "node-2", version).await.unwrap();
+        storage
+            .transfer_ownership(&ctx, &execution_id, "node-2", version)
+            .await
+            .unwrap();
 
         let execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         assert_eq!(execution.node_id, Some("node-2".to_string()));
@@ -463,24 +500,33 @@ mod ddb_tests {
             .unwrap();
 
         let initial_execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
-        let initial_heartbeat = initial_execution.last_heartbeat.expect("Initial heartbeat should be set when creating execution with node");
+        let initial_heartbeat = initial_execution
+            .last_heartbeat
+            .expect("Initial heartbeat should be set when creating execution with node");
         let initial_timestamp = initial_heartbeat.timestamp();
 
         // Sleep long enough to ensure timestamp difference (at least 1 second for Unix timestamps)
         tokio::time::sleep(Duration::from_millis(1100)).await;
 
-        storage.update_heartbeat(&ctx, &execution_id, "node-1").await.unwrap();
+        storage
+            .update_heartbeat(&ctx, &execution_id, "node-1")
+            .await
+            .unwrap();
 
         // Retry getting execution in case of eventual consistency
         let mut execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
         let mut retries = 0;
-        while execution.last_heartbeat.map(|h| h.timestamp()) == Some(initial_timestamp) && retries < 5 {
+        while execution.last_heartbeat.map(|h| h.timestamp()) == Some(initial_timestamp)
+            && retries < 5
+        {
             tokio::time::sleep(Duration::from_millis(100)).await;
             execution = storage.get_execution(&ctx, &execution_id).await.unwrap();
             retries += 1;
         }
 
-        let updated_heartbeat = execution.last_heartbeat.expect("Heartbeat should be updated");
+        let updated_heartbeat = execution
+            .last_heartbeat
+            .expect("Heartbeat should be updated");
         let updated_timestamp = updated_heartbeat.timestamp();
         assert!(
             updated_timestamp > initial_timestamp,
@@ -521,7 +567,10 @@ mod ddb_tests {
             .await
             .unwrap();
 
-        let step_exec = storage.get_step_execution(&ctx, &step_exec_id).await.unwrap();
+        let step_exec = storage
+            .get_step_execution(&ctx, &step_exec_id)
+            .await
+            .unwrap();
         assert_eq!(step_exec.step_execution_id, step_exec_id);
         assert_eq!(step_exec.execution_id, execution_id);
         assert_eq!(step_exec.step_id, "step-1");
@@ -567,7 +616,10 @@ mod ddb_tests {
             .await
             .unwrap();
 
-        let step_exec = storage.get_step_execution(&ctx, &step_exec_id).await.unwrap();
+        let step_exec = storage
+            .get_step_execution(&ctx, &step_exec_id)
+            .await
+            .unwrap();
         assert_eq!(step_exec.status, StepExecutionStatus::Completed);
         assert_eq!(step_exec.output, Some(json!({"result": "success"})));
     }
@@ -604,7 +656,10 @@ mod ddb_tests {
             .await
             .unwrap();
 
-        let history = storage.get_step_execution_history(&ctx, &execution_id).await.unwrap();
+        let history = storage
+            .get_step_execution_history(&ctx, &execution_id)
+            .await
+            .unwrap();
         assert_eq!(history.len(), 2);
     }
 
@@ -639,12 +694,18 @@ mod ddb_tests {
             .await
             .unwrap();
 
-        let signal = storage.check_signal(&ctx, &execution_id, "approval").await.unwrap();
+        let signal = storage
+            .check_signal(&ctx, &execution_id, "approval")
+            .await
+            .unwrap();
         assert!(signal.is_some());
         assert_eq!(signal.unwrap(), json!({"approved": true}));
 
         // Signal should be consumed (deleted)
-        let signal_again = storage.check_signal(&ctx, &execution_id, "approval").await.unwrap();
+        let signal_again = storage
+            .check_signal(&ctx, &execution_id, "approval")
+            .await
+            .unwrap();
         assert!(signal_again.is_none());
     }
 
@@ -679,8 +740,14 @@ mod ddb_tests {
             .await
             .unwrap();
 
-        storage.update_execution_status(&ctx, &exec1, ExecutionStatus::Running).await.unwrap();
-        storage.update_execution_status(&ctx, &exec2, ExecutionStatus::Completed).await.unwrap();
+        storage
+            .update_execution_status(&ctx, &exec1, ExecutionStatus::Running)
+            .await
+            .unwrap();
+        storage
+            .update_execution_status(&ctx, &exec2, ExecutionStatus::Completed)
+            .await
+            .unwrap();
 
         let running = storage
             .list_executions_by_status(&ctx, vec![ExecutionStatus::Running], None)
@@ -726,7 +793,10 @@ mod ddb_tests {
             .await
             .unwrap();
 
-        storage.update_execution_status(&ctx, &execution_id, ExecutionStatus::Running).await.unwrap();
+        storage
+            .update_execution_status(&ctx, &execution_id, ExecutionStatus::Running)
+            .await
+            .unwrap();
 
         // Wait a bit
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -782,8 +852,14 @@ mod ddb_tests {
         storage.save_definition(&ctx2, &def2).await.unwrap();
 
         // Each tenant should see their own definition
-        let def1_retrieved = storage.get_definition(&ctx1, "workflow-1", "1.0").await.unwrap();
-        let def2_retrieved = storage.get_definition(&ctx2, "workflow-1", "1.0").await.unwrap();
+        let def1_retrieved = storage
+            .get_definition(&ctx1, "workflow-1", "1.0")
+            .await
+            .unwrap();
+        let def2_retrieved = storage
+            .get_definition(&ctx2, "workflow-1", "1.0")
+            .await
+            .unwrap();
 
         assert_eq!(def1_retrieved.id, "workflow-1");
         assert_eq!(def2_retrieved.id, "workflow-1");
@@ -842,4 +918,3 @@ mod ddb_tests {
         assert!(result.is_err());
     }
 }
-

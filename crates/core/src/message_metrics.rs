@@ -36,76 +36,76 @@ pub use plexspaces_proto::metrics::v1::ActorMetrics;
 pub trait ActorMetricsExt {
     /// Create new ActorMetrics with all counters at zero
     fn new() -> Self;
-    
+
     /// Increment spawn_total counter
     fn increment_spawn_total(&mut self);
-    
+
     /// Increment active counter
     fn increment_active(&mut self);
-    
+
     /// Decrement active counter
     fn decrement_active(&mut self);
-    
+
     /// Increment messages_routed counter
     fn increment_messages_routed(&mut self);
-    
+
     /// Increment local_deliveries counter
     fn increment_local_deliveries(&mut self);
-    
+
     /// Increment remote_deliveries counter
     fn increment_remote_deliveries(&mut self);
-    
+
     /// Increment failed_deliveries counter
     fn increment_failed_deliveries(&mut self);
-    
+
     /// Increment error_total counter
     fn increment_error_total(&mut self);
-    
+
     // Lifecycle metrics (Phase 1-3)
     /// Increment init_total counter
     fn increment_init_total(&mut self);
-    
+
     /// Increment init_errors_total counter
     fn increment_init_errors_total(&mut self);
-    
+
     /// Increment terminate_total counter
     fn increment_terminate_total(&mut self);
-    
+
     /// Increment terminate_errors_total counter
     fn increment_terminate_errors_total(&mut self);
-    
+
     /// Increment exit_handled_total counter
     fn increment_exit_handled_total(&mut self);
-    
+
     /// Increment exit_propagated_total counter
     fn increment_exit_propagated_total(&mut self);
-    
+
     /// Increment exit_handle_errors_total counter
     fn increment_exit_handle_errors_total(&mut self);
-    
+
     // Parent-child metrics (Phase 3)
     /// Increment parent_child_registered_total counter
     fn increment_parent_child_registered_total(&mut self);
-    
+
     /// Increment parent_child_unregistered_total counter
     fn increment_parent_child_unregistered_total(&mut self);
-    
+
     // Shard group metrics (Data-Parallel Actors)
     /// Increment shard_groups_created_total counter
     fn increment_shard_groups_created_total(&mut self);
-    
+
     /// Increment shard_messages_sent_total counter
     fn increment_shard_messages_sent_total(&mut self);
-    
+
     /// Increment shard_messages_received_total counter
     fn increment_shard_messages_received_total(&mut self);
-    
+
     /// Increment shard_operations_total counter
     fn increment_shard_operations_total(&mut self);
-    
+
     /// Increment shard_operations_failed_total counter
     fn increment_shard_operations_failed_total(&mut self);
-    
+
     /// Get a snapshot of current metrics
     fn snapshot(&self) -> ActorMetrics;
 }
@@ -205,7 +205,8 @@ impl ActorMetricsExt for ActorMetrics {
     }
 
     fn increment_parent_child_unregistered_total(&mut self) {
-        self.parent_child_unregistered_total = self.parent_child_unregistered_total.saturating_add(1);
+        self.parent_child_unregistered_total =
+            self.parent_child_unregistered_total.saturating_add(1);
     }
 
     fn increment_shard_groups_created_total(&mut self) {

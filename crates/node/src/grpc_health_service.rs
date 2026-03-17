@@ -71,7 +71,7 @@ pub async fn start_health_monitoring(
 
             // Check liveness
             let _is_alive = reporter.is_alive().await;
-            
+
             // Check readiness
             let (_is_ready, _reason) = reporter.check_readiness().await;
 
@@ -80,7 +80,7 @@ pub async fn start_health_monitoring(
             // custom service names like "liveness" or "readiness", so we
             // update the default service ("") status based on readiness.
             // For Kubernetes, we'll use HTTP endpoints for probes instead.
-            
+
             // The actual status updates are handled by the reporter's
             // mark_startup_complete and begin_shutdown methods.
         }
@@ -90,7 +90,7 @@ pub async fn start_health_monitoring(
 #[cfg(test)]
 mod tests {
     use super::*;
-           use plexspaces_proto::system::v1::{HealthProbeConfig, DependencyRegistrationConfig};
+    use plexspaces_proto::system::v1::{DependencyRegistrationConfig, HealthProbeConfig};
 
     #[tokio::test]
     async fn test_health_monitoring_starts() {
@@ -106,7 +106,8 @@ mod tests {
         let (reporter, _) = PlexSpacesHealthReporter::with_config(config);
         let reporter = Arc::new(reporter);
 
-        let handle = start_health_monitoring(reporter.clone(), Some(Duration::from_millis(100))).await;
+        let handle =
+            start_health_monitoring(reporter.clone(), Some(Duration::from_millis(100))).await;
 
         // Wait a bit for monitoring to run
         tokio::time::sleep(Duration::from_millis(250)).await;

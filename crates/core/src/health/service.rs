@@ -43,11 +43,11 @@
 //! - [`crate::Node`]: Node that health service monitors
 //! - `proto/plexspaces/v1/system.proto`: Proto definitions for health messages
 
-use crate::health_checker::{HealthChecker, HealthCheckContext, run_health_check};
+use crate::health_checker::{run_health_check, HealthCheckContext, HealthChecker};
 use crate::health_reporter::HealthReporter;
 use plexspaces_proto::system::v1::{
-    DetailedHealthCheck, HealthCheck, HealthProbeConfig, HealthStatus,
-    NodeHealthState, NodeReadinessStatus, ServingStatus,
+    DetailedHealthCheck, HealthCheck, HealthProbeConfig, HealthStatus, NodeHealthState,
+    NodeReadinessStatus, ServingStatus,
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -70,12 +70,26 @@ impl HealthReporter for PlexSpacesHealthReporter {
 
     async fn check_readiness(&self) -> (bool, Option<String>) {
         let (ready, reason) = PlexSpacesHealthReporter::check_readiness(self).await;
-        (ready, if reason.is_empty() { None } else { Some(reason) })
+        (
+            ready,
+            if reason.is_empty() {
+                None
+            } else {
+                Some(reason)
+            },
+        )
     }
 
     async fn check_startup(&self) -> (bool, Option<String>) {
         let (complete, reason) = PlexSpacesHealthReporter::check_startup(self).await;
-        (complete, if reason.is_empty() { None } else { Some(reason) })
+        (
+            complete,
+            if reason.is_empty() {
+                None
+            } else {
+                Some(reason)
+            },
+        )
     }
 
     async fn get_readiness(&self) -> NodeReadinessStatus {
@@ -98,10 +112,16 @@ impl HealthReporter for PlexSpacesHealthReporter {
         }
     }
 
-    async fn begin_shutdown(&self, drain_timeout: Option<prost_types::Duration>) -> (u64, prost_types::Duration, bool) {
+    async fn begin_shutdown(
+        &self,
+        drain_timeout: Option<prost_types::Duration>,
+    ) -> (u64, prost_types::Duration, bool) {
         use std::time::Duration as StdDuration;
-        let timeout = drain_timeout.map(|d| StdDuration::from_secs(d.seconds as u64) + StdDuration::from_nanos(d.nanos as u64));
-        let (drained, duration, completed) = PlexSpacesHealthReporter::begin_shutdown(self, timeout).await;
+        let timeout = drain_timeout.map(|d| {
+            StdDuration::from_secs(d.seconds as u64) + StdDuration::from_nanos(d.nanos as u64)
+        });
+        let (drained, duration, completed) =
+            PlexSpacesHealthReporter::begin_shutdown(self, timeout).await;
         (
             drained,
             prost_types::Duration {
@@ -201,10 +221,10 @@ pub struct PlexSpacesHealthReporter {
     /// Key: Service name (e.g., "plexspaces.actor.v1.ActorService")
     /// Value: ServingStatus
     service_status: Arc<RwLock<std::collections::HashMap<String, ServingStatus>>>,
-    
+
     /// Shutdown flag to prevent new requests
     shutdown_flag: Arc<tokio::sync::RwLock<bool>>,
-    
+
     /// ServiceLocator reference (for setting shutdown flag)
     /// This allows HealthService to be the source of truth for shutdown
     service_locator: Option<Arc<dyn crate::ServiceLocator>>,
@@ -229,7 +249,7 @@ impl PlexSpacesHealthReporter {
     pub fn new() -> (Self, impl tonic::server::NamedService) {
         Self::with_config_and_service_locator(Default::default(), None)
     }
-    
+
     /// Create health reporter with ServiceLocator reference
     ///
     /// ## Arguments
@@ -257,7 +277,7 @@ impl PlexSpacesHealthReporter {
     pub fn with_config(config: HealthProbeConfig) -> (Self, impl tonic::server::NamedService) {
         Self::with_config_and_service_locator(config, None)
     }
-    
+
     /// Create health reporter with custom configuration and ServiceLocator
     ///
     /// ## Arguments
@@ -377,11 +397,14 @@ impl PlexSpacesHealthReporter {
         // Check all dependencies (critical and non-critical)
         for checker in checkers.iter() {
             let check_result = checker.check(&ctx).await;
-            
+
             if let Err(e) = check_result {
                 if checker.is_critical() {
                     // Critical dependency failed - node not ready
-                    return (false, format!("Critical dependency '{}' unhealthy: {}", checker.name(), e));
+                    return (
+                        false,
+                        format!("Critical dependency '{}' unhealthy: {}", checker.name(), e),
+                    );
                 } else {
                     // Non-critical dependency failed - degraded mode
                     degraded_dependencies.push(checker.name().to_string());
@@ -402,12 +425,21 @@ impl PlexSpacesHealthReporter {
             self.config.queue_depth_threshold
         };
         if state.in_flight_requests > threshold {
-            return (false, format!("Queue depth {} exceeds threshold {}", state.in_flight_requests, threshold));
+            return (
+                false,
+                format!(
+                    "Queue depth {} exceeds threshold {}",
+                    state.in_flight_requests, threshold
+                ),
+            );
         }
 
         // If we have degraded dependencies, still ready but note degraded mode
         if !degraded_dependencies.is_empty() {
-            let reason = format!("Degraded mode: non-critical dependencies unhealthy: {}", degraded_dependencies.join(", "));
+            let reason = format!(
+                "Degraded mode: non-critical dependencies unhealthy: {}",
+                degraded_dependencies.join(", ")
+            );
             // Still return true (ready) but with degraded reason for observability
             // The detailed health check will show DEGRADED status
             return (true, reason);
@@ -433,7 +465,14 @@ impl PlexSpacesHealthReporter {
         for checker in checkers.iter() {
             if checker.is_critical() {
                 if let Err(e) = checker.check(&ctx).await {
-                    return (false, format!("Critical startup dependency '{}' unhealthy: {}", checker.name(), e));
+                    return (
+                        false,
+                        format!(
+                            "Critical startup dependency '{}' unhealthy: {}",
+                            checker.name(),
+                            e
+                        ),
+                    );
                 }
             }
         }
@@ -486,7 +525,7 @@ impl PlexSpacesHealthReporter {
 
         // Build component checks (basic system components)
         let mut component_checks = Vec::new();
-        
+
         // Add basic component health checks
         // Note: More detailed component checks can be added as needed
         component_checks.push(HealthCheck {
@@ -500,7 +539,7 @@ impl PlexSpacesHealthReporter {
             response_time: None,
             details: std::collections::HashMap::new(),
         });
-        
+
         DetailedHealthCheck {
             overall_status: overall_status as i32,
             component_checks,
@@ -548,9 +587,18 @@ impl PlexSpacesHealthReporter {
         {
             let mut service_status = self.service_status.write().await;
             service_status.insert("".to_string(), ServingStatus::ServingStatusServing); // Overall health
-            service_status.insert("plexspaces.actor.v1.ActorService".to_string(), ServingStatus::ServingStatusServing);
-            service_status.insert("plexspaces.tuplespace.v1.TupleSpaceService".to_string(), ServingStatus::ServingStatusServing);
-            service_status.insert("plexspaces.supervisor.v1.SupervisorService".to_string(), ServingStatus::ServingStatusServing);
+            service_status.insert(
+                "plexspaces.actor.v1.ActorService".to_string(),
+                ServingStatus::ServingStatusServing,
+            );
+            service_status.insert(
+                "plexspaces.tuplespace.v1.TupleSpaceService".to_string(),
+                ServingStatus::ServingStatusServing,
+            );
+            service_status.insert(
+                "plexspaces.supervisor.v1.SupervisorService".to_string(),
+                ServingStatus::ServingStatusServing,
+            );
         }
 
         tracing::warn!(
@@ -601,20 +649,29 @@ impl PlexSpacesHealthReporter {
             let mut flag = self.shutdown_flag.write().await;
             *flag = true;
         }
-        
+
         // Also update ServiceLocator shutdown flag (if registered)
         if let Some(ref service_locator) = self.service_locator {
             service_locator.request_shutdown();
             tracing::info!("ServiceLocator shutdown flag set via HealthService");
         }
-        
+
         // Update all service statuses to NOT_SERVING (K8s removes from service immediately)
         {
             let mut service_status = self.service_status.write().await;
             service_status.insert("".to_string(), ServingStatus::ServingStatusNotServing); // Overall health
-            service_status.insert("plexspaces.actor.v1.ActorService".to_string(), ServingStatus::ServingStatusNotServing);
-            service_status.insert("plexspaces.tuplespace.v1.TupleSpaceService".to_string(), ServingStatus::ServingStatusNotServing);
-            service_status.insert("plexspaces.supervisor.v1.SupervisorService".to_string(), ServingStatus::ServingStatusNotServing);
+            service_status.insert(
+                "plexspaces.actor.v1.ActorService".to_string(),
+                ServingStatus::ServingStatusNotServing,
+            );
+            service_status.insert(
+                "plexspaces.tuplespace.v1.TupleSpaceService".to_string(),
+                ServingStatus::ServingStatusNotServing,
+            );
+            service_status.insert(
+                "plexspaces.supervisor.v1.SupervisorService".to_string(),
+                ServingStatus::ServingStatusNotServing,
+            );
         }
 
         tracing::warn!("🛑 Graceful shutdown: NOT_SERVING, draining requests...");
@@ -637,7 +694,8 @@ impl PlexSpacesHealthReporter {
         } else {
             tracing::warn!(
                 "⚠️  Drain timeout, {} requests still in flight after {:?}",
-                drained, duration
+                drained,
+                duration
             );
         }
 
@@ -674,18 +732,18 @@ impl PlexSpacesHealthReporter {
             };
             service_status.insert(service_name.to_string(), status_to_insert);
         }
-        
+
         // Also update the tonic-health reporter for standard gRPC health protocol
         // Note: We need to use the reporter's set_serving/set_not_serving methods
         // but they require a NamedService type. For now, we track internally.
         // The standard health service will use overall health for service-specific checks.
-        
+
         if tracing::enabled!(tracing::Level::DEBUG) {
-        tracing::debug!(
-            service = service_name,
-            status = status_i32,
-            "Service health status updated"
-        );
+            tracing::debug!(
+                service = service_name,
+                status = status_i32,
+                "Service health status updated"
+            );
         }
     }
 
@@ -708,11 +766,13 @@ impl PlexSpacesHealthReporter {
     ///
     /// ## Returns
     /// HashMap of service names to their health statuses
-    pub async fn get_all_service_statuses(&self) -> std::collections::HashMap<String, ServingStatus> {
+    pub async fn get_all_service_statuses(
+        &self,
+    ) -> std::collections::HashMap<String, ServingStatus> {
         let service_status = self.service_status.read().await;
         service_status.clone()
     }
-    
+
     /// Check if shutdown is in progress
     ///
     /// ## Returns
@@ -721,7 +781,7 @@ impl PlexSpacesHealthReporter {
         let flag = self.shutdown_flag.read().await;
         *flag
     }
-    
+
     /// Update standard gRPC health status for all services
     ///
     /// ## Arguments
@@ -732,7 +792,7 @@ impl PlexSpacesHealthReporter {
         // via the custom health service implementation
         // Convert enum to i32 first to avoid move issues
         let status_i32 = status as i32;
-        
+
         // Helper to recreate enum from i32
         let recreate_status = |i: i32| -> ServingStatus {
             match i {
@@ -741,12 +801,21 @@ impl PlexSpacesHealthReporter {
                 _ => ServingStatus::ServingStatusUnknown,
             }
         };
-        
+
         let mut service_status = self.service_status.write().await;
         service_status.insert("".to_string(), recreate_status(status_i32)); // Overall health
-        service_status.insert("plexspaces.actor.v1.ActorService".to_string(), recreate_status(status_i32));
-        service_status.insert("plexspaces.tuplespace.v1.TupleSpaceService".to_string(), recreate_status(status_i32));
-        service_status.insert("plexspaces.supervisor.v1.SupervisorService".to_string(), recreate_status(status_i32));
+        service_status.insert(
+            "plexspaces.actor.v1.ActorService".to_string(),
+            recreate_status(status_i32),
+        );
+        service_status.insert(
+            "plexspaces.tuplespace.v1.TupleSpaceService".to_string(),
+            recreate_status(status_i32),
+        );
+        service_status.insert(
+            "plexspaces.supervisor.v1.SupervisorService".to_string(),
+            recreate_status(status_i32),
+        );
     }
 
     /// Get current node readiness status (detailed diagnostics)
@@ -781,9 +850,9 @@ impl PlexSpacesHealthReporter {
         // Get connected nodes count and check required nodes
         // Note: This requires access to Node, which is not available in HealthReporter
         // For now, we'll use default values. In production, this should be passed from Node.
-        let (connected_nodes_count, required_nodes_connected, missing_nodes, tuplespace_healthy) = 
+        let (connected_nodes_count, required_nodes_connected, missing_nodes, tuplespace_healthy) =
             (0u32, true, Vec::new(), true);
-        
+
         NodeReadinessStatus {
             is_ready,
             not_ready_reason,
@@ -904,7 +973,10 @@ mod tests {
         let (reporter, _service) = PlexSpacesHealthReporter::new();
 
         let state = reporter.get_state().await;
-        assert_eq!(state.serving_status, ServingStatus::ServingStatusNotServing as i32);
+        assert_eq!(
+            state.serving_status,
+            ServingStatus::ServingStatusNotServing as i32
+        );
         assert!(!state.startup_complete);
         assert!(state.is_alive);
         assert!(!state.is_ready);
@@ -922,7 +994,10 @@ mod tests {
         assert!(duration.as_nanos() > 0);
 
         let state = reporter.get_state().await;
-        assert_eq!(state.serving_status, ServingStatus::ServingStatusServing as i32);
+        assert_eq!(
+            state.serving_status,
+            ServingStatus::ServingStatusServing as i32
+        );
         assert!(state.startup_complete);
         assert!(state.is_alive);
         assert!(state.is_ready);
@@ -945,7 +1020,10 @@ mod tests {
         assert!(duration.as_millis() < 1500);
 
         let state = reporter.get_state().await;
-        assert_eq!(state.serving_status, ServingStatus::ServingStatusNotServing as i32);
+        assert_eq!(
+            state.serving_status,
+            ServingStatus::ServingStatusNotServing as i32
+        );
         assert!(state.shutdown_in_progress);
     }
 
@@ -1083,7 +1161,10 @@ mod tests {
         let reporter = PlexSpacesHealthReporter::default();
 
         let state = reporter.get_state().await;
-        assert_eq!(state.serving_status, ServingStatus::ServingStatusNotServing as i32);
+        assert_eq!(
+            state.serving_status,
+            ServingStatus::ServingStatusNotServing as i32
+        );
         assert!(!state.startup_complete);
         assert!(state.is_alive);
     }

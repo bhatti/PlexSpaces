@@ -85,8 +85,11 @@ impl ProtoSupervisorBuilder {
         let strategy = Self::convert_supervision_strategy(spec)?;
 
         // Create supervisor with strategy and service_locator
-        let (supervisor, _event_rx) =
-            Supervisor::new(format!("app-supervisor-{}", Ulid::new()), strategy, service_locator);
+        let (supervisor, _event_rx) = Supervisor::new(
+            format!("app-supervisor-{}", Ulid::new()),
+            strategy,
+            service_locator,
+        );
 
         // Add children from spec
         for child_spec in &spec.children {
@@ -108,20 +111,25 @@ impl ProtoSupervisorBuilder {
             .unwrap_or(5); // Default: 5 seconds
 
         match ProtoSupervisionStrategy::try_from(spec.strategy) {
-            Ok(ProtoSupervisionStrategy::SupervisionStrategyUnspecified) | Ok(ProtoSupervisionStrategy::SupervisionStrategyOneForOne) => {
+            Ok(ProtoSupervisionStrategy::SupervisionStrategyUnspecified)
+            | Ok(ProtoSupervisionStrategy::SupervisionStrategyOneForOne) => {
                 Ok(SupervisionStrategy::OneForOne {
                     max_restarts,
                     within_seconds,
                 })
             }
-            Ok(ProtoSupervisionStrategy::SupervisionStrategyOneForAll) => Ok(SupervisionStrategy::OneForAll {
-                max_restarts,
-                within_seconds,
-            }),
-            Ok(ProtoSupervisionStrategy::SupervisionStrategyRestForOne) => Ok(SupervisionStrategy::RestForOne {
-                max_restarts,
-                within_seconds,
-            }),
+            Ok(ProtoSupervisionStrategy::SupervisionStrategyOneForAll) => {
+                Ok(SupervisionStrategy::OneForAll {
+                    max_restarts,
+                    within_seconds,
+                })
+            }
+            Ok(ProtoSupervisionStrategy::SupervisionStrategyRestForOne) => {
+                Ok(SupervisionStrategy::RestForOne {
+                    max_restarts,
+                    within_seconds,
+                })
+            }
             Err(_) => Err(SupervisorError::ConfigError(format!(
                 "Unknown supervision strategy: {}",
                 spec.strategy
@@ -174,9 +182,8 @@ impl ProtoSupervisorBuilder {
         child_spec: &ProtoChildSpec,
     ) -> Result<RestartPolicy, SupervisorError> {
         match ProtoRestartPolicy::try_from(child_spec.restart) {
-            Ok(ProtoRestartPolicy::RestartPolicyUnspecified) | Ok(ProtoRestartPolicy::RestartPolicyPermanent) => {
-                Ok(RestartPolicy::Permanent)
-            }
+            Ok(ProtoRestartPolicy::RestartPolicyUnspecified)
+            | Ok(ProtoRestartPolicy::RestartPolicyPermanent) => Ok(RestartPolicy::Permanent),
             Ok(ProtoRestartPolicy::RestartPolicyTransient) => Ok(RestartPolicy::Transient),
             Ok(ProtoRestartPolicy::RestartPolicyTemporary) => Ok(RestartPolicy::Temporary),
             Err(_) => Err(SupervisorError::ConfigError(format!(
@@ -189,7 +196,9 @@ impl ProtoSupervisorBuilder {
     /// Convert proto ChildType to Rust ChildType
     fn convert_child_type(child_spec: &ProtoChildSpec) -> Result<ChildType, SupervisorError> {
         match ProtoChildType::try_from(child_spec.r#type) {
-            Ok(ProtoChildType::ChildTypeUnspecified) | Ok(ProtoChildType::ChildTypeWorker) => Ok(ChildType::Worker),
+            Ok(ProtoChildType::ChildTypeUnspecified) | Ok(ProtoChildType::ChildTypeWorker) => {
+                Ok(ChildType::Worker)
+            }
             Ok(ProtoChildType::ChildTypeSupervisor) => Ok(ChildType::Supervisor),
             Err(_) => Err(SupervisorError::ConfigError(format!(
                 "Unknown child type for child '{}': {}",
@@ -206,13 +215,12 @@ impl ProtoSupervisorBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SupervisionStrategy;
     use plexspaces_proto::application::v1::{
-        ChildSpec, ChildType, RestartPolicy, 
-        SupervisionStrategy as ProtoSupervisionStrategy, 
+        ChildSpec, ChildType, RestartPolicy, SupervisionStrategy as ProtoSupervisionStrategy,
         SupervisorSpec,
     };
     use plexspaces_services::ServiceLocatorImpl;
-    use crate::SupervisionStrategy;
 
     /// Helper function to create a basic supervisor spec
     fn create_test_supervisor_spec() -> SupervisorSpec {
@@ -223,21 +231,19 @@ mod tests {
                 seconds: 5,
                 nanos: 0,
             }),
-            children: vec![
-                ChildSpec {
-                    id: "worker1".to_string(),
-                    r#type: ChildType::ChildTypeWorker as i32,
-                    args: std::collections::HashMap::new(),
-                    restart: RestartPolicy::RestartPolicyPermanent as i32,
-                    shutdown_timeout: Some(prost_types::Duration {
-                        seconds: 30,
-                        nanos: 0,
-                    }),
-                    supervisor: None,
-                    facets: vec![],
-                    behavior_kind: None,
-                },
-            ],
+            children: vec![ChildSpec {
+                id: "worker1".to_string(),
+                r#type: ChildType::ChildTypeWorker as i32,
+                args: std::collections::HashMap::new(),
+                restart: RestartPolicy::RestartPolicyPermanent as i32,
+                shutdown_timeout: Some(prost_types::Duration {
+                    seconds: 30,
+                    nanos: 0,
+                }),
+                supervisor: None,
+                facets: vec![],
+                behavior_kind: None,
+            }],
         }
     }
 
@@ -245,7 +251,8 @@ mod tests {
     #[tokio::test]
     async fn test_build_supervisor_from_proto() {
         let spec = create_test_supervisor_spec();
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+            Arc::new(ServiceLocatorImpl::new());
 
         let result = ProtoSupervisorBuilder::from_proto_spec(&spec, service_locator).await;
         assert!(result.is_ok(), "Should build supervisor from valid spec");

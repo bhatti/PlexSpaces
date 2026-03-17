@@ -3,9 +3,9 @@
 //
 // Comprehensive tests for Application trait to improve coverage
 
-use plexspaces_application::{Application, ApplicationNode, ApplicationError};
-use plexspaces_proto::v1::application::{ApplicationSpec, HealthStatus, ShutdownStrategy};
 use async_trait::async_trait;
+use plexspaces_application::{Application, ApplicationError, ApplicationNode};
+use plexspaces_proto::v1::application::{ApplicationSpec, HealthStatus, ShutdownStrategy};
 use std::sync::Arc;
 
 struct MockNode {
@@ -22,7 +22,6 @@ impl ApplicationNode for MockNode {
     fn listen_addr(&self) -> &str {
         &self.addr
     }
-
 }
 
 struct TestApplication {
@@ -53,7 +52,9 @@ impl Application for TestApplication {
 
     async fn stop(&mut self) -> Result<(), ApplicationError> {
         if self.stop_fails {
-            Err(ApplicationError::ShutdownFailed("shutdown error".to_string()))
+            Err(ApplicationError::ShutdownFailed(
+                "shutdown error".to_string(),
+            ))
         } else {
             Ok(())
         }
@@ -88,7 +89,7 @@ async fn test_application_start_failure() {
     match result.unwrap_err() {
         ApplicationError::StartupFailed(msg) => {
             assert!(msg.contains("startup error"));
-        },
+        }
         _ => panic!("Expected StartupFailed"),
     }
 }
@@ -97,7 +98,7 @@ async fn test_application_start_failure() {
 async fn test_application_stop_failure() {
     let mut app = TestApplication {
         name: "test-app".to_string(),
-        stop_fails: true,  // Set to true to test stop failure
+        stop_fails: true, // Set to true to test stop failure
         version: "0.1.0".to_string(),
         start_fails: false,
         health_status: HealthStatus::HealthStatusHealthy,
@@ -108,7 +109,7 @@ async fn test_application_stop_failure() {
     match result.unwrap_err() {
         ApplicationError::ShutdownFailed(msg) => {
             assert!(msg.contains("shutdown error"));
-        },
+        }
         _ => panic!("Expected ShutdownFailed"),
     }
 }
@@ -122,7 +123,10 @@ async fn test_application_health_status_variants() {
         stop_fails: false,
         health_status: HealthStatus::HealthStatusHealthy,
     };
-    assert_eq!(healthy_app.health_check().await, HealthStatus::HealthStatusHealthy);
+    assert_eq!(
+        healthy_app.health_check().await,
+        HealthStatus::HealthStatusHealthy
+    );
 
     let degraded_app = TestApplication {
         name: "app".to_string(),
@@ -131,7 +135,10 @@ async fn test_application_health_status_variants() {
         stop_fails: false,
         health_status: HealthStatus::HealthStatusDegraded,
     };
-    assert_eq!(degraded_app.health_check().await, HealthStatus::HealthStatusDegraded);
+    assert_eq!(
+        degraded_app.health_check().await,
+        HealthStatus::HealthStatusDegraded
+    );
 
     let unhealthy_app = TestApplication {
         name: "app".to_string(),
@@ -140,7 +147,10 @@ async fn test_application_health_status_variants() {
         stop_fails: false,
         health_status: HealthStatus::HealthStatusUnhealthy,
     };
-    assert_eq!(unhealthy_app.health_check().await, HealthStatus::HealthStatusUnhealthy);
+    assert_eq!(
+        unhealthy_app.health_check().await,
+        HealthStatus::HealthStatusUnhealthy
+    );
 }
 
 // Note: spawn_actor and stop_actor methods removed from ApplicationNode trait
@@ -168,4 +178,3 @@ async fn test_application_error_all_variants() {
         assert!(!error_msg.is_empty());
     }
 }
-

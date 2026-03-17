@@ -95,7 +95,7 @@ impl CertificateGenerator {
     /// CertificateGenerator or error if directory cannot be created
     pub fn new(cert_dir: impl AsRef<Path>) -> Result<Self, CertGenError> {
         let cert_dir = cert_dir.as_ref().to_path_buf();
-        
+
         // Create directory if it doesn't exist
         if !cert_dir.exists() {
             fs::create_dir_all(&cert_dir)?;
@@ -103,9 +103,10 @@ impl CertificateGenerator {
 
         // Verify directory is writable
         if !cert_dir.is_dir() {
-            return Err(CertGenError::InvalidDirectory(
-                format!("Not a directory: {}", cert_dir.display())
-            ));
+            return Err(CertGenError::InvalidDirectory(format!(
+                "Not a directory: {}",
+                cert_dir.display()
+            )));
         }
 
         Ok(Self { cert_dir })
@@ -129,7 +130,7 @@ impl CertificateGenerator {
         validity_days: Option<u32>,
     ) -> Result<CertificatePaths, CertGenError> {
         let paths = CertificatePaths::new(&self.cert_dir);
-        
+
         // If certificates already exist, return paths
         if paths.all_exist() {
             return Ok(paths);
@@ -147,17 +148,17 @@ impl CertificateGenerator {
             -----END CERTIFICATE-----",
             cn, _validity
         );
-        
+
         let ca_key_pem = format!(
             "-----BEGIN PRIVATE KEY-----\n\
             Placeholder CA Private Key for: {}\n\
             -----END PRIVATE KEY-----",
             cn
         );
-        
+
         // Write CA certificate
         fs::write(&paths.ca_cert, ca_cert_pem.as_bytes())?;
-        
+
         // Write CA key
         fs::write(&paths.ca_key, ca_key_pem.as_bytes())?;
 
@@ -184,7 +185,7 @@ impl CertificateGenerator {
         validity_days: Option<u32>,
     ) -> Result<CertificatePaths, CertGenError> {
         let paths = CertificatePaths::new(&self.cert_dir);
-        
+
         // Ensure CA exists first
         if !paths.ca_cert.exists() || !paths.ca_key.exists() {
             self.generate_ca(None, None)?;
@@ -203,7 +204,7 @@ impl CertificateGenerator {
             -----END CERTIFICATE-----",
             common_name, san_list, _validity
         );
-        
+
         let server_key_pem = format!(
             "-----BEGIN PRIVATE KEY-----\n\
             Placeholder Server Private Key for: {}\n\
@@ -213,7 +214,7 @@ impl CertificateGenerator {
 
         // Write server certificate
         fs::write(&paths.server_cert, server_cert_pem.as_bytes())?;
-        
+
         // Write server key
         fs::write(&paths.server_key, server_key_pem.as_bytes())?;
 
@@ -235,7 +236,7 @@ impl CertificateGenerator {
     ) -> Result<CertificatePaths, CertGenError> {
         // Generate CA first
         self.generate_ca(None, None)?;
-        
+
         // Generate server certificate
         self.generate_server_cert(service_id, san_dns_names, None)?;
 
@@ -253,7 +254,7 @@ mod tests {
     fn test_certificate_paths_new() {
         let dir = Path::new("/tmp/certs");
         let paths = CertificatePaths::new(dir);
-        
+
         assert_eq!(paths.ca_cert, dir.join("ca.crt"));
         assert_eq!(paths.ca_key, dir.join("ca.key"));
         assert_eq!(paths.server_cert, dir.join("server.crt"));
@@ -264,16 +265,16 @@ mod tests {
     fn test_certificate_paths_all_exist() {
         let temp_dir = TempDir::new().unwrap();
         let paths = CertificatePaths::new(temp_dir.path());
-        
+
         // Initially, files don't exist
         assert!(!paths.all_exist());
-        
+
         // Create all files
         fs::write(&paths.ca_cert, "ca cert").unwrap();
         fs::write(&paths.ca_key, "ca key").unwrap();
         fs::write(&paths.server_cert, "server cert").unwrap();
         fs::write(&paths.server_key, "server key").unwrap();
-        
+
         // Now all should exist
         assert!(paths.all_exist());
     }
@@ -282,7 +283,7 @@ mod tests {
     fn test_certificate_generator_new() {
         let temp_dir = TempDir::new().unwrap();
         let gen = CertificateGenerator::new(temp_dir.path());
-        
+
         assert!(gen.is_ok());
         assert!(temp_dir.path().exists());
     }
@@ -291,9 +292,9 @@ mod tests {
     fn test_certificate_generator_new_creates_directory() {
         let temp_dir = TempDir::new().unwrap();
         let subdir = temp_dir.path().join("certs");
-        
+
         let gen = CertificateGenerator::new(&subdir);
-        
+
         assert!(gen.is_ok());
         assert!(subdir.exists());
         assert!(subdir.is_dir());
@@ -305,7 +306,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("file.txt");
         fs::write(&file_path, "test").unwrap();
-        
+
         let gen = CertificateGenerator::new(&file_path);
         assert!(gen.is_err());
         assert!(gen.unwrap_err().to_string().contains("Not a directory"));
@@ -315,9 +316,9 @@ mod tests {
     fn test_generate_ca() {
         let temp_dir = TempDir::new().unwrap();
         let gen = CertificateGenerator::new(temp_dir.path()).unwrap();
-        
+
         let paths = gen.generate_ca(None, None).unwrap();
-        
+
         // Check files were created
         assert!(paths.ca_cert.exists());
         assert!(paths.ca_key.exists());
@@ -330,9 +331,9 @@ mod tests {
     fn test_generate_ca_with_custom_name() {
         let temp_dir = TempDir::new().unwrap();
         let gen = CertificateGenerator::new(temp_dir.path()).unwrap();
-        
+
         let paths = gen.generate_ca(Some("My Custom CA"), Some(180)).unwrap();
-        
+
         assert!(paths.ca_cert.exists());
         assert!(paths.ca_key.exists());
         let cert_content = fs::read_to_string(&paths.ca_cert).unwrap();
@@ -343,11 +344,11 @@ mod tests {
     fn test_generate_ca_idempotent() {
         let temp_dir = TempDir::new().unwrap();
         let gen = CertificateGenerator::new(temp_dir.path()).unwrap();
-        
+
         // Generate twice
         let paths1 = gen.generate_ca(None, None).unwrap();
         let paths2 = gen.generate_ca(None, None).unwrap();
-        
+
         // Should return same paths
         assert_eq!(paths1.ca_cert, paths2.ca_cert);
         assert_eq!(paths1.ca_key, paths2.ca_key);
@@ -357,16 +358,18 @@ mod tests {
     fn test_generate_server_cert() {
         let temp_dir = TempDir::new().unwrap();
         let gen = CertificateGenerator::new(temp_dir.path()).unwrap();
-        
+
         // Generate CA first
         gen.generate_ca(None, None).unwrap();
-        
-        let paths = gen.generate_server_cert(
-            "test-service",
-            vec!["test-service.local".to_string(), "localhost".to_string()],
-            None,
-        ).unwrap();
-        
+
+        let paths = gen
+            .generate_server_cert(
+                "test-service",
+                vec!["test-service.local".to_string(), "localhost".to_string()],
+                None,
+            )
+            .unwrap();
+
         // Check all files were created
         assert!(paths.all_exist());
         let cert_content = fs::read_to_string(&paths.server_cert).unwrap();
@@ -378,30 +381,34 @@ mod tests {
     fn test_generate_all() {
         let temp_dir = TempDir::new().unwrap();
         let gen = CertificateGenerator::new(temp_dir.path()).unwrap();
-        
-        let paths = gen.generate_all(
-            "test-service",
-            vec!["test-service.local".to_string(), "localhost".to_string()],
-        ).unwrap();
-        
+
+        let paths = gen
+            .generate_all(
+                "test-service",
+                vec!["test-service.local".to_string(), "localhost".to_string()],
+            )
+            .unwrap();
+
         // Check all files were created
         assert!(paths.all_exist());
-        assert!(fs::read_to_string(&paths.server_cert).unwrap().contains("BEGIN CERTIFICATE"));
-        assert!(fs::read_to_string(&paths.server_key).unwrap().contains("BEGIN PRIVATE KEY"));
+        assert!(fs::read_to_string(&paths.server_cert)
+            .unwrap()
+            .contains("BEGIN CERTIFICATE"));
+        assert!(fs::read_to_string(&paths.server_key)
+            .unwrap()
+            .contains("BEGIN PRIVATE KEY"));
     }
 
     #[test]
     fn test_generate_server_cert_creates_ca_if_missing() {
         let temp_dir = TempDir::new().unwrap();
         let gen = CertificateGenerator::new(temp_dir.path()).unwrap();
-        
+
         // Generate server cert without CA (should create CA first)
-        let paths = gen.generate_server_cert(
-            "test-service",
-            vec![],
-            None,
-        ).unwrap();
-        
+        let paths = gen
+            .generate_server_cert("test-service", vec![], None)
+            .unwrap();
+
         // Both CA and server certs should exist
         assert!(paths.all_exist());
     }

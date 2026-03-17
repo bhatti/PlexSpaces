@@ -44,7 +44,10 @@ impl TracingInterceptor {
     }
 
     /// Extract trace context from headers (W3C Trace Context format)
-    fn extract_trace_context(&self, headers: &std::collections::HashMap<String, String>) -> Context {
+    fn extract_trace_context(
+        &self,
+        headers: &std::collections::HashMap<String, String>,
+    ) -> Context {
         if headers.get("traceparent").is_some() {
             // Parse W3C traceparent format: 00-{trace-id}-{parent-id}-{flags}
             // For now, we'll create a new context (full parsing would require more complex logic)
@@ -108,14 +111,17 @@ impl Interceptor for TracingInterceptor {
 
         // Add attributes
         span.set_attribute(KeyValue::new("grpc.method", context.method.clone()));
-        span.set_attribute(KeyValue::new("grpc.remote_addr", context.remote_addr.clone()));
+        span.set_attribute(KeyValue::new(
+            "grpc.remote_addr",
+            context.remote_addr.clone(),
+        ));
         span.set_attribute(KeyValue::new("request.id", context.request_id.clone()));
-        
+
         // Extract tenant_id from headers if present (from JWT middleware)
         if let Some(tenant_id) = context.headers.get("x-tenant-id") {
             span.set_attribute(KeyValue::new("tenant_id", tenant_id.clone()));
         }
-        
+
         // Extract user_id from headers if present
         if let Some(user_id) = context.headers.get("x-user-id") {
             span.set_attribute(KeyValue::new("user_id", user_id.clone()));

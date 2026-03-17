@@ -39,10 +39,10 @@
 //! Returns `Arc<dyn MessageSender>` which `ActorRef` implements. This allows the trait
 //! to stay in core crate while implementations can return `ActorRef` wrapped as `Arc<dyn MessageSender>`.
 
+use crate::{ActorId, MessageSender, RequestContext};
 use async_trait::async_trait;
-use std::sync::Arc;
 use std::collections::HashMap;
-use crate::{ActorId, RequestContext, MessageSender};
+use std::sync::Arc;
 
 /// Trait for spawning and activating actors
 ///
@@ -66,8 +66,11 @@ pub trait ActorFactory: Send + Sync {
     ///
     /// ## Returns
     /// Ok(()) if activation successful, error otherwise
-    async fn activate_virtual_actor(&self, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    
+    async fn activate_virtual_actor(
+        &self,
+        actor_id: &ActorId,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
     /// Spawn a new actor locally
     ///
     /// ## Purpose
@@ -100,7 +103,7 @@ pub trait ActorFactory: Send + Sync {
         labels: HashMap<String, String>,
         facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
-    
+
     /// Stop an actor
     ///
     /// ## Purpose
@@ -120,8 +123,12 @@ pub trait ActorFactory: Send + Sync {
     /// ## Note
     /// This method unregisters the actor from ActorRegistry and performs cleanup.
     /// The actor will be garbage collected after unregistration.
-    async fn stop_actor(&self, ctx: &RequestContext, actor_id: &ActorId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    
+    async fn stop_actor(
+        &self,
+        ctx: &RequestContext,
+        actor_id: &ActorId,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
     /// Create a temporary sender for ask() pattern
     ///
     /// ## Purpose
@@ -143,7 +150,7 @@ pub trait ActorFactory: Send + Sync {
         correlation_id: String,
         expires_at: std::time::Instant,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>>;
-    
+
     /// Returns self as Any for downcasting to concrete implementation
     ///
     /// ## Purpose

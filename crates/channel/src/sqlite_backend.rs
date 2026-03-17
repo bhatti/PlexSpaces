@@ -56,9 +56,10 @@
 #[cfg(feature = "sqlite-backend")]
 use crate::{Channel, ChannelError, ChannelResult};
 use async_trait::async_trait;
+use chrono::Utc;
 use futures::stream::BoxStream;
 use plexspaces_proto::channel::v1::{
-    channel_config, ChannelProvider, ChannelConfig, ChannelStats, SqliteConfig,
+    channel_config, ChannelConfig, ChannelProvider, ChannelStats, SqliteConfig,
 };
 use plexspaces_proto::common::v1::Message;
 use prost_types::Timestamp;
@@ -68,7 +69,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use chrono::Utc;
 
 /// SQLite channel implementation for durable messaging
 ///
@@ -161,7 +161,7 @@ impl SqliteChannel {
                         })?
                         .to_string()
                 };
-                
+
                 // Ensure parent directory exists (sqlx requires parent dir to exist)
                 let path_obj = std::path::Path::new(&abs_path);
                 if let Some(parent) = path_obj.parent() {
@@ -174,7 +174,7 @@ impl SqliteChannel {
                         })?;
                     }
                 }
-                
+
                 // Use file:// format for absolute paths (matching journaling crate)
                 if abs_path.starts_with('/') {
                     format!("file://{}", abs_path)
@@ -215,8 +215,12 @@ impl SqliteChannel {
             .map_err(|e| ChannelError::BackendError(e.to_string()))?;
             sqlx::query("CREATE INDEX IF NOT EXISTS idx_channel_unacked ON channel_messages(channel_name, acked) WHERE acked = 0")
                 .execute(&pool).await.map_err(|e| ChannelError::BackendError(e.to_string()))?;
-            sqlx::query("CREATE INDEX IF NOT EXISTS idx_channel_name ON channel_messages(channel_name)")
-                .execute(&pool).await.map_err(|e| ChannelError::BackendError(e.to_string()))?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_channel_name ON channel_messages(channel_name)",
+            )
+            .execute(&pool)
+            .await
+            .map_err(|e| ChannelError::BackendError(e.to_string()))?;
         }
 
         // Get table name
@@ -342,8 +346,8 @@ impl SqliteChannel {
             return Ok(()); // No cleanup
         }
 
-        let cutoff_time = Self::system_time_to_unix_ms(SystemTime::now())
-            - (cleanup_age_seconds as i64 * 1000);
+        let cutoff_time =
+            Self::system_time_to_unix_ms(SystemTime::now()) - (cleanup_age_seconds as i64 * 1000);
 
         let delete_sql = format!(
             r#"
@@ -364,11 +368,11 @@ impl SqliteChannel {
 
         if result.rows_affected() > 0 {
             if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                "Cleaned up {} old acked messages for channel '{}'",
-                result.rows_affected(),
-                self.config.name
-            );
+                tracing::debug!(
+                    "Cleaned up {} old acked messages for channel '{}'",
+                    result.rows_affected(),
+                    self.config.name
+                );
             }
         }
 
@@ -405,9 +409,7 @@ impl Channel for SqliteChannel {
             .bind(created_at)
             .execute(&self.pool)
             .await
-            .map_err(|e| {
-                ChannelError::BackendError(format!("Failed to send message: {}", e))
-            })?;
+            .map_err(|e| ChannelError::BackendError(format!("Failed to send message: {}", e)))?;
 
         // Update stats
         self.stats.messages_sent.fetch_add(1, Ordering::Relaxed);
@@ -500,10 +502,10 @@ impl Channel for SqliteChannel {
     async fn ack(&self, message_id: &str) -> ChannelResult<()> {
         use crate::observability::{backend_name, record_channel_ack, record_channel_error};
         use std::time::Instant;
-        
+
         let start = Instant::now();
         let backend = backend_name(self.config.provider);
-        
+
         // First check if message exists and is not already acked
         let check_sql = format!(
             r#"
@@ -548,7 +550,7 @@ impl Channel for SqliteChannel {
                 return Err(ChannelError::BackendError(error_msg));
             }
         }
-        
+
         // Mark message as acked in database
         let update_sql = format!(
             r#"
@@ -589,7 +591,12 @@ impl Channel for SqliteChannel {
         self.cleanup_acked_messages().await?;
 
         record_channel_ack(&self.config.name, message_id, backend);
-        crate::observability::record_channel_latency_from_start(&self.config.name, "ack", start, backend);
+        crate::observability::record_channel_latency_from_start(
+            &self.config.name,
+            "ack",
+            start,
+            backend,
+        );
 
         Ok(())
     }
@@ -730,11 +737,11 @@ impl Channel for SqliteChannel {
                 // Mark as acked (drop message)
                 self.ack(message_id).await?;
                 if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    channel = %self.config.name,
-                    message_id = %message_id,
-                    "SQLite message nacked (dropped, DLQ disabled)"
-                );
+                    tracing::debug!(
+                        channel = %self.config.name,
+                        message_id = %message_id,
+                        "SQLite message nacked (dropped, DLQ disabled)"
+                    );
                 }
             }
         }
@@ -757,9 +764,7 @@ impl Channel for SqliteChannel {
             .bind(&self.config.name)
             .fetch_one(&self.pool)
             .await
-            .map_err(|e| {
-                ChannelError::BackendError(format!("Failed to get stats: {}", e))
-            })?;
+            .map_err(|e| ChannelError::BackendError(format!("Failed to get stats: {}", e)))?;
 
         let pending_count: i64 = row.get(0);
 
@@ -880,7 +885,7 @@ mod tests {
         // Note: In-memory doesn't persist, but this tests the recovery query logic
         let config2 = create_test_config(":memory:".to_string());
         let _channel2 = SqliteChannel::new(config2).await.unwrap();
-        
+
         // In in-memory, messages are lost, but recovery logic is tested
         // For file-based persistence, would recover 3 messages
     }

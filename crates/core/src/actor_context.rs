@@ -31,13 +31,13 @@
 
 use async_trait::async_trait;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::io::Write;
+use std::sync::Arc;
 
 use crate::{ActorId, ActorRef, RequestContext, ServiceLocator};
+use futures::stream::BoxStream;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
-use futures::stream::BoxStream;
 
 /// Registration entry for objects in the ObjectRegistry.
 /// Re-exported from proto definitions.
@@ -310,6 +310,19 @@ pub trait ActorService: Send + Sync {
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
 
+    /// Send a message to an actor and wait for a reply.
+    ///
+    /// Implementations should route locally or remotely using the canonical
+    /// actor ID and preserve normal reply semantics.
+    async fn send_and_wait(
+        &self,
+        _actor_id: &str,
+        _message: Message,
+        _timeout: Option<std::time::Duration>,
+    ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
+        Err("send_and_wait is not implemented".into())
+    }
+
     /// Create a ShardGroup (data-parallel worker pool)
     ///
     /// ## Arguments
@@ -320,9 +333,14 @@ pub trait ActorService: Send + Sync {
     /// CreateShardGroupResponse with created group
     async fn create_shard_group(
         &self,
-        ctx: &RequestContext,
-        req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
-    ) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>>;
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::CreateShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Err("create_shard_group is not implemented".into())
+    }
 
     /// Bulk update ShardGroup (DPA UpdateFunction)
     ///
@@ -334,9 +352,14 @@ pub trait ActorService: Send + Sync {
     /// BulkUpdateShardGroupResponse with update statistics
     async fn bulk_update_shard_group(
         &self,
-        ctx: &RequestContext,
-        req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
-    ) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>>;
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Err("bulk_update_shard_group is not implemented".into())
+    }
 
     /// Map over ShardGroup (DPA Map operator)
     ///
@@ -348,9 +371,14 @@ pub trait ActorService: Send + Sync {
     /// MapShardGroupResponse with shard results
     async fn map_shard_group(
         &self,
-        ctx: &RequestContext,
-        req: plexspaces_proto::actor::v1::MapShardGroupRequest,
-    ) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>>;
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::MapShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Err("map_shard_group is not implemented".into())
+    }
 
     /// Scatter-gather query (DPA Scatter-Gather)
     ///
@@ -362,10 +390,14 @@ pub trait ActorService: Send + Sync {
     /// ScatterGatherResponse with aggregated results
     async fn scatter_gather(
         &self,
-        ctx: &RequestContext,
-        req: plexspaces_proto::actor::v1::ScatterGatherRequest,
-    ) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>>;
-
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::ScatterGatherResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Err("scatter_gather is not implemented".into())
+    }
 }
 
 /// Trait for providing link semantics (bidirectional death propagation)
@@ -393,7 +425,12 @@ pub trait LinkProvider: Send + Sync {
     ///
     /// ## Returns
     /// Success or error
-    async fn link(&self, actor_id: &ActorId, linked_actor_id: &ActorId, ctx: &RequestContext) -> Result<(), String>;
+    async fn link(
+        &self,
+        actor_id: &ActorId,
+        linked_actor_id: &ActorId,
+        ctx: &RequestContext,
+    ) -> Result<(), String>;
 
     /// Unlink two actors
     ///
@@ -404,7 +441,12 @@ pub trait LinkProvider: Send + Sync {
     ///
     /// ## Returns
     /// Success or error
-    async fn unlink(&self, actor_id: &ActorId, linked_actor_id: &ActorId, ctx: &RequestContext) -> Result<(), String>;
+    async fn unlink(
+        &self,
+        actor_id: &ActorId,
+        linked_actor_id: &ActorId,
+        ctx: &RequestContext,
+    ) -> Result<(), String>;
 }
 
 /// Trait for activating virtual actors (used by ReminderFacet)
@@ -427,7 +469,7 @@ pub trait ActivationProvider: Send + Sync {
     /// ## Returns
     /// true if actor is active, false if deactivated
     async fn is_actor_active(&self, actor_id: &ActorId) -> bool;
-    
+
     /// Activate a virtual actor
     ///
     /// ## Arguments
@@ -466,7 +508,10 @@ pub trait FacetService: Send + Sync {
         &self,
         actor_id: &ActorId,
         facet_type: &str,
-    ) -> Result<std::sync::Arc<tokio::sync::RwLock<Box<dyn plexspaces_facet::Facet>>>, Box<dyn std::error::Error + Send + Sync>>;
+    ) -> Result<
+        std::sync::Arc<tokio::sync::RwLock<Box<dyn plexspaces_facet::Facet>>>,
+        Box<dyn std::error::Error + Send + Sync>,
+    >;
 }
 
 /// Trait for object registry (service discovery)
@@ -608,7 +653,6 @@ pub trait TupleSpaceProvider: Send + Sync {
     /// Count tuples matching pattern
     async fn count(&self, pattern: &Pattern) -> Result<usize, TupleSpaceError>;
 }
-
 
 /// Enhanced ActorContext with service locator access
 ///
@@ -803,12 +847,12 @@ impl ActorContext {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let target_actor_id_clone = target_actor_id.clone();
         let reply_message_id = reply_message.id.clone();
-        
+
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!("[ACTOR_CONTEXT::send_reply] START: sender_id={}, target_actor_id={}, correlation_id={:?}, reply_message_id={}", 
                 sender_id, target_actor_id_clone, correlation_id, reply_message_id);
         }
-        
+
         // SIMPLIFIED: Use send() method - temporary sender behaves like normal actor
         // Set message fields: receiver_id=sender_id (where reply goes TO), sender_id=target_actor_id (where reply comes FROM), correlation_id
         reply_message.receiver_id = sender_id.clone(); // Reply goes TO the sender (temporary sender for ask pattern)
@@ -816,7 +860,7 @@ impl ActorContext {
         if let Some(corr_id) = correlation_id {
             reply_message.correlation_id = corr_id.to_string();
         }
-        
+
         // Ensure reply message has an ID with "res-" prefix for tracking
         if reply_message.id.is_empty() {
             use ulid::Ulid;
@@ -825,22 +869,29 @@ impl ActorContext {
             // If ID exists but doesn't have prefix, add res- prefix for replies
             reply_message.id = format!("res-{}", reply_message.id);
         }
-        
+
         // Use send() method - it will route to temporary sender just like any other actor
         // ActorRef::tell() will detect temporary sender and route to ReplyWaiter automatically
-        let actor_service = self.get_actor_service().await
+        let actor_service = self
+            .get_actor_service()
+            .await
             .ok_or_else(|| "ActorService not available in ServiceLocator".to_string())?;
-        
-        let result = actor_service.send(sender_id, reply_message).await
+
+        let result = actor_service
+            .send(sender_id, reply_message)
+            .await
             .map(|_| ()); // Ignore message_id return value
-        
+
         if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("[ACTOR_CONTEXT::send_reply] END: sender_id={}, target_actor_id={}, result={:?}", 
-                sender_id, target_actor_id_clone, result.is_ok());
+            tracing::debug!(
+                "[ACTOR_CONTEXT::send_reply] END: sender_id={}, target_actor_id={}, result={:?}",
+                sender_id,
+                target_actor_id_clone,
+                result.is_ok()
+            );
         }
         result
     }
-
 
     /// Get ActorService from ServiceLocator
     ///
@@ -865,7 +916,7 @@ impl ActorContext {
     /// ## Note
     /// Uses ServiceLocator's generic service lookup. The service must be registered
     /// via `service_locator.register_service(channel_service).await`.
-    /// 
+    ///
     /// ## Implementation
     /// Since ChannelService is a trait, we need to look it up by type name.
     /// The service must be registered as a concrete type that implements ChannelService.
@@ -898,7 +949,6 @@ impl ActorContext {
         None
     }
 
-
     /// Get FacetService from ServiceLocator
     ///
     /// ## Note
@@ -906,8 +956,6 @@ impl ActorContext {
     pub async fn get_facet_service(&self) -> Option<Arc<dyn FacetService>> {
         None
     }
-
-
 }
 
 // Stub implementations for testing/backward compatibility
@@ -973,7 +1021,10 @@ impl ActorService for StubActorService {
         &self,
         _ctx: &RequestContext,
         _req: plexspaces_proto::actor::v1::CreateShardGroupRequest,
-    ) -> Result<plexspaces_proto::actor::v1::CreateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        plexspaces_proto::actor::v1::CreateShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         Err("StubActorService: create_shard_group not implemented".into())
     }
 
@@ -981,7 +1032,10 @@ impl ActorService for StubActorService {
         &self,
         _ctx: &RequestContext,
         _req: plexspaces_proto::actor::v1::BulkUpdateShardGroupRequest,
-    ) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         Err("StubActorService: bulk_update_shard_group not implemented".into())
     }
 
@@ -989,7 +1043,10 @@ impl ActorService for StubActorService {
         &self,
         _ctx: &RequestContext,
         _req: plexspaces_proto::actor::v1::MapShardGroupRequest,
-    ) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        plexspaces_proto::actor::v1::MapShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         Err("StubActorService: map_shard_group not implemented".into())
     }
 
@@ -997,10 +1054,12 @@ impl ActorService for StubActorService {
         &self,
         _ctx: &RequestContext,
         _req: plexspaces_proto::actor::v1::ScatterGatherRequest,
-    ) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        plexspaces_proto::actor::v1::ScatterGatherResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         Err("StubActorService: scatter_gather not implemented".into())
     }
-
 }
 
 struct StubObjectRegistry;
@@ -1071,19 +1130,27 @@ struct StubTupleSpaceProvider;
 #[async_trait]
 impl TupleSpaceProvider for StubTupleSpaceProvider {
     async fn write(&self, _tuple: Tuple) -> Result<(), TupleSpaceError> {
-        Err(TupleSpaceError::BackendError("StubTupleSpaceProvider: write not implemented".to_string()))
+        Err(TupleSpaceError::BackendError(
+            "StubTupleSpaceProvider: write not implemented".to_string(),
+        ))
     }
 
     async fn read(&self, _pattern: &Pattern) -> Result<Vec<Tuple>, TupleSpaceError> {
-        Err(TupleSpaceError::BackendError("StubTupleSpaceProvider: read not implemented".to_string()))
+        Err(TupleSpaceError::BackendError(
+            "StubTupleSpaceProvider: read not implemented".to_string(),
+        ))
     }
 
     async fn take(&self, _pattern: &Pattern) -> Result<Option<Tuple>, TupleSpaceError> {
-        Err(TupleSpaceError::BackendError("StubTupleSpaceProvider: take not implemented".to_string()))
+        Err(TupleSpaceError::BackendError(
+            "StubTupleSpaceProvider: take not implemented".to_string(),
+        ))
     }
 
     async fn count(&self, _pattern: &Pattern) -> Result<usize, TupleSpaceError> {
-        Err(TupleSpaceError::BackendError("StubTupleSpaceProvider: count not implemented".to_string()))
+        Err(TupleSpaceError::BackendError(
+            "StubTupleSpaceProvider: count not implemented".to_string(),
+        ))
     }
 }
 
@@ -1160,7 +1227,6 @@ impl ProcessGroupService for StubProcessGroupService {
     }
 }
 
-
 struct StubFacetService;
 
 #[async_trait]
@@ -1169,8 +1235,10 @@ impl FacetService for StubFacetService {
         &self,
         _actor_id: &ActorId,
         _facet_type: &str,
-    ) -> Result<std::sync::Arc<tokio::sync::RwLock<Box<dyn plexspaces_facet::Facet>>>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        std::sync::Arc<tokio::sync::RwLock<Box<dyn plexspaces_facet::Facet>>>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         Err("StubFacetService: get_facet not implemented".into())
     }
 }
-

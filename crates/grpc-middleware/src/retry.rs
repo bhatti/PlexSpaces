@@ -67,7 +67,8 @@ impl RetryInterceptor {
             .unwrap_or(5000); // Default 5 seconds
 
         // Exponential backoff: initial_delay * (backoff_factor ^ attempt)
-        let delay = (initial_delay_ms as f64 * self.config.backoff_factor.powi(attempt as i32)) as u64;
+        let delay =
+            (initial_delay_ms as f64 * self.config.backoff_factor.powi(attempt as i32)) as u64;
 
         // Cap at max_delay
         delay.min(max_delay_ms)
@@ -122,4 +123,3 @@ impl Interceptor for RetryInterceptor {
         35 // After auth, before compression
     }
 }
-

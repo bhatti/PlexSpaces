@@ -10,9 +10,13 @@ use ulid::Ulid;
 
 /// Check if this is an EXIT message
 pub fn is_exit(msg: &Message) -> bool {
-    msg.payload == b"__EXIT__" || 
-    msg.message_type == "__EXIT__" ||
-    msg.headers.get("type").map(|s| s == "__EXIT__").unwrap_or(false)
+    msg.payload == b"__EXIT__"
+        || msg.message_type == "__EXIT__"
+        || msg
+            .headers
+            .get("type")
+            .map(|s| s == "__EXIT__")
+            .unwrap_or(false)
 }
 
 /// Try to parse EXIT message and extract exit reason string
@@ -29,7 +33,9 @@ pub fn try_parse_exit(msg: &Message) -> Option<(String, String)> {
     } else {
         msg.sender_id.clone()
     };
-    let reason_str = msg.headers.get("exit_reason")
+    let reason_str = msg
+        .headers
+        .get("exit_reason")
         .cloned()
         .unwrap_or_else(|| "Normal".to_string());
 
@@ -58,8 +64,10 @@ pub fn is_receiver_unset(msg: &Message) -> bool {
 pub fn is_expired(msg: &Message) -> bool {
     if let Some(ttl) = &msg.ttl {
         if let Some(timestamp) = &msg.timestamp {
-            let created = std::time::UNIX_EPOCH + std::time::Duration::from_secs(timestamp.seconds as u64);
-            let ttl_duration = std::time::Duration::from_secs(ttl.seconds as u64) + std::time::Duration::from_nanos(ttl.nanos as u64);
+            let created =
+                std::time::UNIX_EPOCH + std::time::Duration::from_secs(timestamp.seconds as u64);
+            let ttl_duration = std::time::Duration::from_secs(ttl.seconds as u64)
+                + std::time::Duration::from_nanos(ttl.nanos as u64);
             if let Ok(elapsed) = std::time::SystemTime::now().duration_since(created) {
                 return elapsed >= ttl_duration;
             }
@@ -104,7 +112,7 @@ pub fn exit_message(from: String, reason_str: &str) -> Message {
     headers.insert("type".to_string(), "__EXIT__".to_string());
     headers.insert("exit_from".to_string(), from.clone());
     headers.insert("exit_reason".to_string(), reason_str.to_string());
-    
+
     Message {
         id: Ulid::new().to_string(),
         sender_id: from,

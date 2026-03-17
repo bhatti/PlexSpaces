@@ -40,10 +40,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for file_path in generated_files {
             let mut content = fs::read_to_string(&file_path)?;
             let original_content = content.clone();
-            
+
             // Remove Copy from all prost::Message derives
             content = remove_copy_derives(content);
-            
+
             if content != original_content {
                 fs::write(&file_path, content)?;
             }
@@ -166,7 +166,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Remove Copy derives from generated proto code
 fn remove_copy_derives(content: String) -> String {
     let mut content = content;
-    
+
     // Remove `Copy` from `prost::Message` derives (multiple patterns)
     // Pattern: #[derive(Clone, Copy, PartialEq, ::prost::Message)]
     content = content.replace(
@@ -208,7 +208,7 @@ fn remove_copy_derives(content: String) -> String {
     content = content.replace("(Copy)", "()");
     // Replace prost's Empty with unit type for better ergonomics
     content = content.replace("::prost_types::Empty", "()");
-    
+
     content
 }
 

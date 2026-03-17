@@ -53,36 +53,35 @@ impl MetricsService for MetricsServiceImpl {
         // Export metrics in Prometheus text format
         // The metrics crate provides a recorder that we can query
         // For now, we'll use a simple implementation that formats known metrics
-        
+
         let mut output = String::new();
-        
+
         // Export all metrics from the metrics crate
         // Note: The metrics crate doesn't provide a direct way to export all metrics
         // in Prometheus format. We'll need to use metrics-exporter-prometheus or
         // implement a custom exporter.
-        
+
         // For now, return a placeholder that indicates metrics are available
         // In production, this should use metrics-exporter-prometheus or a custom exporter
         output.push_str("# PlexSpaces Metrics (Prometheus format)\n");
         output.push_str("# Note: Full Prometheus export requires metrics-exporter-prometheus\n");
         output.push_str("# Current metrics are available via metrics crate recorder\n");
-        
+
         // Add some example metrics to show the format
-        output.push_str("# HELP plexspaces_node_health_requests_total Total health check requests\n");
+        output
+            .push_str("# HELP plexspaces_node_health_requests_total Total health check requests\n");
         output.push_str("# TYPE plexspaces_node_health_requests_total counter\n");
         output.push_str("plexspaces_node_health_requests_total 0\n");
-        
+
         output.push_str("# HELP plexspaces_node_readiness_checks_total Total readiness checks\n");
         output.push_str("# TYPE plexspaces_node_readiness_checks_total counter\n");
         output.push_str("plexspaces_node_readiness_checks_total 0\n");
-        
+
         output.push_str("# HELP plexspaces_node_liveness_checks_total Total liveness checks\n");
         output.push_str("# TYPE plexspaces_node_liveness_checks_total counter\n");
         output.push_str("plexspaces_node_liveness_checks_total 0\n");
 
-        Ok(Response::new(ExportPrometheusResponse {
-            content: output,
-        }))
+        Ok(Response::new(ExportPrometheusResponse { content: output }))
     }
 
     async fn get_metrics(
@@ -90,12 +89,10 @@ impl MetricsService for MetricsServiceImpl {
         request: Request<GetMetricsRequest>,
     ) -> Result<Response<GetMetricsResponse>, Status> {
         let _req = request.into_inner();
-        
+
         // Return structured metrics
         // For now, return empty list - full implementation would query metrics crate
-        Ok(Response::new(GetMetricsResponse {
-            metrics: vec![],
-        }))
+        Ok(Response::new(GetMetricsResponse { metrics: vec![] }))
     }
 
     async fn list_metric_definitions(
@@ -188,7 +185,11 @@ impl MetricsService for MetricsServiceImpl {
                 name: "plexspaces_supervisor_child_restarted_total".to_string(),
                 r#type: MetricType::MetricTypeCounter as i32,
                 help: "Total supervisor child restarts".to_string(),
-                labels: vec!["supervisor_id".to_string(), "child_type".to_string(), "restart_policy".to_string()],
+                labels: vec![
+                    "supervisor_id".to_string(),
+                    "child_type".to_string(),
+                    "restart_policy".to_string(),
+                ],
                 buckets: vec![],
             },
             MetricDefinition {
@@ -216,7 +217,8 @@ impl MetricsService for MetricsServiceImpl {
             MetricDefinition {
                 name: "plexspaces_actor_subtree_size".to_string(),
                 r#type: MetricType::MetricTypeGauge as i32,
-                help: "Total size of actor subtree (including self and all descendants)".to_string(),
+                help: "Total size of actor subtree (including self and all descendants)"
+                    .to_string(),
                 labels: vec!["actor_id".to_string()],
                 buckets: vec![],
             },
@@ -302,9 +304,12 @@ mod tests {
         let service = MetricsServiceImpl::new();
         let request = Request::new(ExportPrometheusRequest {});
         let response = service.export_prometheus(request).await.unwrap();
-        
+
         assert!(response.get_ref().content.contains("PlexSpaces Metrics"));
-        assert!(response.get_ref().content.contains("plexspaces_node_health_requests_total"));
+        assert!(response
+            .get_ref()
+            .content
+            .contains("plexspaces_node_health_requests_total"));
     }
 
     #[tokio::test]
@@ -314,8 +319,12 @@ mod tests {
             name_pattern: String::new(),
         });
         let response = service.list_metric_definitions(request).await.unwrap();
-        
+
         assert!(!response.get_ref().definitions.is_empty());
-        assert!(response.get_ref().definitions.iter().any(|d| d.name == "plexspaces_node_health_requests_total"));
+        assert!(response
+            .get_ref()
+            .definitions
+            .iter()
+            .any(|d| d.name == "plexspaces_node_health_requests_total"));
     }
 }

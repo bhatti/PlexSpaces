@@ -88,7 +88,7 @@ See [SDK Guide](sdk.md) for complete documentation (Python, TypeScript, Go, and 
 
 ### Rust SDK Examples
 
-Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[gen_server_actor]`, `#[handler]`, `#[plexspaces_handlers]`, and `spawn_actor` with facets.
+Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations plus node-based spawn helpers: `#[actor]`, `#[gen_server_actor]`, `#[handler]`, `#[plexspaces_handlers]`, `spawn`, and `spawn_with_facets`.
 
 | Example | Description | Annotations Used | README |
 |---------|-------------|------------------|--------|
@@ -101,8 +101,8 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 | **matrix_multiply** | Parallel matrix multiplication with scatter-gather pattern (leader-worker, scientific computing) | `#[gen_server_actor]`, `#[plexspaces_handlers]`, `#[handler]`, `spawn()`, `GenServerRef.call()` | [embedded](../examples/rust/embedded/matrix_multiply/README.md) |
 | **chat_room** | Process groups for broadcast messaging (pub/sub, Slack/Discord-style) | `ProcessGroupRegistry`, `RequestContext`, `CoordinationComputeTracker` | [embedded](../examples/rust/embedded/chat_room/README.md) |
 | **timeseries_forecasting** | Pipeline via Node/type-name spawn; see README | SDK/Node spawn | [embedded](../examples/rust/embedded/timeseries_forecasting/README.md) |
-| **firecracker_multi_tenant** | Data-parallel actors (DPA-inspired) with worker pools, **health-aware node connectivity** (liveness/readiness checks, exponential backoff retry), resource-based routing, coordination/compute metrics | `ParallelClient`, `UnifiedShardGroupClient`, `NodeClient` (with health checks) | [embedded](../examples/rust/embedded/firecracker_multi_tenant/README.md) |
-| **Parameter sweep (migrating_merlin)** | Merlin-style parameter sweep (WASM): pool checkout/checkin + tuple space; fallback to process group. Same API as Python/Go/TS. | WIT exports (workflow_run, work_available), host stubs | [apps](../examples/rust/apps/migrating_merlin/README.md) |
+| **firecracker_multi_tenant** | Data-parallel actors (DPA-inspired) with worker pools, **health-aware node connectivity** (liveness/readiness checks, exponential backoff retry), resource-based routing, coordination/compute metrics | `ShardGroupClient`, `UnifiedShardGroupClient`, `NodeClient` (with health checks) | [embedded](../examples/rust/embedded/firecracker_multi_tenant/README.md) |
+| **Parameter sweep (migrating_merlin)** | Merlin-style parameter sweep (WASM): pool checkout/checkin + tuple space; fallback to process group. Same API as Python/Go/TS. | SDK/WIT host helpers, workflow handlers | [apps](../examples/rust/apps/migrating_merlin/README.md) |
 
 **Annotations Quick Reference**:
 | Annotation | Description |
@@ -115,9 +115,9 @@ Rust examples use the [Rust SDK](sdk.md#rust-sdk) annotations: `#[actor]`, `#[ge
 | `#[handler("op", cast)]` | Fire-and-forget handler (no reply) |
 
 **Conventions**: 
-- ✅ **Use SDK patterns** (`spawn`, `spawn_with_facets`, `spawn_with_storage`, `call_message`, `cast_message`) for examples and user code
+- ✅ **Use SDK patterns** (`spawn`, `spawn_with_facets`, `spawn_with_storage`, `call_message`, `cast_message`, `new_message`) for examples and user code
 - ✅ **Use SDK annotations** (`#[gen_server_actor]`, `#[handler]`, `#[plexspaces_handlers]`) for actor definitions
-- Use **Node** and SDK spawn helpers in examples; framework uses ActorFactory internally for gRPC spawn
+- Use **Node** and SDK spawn helpers in examples; do not teach ActorFactory as the application-facing spawn path
 - ✅ GenServer uses **call by default** (like Python)
 
 **Note**: For examples, prefer SDK patterns over low-level APIs. SDK removes boilerplate and provides better developer experience.

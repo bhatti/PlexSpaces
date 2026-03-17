@@ -50,12 +50,12 @@
 
 use crate::deployment_service::WasmDeploymentService;
 use crate::{WasmConfig, WasmError, WasmRuntime};
+use plexspaces_proto::prost_types;
 use plexspaces_proto::wasm::v1::{
     wasm_runtime_service_server::WasmRuntimeService, DeployWasmModuleRequest,
     DeployWasmModuleResponse, InstantiateActorRequest, InstantiateActorResponse,
     MigrateActorRequest, MigrateActorResponse, WasmError as ProtoWasmError, WasmErrorCode,
 };
-use plexspaces_proto::prost_types;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -74,9 +74,7 @@ impl WasmRuntimeServiceImpl {
     /// Create new gRPC service
     pub fn new(runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>) -> Self {
         let deployment_service = Arc::new(WasmDeploymentService::new(runtime));
-        Self {
-            deployment_service,
-        }
+        Self { deployment_service }
     }
 
     /// Convert internal WasmError to proto WasmError
@@ -180,9 +178,9 @@ impl WasmRuntimeService for WasmRuntimeServiceImpl {
     ) -> Result<Response<DeployWasmModuleResponse>, Status> {
         let req = request.into_inner();
 
-        let module = req.module.ok_or_else(|| {
-            Status::invalid_argument("module field is required")
-        })?;
+        let module = req
+            .module
+            .ok_or_else(|| Status::invalid_argument("module field is required"))?;
 
         if module.name.is_empty() {
             return Err(Status::invalid_argument("module.name cannot be empty"));
@@ -191,7 +189,9 @@ impl WasmRuntimeService for WasmRuntimeServiceImpl {
             return Err(Status::invalid_argument("module.version cannot be empty"));
         }
         if module.module_bytes.is_empty() {
-            return Err(Status::invalid_argument("module.module_bytes cannot be empty"));
+            return Err(Status::invalid_argument(
+                "module.module_bytes cannot be empty",
+            ));
         }
 
         match self
@@ -308,9 +308,9 @@ mod tests {
     use plexspaces_proto::wasm::v1::WasmModule as ProtoWasmModule;
 
     const SIMPLE_WASM: &[u8] = &[
-        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
-        0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00,
-        0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b,
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
+        0x03, 0x02, 0x01, 0x00, 0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x00, 0x0a,
+        0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b,
     ];
 
     #[tokio::test]

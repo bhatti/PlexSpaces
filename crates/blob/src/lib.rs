@@ -74,7 +74,9 @@ mod presigned {
         _operation: &str,
         _expires_after: Duration,
     ) -> Result<String, crate::BlobError> {
-        Err(crate::BlobError::InvalidInput("Presigned URLs require presigned-urls feature".to_string()))
+        Err(crate::BlobError::InvalidInput(
+            "Presigned URLs require presigned-urls feature".to_string(),
+        ))
     }
 }
 
@@ -86,11 +88,11 @@ pub use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 
 pub use config_ext::BlobConfigExt;
 pub use error::{BlobError, BlobResult};
+pub use helpers::{get_storage_path, is_expired, validate_metadata};
 pub use repository::BlobRepository;
 #[cfg(feature = "ddb-backend")]
 pub use repository::{DynamoDBBlobRepository, ListFilters};
 pub use service::BlobService;
-pub use helpers::{get_storage_path, is_expired, validate_metadata};
 
 #[cfg(feature = "server")]
 pub use server::grpc::BlobServiceImpl;

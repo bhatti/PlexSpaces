@@ -63,7 +63,6 @@ pub use plexspaces_sdk_macros::signal_handler;
 /// `#[query_handler("name")]` - Mark method as workflow query handler
 pub use plexspaces_sdk_macros::query_handler;
 
-
 // ============================================================================
 // DeclaredFacets trait - allows spawn_actor to auto-attach facets
 // ============================================================================
@@ -98,14 +97,14 @@ pub trait DeclaredFacets {
 // Re-export core types so apps can depend only on plexspaces-sdk
 // ============================================================================
 
-pub use plexspaces_core::{
-    ActorId, ActorContext, BehaviorError, BehaviorType, Message, RequestContext,
-};
 pub use plexspaces_actor::{ActorBuilder, ActorRef};
+pub use plexspaces_core::{
+    ActorContext, ActorId, BehaviorError, BehaviorType, Message, RequestContext,
+};
 pub use plexspaces_node::NodeBuilder;
 
 /// Actor trait – implement handle_message; use attribute macros for auto-generation.
-/// 
+///
 /// For examples and user code, prefer SDK annotations (`#[gen_server_actor]`, `#[event_actor]`, etc.)
 /// which automatically implement this trait.
 pub use plexspaces_core::Actor;
@@ -200,7 +199,7 @@ pub use async_trait::async_trait;
 pub use plexspaces_workflow::WorkflowError;
 
 /// High-level workflow handle with typed signal/query methods.
-/// 
+///
 /// ## Design Philosophy (Temporal-inspired)
 /// - **Workflow lifetime**: Workflows can run for days, months, or years
 /// - **Operation timeouts**: Per-call timeouts with sensible defaults
@@ -236,7 +235,7 @@ pub use plexspaces_workflow::WorkflowError;
 pub use plexspaces_workflow::WorkflowRef;
 
 /// Spawn a workflow actor and return a WorkflowRef.
-/// 
+///
 /// ## Example
 /// ```ignore
 /// let workflow = spawn_workflow(
@@ -282,25 +281,27 @@ where
     B: plexspaces_core::Actor + Send + 'static,
 {
     // Get ActorFactory from ServiceLocator - core functionality in crates/actor
-    let factory_dyn = service_locator
-        .get_actor_factory()
-        .await
-        .ok_or_else(|| WorkflowRefError::Spawn("ActorFactory not found in ServiceLocator".to_string()))?;
-    
+    let factory_dyn = service_locator.get_actor_factory().await.ok_or_else(|| {
+        WorkflowRefError::Spawn("ActorFactory not found in ServiceLocator".to_string())
+    })?;
+
     // Downcast to ActorFactoryImpl for typed spawn methods
     let factory = factory_dyn
         .as_any()
         .downcast_ref::<ActorFactoryImpl>()
-        .ok_or_else(|| WorkflowRefError::Spawn("ActorFactory is not ActorFactoryImpl".to_string()))?;
-    
+        .ok_or_else(|| {
+            WorkflowRefError::Spawn("ActorFactory is not ActorFactoryImpl".to_string())
+        })?;
+
     // Delegate to ActorFactoryImpl - core functionality stays in main crate
-    factory.spawn_workflow(ctx, actor_id, behavior, facets).await
+    factory
+        .spawn_workflow(ctx, actor_id, behavior, facets)
+        .await
 }
 
 /// Re-export serde_json for handler payload parsing
 pub use serde_json;
 pub use serde_json::{json, Value};
-
 
 // ============================================================================
 // Spawn Helpers
@@ -381,7 +382,12 @@ where
     B: plexspaces_core::Actor + DeclaredFacets + Send + 'static,
 {
     let declared = B::declared_facets();
-    let facets = create_facets_with_storage(declared, &serde_json::json!({}), Some(storage), service_locator.clone())?;
+    let facets = create_facets_with_storage(
+        declared,
+        &serde_json::json!({}),
+        Some(storage),
+        service_locator.clone(),
+    )?;
     spawn_with_facets(ctx, service_locator, actor_id, namespace, behavior, facets).await
 }
 
@@ -433,7 +439,7 @@ where
     B: plexspaces_core::Actor + Send + 'static,
 {
     let namespace_str = namespace.as_ref().to_string();
-    
+
     // Phase 2.1: Register virtual actor type if virtual_actor facet is present
     // This enables automatic activation of any actor ID matching the type pattern
     // Uses centralized helper for consistent behavior across SDK, WASM, and app-config.toml
@@ -448,7 +454,7 @@ where
             plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
             plexspaces_core::BehaviorType::Custom(s) => s,
         };
-        
+
         // Use centralized helper for consistent registration
         // Errors are logged but non-fatal (actor will still work, just no auto-activation)
         let _ = plexspaces_core::register_virtual_actor_type_consistent(
@@ -456,13 +462,14 @@ where
             actor_type,
             namespace_str.clone(),
             Some(&facets),
-            None, // No proto facets for SDK
-            None, // config - can be provided later if needed
+            None,                              // No proto facets for SDK
+            None,                              // config - can be provided later if needed
             Some(ctx.tenant_id().to_string()), // tenant_id from context
             None, // init_config_template - not used for SDK actors (only WASM actors)
-        ).await;
+        )
+        .await;
     }
-    
+
     // Use ActorBuilder from main crate - core functionality stays in crates/actor
     let mut builder = ActorBuilder::new(Box::new(behavior))
         .with_id(actor_id.into())
@@ -471,7 +478,10 @@ where
         builder = builder.with_facet(facet);
     }
     // ActorBuilder.spawn() delegates to ActorFactory internally
-    builder.spawn(ctx, service_locator).await.map_err(|e| e.into())
+    builder
+        .spawn(ctx, service_locator)
+        .await
+        .map_err(|e| e.into())
 }
 
 /// Spawn an actor using a behavior type name from BehaviorRegistry.
@@ -522,16 +532,16 @@ pub async fn spawn_with_behavior_type(
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
     use std::sync::Arc;
-    
+
     let actor_id: ActorId = actor_id.into();
     let behavior_type = behavior_type.as_ref().to_string();
-    
+
     // Get ActorFactory from ServiceLocator - core functionality in crates/actor
     let actor_factory = service_locator
         .get_actor_factory()
         .await
         .ok_or_else(|| "ActorFactory not available in ServiceLocator".to_string())?;
-    
+
     // Use ActorFactory trait method - works with any implementation
     // ActorFactory handles BehaviorRegistry lookup and actor creation
     // Note: ActorFactory::spawn_actor() always spawns actors locally
@@ -547,25 +557,25 @@ pub async fn spawn_with_behavior_type(
         )
         .await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-    
+
     // Get ActorRegistry to lookup the spawned actor and get its mailbox
     let registry = service_locator
         .actor_registry()
         .await
         .ok_or_else(|| "ActorRegistry not available in ServiceLocator".to_string())?;
-    
+
     // Extract tenant_id and namespace from RequestContext
     let tenant_id = ctx.tenant_id().to_string();
     let namespace_str = namespace.as_ref().to_string();
-    
+
     // Get local node ID to determine if actor is local
     let local_node_id = registry.local_node_id();
-    
+
     // Extract node_id from actor_id (format: "name@node-id")
     use plexspaces_core::ActorRef as CoreActorRef;
     let actor_id_str = actor_id.to_string();
-    let (_, node_id_from_actor) = CoreActorRef::parse_actor_id(&actor_id_str)
-        .unwrap_or_else(|_| {
+    let (_, node_id_from_actor) =
+        CoreActorRef::parse_actor_id(&actor_id_str).unwrap_or_else(|_| {
             // Fallback: extract from actor_id string
             let parts: Vec<&str> = actor_id_str.split('@').collect();
             if parts.len() == 2 {
@@ -574,24 +584,24 @@ pub async fn spawn_with_behavior_type(
                 (actor_id_str.clone(), local_node_id.to_string())
             }
         });
-    
+
     // Check if actor is local (ActorFactory always spawns locally, so this should be true)
     let is_local = node_id_from_actor == local_node_id || node_id_from_actor.is_empty();
-    
+
     // Convert ServiceLocator to the type expected by ActorRef
     use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
     let service_locator_trait: Arc<dyn ServiceLocatorTrait> = service_locator.clone();
-    
+
     if is_local {
         // Actor is local - get mailbox from actor instance stored in registry
         // The actor instance is stored asynchronously during registration, so we retry
         // with exponential backoff to handle registration timing
         const MAX_RETRIES: usize = 10;
         const INITIAL_DELAY_MS: u64 = 10;
-        
+
         let mut actor_instance = None;
         let mut delay_ms = INITIAL_DELAY_MS;
-        
+
         for attempt in 0..MAX_RETRIES {
             if let Some(inst) = registry.get_actor_instance(&actor_id).await {
                 actor_instance = Some(inst);
@@ -604,13 +614,13 @@ pub async fn spawn_with_behavior_type(
                 }
                 break;
             }
-            
+
             if attempt < MAX_RETRIES - 1 {
                 tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
                 delay_ms = (delay_ms * 2).min(100); // Exponential backoff, max 100ms
             }
         }
-        
+
         let actor_instance = actor_instance
             .ok_or_else(|| {
                 // Calculate total wait time: sum of exponential backoff delays
@@ -626,29 +636,39 @@ pub async fn spawn_with_behavior_type(
                     MAX_RETRIES
                 )
             })?;
-        
+
         // Downcast to Actor struct to get mailbox
         // The instance is stored as Arc<dyn Any>, we need to downcast to Arc<Actor>
         // Following the same pattern as actor_factory_impl.rs (lines 477, 760)
         use plexspaces_actor::Actor as ActorStruct;
-        let actor_arc = actor_instance
-            .downcast::<ActorStruct>()
-            .map_err(|_| {
-                format!(
-                    "Actor {} instance is not an Actor struct. \
+        let actor_arc = actor_instance.downcast::<ActorStruct>().map_err(|_| {
+            format!(
+                "Actor {} instance is not an Actor struct. \
                     Expected Arc<Actor>, got different type. \
                     This indicates a registration or storage issue.",
-                    actor_id
-                )
-            })?;
-        
+                actor_id
+            )
+        })?;
+
         let mailbox = actor_arc.mailbox().clone();
-        
-        Ok(ActorRef::local(actor_id, tenant_id, namespace_str, mailbox, service_locator_trait))
+
+        Ok(ActorRef::local(
+            actor_id,
+            tenant_id,
+            namespace_str,
+            mailbox,
+            service_locator_trait,
+        ))
     } else {
         // Actor is remote - create ActorRef::remote()
         // Note: This branch should rarely execute since ActorFactory::spawn_actor() always spawns locally
-        Ok(ActorRef::remote(actor_id, tenant_id, namespace_str, node_id_from_actor, service_locator_trait))
+        Ok(ActorRef::remote(
+            actor_id,
+            tenant_id,
+            namespace_str,
+            node_id_from_actor,
+            service_locator_trait,
+        ))
     }
 }
 
@@ -657,7 +677,7 @@ pub async fn spawn_with_behavior_type(
 // ============================================================================
 
 /// Creates facet instances from facet type names.
-/// 
+///
 /// This is a convenience function to create common facets by name,
 /// useful when facets are declared via `#[gen_server_actor(facets = ["timer", "durability"])]`.
 ///
@@ -682,18 +702,24 @@ pub fn create_facets(
     service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
 ) -> Result<Vec<Box<dyn plexspaces_facet::Facet>>, Box<dyn std::error::Error + Send + Sync>> {
     let mut facets: Vec<Box<dyn plexspaces_facet::Facet>> = Vec::new();
-    
+
     for name in facet_names {
         match *name {
             "timer" => {
-                let timer = plexspaces_journaling::TimerFacet::new(serde_json::json!({}), 50, service_locator.clone());
+                let timer = plexspaces_journaling::TimerFacet::new(
+                    serde_json::json!({}),
+                    50,
+                    service_locator.clone(),
+                );
                 facets.push(Box::new(timer));
             }
             "virtual_actor" => {
                 // VirtualActorFacet with default config (uses constants from plexspaces-common)
                 // TODO: Use runtime config from ServiceLocator when available (Phase 1.4)
-                use plexspaces_common::virtual_actor_config::{DEFAULT_IDLE_TIMEOUT_SECONDS, DEFAULT_ACTIVATION_STRATEGY};
                 use plexspaces_common::to_config_str;
+                use plexspaces_common::virtual_actor_config::{
+                    DEFAULT_ACTIVATION_STRATEGY, DEFAULT_IDLE_TIMEOUT_SECONDS,
+                };
                 let facet_config = if config.get("virtual_actor").is_some() {
                     config["virtual_actor"].clone()
                 } else {
@@ -703,7 +729,10 @@ pub fn create_facets(
                     })
                 };
                 use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
-                let virtual_facet = plexspaces_journaling::VirtualActorFacet::new(facet_config, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY);
+                let virtual_facet = plexspaces_journaling::VirtualActorFacet::new(
+                    facet_config,
+                    VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY,
+                );
                 facets.push(Box::new(virtual_facet));
             }
             "logging" => {
@@ -724,7 +753,7 @@ pub fn create_facets(
             }
         }
     }
-    
+
     Ok(facets)
 }
 
@@ -742,7 +771,7 @@ pub fn create_facets(
 /// ## Example
 /// ```ignore
 /// use plexspaces_sdk::{create_facets_with_storage, SqliteJournalStorage};
-/// 
+///
 /// let storage = Arc::new(SqliteJournalStorage::new_in_memory().await?);
 /// let facets = create_facets_with_storage(
 ///     &["virtual_actor", "durability"],
@@ -757,18 +786,24 @@ pub fn create_facets_with_storage(
     service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
 ) -> Result<Vec<Box<dyn plexspaces_facet::Facet>>, Box<dyn std::error::Error + Send + Sync>> {
     let mut facets: Vec<Box<dyn plexspaces_facet::Facet>> = Vec::new();
-    
+
     for name in facet_names {
         match *name {
             "timer" => {
-                let timer = plexspaces_journaling::TimerFacet::new(serde_json::json!({}), 50, service_locator.clone());
+                let timer = plexspaces_journaling::TimerFacet::new(
+                    serde_json::json!({}),
+                    50,
+                    service_locator.clone(),
+                );
                 facets.push(Box::new(timer));
             }
             "virtual_actor" => {
                 // VirtualActorFacet with default config (uses constants from plexspaces-common)
                 // TODO: Use runtime config from ServiceLocator when available (Phase 1.4)
-                use plexspaces_common::virtual_actor_config::{DEFAULT_IDLE_TIMEOUT_SECONDS, DEFAULT_ACTIVATION_STRATEGY};
                 use plexspaces_common::to_config_str;
+                use plexspaces_common::virtual_actor_config::{
+                    DEFAULT_ACTIVATION_STRATEGY, DEFAULT_IDLE_TIMEOUT_SECONDS,
+                };
                 let facet_config = if config.get("virtual_actor").is_some() {
                     config["virtual_actor"].clone()
                 } else {
@@ -778,7 +813,10 @@ pub fn create_facets_with_storage(
                     })
                 };
                 use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
-                let virtual_facet = plexspaces_journaling::VirtualActorFacet::new(facet_config, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY);
+                let virtual_facet = plexspaces_journaling::VirtualActorFacet::new(
+                    facet_config,
+                    VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY,
+                );
                 facets.push(Box::new(virtual_facet));
             }
             "durability" => {
@@ -801,7 +839,7 @@ pub fn create_facets_with_storage(
             }
         }
     }
-    
+
     Ok(facets)
 }
 
@@ -814,7 +852,9 @@ pub use plexspaces_journaling::TimerFacet;
 
 /// Re-export VirtualActorFacet for Orleans-style virtual actor lifecycle
 /// Virtual actors are always addressable but activated on-demand
-pub use plexspaces_journaling::{VirtualActorFacet, VirtualActorLifecycleState, ActivationStrategy};
+pub use plexspaces_journaling::{
+    ActivationStrategy, VirtualActorFacet, VirtualActorLifecycleState,
+};
 
 /// Re-export DurabilityFacet for durable execution (journaling)
 pub use plexspaces_journaling::DurabilityFacet;
@@ -837,20 +877,18 @@ pub use plexspaces_facet::Facet;
 // ShardGroup and Node Connectivity Helpers
 // ============================================================================
 
-pub mod shard_group;
-pub mod node_client;
-pub mod parallel;
 pub mod elastic_pool_client;
 pub mod leader_worker;
+pub mod node_client;
+pub mod shard_group;
 
-pub use shard_group::{ShardGroupClientTrait, UnifiedShardGroupClient, ShardGroupClientLocal};
-#[cfg(feature = "grpc")]
-pub use shard_group::{ShardGroupClientGrpc, ShardGroupClient};
-pub use node_client::{NodeClient, HealthCheckConfig};
-pub use parallel::ParallelClient;
 pub use elastic_pool_client::ElasticPoolClient;
+pub use node_client::{HealthCheckConfig, NodeClient};
 /// Re-export pool service error for elastic pool client callers
 pub use plexspaces_core::PoolServiceError;
+#[cfg(feature = "grpc")]
+pub use shard_group::{ShardGroupClient, ShardGroupClientGrpc};
+pub use shard_group::{ShardGroupClientLocal, ShardGroupClientTrait, UnifiedShardGroupClient};
 
 /// Re-export CoordinationComputeTracker for metrics tracking
 pub use plexspaces_node::CoordinationComputeTracker;
@@ -863,13 +901,13 @@ pub use plexspaces_node::CoordinationComputeTracker;
 pub use plexspaces_actor::WorkflowRefError;
 
 /// Re-export GenServerRef for typed GenServer interactions
-pub use plexspaces_actor::{GenServerRef, GenServerError, DEFAULT_CALL_TIMEOUT};
+pub use plexspaces_actor::{GenServerError, GenServerRef, DEFAULT_CALL_TIMEOUT};
 
 /// Re-export FsmRef for typed FSM interactions
-pub use plexspaces_actor::{FsmRef, FsmError, DEFAULT_FSM_TIMEOUT};
+pub use plexspaces_actor::{FsmError, FsmRef, DEFAULT_FSM_TIMEOUT};
 
 /// Re-export EventRef for typed event emission
-pub use plexspaces_actor::{EventRef, EventError};
+pub use plexspaces_actor::{EventError, EventRef};
 
 /// Re-export ActorFactoryImpl for direct factory access
 pub use plexspaces_actor::ActorFactoryImpl;
@@ -913,14 +951,14 @@ where
         .get_actor_factory()
         .await
         .ok_or_else(|| FsmError::Spawn("ActorFactory not found in ServiceLocator".to_string()))?;
-    
+
     // Downcast to ActorFactoryImpl for typed spawn methods
     // ActorFactoryImpl provides spawn_fsm, spawn_gen_server, etc.
     let factory = factory_dyn
         .as_any()
         .downcast_ref::<ActorFactoryImpl>()
         .ok_or_else(|| FsmError::Spawn("ActorFactory is not ActorFactoryImpl".to_string()))?;
-    
+
     // Delegate to ActorFactoryImpl - core functionality stays in main crate
     factory.spawn_fsm(ctx, actor_id, behavior, facets).await
 }
@@ -956,13 +994,13 @@ where
         .get_actor_factory()
         .await
         .ok_or_else(|| EventError::Spawn("ActorFactory not found in ServiceLocator".to_string()))?;
-    
+
     // Downcast to ActorFactoryImpl for typed spawn methods
     let factory = factory_dyn
         .as_any()
         .downcast_ref::<ActorFactoryImpl>()
         .ok_or_else(|| EventError::Spawn("ActorFactory is not ActorFactoryImpl".to_string()))?;
-    
+
     // Delegate to ActorFactoryImpl - core functionality stays in main crate
     factory.spawn_event(ctx, actor_id, behavior, facets).await
 }
@@ -994,17 +1032,18 @@ where
     B: plexspaces_core::Actor + Send + 'static,
 {
     // Get ActorFactory from ServiceLocator - core functionality in crates/actor
-    let factory_dyn = service_locator
-        .get_actor_factory()
-        .await
-        .ok_or_else(|| GenServerError::Spawn("ActorFactory not found in ServiceLocator".to_string()))?;
-    
+    let factory_dyn = service_locator.get_actor_factory().await.ok_or_else(|| {
+        GenServerError::Spawn("ActorFactory not found in ServiceLocator".to_string())
+    })?;
+
     // Downcast to ActorFactoryImpl for typed spawn methods
     let factory = factory_dyn
         .as_any()
         .downcast_ref::<ActorFactoryImpl>()
         .ok_or_else(|| GenServerError::Spawn("ActorFactory is not ActorFactoryImpl".to_string()))?;
-    
+
     // Delegate to ActorFactoryImpl - core functionality stays in main crate
-    factory.spawn_gen_server(ctx, actor_id, behavior, facets).await
+    factory
+        .spawn_gen_server(ctx, actor_id, behavior, facets)
+        .await
 }

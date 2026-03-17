@@ -163,10 +163,18 @@ impl DynamoDBBlobRepository {
             Err(e) => {
                 // Table doesn't exist, create it
                 let error_msg = format!("{}", e);
-                let error_code = e.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
-                let error_message = e.message().map(|m| m.to_string()).unwrap_or_else(|| error_msg.clone());
+                let error_code = e
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let error_message = e
+                    .message()
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| error_msg.clone());
 
-                if !error_msg.contains("ResourceNotFoundException") && error_code != "ResourceNotFoundException" {
+                if !error_msg.contains("ResourceNotFoundException")
+                    && error_code != "ResourceNotFoundException"
+                {
                     error!(
                         error = %e,
                         error_code = %error_code,
@@ -200,50 +208,66 @@ impl DynamoDBBlobRepository {
             .attribute_name("pk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let sk_attr = AttributeDefinition::builder()
             .attribute_name("sk")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let tenant_namespace_attr = AttributeDefinition::builder()
             .attribute_name("tenant_namespace")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let sha256_attr = AttributeDefinition::builder()
             .attribute_name("sha256")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let name_attr = AttributeDefinition::builder()
             .attribute_name("name")
             .attribute_type(ScalarAttributeType::S)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         let expires_at_attr = AttributeDefinition::builder()
             .attribute_name("expires_at")
             .attribute_type(ScalarAttributeType::N)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build attribute definition: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build attribute definition: {}", e))
+            })?;
 
         // GSI: sha256_index
         let sha256_gsi_pk = KeySchemaElement::builder()
             .attribute_name("tenant_namespace")
             .key_type(KeyType::Hash)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let sha256_gsi_sk = KeySchemaElement::builder()
             .attribute_name("sha256")
             .key_type(KeyType::Range)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let sha256_gsi_projection = Projection::builder()
             .projection_type(ProjectionType::All)
@@ -262,13 +286,17 @@ impl DynamoDBBlobRepository {
             .attribute_name("tenant_namespace")
             .key_type(KeyType::Hash)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let name_gsi_sk = KeySchemaElement::builder()
             .attribute_name("name")
             .key_type(KeyType::Range)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let name_gsi_projection = Projection::builder()
             .projection_type(ProjectionType::All)
@@ -287,13 +315,17 @@ impl DynamoDBBlobRepository {
             .attribute_name("tenant_namespace")
             .key_type(KeyType::Hash)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let expires_gsi_sk = KeySchemaElement::builder()
             .attribute_name("expires_at")
             .key_type(KeyType::Range)
             .build()
-            .map_err(|e| BlobError::StorageError(format!("Failed to build GSI key schema: {}", e)))?;
+            .map_err(|e| {
+                BlobError::StorageError(format!("Failed to build GSI key schema: {}", e))
+            })?;
 
         let expires_gsi_projection = Projection::builder()
             .projection_type(ProjectionType::All)
@@ -390,7 +422,9 @@ impl DynamoDBBlobRepository {
                     }
                 }
             } else {
-                return Err(BlobError::StorageError("Table status not available".to_string()));
+                return Err(BlobError::StorageError(
+                    "Table status not available".to_string(),
+                ));
             }
         }
     }
@@ -418,9 +452,7 @@ impl DynamoDBBlobRepository {
     }
 
     /// Convert DDB item to BlobMetadata.
-    fn item_to_metadata(
-        item: &HashMap<String, AttributeValue>,
-    ) -> Result<BlobMetadata, BlobError> {
+    fn item_to_metadata(item: &HashMap<String, AttributeValue>) -> Result<BlobMetadata, BlobError> {
         let blob_id = item
             .get("blob_id")
             .and_then(|v| v.as_s().ok())
@@ -486,8 +518,8 @@ impl DynamoDBBlobRepository {
             .and_then(|v| v.as_s().ok())
             .cloned()
             .unwrap_or_else(|| "{}".to_string());
-        let metadata: HashMap<String, String> = serde_json::from_str(&metadata_json)
-            .unwrap_or_default();
+        let metadata: HashMap<String, String> =
+            serde_json::from_str(&metadata_json).unwrap_or_default();
 
         let tags_json = item
             .get("tags_json")
@@ -554,28 +586,62 @@ impl DynamoDBBlobRepository {
         let pk = Self::composite_key(ctx, &metadata.blob_id);
         let tenant_namespace = Self::tenant_namespace_key(ctx);
 
-        let metadata_json = serde_json::to_string(&metadata.metadata).unwrap_or_else(|_| "{}".to_string());
+        let metadata_json =
+            serde_json::to_string(&metadata.metadata).unwrap_or_else(|_| "{}".to_string());
         let tags_json = serde_json::to_string(&metadata.tags).unwrap_or_else(|_| "{}".to_string());
 
         let mut item = HashMap::new();
         item.insert("pk".to_string(), AttributeValue::S(pk));
         item.insert("sk".to_string(), AttributeValue::S("METADATA".to_string()));
-        item.insert("blob_id".to_string(), AttributeValue::S(metadata.blob_id.clone()));
-        item.insert("tenant_id".to_string(), AttributeValue::S(metadata.tenant_id.clone()));
-        item.insert("namespace".to_string(), AttributeValue::S(metadata.namespace.clone()));
+        item.insert(
+            "blob_id".to_string(),
+            AttributeValue::S(metadata.blob_id.clone()),
+        );
+        item.insert(
+            "tenant_id".to_string(),
+            AttributeValue::S(metadata.tenant_id.clone()),
+        );
+        item.insert(
+            "namespace".to_string(),
+            AttributeValue::S(metadata.namespace.clone()),
+        );
         item.insert("name".to_string(), AttributeValue::S(metadata.name.clone()));
-        item.insert("sha256".to_string(), AttributeValue::S(metadata.sha256.clone()));
-        item.insert("content_type".to_string(), AttributeValue::S(metadata.content_type.clone()));
-        item.insert("content_length".to_string(), AttributeValue::N(metadata.content_length.to_string()));
+        item.insert(
+            "sha256".to_string(),
+            AttributeValue::S(metadata.sha256.clone()),
+        );
+        item.insert(
+            "content_type".to_string(),
+            AttributeValue::S(metadata.content_type.clone()),
+        );
+        item.insert(
+            "content_length".to_string(),
+            AttributeValue::N(metadata.content_length.to_string()),
+        );
         item.insert("etag".to_string(), AttributeValue::S(metadata.etag.clone()));
-        item.insert("metadata_json".to_string(), AttributeValue::S(metadata_json));
+        item.insert(
+            "metadata_json".to_string(),
+            AttributeValue::S(metadata_json),
+        );
         item.insert("tags_json".to_string(), AttributeValue::S(tags_json));
-        item.insert("created_at".to_string(), AttributeValue::N(now_secs.to_string()));
-        item.insert("updated_at".to_string(), AttributeValue::N(now_secs.to_string()));
-        item.insert("tenant_namespace".to_string(), AttributeValue::S(tenant_namespace));
+        item.insert(
+            "created_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
+        item.insert(
+            "updated_at".to_string(),
+            AttributeValue::N(now_secs.to_string()),
+        );
+        item.insert(
+            "tenant_namespace".to_string(),
+            AttributeValue::S(tenant_namespace),
+        );
 
         if !metadata.blob_group.is_empty() {
-            item.insert("blob_group".to_string(), AttributeValue::S(metadata.blob_group.clone()));
+            item.insert(
+                "blob_group".to_string(),
+                AttributeValue::S(metadata.blob_group.clone()),
+            );
         }
 
         if !metadata.kind.is_empty() {
@@ -583,7 +649,10 @@ impl DynamoDBBlobRepository {
         }
 
         if let Some(expires_at) = &metadata.expires_at {
-            item.insert("expires_at".to_string(), AttributeValue::N(expires_at.seconds.to_string()));
+            item.insert(
+                "expires_at".to_string(),
+                AttributeValue::N(expires_at.seconds.to_string()),
+            );
         }
 
         item
@@ -592,11 +661,7 @@ impl DynamoDBBlobRepository {
 
 #[async_trait]
 impl BlobRepository for DynamoDBBlobRepository {
-    async fn get(
-        &self,
-        ctx: &RequestContext,
-        blob_id: &str,
-    ) -> BlobResult<Option<BlobMetadata>> {
+    async fn get(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<Option<BlobMetadata>> {
         let start_time = std::time::Instant::now();
         let pk = Self::composite_key(ctx, blob_id);
 
@@ -650,7 +715,10 @@ impl BlobRepository for DynamoDBBlobRepository {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(BlobError::StorageError(format!("DynamoDB get_item failed: {}", e)))
+                Err(BlobError::StorageError(format!(
+                    "DynamoDB get_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -718,16 +786,15 @@ impl BlobRepository for DynamoDBBlobRepository {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(BlobError::StorageError(format!("DynamoDB query failed: {}", e)))
+                Err(BlobError::StorageError(format!(
+                    "DynamoDB query failed: {}",
+                    e
+                )))
             }
         }
     }
 
-    async fn save(
-        &self,
-        ctx: &RequestContext,
-        metadata: &BlobMetadata,
-    ) -> BlobResult<()> {
+    async fn save(&self, ctx: &RequestContext, metadata: &BlobMetadata) -> BlobResult<()> {
         // Validate tenant_id and namespace match context
         if metadata.tenant_id != ctx.tenant_id() {
             return Err(BlobError::InvalidInput(format!(
@@ -779,16 +846,15 @@ impl BlobRepository for DynamoDBBlobRepository {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(BlobError::StorageError(format!("DynamoDB put_item failed: {}", e)))
+                Err(BlobError::StorageError(format!(
+                    "DynamoDB put_item failed: {}",
+                    e
+                )))
             }
         }
     }
 
-    async fn update(
-        &self,
-        ctx: &RequestContext,
-        metadata: &BlobMetadata,
-    ) -> BlobResult<()> {
+    async fn update(&self, ctx: &RequestContext, metadata: &BlobMetadata) -> BlobResult<()> {
         // Validate tenant_id and namespace match context
         if metadata.tenant_id != ctx.tenant_id() {
             return Err(BlobError::InvalidInput(format!(
@@ -810,11 +876,7 @@ impl BlobRepository for DynamoDBBlobRepository {
         self.save(ctx, metadata).await
     }
 
-    async fn delete(
-        &self,
-        ctx: &RequestContext,
-        blob_id: &str,
-    ) -> BlobResult<()> {
+    async fn delete(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<()> {
         let start_time = std::time::Instant::now();
         let pk = Self::composite_key(ctx, blob_id);
 
@@ -849,7 +911,10 @@ impl BlobRepository for DynamoDBBlobRepository {
                     "backend" => "dynamodb"
                 )
                 .increment(1);
-                Err(BlobError::StorageError(format!("DynamoDB delete_item failed: {}", e)))
+                Err(BlobError::StorageError(format!(
+                    "DynamoDB delete_item failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -871,7 +936,8 @@ impl BlobRepository for DynamoDBBlobRepository {
         // Always use name_index GSI to query by tenant_namespace
         // This is efficient since tenant_namespace is the partition key of the GSI
         loop {
-            let mut query = self.client
+            let mut query = self
+                .client
                 .query()
                 .table_name(&self.table_name)
                 .index_name("name_index")
@@ -880,12 +946,18 @@ impl BlobRepository for DynamoDBBlobRepository {
             // If name_prefix filter is provided, add begins_with condition
             if let Some(name_prefix) = &filters.name_prefix {
                 query = query
-                    .key_condition_expression("tenant_namespace = :tn AND begins_with(#name, :name_prefix)")
+                    .key_condition_expression(
+                        "tenant_namespace = :tn AND begins_with(#name, :name_prefix)",
+                    )
                     .expression_attribute_names("#name", "name")
-                    .expression_attribute_values(":name_prefix", AttributeValue::S(name_prefix.clone()));
+                    .expression_attribute_values(
+                        ":name_prefix",
+                        AttributeValue::S(name_prefix.clone()),
+                    );
             }
 
-            query = query.expression_attribute_values(":tn", AttributeValue::S(tenant_namespace.clone()));
+            query = query
+                .expression_attribute_values(":tn", AttributeValue::S(tenant_namespace.clone()));
 
             if let Some(lek) = last_evaluated_key {
                 query = query.set_exclusive_start_key(Some(lek));
@@ -898,7 +970,9 @@ impl BlobRepository for DynamoDBBlobRepository {
                     for item in result.items() {
                         // Apply filters
                         if let Some(blob_group) = &filters.blob_group {
-                            if let Some(item_group) = item.get("blob_group").and_then(|v| v.as_s().ok()) {
+                            if let Some(item_group) =
+                                item.get("blob_group").and_then(|v| v.as_s().ok())
+                            {
                                 if item_group != blob_group {
                                     continue;
                                 }
@@ -918,7 +992,9 @@ impl BlobRepository for DynamoDBBlobRepository {
                         }
 
                         if let Some(sha256) = &filters.sha256 {
-                            if let Some(item_sha256) = item.get("sha256").and_then(|v| v.as_s().ok()) {
+                            if let Some(item_sha256) =
+                                item.get("sha256").and_then(|v| v.as_s().ok())
+                            {
                                 if item_sha256 != sha256 {
                                     continue;
                                 }
@@ -941,13 +1017,18 @@ impl BlobRepository for DynamoDBBlobRepository {
                     }
 
                     last_evaluated_key = result.last_evaluated_key().cloned();
-                    if last_evaluated_key.is_none() || results.len() >= (page_size + offset) as usize {
+                    if last_evaluated_key.is_none()
+                        || results.len() >= (page_size + offset) as usize
+                    {
                         break;
                     }
                 }
                 Err(e) => {
                     error!(error = %e, "Failed to list blob metadata");
-                    return Err(BlobError::StorageError(format!("DynamoDB query/scan failed: {}", e)));
+                    return Err(BlobError::StorageError(format!(
+                        "DynamoDB query/scan failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -1029,7 +1110,10 @@ impl BlobRepository for DynamoDBBlobRepository {
                 }
                 Err(e) => {
                     error!(error = %e, "Failed to find expired blobs");
-                    return Err(BlobError::StorageError(format!("DynamoDB query failed: {}", e)));
+                    return Err(BlobError::StorageError(format!(
+                        "DynamoDB query failed: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -1051,4 +1135,3 @@ impl BlobRepository for DynamoDBBlobRepository {
         Ok(expired)
     }
 }
-

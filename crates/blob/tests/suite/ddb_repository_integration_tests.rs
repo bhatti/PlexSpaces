@@ -24,10 +24,10 @@
 #[cfg(feature = "ddb-backend")]
 mod ddb_tests {
     use plexspaces_blob::{BlobRepository, DynamoDBBlobRepository, ListFilters};
+    use plexspaces_common::test_helpers::dynamodb_local_available;
     use plexspaces_core::RequestContext;
     use plexspaces_proto::storage::v1::BlobMetadata;
     use prost_types::Timestamp;
-    use plexspaces_common::test_helpers::dynamodb_local_available;
 
     /// Helper to check if DynamoDB simulator is available and skip test with warning if not
     async fn check_ddb_available() -> bool {
@@ -44,7 +44,7 @@ mod ddb_tests {
         let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
             .or_else(|_| std::env::var("PLEXSPACES_DDB_ENDPOINT_URL"))
             .unwrap_or_else(|_| "http://localhost:8000".to_string());
-        
+
         DynamoDBBlobRepository::new(
             "us-east-1".to_string(),
             "plexspaces-blob-test".to_string(),
@@ -191,11 +191,15 @@ mod ddb_tests {
         let ctx = tenant1_ctx();
 
         for i in 1..=5 {
-            let metadata = create_test_metadata(&ctx, &format!("blob-{}", i), &format!("sha256-{}", i));
+            let metadata =
+                create_test_metadata(&ctx, &format!("blob-{}", i), &format!("sha256-{}", i));
             repo.save(&ctx, &metadata).await.unwrap();
         }
 
-        let (results, total) = repo.list(&ctx, &ListFilters::default(), 10, 0).await.unwrap();
+        let (results, total) = repo
+            .list(&ctx, &ListFilters::default(), 10, 0)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 5);
         assert_eq!(total, 5);
     }
@@ -306,7 +310,10 @@ mod ddb_tests {
         assert_eq!(retrieved2.unwrap().sha256, "sha256-2");
 
         // Tenant1 should not see tenant2's blob when listing
-        let (results, _) = repo.list(&ctx1, &ListFilters::default(), 10, 0).await.unwrap();
+        let (results, _) = repo
+            .list(&ctx1, &ListFilters::default(), 10, 0)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].sha256, "sha256-1");
     }
@@ -336,4 +343,3 @@ mod ddb_tests {
         assert!(repo.get(&ctx2, "blob-1").await.unwrap().is_some());
     }
 }
-

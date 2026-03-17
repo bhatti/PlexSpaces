@@ -18,22 +18,21 @@
 //! cargo test -p plexspaces-node --test node_integration_tests wasm_ask_single_message_id_flow -- --nocapture
 //! ```
 
+use super::test_helpers::app_request_with_tenant;
 use plexspaces_node::NodeBuilder;
-use plexspaces_services::application_service::ApplicationServiceImpl;
 use plexspaces_proto::application::v1::{
-    application_service_server::ApplicationService,
-    ApplicationSpec, ApplicationType, ChildSpec, ChildType,
-    DeployApplicationRequest, RestartPolicy, ShutdownStrategy,
-    SupervisorSpec, SupervisionStrategy,
+    application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
+    ChildType, DeployApplicationRequest, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
+    SupervisorSpec,
 };
 use plexspaces_proto::common::v1::{Message, Metadata};
 use plexspaces_proto::wasm::v1::WasmModule;
+use plexspaces_services::application_service::ApplicationServiceImpl;
 use prost_types::Duration as ProstDuration;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
-use super::test_helpers::app_request_with_tenant;
 
 /// Get the calculator WASM file path (same as other test files)
 fn get_calculator_wasm_path() -> PathBuf {
@@ -59,7 +58,10 @@ async fn test_wasm_ask_single_message_id_flow() {
     // ── 0. Load WASM file ──────────────────────────────────────────
     let wasm_path = get_calculator_wasm_path();
     if !wasm_path.exists() {
-        eprintln!("Skipping test: calculator_actor.wasm not found at {:?}", wasm_path);
+        eprintln!(
+            "Skipping test: calculator_actor.wasm not found at {:?}",
+            wasm_path
+        );
         return;
     }
     let wasm_bytes = tokio::fs::read(&wasm_path).await.expect("read WASM file");
@@ -83,7 +85,10 @@ async fn test_wasm_ask_single_message_id_flow() {
         r#type: ChildType::ChildTypeWorker.into(),
         args: HashMap::new(),
         restart: RestartPolicy::RestartPolicyPermanent.into(),
-        shutdown_timeout: Some(ProstDuration { seconds: 5, nanos: 0 }),
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 5,
+            nanos: 0,
+        }),
         supervisor: None,
         facets: vec![],
         behavior_kind: None,
@@ -91,7 +96,10 @@ async fn test_wasm_ask_single_message_id_flow() {
     let supervisor_spec = SupervisorSpec {
         strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
         max_restarts: 3,
-        max_restart_window: Some(ProstDuration { seconds: 5, nanos: 0 }),
+        max_restart_window: Some(ProstDuration {
+            seconds: 5,
+            nanos: 0,
+        }),
         children: vec![child_spec],
     };
     let app_spec = ApplicationSpec {
@@ -106,7 +114,10 @@ async fn test_wasm_ask_single_message_id_flow() {
         supervisor: Some(supervisor_spec),
         enabled: true,
         auto_start: true,
-        shutdown_timeout: Some(ProstDuration { seconds: 10, nanos: 0 }),
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 10,
+            nanos: 0,
+        }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         metadata: None,
     };
@@ -130,7 +141,7 @@ async fn test_wasm_ask_single_message_id_flow() {
         size_bytes: 0,
     };
 
-    let service = ApplicationServiceImpl::new(node.service_locator().clone());
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
     let deploy_req = DeployApplicationRequest {
         application_id: "calc-ask-test".to_string(),
         name: "calc-ask-test".to_string(),
@@ -152,7 +163,10 @@ async fn test_wasm_ask_single_message_id_flow() {
     sleep(Duration::from_millis(2000)).await;
 
     // ── 3. Lookup calculator ActorRef ──────────────────────────────
-    let registry = node.service_locator().actor_registry().await
+    let registry = node
+        .service_locator()
+        .actor_registry()
+        .await
         .expect("ActorRegistry should be available");
 
     // Actor ID follows name:namespace@node_id — find it from the registry
@@ -162,12 +176,15 @@ async fn test_wasm_ask_single_message_id_flow() {
     };
     eprintln!("Registered actors: {:?}", all_actor_ids);
 
-    let calc_actor_id = all_actor_ids.iter()
+    let calc_actor_id = all_actor_ids
+        .iter()
         .find(|id| id.contains("calculator"))
         .expect("calculator actor should be registered");
     eprintln!("Found calculator actor: {}", calc_actor_id);
 
-    let actor_ref = registry.lookup_actor(calc_actor_id).await
+    let actor_ref = registry
+        .lookup_actor(calc_actor_id)
+        .await
         .expect("calculator ActorRef should exist");
 
     // ── 4. Send ask("add") with operands [1, 2, 3] ────────────────
@@ -187,7 +204,10 @@ async fn test_wasm_ask_single_message_id_flow() {
         ..Default::default()
     };
 
-    eprintln!("Sending ask: message_id={}, recipient={}", request_id, calc_actor_id);
+    eprintln!(
+        "Sending ask: message_id={}, recipient={}",
+        request_id, calc_actor_id
+    );
 
     let reply = actor_ref
         .ask(ask_message, std::time::Duration::from_secs(10))
@@ -216,8 +236,8 @@ async fn test_wasm_ask_single_message_id_flow() {
             );
 
             // Verify the calculator actually computed the result
-            let result: serde_json::Value = serde_json::from_slice(&reply_msg.payload)
-                .expect("reply should be valid JSON");
+            let result: serde_json::Value =
+                serde_json::from_slice(&reply_msg.payload).expect("reply should be valid JSON");
             eprintln!("  parsed result  = {}", result);
             // Calculator returns {"result": 6, "operation": "add"}
             if let Some(r) = result.get("result") {
@@ -229,5 +249,7 @@ async fn test_wasm_ask_single_message_id_flow() {
         }
     }
 
-    eprintln!("PASSED: WASM ask message-id flow verified (req-/res- prefixes, reply reached caller)");
+    eprintln!(
+        "PASSED: WASM ask message-id flow verified (req-/res- prefixes, reply reached caller)"
+    );
 }

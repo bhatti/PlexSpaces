@@ -26,6 +26,7 @@
 use crate::executor::WorkflowExecutor;
 use crate::storage::WorkflowStorage;
 use crate::types::*;
+use plexspaces_proto::v1::common::Empty;
 use plexspaces_proto::workflow::v1::{
     workflow_service_server::WorkflowService, CancelExecutionRequest, CreateDefinitionRequest,
     CreateDefinitionResponse, DeleteDefinitionRequest, GetDefinitionRequest, GetDefinitionResponse,
@@ -35,7 +36,6 @@ use plexspaces_proto::workflow::v1::{
     StartExecutionResponse, UpdateDefinitionRequest, UpdateDefinitionResponse,
     WorkflowDefinition as ProtoWorkflowDefinition, WorkflowExecution as ProtoWorkflowExecution,
 };
-use plexspaces_proto::v1::common::Empty;
 use serde_json::Value;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -73,7 +73,7 @@ impl WorkflowServiceImpl {
     /// Convert internal WorkflowDefinition to proto
     fn internal_definition_to_proto(def: &WorkflowDefinition) -> ProtoWorkflowDefinition {
         use prost_types::Duration;
-        
+
         ProtoWorkflowDefinition {
             id: def.id.clone(),
             name: def.name.clone(),
@@ -95,11 +95,12 @@ impl WorkflowServiceImpl {
         proto: &ProtoWorkflowDefinition,
     ) -> Result<WorkflowDefinition, Status> {
         use std::time::Duration;
-        
-        let timeout = proto.default_timeout.as_ref().map(|d| {
-            Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64)
-        });
-        
+
+        let timeout = proto
+            .default_timeout
+            .as_ref()
+            .map(|d| Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64));
+
         Ok(WorkflowDefinition {
             id: proto.id.clone(),
             name: proto.name.clone(),
@@ -113,7 +114,6 @@ impl WorkflowServiceImpl {
     /// Convert internal WorkflowExecution to proto
     fn internal_execution_to_proto(exec: &WorkflowExecution) -> ProtoWorkflowExecution {
         use plexspaces_proto::workflow::v1::ExecutionStatus as ProtoExecutionStatus;
-        
 
         let status = match exec.status {
             ExecutionStatus::Pending => ProtoExecutionStatus::ExecutionStatusPending,
@@ -315,14 +315,10 @@ impl WorkflowService for WorkflowServiceImpl {
         );
 
         // Start execution using executor
-        let execution_id = WorkflowExecutor::start_execution(
-            &*self.storage,
-            &req.definition_id,
-            version,
-            input,
-        )
-        .await
-        .map_err(Self::workflow_error_to_status)?;
+        let execution_id =
+            WorkflowExecutor::start_execution(&*self.storage, &req.definition_id, version, input)
+                .await
+                .map_err(Self::workflow_error_to_status)?;
 
         Ok(Response::new(StartExecutionResponse { execution_id }))
     }
@@ -459,23 +455,27 @@ impl WorkflowService for WorkflowServiceImpl {
         }
 
         // Parse signal data from Value
-        let payload = req.data.map(|v| {
-            // Convert prost_types::Value to serde_json::Value
-            match v.kind {
-                Some(prost_types::value::Kind::StringValue(s)) => {
-                    serde_json::from_str(&s).unwrap_or_else(|_| Value::String(s))
+        let payload = req
+            .data
+            .map(|v| {
+                // Convert prost_types::Value to serde_json::Value
+                match v.kind {
+                    Some(prost_types::value::Kind::StringValue(s)) => {
+                        serde_json::from_str(&s).unwrap_or_else(|_| Value::String(s))
+                    }
+                    Some(prost_types::value::Kind::BoolValue(b)) => Value::Bool(b),
+                    Some(prost_types::value::Kind::NumberValue(n)) => Value::Number(
+                        serde_json::Number::from_f64(n).unwrap_or(serde_json::Number::from(0)),
+                    ),
+                    Some(prost_types::value::Kind::NullValue(_)) => Value::Null,
+                    Some(prost_types::value::Kind::ListValue(_))
+                    | Some(prost_types::value::Kind::StructValue(_)) => {
+                        Value::Null // TODO: Implement full conversion
+                    }
+                    None => Value::Null,
                 }
-                Some(prost_types::value::Kind::BoolValue(b)) => Value::Bool(b),
-                Some(prost_types::value::Kind::NumberValue(n)) => {
-                    Value::Number(serde_json::Number::from_f64(n).unwrap_or(serde_json::Number::from(0)))
-                }
-                Some(prost_types::value::Kind::NullValue(_)) => Value::Null,
-                Some(prost_types::value::Kind::ListValue(_)) | Some(prost_types::value::Kind::StructValue(_)) => {
-                    Value::Null // TODO: Implement full conversion
-                }
-                None => Value::Null,
-            }
-        }).unwrap_or_else(|| Value::Null);
+            })
+            .unwrap_or_else(|| Value::Null);
 
         // Send signal to storage
         self.storage
@@ -574,8 +574,10 @@ impl WorkflowService for WorkflowServiceImpl {
             .map_err(Self::workflow_error_to_status)?;
 
         // Convert to proto
-        use plexspaces_proto::workflow::v1::{StepExecution as ProtoStepExecution, StepStatus as ProtoStepStatus};
-        
+        use plexspaces_proto::workflow::v1::{
+            StepExecution as ProtoStepExecution, StepStatus as ProtoStepStatus,
+        };
+
         let proto_steps = step_executions
             .iter()
             .map(|step| {
@@ -619,13 +621,14 @@ impl WorkflowService for WorkflowServiceImpl {
 mod tests {
     use super::*;
     use crate::storage::WorkflowStorage;
+    use plexspaces_proto::v1::common::Empty;
     use plexspaces_proto::workflow::v1::{
         CreateDefinitionRequest, DeleteDefinitionRequest, GetDefinitionRequest,
         GetExecutionRequest, GetStepExecutionsRequest, ListDefinitionsRequest,
         ListExecutionsRequest, QueryExecutionRequest, SignalExecutionRequest,
-        StartExecutionRequest, UpdateDefinitionRequest, WorkflowDefinition as ProtoWorkflowDefinition,
+        StartExecutionRequest, UpdateDefinitionRequest,
+        WorkflowDefinition as ProtoWorkflowDefinition,
     };
-    use plexspaces_proto::v1::common::Empty;
     use std::sync::Arc;
     use tonic::Request;
 
@@ -978,7 +981,9 @@ mod tests {
             execution_id,
             signal_name: "test-signal".to_string(),
             data: Some(prost_types::Value {
-                kind: Some(prost_types::value::Kind::StringValue("test-data".to_string())),
+                kind: Some(prost_types::value::Kind::StringValue(
+                    "test-data".to_string(),
+                )),
             }),
         });
 
@@ -1101,4 +1106,3 @@ mod tests {
         assert_eq!(result.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 }
-

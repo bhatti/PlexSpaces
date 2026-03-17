@@ -59,4 +59,3 @@ pub mod service_names {
     /// Tuplespace service
     pub const TUPLESPACE_SERVICE: &str = "TupleSpaceService";
 }
-

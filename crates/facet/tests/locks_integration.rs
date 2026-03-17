@@ -7,16 +7,16 @@
 // Tests verify that LockFacet correctly intercepts lock operations and uses
 // the LockManager from ServiceLocator (based on node config).
 
-use plexspaces_actor::{ActorRef, create_facet_from_proto};
+use plexspaces_actor::{create_facet_from_proto, ActorRef};
 use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, LockManager as CoreLockManager};
 use plexspaces_facet::capabilities::locks::LockFacet;
+use plexspaces_mailbox::Mailbox;
 use plexspaces_mailbox::Message;
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::locks::prv::Lock;
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use plexspaces_mailbox::Mailbox;
 
 // Initialize tracing for tests (if not already initialized)
 static TRACING_INIT: std::sync::Once = std::sync::Once::new();
@@ -39,11 +39,11 @@ static SHARED_NODE: OnceLock<Arc<Node>> = OnceLock::new();
 static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Get or create shared test node
-/// 
+///
 /// ## Purpose
 /// Creates a test node with services initialized but without gRPC server.
 /// This is sufficient for facet integration tests that don't need network communication.
-/// 
+///
 /// ## Pattern
 /// Follows the same pattern as other integration tests in the codebase:
 /// - Build node with in-memory backends
@@ -57,7 +57,9 @@ async fn get_shared_node() -> Arc<Node> {
 
     // Use a lock to ensure only one thread initializes
     // Handle poison errors gracefully (if a test panicked while holding the lock)
-    let _guard = INIT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = INIT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     // Double-check after acquiring lock
     if let Some(node) = SHARED_NODE.get() {
@@ -70,12 +72,12 @@ async fn get_shared_node() -> Arc<Node> {
         NodeBuilder::new("test-node")
             .with_in_memory_backends()
             .build()
-            .await
+            .await,
     );
 
     // Wait for services to be ready with polling (no gRPC server startup needed)
-    use tokio::task::yield_now;
     use std::time::Duration;
+    use tokio::task::yield_now;
     use tokio::time::sleep;
     for _ in 0..5 {
         yield_now().await;
@@ -105,18 +107,18 @@ impl ActorTrait for EchoBehavior {
 }
 
 /// Helper to get ActorRef after spawning an actor
-/// 
+///
 /// ## Purpose
 /// Waits for actor to be registered and creates ActorRef for ask() pattern.
 /// For local actors, uses ActorRef::local() with mailbox.
 /// For remote actors, uses ActorRef::remote().
-async fn get_actor_ref_after_spawn(
-    node: &Node,
-    actor_id: &ActorId,
-) -> ActorRef {
-    let actor_registry = node.service_locator().actor_registry().await
+async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef {
+    let actor_registry = node
+        .service_locator()
+        .actor_registry()
+        .await
         .expect("ActorRegistry should be available");
-    
+
     // Wait for actor to be registered (async registration)
     let node_id = node.id().as_str().to_string();
     for _ in 0..20 {
@@ -128,12 +130,9 @@ async fn get_actor_ref_after_spawn(
             // for reply routing, and the actual actor mailbox is used for receiving messages.
             use plexspaces_mailbox::{mailbox_config_default, Mailbox};
             let mailbox_for_ref = Arc::new(
-                Mailbox::new(
-                    mailbox_config_default(),
-                    format!("ref-{}", actor_id),
-                )
-                .await
-                .expect("Failed to create mailbox for ActorRef"),
+                Mailbox::new(mailbox_config_default(), format!("ref-{}", actor_id))
+                    .await
+                    .expect("Failed to create mailbox for ActorRef"),
             );
             return ActorRef::local(
                 actor_id.clone(),
@@ -151,7 +150,7 @@ async fn get_actor_ref_after_spawn(
 #[tokio::test]
 async fn test_rust_actor_lock_facet_acquire_release() {
     init_test_tracing();
-    
+
     // ARRANGE: Get shared node
     let node = get_shared_node().await;
 
@@ -181,7 +180,7 @@ async fn test_rust_actor_lock_facet_acquire_release() {
         "test-tenant".to_string(),
         "test-namespace".to_string(),
     );
-    
+
     // Spawn actor and get ActorRef for ask() pattern
     node.spawn(
         &ctx,
@@ -194,7 +193,7 @@ async fn test_rust_actor_lock_facet_acquire_release() {
     )
     .await
     .expect("Failed to spawn actor");
-    
+
     // Get ActorRef after spawning (waits for registration)
     let actor_ref = get_actor_ref_after_spawn(&node, &actor_id_typed).await;
 
@@ -213,29 +212,32 @@ async fn test_rust_actor_lock_facet_acquire_release() {
         .expect("Failed to acquire lock");
 
     // ASSERT: Should receive lock data
-    let lock_json: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse lock from reply");
+    let lock_json: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse lock from reply");
     assert_eq!(lock_json["lock_key"], "test-resource-1");
     assert_eq!(lock_json["holder_id"], actor_id);
     assert!(!lock_json["version"].as_str().unwrap().is_empty());
 
     // ACT: Send release_lock message (need to get version from acquire response)
     let acquire_reply2 = actor_ref
-        .ask(Message::json(&json!({
-            "lock_key": "test-resource-1",
-            "holder_id": actor_id.clone(),
-            "lease_duration_secs": 30
-        }))
-        .expect("Failed to create message")
-        .with_message_type("acquire_lock")
-        .to_proto(), std::time::Duration::from_secs(5))
+        .ask(
+            Message::json(&json!({
+                "lock_key": "test-resource-1",
+                "holder_id": actor_id.clone(),
+                "lease_duration_secs": 30
+            }))
+            .expect("Failed to create message")
+            .with_message_type("acquire_lock")
+            .to_proto(),
+            std::time::Duration::from_secs(5),
+        )
         .await
         .expect("Failed to acquire lock");
-    
-    let lock_json2: serde_json::Value = serde_json::from_slice(&acquire_reply2.payload)
-        .expect("Failed to parse lock from reply");
+
+    let lock_json2: serde_json::Value =
+        serde_json::from_slice(&acquire_reply2.payload).expect("Failed to parse lock from reply");
     let version = lock_json2["version"].as_str().unwrap();
-    
+
     let release_msg = Message::json(&json!({
         "lock_key": "test-resource-1",
         "holder_id": actor_id.clone(),
@@ -251,8 +253,8 @@ async fn test_rust_actor_lock_facet_acquire_release() {
         .expect("Failed to release lock");
 
     // ASSERT: Should receive success response
-    let response: serde_json::Value = serde_json::from_slice(&release_reply.payload)
-        .expect("Failed to parse release response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&release_reply.payload).expect("Failed to parse release response");
     assert_eq!(response["status"], "ok");
 }
 
@@ -260,7 +262,7 @@ async fn test_rust_actor_lock_facet_acquire_release() {
 #[tokio::test]
 async fn test_rust_actor_lock_facet_try_acquire() {
     init_test_tracing();
-    
+
     // ARRANGE: Get shared node
     let node = get_shared_node().await;
 
@@ -286,7 +288,7 @@ async fn test_rust_actor_lock_facet_try_acquire() {
         "test-tenant".to_string(),
         "test-namespace".to_string(),
     );
-    
+
     // Spawn actor
     node.clone()
         .spawn(
@@ -300,19 +302,27 @@ async fn test_rust_actor_lock_facet_try_acquire() {
         )
         .await
         .expect("Failed to spawn actor");
-    
+
     // Get ActorRef from registry
     let node_clone1 = node.clone();
-    let actor_registry1 = node_clone1.service_locator().actor_registry().await
+    let actor_registry1 = node_clone1
+        .service_locator()
+        .actor_registry()
+        .await
         .expect("ActorRegistry should be available");
-    let routing1 = actor_registry1.lookup_routing(&ctx1, &actor_id1_typed).await
+    let routing1 = actor_registry1
+        .lookup_routing(&ctx1, &actor_id1_typed)
+        .await
         .expect("Failed to lookup routing");
     let actor_ref1 = if let Some(routing_info) = routing1 {
         if routing_info.is_local {
-            let actor_instance = actor_registry1.get_actor_instance(&actor_id1_typed).await
+            let actor_instance = actor_registry1
+                .get_actor_instance(&actor_id1_typed)
+                .await
                 .expect("Actor instance should exist");
             use plexspaces_actor::Actor;
-            let actor = actor_instance.downcast_ref::<plexspaces_actor::Actor>()
+            let actor = actor_instance
+                .downcast_ref::<plexspaces_actor::Actor>()
                 .expect("Should be Actor instance");
             ActorRef::local(
                 actor_id1_typed.clone(),
@@ -362,7 +372,7 @@ async fn test_rust_actor_lock_facet_try_acquire() {
         "test-tenant".to_string(),
         "test-namespace".to_string(),
     );
-    
+
     // Spawn actor
     node.clone()
         .spawn(
@@ -376,19 +386,27 @@ async fn test_rust_actor_lock_facet_try_acquire() {
         )
         .await
         .expect("Failed to spawn actor");
-    
+
     // Get ActorRef from registry
     let node_clone2 = node.clone();
-    let actor_registry2 = node_clone2.service_locator().actor_registry().await
+    let actor_registry2 = node_clone2
+        .service_locator()
+        .actor_registry()
+        .await
         .expect("ActorRegistry should be available");
-    let routing2 = actor_registry2.lookup_routing(&ctx2, &actor_id2_typed).await
+    let routing2 = actor_registry2
+        .lookup_routing(&ctx2, &actor_id2_typed)
+        .await
         .expect("Failed to lookup routing");
     let actor_ref2 = if let Some(routing_info) = routing2 {
         if routing_info.is_local {
-            let actor_instance = actor_registry2.get_actor_instance(&actor_id2_typed).await
+            let actor_instance = actor_registry2
+                .get_actor_instance(&actor_id2_typed)
+                .await
                 .expect("Actor instance should exist");
             use plexspaces_actor::Actor;
-            let actor = actor_instance.downcast_ref::<plexspaces_actor::Actor>()
+            let actor = actor_instance
+                .downcast_ref::<plexspaces_actor::Actor>()
                 .expect("Should be Actor instance");
             ActorRef::local(
                 actor_id2_typed.clone(),
@@ -417,13 +435,16 @@ async fn test_rust_actor_lock_facet_try_acquire() {
     .with_message_type("try_acquire_lock");
 
     let try_reply = actor_ref2
-        .ask(try_acquire_msg.to_proto(), std::time::Duration::from_secs(5))
+        .ask(
+            try_acquire_msg.to_proto(),
+            std::time::Duration::from_secs(5),
+        )
         .await
         .expect("Failed to try acquire lock");
 
     // ASSERT: Should return not acquired
-    let response: serde_json::Value = serde_json::from_slice(&try_reply.payload)
-        .expect("Failed to parse try_acquire response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&try_reply.payload).expect("Failed to parse try_acquire response");
     assert_eq!(response["acquired"], false);
 }
 
@@ -431,7 +452,7 @@ async fn test_rust_actor_lock_facet_try_acquire() {
 #[tokio::test]
 async fn test_rust_actor_lock_facet_get_lock() {
     init_test_tracing();
-    
+
     // ARRANGE: Get shared node
     let node = get_shared_node().await;
 
@@ -457,7 +478,7 @@ async fn test_rust_actor_lock_facet_get_lock() {
         "test-tenant".to_string(),
         "test-namespace".to_string(),
     );
-    
+
     // Spawn actor and get ActorRef for ask() pattern
     node.spawn(
         &ctx,
@@ -470,7 +491,7 @@ async fn test_rust_actor_lock_facet_get_lock() {
     )
     .await
     .expect("Failed to spawn actor");
-    
+
     // Get ActorRef after spawning (waits for registration)
     let actor_ref = get_actor_ref_after_spawn(&node, &actor_id_typed).await;
 
@@ -485,8 +506,8 @@ async fn test_rust_actor_lock_facet_get_lock() {
         .expect("Failed to get lock");
 
     // ASSERT: Should return not found
-    let response: serde_json::Value = serde_json::from_slice(&get_reply.payload)
-        .expect("Failed to parse get_lock response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&get_reply.payload).expect("Failed to parse get_lock response");
     assert_eq!(response["found"], false);
 
     // ACT: Acquire lock, then get it
@@ -532,7 +553,10 @@ impl plexspaces_facet::capabilities::locks::LockManager for LockManagerAdapter {
         ctx: &plexspaces_common::RequestContext,
         options: plexspaces_proto::locks::prv::AcquireLockOptions,
     ) -> Result<Lock, String> {
-        self.inner.acquire_lock(ctx, options).await.map_err(|e| e.to_string())
+        self.inner
+            .acquire_lock(ctx, options)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn renew_lock(
@@ -540,7 +564,10 @@ impl plexspaces_facet::capabilities::locks::LockManager for LockManagerAdapter {
         ctx: &plexspaces_common::RequestContext,
         options: plexspaces_proto::locks::prv::RenewLockOptions,
     ) -> Result<Lock, String> {
-        self.inner.renew_lock(ctx, options).await.map_err(|e| e.to_string())
+        self.inner
+            .renew_lock(ctx, options)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn release_lock(
@@ -548,7 +575,10 @@ impl plexspaces_facet::capabilities::locks::LockManager for LockManagerAdapter {
         ctx: &plexspaces_common::RequestContext,
         options: plexspaces_proto::locks::prv::ReleaseLockOptions,
     ) -> Result<(), String> {
-        self.inner.release_lock(ctx, options).await.map_err(|e| e.to_string())
+        self.inner
+            .release_lock(ctx, options)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn get_lock(
@@ -556,7 +586,10 @@ impl plexspaces_facet::capabilities::locks::LockManager for LockManagerAdapter {
         ctx: &plexspaces_common::RequestContext,
         lock_key: &str,
     ) -> Result<Option<Lock>, String> {
-        self.inner.get_lock(ctx, lock_key).await.map_err(|e| e.to_string())
+        self.inner
+            .get_lock(ctx, lock_key)
+            .await
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -565,25 +598,30 @@ impl plexspaces_facet::capabilities::locks::LockManager for LockManagerAdapter {
 #[tokio::test]
 async fn test_lock_facet_from_proto_config() {
     init_test_tracing();
-    
+
     // ARRANGE: Get shared node (this initializes FacetRegistry with factories)
     let node = get_shared_node().await;
-    node.initialize_services().await.expect("Failed to initialize services");
-    
+    node.initialize_services()
+        .await
+        .expect("Failed to initialize services");
+
     // Get FacetRegistry from ServiceLocator
     let service_locator = node.service_locator();
     let facet_registry_wrapper = service_locator
         .get_facet_registry()
         .await
         .expect("FacetRegistry should be registered");
-    
+
     let facet_registry = facet_registry_wrapper.inner_clone();
-    
+
     // Verify "locks" facet type is registered
     let registered_types = facet_registry.list_types();
-    assert!(registered_types.contains(&"locks".to_string()), 
-        "LockFacetFactory should be registered. Found types: {:?}", registered_types);
-    
+    assert!(
+        registered_types.contains(&"locks".to_string()),
+        "LockFacetFactory should be registered. Found types: {:?}",
+        registered_types
+    );
+
     // ACT: Create LockFacet from proto configuration (simulating app-config.toml)
     use plexspaces_proto::common::v1::Facet as ProtoFacet;
     use std::collections::HashMap;
@@ -594,15 +632,15 @@ async fn test_lock_facet_from_proto_config() {
         state: HashMap::new(),
         metadata: None,
     };
-    
+
     // Use create_facet_from_proto helper (same as application deployment)
     let lock_facet = create_facet_from_proto(&proto_facet, &facet_registry)
         .await
         .expect("Failed to create LockFacet from proto");
-    
+
     // ASSERT: Facet should be LockFacet
     assert_eq!(lock_facet.facet_type(), "locks");
-    
+
     // ACT: Spawn actor with facet created from proto
     let node_id = node.id();
     let actor_name = format!("test-actor-proto-{}", ulid::Ulid::new());
@@ -612,7 +650,7 @@ async fn test_lock_facet_from_proto_config() {
         "test-tenant".to_string(),
         "test-namespace".to_string(),
     );
-    
+
     node.spawn(
         &ctx,
         &actor_id_typed,
@@ -624,10 +662,10 @@ async fn test_lock_facet_from_proto_config() {
     )
     .await
     .expect("Failed to spawn actor with LockFacet from proto");
-    
+
     // Get ActorRef
     let actor_ref = get_actor_ref_after_spawn(&node, &actor_id_typed).await;
-    
+
     // ACT: Send acquire_lock message - facet should intercept
     let acquire_msg = Message::json(&json!({
         "lock_key": "test-resource-proto",
@@ -636,15 +674,15 @@ async fn test_lock_facet_from_proto_config() {
     }))
     .expect("Failed to create message")
     .with_message_type("acquire_lock");
-    
+
     let reply = actor_ref
         .ask(acquire_msg.to_proto(), std::time::Duration::from_secs(5))
         .await
         .expect("Failed to acquire lock");
-    
+
     // ASSERT: Should receive lock data (facet intercepted and handled)
-    let lock_json: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse lock from reply");
+    let lock_json: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse lock from reply");
     assert_eq!(lock_json["lock_key"], "test-resource-proto");
     assert_eq!(lock_json["holder_id"], actor_id);
     assert!(!lock_json["version"].as_str().unwrap().is_empty());

@@ -8,20 +8,20 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_wasm_runtime::component_host::{
-        LoggingImpl, MessagingImpl, TuplespaceImpl, ChannelsImpl, DurabilityImpl,
-    };
+    use plexspaces_core::ActorId;
     use plexspaces_wasm_runtime::component_host::plexspaces::actor::{
+        channels::Host as ChannelsHost,
+        durability::Host as DurabilityHost,
         logging::Host as LoggingHost,
         messaging::Host as MessagingHost,
         tuplespace::Host as TuplespaceHost,
-        channels::Host as ChannelsHost,
-        durability::Host as DurabilityHost,
         types::{Context, SpawnOptions},
     };
-    use plexspaces_core::ActorId;
-    use std::sync::Arc;
+    use plexspaces_wasm_runtime::component_host::{
+        ChannelsImpl, DurabilityImpl, LoggingImpl, MessagingImpl, TuplespaceImpl,
+    };
     use plexspaces_wasm_runtime::HostFunctions;
+    use std::sync::Arc;
 
     // Helper to create context for tests
     fn test_context(tenant_id: &str, namespace: &str) -> Context {
@@ -40,7 +40,9 @@ mod tests {
     async fn test_logging_impl() {
         // ARRANGE
         let actor_id = ActorId::from("test-actor".to_string());
-        let mut logging = LoggingImpl { actor_id: actor_id.clone() };
+        let mut logging = LoggingImpl {
+            actor_id: actor_id.clone(),
+        };
 
         // ACT & ASSERT: All logging functions should not panic
         logging.trace("test trace message".to_string()).await;
@@ -55,7 +57,9 @@ mod tests {
         // Test span functions
         let span_id = logging.start_span("test-span".to_string()).await;
         logging.end_span(span_id).await;
-        logging.add_span_event("test-event".to_string(), vec![]).await;
+        logging
+            .add_span_event("test-event".to_string(), vec![])
+            .await;
     }
 
     #[tokio::test]
@@ -66,11 +70,13 @@ mod tests {
         let mut messaging = MessagingImpl::new(actor_id.clone(), host_functions.clone());
 
         // ACT: Test tell (should work even without message sender configured)
-        let result = messaging.tell(
-            "target-actor".to_string(),
-            "test-msg".to_string(),
-            vec![1, 2, 3],
-        ).await;
+        let result = messaging
+            .tell(
+                "target-actor".to_string(),
+                "test-msg".to_string(),
+                vec![1, 2, 3],
+            )
+            .await;
 
         // ASSERT: Should succeed (even if message sender not configured, it logs and returns success)
         assert!(result.is_ok(), "tell should succeed");
@@ -134,13 +140,13 @@ mod tests {
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
         // ACT & ASSERT: ask should return error when message sender not configured
-        let ask_result = messaging.ask(
-            "target".to_string(),
-            "msg".to_string(),
-            vec![],
-            1000,
-        ).await;
-        assert!(ask_result.is_err(), "ask should fail when message sender not configured");
+        let ask_result = messaging
+            .ask("target".to_string(), "msg".to_string(), vec![], 1000)
+            .await;
+        assert!(
+            ask_result.is_err(),
+            "ask should fail when message sender not configured"
+        );
         if let Err(e) = ask_result {
             // actor-error is now a string (JSON), not a record
             assert!(!e.is_empty(), "error message should not be empty");
@@ -151,9 +157,9 @@ mod tests {
     async fn test_messaging_impl_ask_with_mock_sender() {
         // ARRANGE: Create mock message sender that handles ask/reply
         use plexspaces_wasm_runtime::MessageSender;
+        use std::collections::HashMap;
         use std::sync::Arc;
         use tokio::sync::RwLock;
-        use std::collections::HashMap;
 
         struct MockMessageSender {
             replies: Arc<RwLock<HashMap<String, Vec<u8>>>>,
@@ -161,7 +167,13 @@ mod tests {
 
         #[async_trait::async_trait]
         impl MessageSender for MockMessageSender {
-            async fn send_message(&self, _from: &str, _to: &str, _message_type: &str, _message: &str) -> Result<(), String> {
+            async fn send_message(
+                &self,
+                _from: &str,
+                _to: &str,
+                _message_type: &str,
+                _message: &str,
+            ) -> Result<(), String> {
                 Ok(())
             }
 
@@ -226,11 +238,7 @@ mod tests {
                 Ok(())
             }
 
-            async fn monitor_actor(
-                &self,
-                _from: &str,
-                _actor_id: &str,
-            ) -> Result<u64, String> {
+            async fn monitor_actor(&self, _from: &str, _actor_id: &str) -> Result<u64, String> {
                 Ok(1)
             }
 
@@ -254,19 +262,24 @@ mod tests {
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
         // ACT: Test ask with mock sender
-        let ask_result = messaging.ask(
-            "target-actor".to_string(),
-            "get".to_string(),
-            b"request-data".to_vec(),
-            5000,
-        ).await;
+        let ask_result = messaging
+            .ask(
+                "target-actor".to_string(),
+                "get".to_string(),
+                b"request-data".to_vec(),
+                5000,
+            )
+            .await;
 
         // ASSERT: Should succeed and return reply
         assert!(ask_result.is_ok(), "ask should succeed with mock sender");
         let reply = ask_result.unwrap();
         let reply_str = String::from_utf8_lossy(&reply);
         assert!(reply_str.contains("reply:"), "reply should contain prefix");
-        assert!(reply_str.contains("request-data"), "reply should echo request");
+        assert!(
+            reply_str.contains("request-data"),
+            "reply should echo request"
+        );
     }
 
     #[tokio::test]
@@ -278,7 +291,13 @@ mod tests {
 
         #[async_trait::async_trait]
         impl MessageSender for TimeoutMessageSender {
-            async fn send_message(&self, _from: &str, _to: &str, _message_type: &str, _message: &str) -> Result<(), String> {
+            async fn send_message(
+                &self,
+                _from: &str,
+                _to: &str,
+                _message_type: &str,
+                _message: &str,
+            ) -> Result<(), String> {
                 Ok(())
             }
 
@@ -337,11 +356,7 @@ mod tests {
                 Ok(())
             }
 
-            async fn monitor_actor(
-                &self,
-                _from: &str,
-                _actor_id: &str,
-            ) -> Result<u64, String> {
+            async fn monitor_actor(&self, _from: &str, _actor_id: &str) -> Result<u64, String> {
                 Ok(1)
             }
 
@@ -362,12 +377,14 @@ mod tests {
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
         // ACT: Test ask with short timeout
-        let ask_result = messaging.ask(
-            "target".to_string(),
-            "msg".to_string(),
-            vec![],
-            50, // Short timeout
-        ).await;
+        let ask_result = messaging
+            .ask(
+                "target".to_string(),
+                "msg".to_string(),
+                vec![],
+                50, // Short timeout
+            )
+            .await;
 
         // ASSERT: Should timeout
         assert!(ask_result.is_err(), "ask should timeout");
@@ -380,13 +397,22 @@ mod tests {
 
         // ACT & ASSERT: Without a tuplespace provider, operations return errors
         let write_result = tuplespace.write(test_context("", ""), vec![]).await;
-        assert!(write_result.is_err(), "write should fail without tuplespace provider");
+        assert!(
+            write_result.is_err(),
+            "write should fail without tuplespace provider"
+        );
 
         let read_result = tuplespace.read(test_context("", ""), vec![]).await;
-        assert!(read_result.is_err(), "read should fail without tuplespace provider");
+        assert!(
+            read_result.is_err(),
+            "read should fail without tuplespace provider"
+        );
 
         let count_result = tuplespace.count(test_context("", ""), vec![]).await;
-        assert!(count_result.is_err(), "count should fail without tuplespace provider");
+        assert!(
+            count_result.is_err(),
+            "count should fail without tuplespace provider"
+        );
     }
 
     #[tokio::test]
@@ -396,15 +422,20 @@ mod tests {
         let mut channels = ChannelsImpl::new(host_functions);
 
         // ACT: Test send_to_queue
-        let result = channels.send_to_queue(
-            test_context("", ""),
-            "test-queue".to_string(),
-            "test-msg".to_string(),
-            vec![1, 2, 3],
-        ).await;
+        let result = channels
+            .send_to_queue(
+                test_context("", ""),
+                "test-queue".to_string(),
+                "test-msg".to_string(),
+                vec![1, 2, 3],
+            )
+            .await;
 
         // ASSERT: Should fail without channel service configured
-        assert!(result.is_err(), "send_to_queue should fail without channel service");
+        assert!(
+            result.is_err(),
+            "send_to_queue should fail without channel service"
+        );
     }
 
     #[tokio::test]
@@ -414,10 +445,15 @@ mod tests {
         let mut channels = ChannelsImpl::new(host_functions);
 
         // ACT: Test receive_from_queue (with timeout 0 = poll immediately)
-        let result = channels.receive_from_queue(test_context("", ""), "test-queue".to_string(), 0).await;
+        let result = channels
+            .receive_from_queue(test_context("", ""), "test-queue".to_string(), 0)
+            .await;
 
         // ASSERT: Should fail without channel service configured
-        assert!(result.is_err(), "receive_from_queue should fail without channel service");
+        assert!(
+            result.is_err(),
+            "receive_from_queue should fail without channel service"
+        );
     }
 
     #[tokio::test]
@@ -427,15 +463,20 @@ mod tests {
         let mut channels = ChannelsImpl::new(host_functions);
 
         // ACT: Test publish_to_topic
-        let result = channels.publish_to_topic(
-            test_context("", ""),
-            "test-topic".to_string(),
-            "test-msg".to_string(),
-            vec![1, 2, 3],
-        ).await;
+        let result = channels
+            .publish_to_topic(
+                test_context("", ""),
+                "test-topic".to_string(),
+                "test-msg".to_string(),
+                vec![1, 2, 3],
+            )
+            .await;
 
         // ASSERT: Should fail without channel service configured
-        assert!(result.is_err(), "publish_to_topic should fail without channel service");
+        assert!(
+            result.is_err(),
+            "publish_to_topic should fail without channel service"
+        );
     }
 
     #[tokio::test]
@@ -445,17 +486,28 @@ mod tests {
         let mut durability = DurabilityImpl::new("test-actor".to_string(), host_functions);
 
         // ACT & ASSERT: Without journal storage, persist returns error
-        let persist_result = durability.persist(test_context("", ""), "test-event".to_string(), vec![]).await;
-        assert!(persist_result.is_err(), "persist should fail without journal storage");
+        let persist_result = durability
+            .persist(test_context("", ""), "test-event".to_string(), vec![])
+            .await;
+        assert!(
+            persist_result.is_err(),
+            "persist should fail without journal storage"
+        );
 
         // checkpoint returns error without storage
         let checkpoint_result = durability.checkpoint(test_context("", "")).await;
-        assert!(checkpoint_result.is_err(), "checkpoint should fail without journal storage");
+        assert!(
+            checkpoint_result.is_err(),
+            "checkpoint should fail without journal storage"
+        );
 
         // is_replaying returns false (default) even without storage
         let is_replaying_result = durability.is_replaying(test_context("", "")).await;
         assert!(is_replaying_result.is_ok(), "is_replaying should succeed");
-        assert!(!is_replaying_result.unwrap(), "is_replaying should return false");
+        assert!(
+            !is_replaying_result.unwrap(),
+            "is_replaying should return false"
+        );
     }
 
     #[tokio::test]
@@ -466,12 +518,9 @@ mod tests {
         let mut messaging = MessagingImpl::new(actor_id, host_functions);
 
         // ACT & ASSERT: Test that errors are properly formatted
-        let ask_result = messaging.ask(
-            "target".to_string(),
-            "msg".to_string(),
-            vec![],
-            1000,
-        ).await;
+        let ask_result = messaging
+            .ask("target".to_string(), "msg".to_string(), vec![], 1000)
+            .await;
 
         assert!(ask_result.is_err());
         if let Err(e) = ask_result {
@@ -496,12 +545,13 @@ mod tests {
         };
 
         // ACT & ASSERT: spawn should return error when message sender not configured
-        let spawn_result = messaging.spawn(
-            "worker@1.0.0".to_string(),
-            vec![],
-            spawn_options,
-        ).await;
-        assert!(spawn_result.is_err(), "spawn should fail when message sender not configured");
+        let spawn_result = messaging
+            .spawn("worker@1.0.0".to_string(), vec![], spawn_options)
+            .await;
+        assert!(
+            spawn_result.is_err(),
+            "spawn should fail when message sender not configured"
+        );
     }
 
     #[tokio::test]
@@ -513,7 +563,13 @@ mod tests {
 
         #[async_trait::async_trait]
         impl MessageSender for MockSpawnSender {
-            async fn send_message(&self, _from: &str, _to: &str, _message_type: &str, _message: &str) -> Result<(), String> {
+            async fn send_message(
+                &self,
+                _from: &str,
+                _to: &str,
+                _message_type: &str,
+                _message: &str,
+            ) -> Result<(), String> {
                 Ok(())
             }
 
@@ -538,7 +594,8 @@ mod tests {
                 _durable: bool,
             ) -> Result<String, String> {
                 // Generate actor ID if not provided
-                let spawned_id = actor_id.unwrap_or_else(|| format!("spawned-{}", ulid::Ulid::new()));
+                let spawned_id =
+                    actor_id.unwrap_or_else(|| format!("spawned-{}", ulid::Ulid::new()));
                 Ok(spawned_id)
             }
 
@@ -573,11 +630,7 @@ mod tests {
                 Ok(())
             }
 
-            async fn monitor_actor(
-                &self,
-                _from: &str,
-                _actor_id: &str,
-            ) -> Result<u64, String> {
+            async fn monitor_actor(&self, _from: &str, _actor_id: &str) -> Result<u64, String> {
                 Ok(1)
             }
 
@@ -605,17 +658,24 @@ mod tests {
             durable: false,
             supervisor: None,
         };
-        let spawn_result = messaging.spawn(
-            "worker@1.0.0".to_string(),
-            vec![],
-            spawn_options,
-        ).await;
+        let spawn_result = messaging
+            .spawn("worker@1.0.0".to_string(), vec![], spawn_options)
+            .await;
 
         // ASSERT: Should succeed and return actor ID
-        assert!(spawn_result.is_ok(), "spawn should succeed with mock sender");
+        assert!(
+            spawn_result.is_ok(),
+            "spawn should succeed with mock sender"
+        );
         let spawned_id = spawn_result.unwrap();
-        assert!(!spawned_id.is_empty(), "spawned actor ID should not be empty");
-        assert!(spawned_id.starts_with("spawned-"), "spawned ID should have prefix");
+        assert!(
+            !spawned_id.is_empty(),
+            "spawned actor ID should not be empty"
+        );
+        assert!(
+            spawned_id.starts_with("spawned-"),
+            "spawned ID should have prefix"
+        );
     }
 
     #[tokio::test]
@@ -627,7 +687,10 @@ mod tests {
 
         // ACT & ASSERT: stop should return error when message sender not configured
         let stop_result = messaging.stop("target-actor".to_string(), 5000).await;
-        assert!(stop_result.is_err(), "stop should fail when message sender not configured");
+        assert!(
+            stop_result.is_err(),
+            "stop should fail when message sender not configured"
+        );
     }
 
     #[tokio::test]
@@ -639,7 +702,13 @@ mod tests {
 
         #[async_trait::async_trait]
         impl MessageSender for MockStopSender {
-            async fn send_message(&self, _from: &str, _to: &str, _message_type: &str, _message: &str) -> Result<(), String> {
+            async fn send_message(
+                &self,
+                _from: &str,
+                _to: &str,
+                _message_type: &str,
+                _message: &str,
+            ) -> Result<(), String> {
                 Ok(())
             }
 
@@ -699,11 +768,7 @@ mod tests {
                 Ok(())
             }
 
-            async fn monitor_actor(
-                &self,
-                _from: &str,
-                _actor_id: &str,
-            ) -> Result<u64, String> {
+            async fn monitor_actor(&self, _from: &str, _actor_id: &str) -> Result<u64, String> {
                 Ok(1)
             }
 
@@ -730,4 +795,3 @@ mod tests {
         assert!(stop_result.is_ok(), "stop should succeed with mock sender");
     }
 }
-

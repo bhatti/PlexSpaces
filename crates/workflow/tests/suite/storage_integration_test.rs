@@ -33,7 +33,12 @@ async fn test_create_and_get_execution() {
 
     // Create execution
     let execution_id = storage
-        .create_execution("test-workflow", "1.0", json!({"input": "test"}), HashMap::new())
+        .create_execution(
+            "test-workflow",
+            "1.0",
+            json!({"input": "test"}),
+            HashMap::new(),
+        )
         .await
         .unwrap();
 
@@ -136,13 +141,21 @@ async fn test_optimistic_locking_version_check() {
 
     // Update with correct version (should succeed)
     storage
-        .update_execution_status_with_version(&execution_id, ExecutionStatus::Running, Some(version))
+        .update_execution_status_with_version(
+            &execution_id,
+            ExecutionStatus::Running,
+            Some(version),
+        )
         .await
         .unwrap();
 
     // Update with wrong version (should fail)
     let result = storage
-        .update_execution_status_with_version(&execution_id, ExecutionStatus::Completed, Some(version))
+        .update_execution_status_with_version(
+            &execution_id,
+            ExecutionStatus::Completed,
+            Some(version),
+        )
         .await;
 
     assert!(matches!(result, Err(WorkflowError::ConcurrentUpdate(_))));
@@ -691,13 +704,21 @@ async fn test_concurrent_update_detection() {
     // Simulate concurrent update: Node A reads version 1
     // Node B updates to version 2
     storage
-        .update_execution_status_with_version(&execution_id, ExecutionStatus::Running, Some(version))
+        .update_execution_status_with_version(
+            &execution_id,
+            ExecutionStatus::Running,
+            Some(version),
+        )
         .await
         .unwrap();
 
     // Node A tries to update with stale version (should fail)
     let result = storage
-        .update_execution_status_with_version(&execution_id, ExecutionStatus::Completed, Some(version))
+        .update_execution_status_with_version(
+            &execution_id,
+            ExecutionStatus::Completed,
+            Some(version),
+        )
         .await;
 
     assert!(matches!(result, Err(WorkflowError::ConcurrentUpdate(_))));
@@ -728,7 +749,11 @@ async fn test_update_execution_output_with_version() {
 
     // Update output with correct version (should succeed)
     storage
-        .update_execution_output_with_version(&execution_id, json!({"result": "success"}), Some(version))
+        .update_execution_output_with_version(
+            &execution_id,
+            json!({"result": "success"}),
+            Some(version),
+        )
         .await
         .unwrap();
 
@@ -739,7 +764,11 @@ async fn test_update_execution_output_with_version() {
 
     // Update with wrong version (should fail)
     let result = storage
-        .update_execution_output_with_version(&execution_id, json!({"result": "fail"}), Some(version))
+        .update_execution_output_with_version(
+            &execution_id,
+            json!({"result": "fail"}),
+            Some(version),
+        )
         .await;
 
     assert!(matches!(result, Err(WorkflowError::ConcurrentUpdate(_))));
@@ -1027,4 +1056,3 @@ async fn test_step_execution_history_empty() {
 
     assert_eq!(history.len(), 0);
 }
-

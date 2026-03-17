@@ -35,13 +35,13 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-use plexspaces_actor::{Actor, ChildSpec};
-use plexspaces_actor::child_spec::{RestartStrategy, ChildType as CSChildType};
+use plexspaces_actor::child_spec::{ChildType as CSChildType, RestartStrategy};
 use plexspaces_actor::supervisor::{
     ChildType, RestartPolicy, SupervisionStrategy, Supervisor, SupervisorEvent,
 };
+use plexspaces_actor::{Actor, ChildSpec};
 use plexspaces_behavior::MockBehavior;
-use plexspaces_core::{ActorId, ActorRef as CoreActorRef, ActorError, ServiceLocator};
+use plexspaces_core::{ActorError, ActorId, ActorRef as CoreActorRef, ServiceLocator};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_persistence::MemoryJournal;
 
@@ -50,46 +50,42 @@ fn create_supervisor_with_locator(
     id: String,
     strategy: SupervisionStrategy,
 ) -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
     Supervisor::new(id, strategy, service_locator)
 }
 
 /// Helper function to create a ChildSpec with sync factory
 /// Accepts RestartPolicy for backward compatibility and converts to RestartStrategy
-fn create_child_spec(
-    id: String,
-    restart: RestartPolicy,
-) -> ChildSpec {
+fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
     let id_for_factory = id.clone();
-    let sync_factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync> = Arc::new(move || {
-        let actor_id = id_for_factory.clone();
-        // Create mailbox on a separate thread to avoid blocking async runtime
-        let mailbox = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("Failed to create runtime for mailbox");
-            rt.block_on(
-                Mailbox::new(MailboxConfig::default(), actor_id.clone())
-            )
-        })
-        .join()
-        .expect("Thread panicked")
-        .expect("Failed to create mailbox in factory");
-        Ok(Actor::new(
-            id_for_factory.clone(),
-            Box::new(MockBehavior::new()),
-            mailbox,
-            "test-tenant".to_string(),
-            "test".to_string(),
-            None,
-        ))
-    });
-    
+    let sync_factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync> =
+        Arc::new(move || {
+            let actor_id = id_for_factory.clone();
+            // Create mailbox on a separate thread to avoid blocking async runtime
+            let mailbox = std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to create runtime for mailbox");
+                rt.block_on(Mailbox::new(MailboxConfig::default(), actor_id.clone()))
+            })
+            .join()
+            .expect("Thread panicked")
+            .expect("Failed to create mailbox in factory");
+            Ok(Actor::new(
+                id_for_factory.clone(),
+                Box::new(MockBehavior::new()),
+                mailbox,
+                "test-tenant".to_string(),
+                "test".to_string(),
+                None,
+            ))
+        });
+
     // Create core ActorRef (now accepted by ChildSpec::worker_sync)
-    let actor_ref = CoreActorRef::new(id.clone())
-        .expect("Failed to create actor ref");
-    
+    let actor_ref = CoreActorRef::new(id.clone()).expect("Failed to create actor ref");
+
     // Convert RestartPolicy to RestartStrategy
     let restart_strategy = match restart {
         RestartPolicy::Permanent => RestartStrategy::Permanent,
@@ -97,9 +93,8 @@ fn create_child_spec(
         RestartPolicy::Temporary => RestartStrategy::Temporary,
         RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
     };
-    
-    ChildSpec::worker_sync(id.clone(), id, sync_factory, actor_ref)
-        .with_restart(restart_strategy)
+
+    ChildSpec::worker_sync(id.clone(), id, sync_factory, actor_ref).with_restart(restart_strategy)
 }
 
 // ============================================================================
@@ -123,7 +118,8 @@ fn create_child_spec(
 #[tokio::test]
 async fn test_two_level_supervision_tree() {
     // Create root supervisor (OneForOne)
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
     let (mut root_supervisor, mut root_events) = Supervisor::new(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -517,10 +513,9 @@ async fn test_cascading_shutdown() {
     // Consume any remaining forwarded events from child supervisors (ChildStarted for actors)
     // These are forwarded from mid-level supervisors when they add actors
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    while let Ok(Some(_)) = tokio::time::timeout(
-        tokio::time::Duration::from_millis(50),
-        root_events.recv()
-    ).await {
+    while let Ok(Some(_)) =
+        tokio::time::timeout(tokio::time::Duration::from_millis(50), root_events.recv()).await
+    {
         // Drain any remaining forwarded events
     }
 
@@ -535,7 +530,7 @@ async fn test_cascading_shutdown() {
     let timeout = tokio::time::Duration::from_secs(5);
     let mut attempts = 0;
     const MAX_ATTEMPTS: usize = 10; // Allow for forwarded events from child supervisors
-    
+
     while stopped_ids.len() < 2 && attempts < MAX_ATTEMPTS {
         match tokio::time::timeout(timeout, root_events.recv()).await {
             Ok(Some(SupervisorEvent::ChildStopped(id))) => {
@@ -562,14 +557,20 @@ async fn test_cascading_shutdown() {
         }
         attempts += 1;
     }
-    
+
     println!("📊 Collected stopped_ids: {:?}", stopped_ids);
 
     // Verify both supervisors were stopped
-    assert!(stopped_ids.contains(&"mid-supervisor-1".to_string()), 
-            "Expected mid-supervisor-1 in stopped_ids, got: {:?}", stopped_ids);
-    assert!(stopped_ids.contains(&"mid-supervisor-2".to_string()),
-            "Expected mid-supervisor-2 in stopped_ids, got: {:?}", stopped_ids);
+    assert!(
+        stopped_ids.contains(&"mid-supervisor-1".to_string()),
+        "Expected mid-supervisor-1 in stopped_ids, got: {:?}",
+        stopped_ids
+    );
+    assert!(
+        stopped_ids.contains(&"mid-supervisor-2".to_string()),
+        "Expected mid-supervisor-2 in stopped_ids, got: {:?}",
+        stopped_ids
+    );
 
     println!("✅ Test passed: Cascading shutdown worked correctly");
 }
@@ -622,7 +623,8 @@ async fn test_failure_escalation_to_parent() {
 #[tokio::test]
 async fn test_dynamic_tree_modification() {
     // Create root supervisor
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
     let (root_supervisor, mut root_events) = Supervisor::new(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {

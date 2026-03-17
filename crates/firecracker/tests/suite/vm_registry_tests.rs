@@ -25,14 +25,16 @@ async fn test_vm_registry_find_vm_not_found() {
 #[tokio::test]
 async fn test_vm_registry_get_socket_path_not_found() {
     // Test: Get socket path for non-existent VM
-    let result = VmRegistry::get_vm_socket_path("non-existent-vm-id").await.unwrap();
+    let result = VmRegistry::get_vm_socket_path("non-existent-vm-id")
+        .await
+        .unwrap();
     assert!(result.is_none());
 }
 
 #[tokio::test]
 async fn test_vm_registry_discover_running_vm() {
     skip_if_unavailable!(firecracker_available(), "Firecracker");
-    
+
     use plexspaces_firecracker::{FirecrackerVm, VmConfig, VmState};
     use std::time::Duration;
     use tokio::time::sleep;
@@ -65,4 +67,3 @@ async fn test_vm_registry_discover_running_vm() {
         vm.stop().await.unwrap();
     }
 }
-

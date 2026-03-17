@@ -56,10 +56,10 @@ mod tests {
     async fn test_message_expired() {
         let ttl = Duration::from_millis(10);
         let msg = Message::new(b"test".to_vec()).with_ttl(ttl);
-        
+
         // Wait for TTL to expire
         tokio::time::sleep(Duration::from_millis(20)).await;
-        
+
         assert!(msg.is_expired());
     }
 
@@ -69,7 +69,7 @@ mod tests {
         let ttl = Duration::from_secs(30);
         let msg = Message::new(b"test".to_vec()).with_ttl(ttl);
         let proto = msg.to_proto();
-        
+
         assert!(proto.ttl.is_some());
         let proto_ttl = proto.ttl.unwrap();
         assert_eq!(proto_ttl.seconds, 30);
@@ -79,9 +79,9 @@ mod tests {
     /// Test TTL deserialization from proto
     #[test]
     fn test_message_ttl_from_proto() {
-        use prost_types::Duration as ProtoDuration;
         use plexspaces_proto::common::v1::Message as ProtoMessage;
-        
+        use prost_types::Duration as ProtoDuration;
+
         let proto_msg = ProtoMessage {
             id: "test-id".to_string(),
             sender_id: "sender".to_string(),
@@ -104,7 +104,7 @@ mod tests {
             uri_path: String::new(),
             uri_method: String::new(),
         };
-        
+
         let msg = Message::from_proto(&proto_msg);
         assert_eq!(msg.ttl(), Some(Duration::from_secs(30)));
     }
@@ -113,7 +113,7 @@ mod tests {
     #[test]
     fn test_message_no_ttl_from_proto() {
         use plexspaces_proto::common::v1::Message as ProtoMessage;
-        
+
         let proto_msg = ProtoMessage {
             id: "test-id".to_string(),
             sender_id: "sender".to_string(),
@@ -133,7 +133,7 @@ mod tests {
             uri_path: String::new(),
             uri_method: String::new(),
         };
-        
+
         let msg = Message::from_proto(&proto_msg);
         assert_eq!(msg.ttl(), None);
     }
@@ -144,7 +144,7 @@ mod tests {
         let ttl = Duration::from_millis(500);
         let msg = Message::new(b"test".to_vec()).with_ttl(ttl);
         let proto = msg.to_proto();
-        
+
         assert!(proto.ttl.is_some());
         let proto_ttl = proto.ttl.unwrap();
         assert_eq!(proto_ttl.seconds, 0);
@@ -158,11 +158,10 @@ mod tests {
         // For now, just verify the message is marked as expired
         let ttl = Duration::from_millis(10);
         let msg = Message::new(b"test".to_vec()).with_ttl(ttl);
-        
+
         tokio::time::sleep(Duration::from_millis(20)).await;
-        
+
         assert!(msg.is_expired());
         // TODO: Test that mailbox skips expired messages
     }
 }
-

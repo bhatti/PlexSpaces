@@ -10,12 +10,12 @@
 use plexspaces_actor::ActorRef;
 use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId};
 use plexspaces_facet::capabilities::registry::RegistryFacet;
+use plexspaces_mailbox::Mailbox;
 use plexspaces_mailbox::Message;
 use plexspaces_node::{Node, NodeBuilder};
 use serde_json::json;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use plexspaces_mailbox::Mailbox;
 
 // Initialize tracing for tests (if not already initialized)
 static TRACING_INIT: std::sync::Once = std::sync::Once::new();
@@ -37,11 +37,11 @@ static SHARED_NODE: OnceLock<Arc<Node>> = OnceLock::new();
 static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Get or create shared test node
-/// 
+///
 /// ## Purpose
 /// Creates a test node with services initialized but without gRPC server.
 /// This is sufficient for facet integration tests that don't need network communication.
-/// 
+///
 /// ## Pattern
 /// Follows the same pattern as other integration tests in the codebase:
 /// - Build node with in-memory backends
@@ -55,7 +55,9 @@ async fn get_shared_node() -> Arc<Node> {
 
     // Use a lock to ensure only one thread initializes
     // Handle poison errors gracefully (if a test panicked while holding the lock)
-    let _guard = INIT_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = INIT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     // Double-check after acquiring lock
     if let Some(node) = SHARED_NODE.get() {
@@ -68,12 +70,12 @@ async fn get_shared_node() -> Arc<Node> {
         NodeBuilder::new("test-node-registry")
             .with_in_memory_backends()
             .build()
-            .await
+            .await,
     );
 
     // Wait for services to be ready with polling (no gRPC server startup needed)
-    use tokio::task::yield_now;
     use std::time::Duration;
+    use tokio::task::yield_now;
     use tokio::time::sleep;
     for _ in 0..5 {
         yield_now().await;
@@ -84,18 +86,18 @@ async fn get_shared_node() -> Arc<Node> {
 }
 
 /// Helper to get ActorRef after spawning an actor
-/// 
+///
 /// ## Purpose
 /// Waits for actor to be registered and creates ActorRef for ask() pattern.
 /// For local actors, uses ActorRef::local() with mailbox.
 /// For remote actors, uses ActorRef::remote().
-async fn get_actor_ref_after_spawn(
-    node: &Node,
-    actor_id: &ActorId,
-) -> ActorRef {
-    let actor_registry = node.service_locator().actor_registry().await
+async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef {
+    let actor_registry = node
+        .service_locator()
+        .actor_registry()
+        .await
         .expect("ActorRegistry should be available");
-    
+
     // Wait for actor to be registered (async registration)
     let node_id = node.id().as_str().to_string();
     for _ in 0..20 {
@@ -107,12 +109,9 @@ async fn get_actor_ref_after_spawn(
             // for reply routing, and the actual actor mailbox is used for receiving messages.
             use plexspaces_mailbox::{mailbox_config_default, Mailbox};
             let mailbox_for_ref = Arc::new(
-                Mailbox::new(
-                    mailbox_config_default(),
-                    format!("ref-{}", actor_id),
-                )
-                .await
-                .expect("Failed to create mailbox for ActorRef"),
+                Mailbox::new(mailbox_config_default(), format!("ref-{}", actor_id))
+                    .await
+                    .expect("Failed to create mailbox for ActorRef"),
             );
             return ActorRef::local(
                 actor_id.clone(),
@@ -304,8 +303,8 @@ async fn test_rust_actor_registry_facet_register_lookup() {
         .expect("Failed to register object");
 
     // ASSERT: Should receive success
-    let response: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
     assert_eq!(response["status"], "ok");
 
     // ACT: Lookup object
@@ -322,8 +321,8 @@ async fn test_rust_actor_registry_facet_register_lookup() {
         .expect("Failed to lookup object");
 
     // ASSERT: Should return object
-    let response: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
     assert_eq!(response["object_id"], "service-1");
     assert_eq!(response["grpc_address"], "http://service-1:50051");
 }
@@ -398,8 +397,8 @@ async fn test_rust_actor_registry_facet_unregister() {
         .expect("Failed to unregister object");
 
     // ASSERT: Should receive success
-    let response: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
     assert_eq!(response["status"], "ok");
 
     // ASSERT: Lookup should return None
@@ -415,8 +414,8 @@ async fn test_rust_actor_registry_facet_unregister() {
         .await
         .expect("Failed to lookup object");
 
-    let response: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
     assert!(response.get("found").is_none() || response["found"] == false);
 }
 
@@ -493,8 +492,8 @@ async fn test_rust_actor_registry_facet_discover() {
         .expect("Failed to discover objects");
 
     // ASSERT: Should return multiple objects
-    let response: serde_json::Value = serde_json::from_slice(&reply.payload)
-        .expect("Failed to parse response");
+    let response: serde_json::Value =
+        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
     let objects: Vec<serde_json::Value> =
         serde_json::from_value(response["objects"].clone()).expect("Failed to parse objects");
     assert!(objects.len() >= 3);

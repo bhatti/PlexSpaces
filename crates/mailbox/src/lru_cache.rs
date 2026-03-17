@@ -57,25 +57,25 @@ where
     /// Updates LRU order (moves key to back of queue)
     pub fn get(&mut self, key: &K) -> Option<&V> {
         let now = SystemTime::now();
-        
+
         // Check if key exists
         if !self.map.contains_key(key) {
             return None;
         }
-        
+
         // Check if expired (need to check timestamp first)
-        let expired = self.map.get(key)
-            .map(|(_, timestamp)| {
-                now.duration_since(*timestamp).unwrap_or_default() >= self.ttl
-            })
+        let expired = self
+            .map
+            .get(key)
+            .map(|(_, timestamp)| now.duration_since(*timestamp).unwrap_or_default() >= self.ttl)
             .unwrap_or(true);
-        
+
         if expired {
             // Expired - remove it
             self.remove(key);
             return None;
         }
-        
+
         // Update LRU order: move to back of queue
         // Find and remove from queue (O(n) but acceptable for cache sizes)
         if let Some(pos) = self.queue.iter().position(|k| k == key) {
@@ -83,7 +83,7 @@ where
         }
         // Add to back (most recently used)
         self.queue.push_back(key.clone());
-        
+
         // Return reference to value
         self.map.get(key).map(|(value, _)| value)
     }
@@ -94,13 +94,13 @@ where
     /// If key already exists, updates value and LRU order.
     pub fn insert(&mut self, key: K, value: V) {
         let now = SystemTime::now();
-        
+
         // Check if key already exists
         if let Some((old_value, timestamp)) = self.map.get_mut(&key) {
             // Update existing entry
             *old_value = value;
             *timestamp = now;
-            
+
             // Update LRU order: move to back
             if let Some(pos) = self.queue.iter().position(|k| k == &key) {
                 self.queue.remove(pos);
@@ -108,7 +108,7 @@ where
             self.queue.push_back(key.clone());
             return;
         }
-        
+
         // New entry - check if we need to evict
         if self.map.len() >= self.capacity {
             // Evict least recently used (front of queue)
@@ -116,7 +116,7 @@ where
                 self.map.remove(&lru_key);
             }
         }
-        
+
         // Insert new entry
         self.queue.push_back(key.clone());
         self.map.insert(key, (value, now));
@@ -148,7 +148,7 @@ where
             })
             .map(|(key, _)| key.clone())
             .collect();
-        
+
         for key in expired_keys {
             self.remove(&key);
         }
@@ -178,11 +178,11 @@ mod tests {
     #[test]
     fn test_lru_cache_basic() {
         let mut cache = LruCache::new(3, Duration::from_secs(3600));
-        
+
         cache.insert("key1", "value1");
         cache.insert("key2", "value2");
         cache.insert("key3", "value3");
-        
+
         assert_eq!(cache.get(&"key1"), Some(&"value1"));
         assert_eq!(cache.get(&"key2"), Some(&"value2"));
         assert_eq!(cache.get(&"key3"), Some(&"value3"));
@@ -191,11 +191,11 @@ mod tests {
     #[test]
     fn test_lru_cache_eviction() {
         let mut cache = LruCache::new(2, Duration::from_secs(3600));
-        
+
         cache.insert("key1", "value1");
         cache.insert("key2", "value2");
         cache.insert("key3", "value3"); // Should evict key1 (least recently used)
-        
+
         assert_eq!(cache.get(&"key1"), None); // Evicted
         assert_eq!(cache.get(&"key2"), Some(&"value2"));
         assert_eq!(cache.get(&"key3"), Some(&"value3"));
@@ -204,13 +204,13 @@ mod tests {
     #[test]
     fn test_lru_cache_ttl_expiration() {
         let mut cache = LruCache::new(10, Duration::from_millis(100));
-        
+
         cache.insert("key1", "value1");
         assert_eq!(cache.get(&"key1"), Some(&"value1"));
-        
+
         // Wait for expiration
         std::thread::sleep(Duration::from_millis(150));
-        
+
         // Should be expired
         assert_eq!(cache.get(&"key1"), None);
     }
@@ -218,11 +218,11 @@ mod tests {
     #[test]
     fn test_lru_cache_update_existing() {
         let mut cache = LruCache::new(3, Duration::from_secs(3600));
-        
+
         cache.insert("key1", "value1");
         cache.insert("key2", "value2");
         cache.insert("key1", "value1_updated"); // Update existing
-        
+
         assert_eq!(cache.get(&"key1"), Some(&"value1_updated"));
         assert_eq!(cache.len(), 2); // Still only 2 entries
     }
@@ -230,16 +230,16 @@ mod tests {
     #[test]
     fn test_lru_cache_cleanup_expired() {
         let mut cache = LruCache::new(10, Duration::from_millis(100));
-        
+
         cache.insert("key1", "value1");
         cache.insert("key2", "value2");
-        
+
         // Wait for expiration
         std::thread::sleep(Duration::from_millis(150));
-        
+
         // Cleanup expired
         cache.cleanup_expired();
-        
+
         assert_eq!(cache.len(), 0);
     }
 }

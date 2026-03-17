@@ -171,7 +171,11 @@ impl CheckpointManager {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(storage: Arc<dyn JournalStorage>, config: CheckpointConfig, schema_version: u32) -> Self {
+    pub fn new(
+        storage: Arc<dyn JournalStorage>,
+        config: CheckpointConfig,
+        schema_version: u32,
+    ) -> Self {
         Self {
             storage,
             config,
@@ -206,7 +210,10 @@ impl CheckpointManager {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with_default_version(storage: Arc<dyn JournalStorage>, config: CheckpointConfig) -> Self {
+    pub fn with_default_version(
+        storage: Arc<dyn JournalStorage>,
+        config: CheckpointConfig,
+    ) -> Self {
         Self::new(storage, config, 1)
     }
 
@@ -348,7 +355,10 @@ impl CheckpointManager {
         // Truncate entries BEFORE the checkpoint (keep checkpointed entry)
         if self.config.auto_truncate && current_sequence > 0 {
             let truncate_sequence = current_sequence - 1;
-            let truncated = self.storage.truncate_to(actor_id, truncate_sequence).await?;
+            let truncated = self
+                .storage
+                .truncate_to(actor_id, truncate_sequence)
+                .await?;
 
             let mut stats = self.stats.write().await;
             stats.entries_truncated += truncated;
@@ -411,7 +421,8 @@ impl CheckpointManager {
     /// - Compression errors (zstd/snappy failures)
     fn compress_state_data(&self, data: Vec<u8>) -> JournalResult<Vec<u8>> {
         match CompressionType::try_from(self.config.compression) {
-            Ok(CompressionType::CompressionTypeNone) | Ok(CompressionType::CompressionTypeUnspecified) => {
+            Ok(CompressionType::CompressionTypeNone)
+            | Ok(CompressionType::CompressionTypeUnspecified) => {
                 // No compression
                 Ok(data)
             }
@@ -587,7 +598,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_checkpoint_manager_creation() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig {
             enabled: true,
             entry_interval: 100,
@@ -609,7 +621,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_entry_interval_checkpoint() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig {
             enabled: true,
             entry_interval: 10,
@@ -646,7 +659,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_disabled_checkpointing() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig {
             enabled: false, // Disabled!
             entry_interval: 1,
@@ -674,7 +688,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_time_interval_checkpoint() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig {
             enabled: true,
             entry_interval: 0, // Disabled
@@ -715,7 +730,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_auto_truncate() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig {
             enabled: true,
             entry_interval: 5,
@@ -746,7 +762,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_last_checkpoint_sequence() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig {
             enabled: true,
             entry_interval: 5,
@@ -776,7 +793,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_compression_none() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig {
             enabled: true,
             entry_interval: 1,
@@ -803,7 +821,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_checkpoint_includes_schema_version() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig {
             enabled: true,
             entry_interval: 1,
@@ -832,7 +851,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_same_version() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig::default();
 
         // Manager with schema version 2
@@ -855,7 +875,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_older_version() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig::default();
 
         // Manager with schema version 2 (current)
@@ -878,7 +899,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_newer_version_fails() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig::default();
 
         // Manager with schema version 1 (old)
@@ -916,7 +938,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_unversioned_checkpoint() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig::default();
 
         // Manager with schema version 1
@@ -939,7 +962,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_validated_checkpoint_success() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig {
             enabled: true,
             entry_interval: 1,
@@ -969,7 +993,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_validated_checkpoint_version_mismatch() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig {
             enabled: true,
             entry_interval: 1,
@@ -1010,7 +1035,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_default_version() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let config = CheckpointConfig::default();
 
         // Create with default version (should be 1)

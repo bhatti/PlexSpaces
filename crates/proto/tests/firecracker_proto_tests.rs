@@ -24,12 +24,12 @@
 
 #[cfg(test)]
 mod tests {
+    use plexspaces_proto::common::v1::Metadata;
     use plexspaces_proto::firecracker::v1::{
         BootSource, CreateVmRequest, CreateVmResponse, DeployApplicationRequest,
         DeployApplicationResponse, Drive, NetworkInterface, UndeployApplicationRequest,
         UndeployApplicationResponse, VmConfig, VmInstance, VmState,
     };
-    use plexspaces_proto::common::v1::Metadata;
 
     /// Test: Firecracker proto has VM lifecycle RPCs
     ///
@@ -208,4 +208,3 @@ mod tests {
         assert_eq!(config.mem_size_mib, 2048);
     }
 }
-

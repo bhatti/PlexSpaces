@@ -151,6 +151,12 @@ message ApplicationSpec {
   // - team: "genomics"
   // - criticality: "high"
   plexspaces.common.v1.Metadata metadata = 14;
+
+  // Seed nodes (gRPC addresses) to connect to when this application is deployed.
+  // The node will connect to these addresses if not already connected, so
+  // leader-worker and scatter/gather can use workers on other nodes.
+  // Example: ["localhost:8091", "localhost:8093"]
+  repeated string seed_nodes = 15;
 }
 
 // Application type
@@ -666,14 +672,45 @@ message ApplicationInfo {
 
 // Application metrics
 message ApplicationMetrics {
-  // Number of actors in the application
-  uint32 actor_count = 1;
+  // Actor counts by role/type within the application on this node.
+  // Examples:
+  // - leader: 1
+  // - worker: 8
+  // - supervisor: 1
+  map<string, uint64> actor_counts = 1;
 
   // Number of supervisors
   uint32 supervisor_count = 2;
 
   // Uptime in seconds
   uint64 uptime_seconds = 3;
+
+  // Total messages processed by this application on this node.
+  uint64 message_count = 4;
+
+  // Total errors observed by this application on this node.
+  uint64 error_count = 5;
+
+  // General-purpose counters for application-defined metrics.
+  // Examples:
+  // - tuple_operations: 690
+  // - scatter_gather_rounds: 30
+  // - ts_write_count: 64
+  // - ts_read_count: 64
+  map<string, uint64> counter_metrics = 6;
+
+  // Cumulative latency totals in milliseconds by metric type.
+  // Examples:
+  // - compute: 511
+  // - coordination: 65419
+  // - worker: 65930
+  map<string, uint64> latency_totals_ms = 7;
+
+  // Maximum observed latency in milliseconds by metric type.
+  map<string, uint64> latency_max_ms = 8;
+
+  // Number of latency samples contributing to latency_totals_ms for each type.
+  map<string, uint64> latency_samples = 9;
 }
 
 // Get application status request
@@ -692,5 +729,10 @@ message GetApplicationStatusResponse {
 
   // Error if application not found
   optional string error = 3;
-}
 
+  // Node ID that served this status response.
+  string node_id = 4;
+
+  // Node address that served this status response.
+  string node_address = 5;
+}

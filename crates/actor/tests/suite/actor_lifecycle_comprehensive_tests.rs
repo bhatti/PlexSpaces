@@ -79,11 +79,19 @@ impl plexspaces_core::Actor for TestLifecycleActor {
             .map_err(|e| ActorError::InvalidState(e))
     }
 
-    async fn handle_message(&mut self, _ctx: &ActorContext, _msg: Message) -> Result<(), BehaviorError> {
+    async fn handle_message(
+        &mut self,
+        _ctx: &ActorContext,
+        _msg: Message,
+    ) -> Result<(), BehaviorError> {
         Ok(())
     }
 
-    async fn terminate(&mut self, _ctx: &ActorContext, reason: &ExitReason) -> Result<(), ActorError> {
+    async fn terminate(
+        &mut self,
+        _ctx: &ActorContext,
+        reason: &ExitReason,
+    ) -> Result<(), ActorError> {
         *self.terminate_called.lock().unwrap() = true;
         *self.terminate_reason.lock().unwrap() = Some(reason.clone());
         Ok(())
@@ -130,7 +138,11 @@ impl plexspaces_core::Actor for ObservabilityTestActor {
         Ok(())
     }
 
-    async fn handle_message(&mut self, _ctx: &ActorContext, _msg: Message) -> Result<(), BehaviorError> {
+    async fn handle_message(
+        &mut self,
+        _ctx: &ActorContext,
+        _msg: Message,
+    ) -> Result<(), BehaviorError> {
         Ok(())
     }
 
@@ -147,7 +159,11 @@ impl plexspaces_core::Actor for FailingInitActor {
         Err(ActorError::InvalidState("init failed".to_string()))
     }
 
-    async fn handle_message(&mut self, _ctx: &ActorContext, _msg: Message) -> Result<(), BehaviorError> {
+    async fn handle_message(
+        &mut self,
+        _ctx: &ActorContext,
+        _msg: Message,
+    ) -> Result<(), BehaviorError> {
         Ok(())
     }
 
@@ -494,7 +510,11 @@ impl ActorTrait for SimpleActor {
     async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
         Ok(())
     }
-    async fn handle_message(&mut self, _ctx: &ActorContext, _msg: Message) -> Result<(), BehaviorError> {
+    async fn handle_message(
+        &mut self,
+        _ctx: &ActorContext,
+        _msg: Message,
+    ) -> Result<(), BehaviorError> {
         Ok(())
     }
     fn behavior_type(&self) -> BehaviorType {
@@ -623,10 +643,18 @@ async fn test_multiple_facets_detachment_order() {
         async fn init(&mut self, _ctx: &ActorContext) -> Result<(), ActorError> {
             Ok(())
         }
-        async fn handle_message(&mut self, _ctx: &ActorContext, _msg: Message) -> Result<(), BehaviorError> {
+        async fn handle_message(
+            &mut self,
+            _ctx: &ActorContext,
+            _msg: Message,
+        ) -> Result<(), BehaviorError> {
             Ok(())
         }
-        async fn terminate(&mut self, _ctx: &ActorContext, _reason: &ExitReason) -> Result<(), ActorError> {
+        async fn terminate(
+            &mut self,
+            _ctx: &ActorContext,
+            _reason: &ExitReason,
+        ) -> Result<(), ActorError> {
             self.terminate_called.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }

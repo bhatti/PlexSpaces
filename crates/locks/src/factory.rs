@@ -80,43 +80,40 @@ pub async fn create_lock_manager(
             use crate::sql::SqliteLockManager;
             let url = database_url.unwrap_or_else(|| ":memory:".to_string());
             tracing::info!(backend = "SQLite", db_url = %url, "Creating SQLite lock manager");
-            SqliteLockManager::new(&url).await.map(|m| Arc::new(m) as Arc<dyn LockManager>)
+            SqliteLockManager::new(&url)
+                .await
+                .map(|m| Arc::new(m) as Arc<dyn LockManager>)
         }
         #[cfg(not(feature = "sqlite-backend"))]
-        LockBackend::Sqlite => {
-            Err(crate::LockError::BackendError(
-                "SQLite backend not available. Enable 'sqlite-backend' feature.".to_string()
-            ))
-        }
+        LockBackend::Sqlite => Err(crate::LockError::BackendError(
+            "SQLite backend not available. Enable 'sqlite-backend' feature.".to_string(),
+        )),
         #[cfg(feature = "postgres-backend")]
         LockBackend::Postgres => {
             // PostgreSQL lock manager not yet implemented
             // Use SQLite or Redis instead
             Err(crate::LockError::BackendError(
-                "PostgreSQL backend not yet implemented. Use SQLite or Redis.".to_string()
+                "PostgreSQL backend not yet implemented. Use SQLite or Redis.".to_string(),
             ))
         }
         #[cfg(not(feature = "postgres-backend"))]
-        LockBackend::Postgres => {
-            Err(crate::LockError::BackendError(
-                "PostgreSQL backend not available. Enable 'postgres-backend' feature.".to_string()
-            ))
-        }
+        LockBackend::Postgres => Err(crate::LockError::BackendError(
+            "PostgreSQL backend not available. Enable 'postgres-backend' feature.".to_string(),
+        )),
         #[cfg(feature = "redis-backend")]
         LockBackend::Redis => {
             use crate::redis::RedisLockManager;
-            let url = database_url.ok_or_else(|| {
-                crate::LockError::BackendError("Redis URL required".to_string())
-            })?;
+            let url = database_url
+                .ok_or_else(|| crate::LockError::BackendError("Redis URL required".to_string()))?;
             tracing::info!(backend = "Redis", url = %url, "Creating Redis lock manager");
-            RedisLockManager::new(&url).await.map(|m| Arc::new(m) as Arc<dyn LockManager>)
+            RedisLockManager::new(&url)
+                .await
+                .map(|m| Arc::new(m) as Arc<dyn LockManager>)
         }
         #[cfg(not(feature = "redis-backend"))]
-        LockBackend::Redis => {
-            Err(crate::LockError::BackendError(
-                "Redis backend not available. Enable 'redis-backend' feature.".to_string()
-            ))
-        }
+        LockBackend::Redis => Err(crate::LockError::BackendError(
+            "Redis backend not available. Enable 'redis-backend' feature.".to_string(),
+        )),
         #[cfg(feature = "ddb-backend")]
         LockBackend::DynamoDB => {
             use crate::ddb::DynamoDBLockManager;
@@ -135,7 +132,11 @@ pub async fn create_lock_manager(
                     }
                     _ => {
                         // region:table_name:endpoint_url
-                        (parts[0].to_string(), parts[1].to_string(), Some(parts[2..].join(":")))
+                        (
+                            parts[0].to_string(),
+                            parts[1].to_string(),
+                            Some(parts[2..].join(":")),
+                        )
                     }
                 }
             } else {
@@ -144,13 +145,13 @@ pub async fn create_lock_manager(
                 ));
             };
             tracing::info!(backend = "DynamoDB", region = %region, table = %table_name, "Creating DynamoDB lock manager");
-            DynamoDBLockManager::new(region, table_name, endpoint_url).await.map(|m| Arc::new(m) as Arc<dyn LockManager>)
+            DynamoDBLockManager::new(region, table_name, endpoint_url)
+                .await
+                .map(|m| Arc::new(m) as Arc<dyn LockManager>)
         }
         #[cfg(not(feature = "ddb-backend"))]
-        LockBackend::DynamoDB => {
-            Err(crate::LockError::BackendError(
-                "DynamoDB backend not available. Enable 'ddb-backend' feature.".to_string()
-            ))
-        }
+        LockBackend::DynamoDB => Err(crate::LockError::BackendError(
+            "DynamoDB backend not available. Enable 'ddb-backend' feature.".to_string(),
+        )),
     }
 }

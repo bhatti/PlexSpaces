@@ -439,11 +439,11 @@ graph TB
 - **Parallel Map**: Query all shards simultaneously (DPA Map operator)
 - **Scatter-Gather**: Aggregate results with fault tolerance (DPA Scatter-Gather)
 - **Resource-Based Routing**: Labels flow to DataParallelConfig.placement.required_labels (NodePlacement) for scheduler node matching
-- **Unified SDK**: `ParallelClient` and `UnifiedShardGroupClient` for both WASM/internal and gRPC
+- **Unified SDK**: `ShardGroupClient` and `UnifiedShardGroupClient` for both WASM/internal and gRPC
 
 **Architecture**:
 - Core functionality in `crates/services/src/actor_service/mod.rs` (ActorService trait)
-- SDK provides unified abstractions (`UnifiedShardGroupClient`, `ParallelClient`)
+- SDK provides unified abstractions (`UnifiedShardGroupClient`, `ShardGroupClient`)
 - Labels flow: ShardGroup config.placement.required_labels (NodePlacement) → ActorResourceRequirements.placement → NodeSelector → Node placement
 - **Cohesive design**: One placement model (`NodePlacement`) for scheduling, ShardGroup, and scatter-gather; scheduler (`crates/scheduler`) uses `ActorResourceRequirements.placement`; CreateShardGroup passes `config.placement` into shard spawn; elastic pool uses `PoolConfig` for sizing and can align worker placement with NodeRegistry/placement when spanning nodes. See [Leader-Worker and ShardGroup Placement](detailed-design.md#leader-worker-and-shardgroup-placement) in detailed-design.
 
@@ -1262,6 +1262,19 @@ let node_registry = service_locator.get_node_registry().await?;
 let node = node_registry.lookup_node(&ctx, "node-123").await?;
 let (nodes, next_token) = node_registry.list_nodes(&ctx, None, 100, "").await?;
 ```
+
+#### Node connectivity and seed nodes
+
+**Ownership**: Node connectivity is implemented by **NodeServiceImpl** (not ServiceLocator). The node creates NodeServiceImpl, calls `register_node_connectivity(self)` so the instance is the connectivity provider, and passes it into **ApplicationServiceImpl** at construction so deploy can connect to `ApplicationSpec.seed_nodes`.
+
+**Automatic connection**:
+- **Node startup**: Connects to `ReleaseSpec.node.cluster_seed_nodes` via `connect_to_node_addresses` after the gRPC server is up.
+- **Application deploy**: Connects to `ApplicationSpec.seed_nodes` using the injected NodeConnectivity before the app runs.
+- **Registry reconciliation**: Seed addresses are inserted into NodeRegistry immediately so placement can observe them, then SWIM ping reconciles placeholders to real node IDs and updates heartbeats. Nodes that report a different cluster are removed during reconciliation.
+
+**Connect timeout**: 1 second per address, minimum 5s, maximum 5 minutes. See [Services Reference](services.md#node-connectivity-and-seed-nodes).
+
+**Cluster matching**: NodeServiceImpl holds `local_cluster` (from release spec when using `with_release_spec`). After a successful ping, the remote node is registered only if the remote cluster matches the effective local cluster (or either is unspecified). Address lookup for "already registered" uses exact match (no scheme normalization).
 
 ### Channel Factory Architecture
 

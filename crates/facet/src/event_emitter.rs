@@ -241,11 +241,11 @@ impl Facet for EventEmitterFacet {
     fn facet_type(&self) -> &str {
         "event_emitter"
     }
-    
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
@@ -290,11 +290,11 @@ impl Facet for EventEmitterFacet {
 
         Ok(InterceptResult::Continue)
     }
-    
+
     fn get_config(&self) -> Value {
         self.config_value.clone()
     }
-    
+
     fn get_priority(&self) -> i32 {
         self.priority
     }

@@ -27,20 +27,20 @@
 //! - Services implements the trait
 //! - ActorContext uses the trait
 
-use std::sync::Arc;
 use crate::ApplicationNode;
 use async_trait::async_trait;
+use std::sync::Arc;
 
-use crate::{ActorRegistry, VirtualActorManager, ReplyWaiterRegistry, Service};
-use crate::actor_context::{ActorService, ChannelService, TupleSpaceProvider, ObjectRegistry};
+use crate::actor_context::{ActorService, ChannelService, ObjectRegistry, TupleSpaceProvider};
 use crate::actor_trait::MessageSender;
-use crate::monitoring::{NodeMetricsAccessor, NodeConnectionInfo};
-use crate::RequestContext;
+use crate::monitoring::{NodeConnectionInfo, NodeMetricsAccessor};
 use crate::JournalStorage;
 use crate::KeyValueStore;
+use crate::RequestContext;
+use crate::{ActorRegistry, ReplyWaiterRegistry, Service, VirtualActorManager};
 // LockManager is in plexspaces-locks crate
-use crate::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 use crate::behavior_factory::BehaviorRegistry;
+use crate::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 use crate::grpc_connection_manager::GrpcConnectionManager;
 use crate::ActorFactory;
 
@@ -71,94 +71,107 @@ pub trait ServiceLocator: Send + Sync {
     // GENERIC METHODS (require `Self: Sized`, cannot be called on trait objects)
     // Use strongly-typed methods below when working with Arc<dyn ServiceLocator>
     // ============================================================================
-    
+
     /// Register a service by type (requires concrete type, cannot use on trait objects)
     async fn register_service<T: Service + 'static>(&self, service: Arc<T>)
-    where Self: Sized;
-    
+    where
+        Self: Sized;
+
     /// Get a service by type (requires concrete type, cannot use on trait objects)
     async fn get_service<T: Service + 'static>(&self) -> Option<Arc<T>>
-    where Self: Sized;
-    
+    where
+        Self: Sized;
+
     /// Register a service by name (requires concrete type, cannot use on trait objects)
     async fn register_service_by_name<T: Service + 'static>(&self, name: &str, service: Arc<T>)
-    where Self: Sized;
-    
+    where
+        Self: Sized;
+
     /// Get a service by name (requires concrete type, cannot use on trait objects)
     async fn get_service_by_name<T: Service + 'static>(&self, name: &str) -> Option<Arc<T>>
-    where Self: Sized;
-    
+    where
+        Self: Sized;
+
     // ============================================================================
     // STRONGLY-TYPED ACCESSOR METHODS (object-safe, work with trait objects)
     // Use these methods when working with Arc<dyn ServiceLocator>
     // ============================================================================
-    
+
     /// Get ActorRegistry
     async fn actor_registry(&self) -> Option<Arc<ActorRegistry>>;
-    
+
     /// Register ActorRegistry
     async fn register_actor_registry(&self, registry: Arc<ActorRegistry>);
-    
+
     /// Get VirtualActorManager
     async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>>;
-    
+
     /// Get ReplyWaiterRegistry
     async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>>;
-    
+
     /// Get ActorService
     async fn get_actor_service(&self) -> Option<Arc<dyn ActorService>>;
-    
+
     /// Register ActorService
     async fn register_actor_service(&self, service: Arc<dyn ActorService>);
-    
+
     /// Get ChannelService
     async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>>;
-    
+
     /// Register ChannelService
     async fn register_channel_service(&self, service: Arc<dyn ChannelService>);
-    
+
     /// Get TupleSpaceProvider
     async fn get_tuplespace_provider(&self) -> Option<Arc<dyn TupleSpaceProvider>>;
-    
+
     /// Register TupleSpaceProvider
     async fn register_tuplespace_provider(&self, service: Arc<dyn TupleSpaceProvider>);
-    
+
     /// Get ObjectRegistry
     async fn get_object_registry(&self) -> Option<Arc<dyn ObjectRegistry>>;
-    
+
     /// Register ObjectRegistry
     async fn register_object_registry(&self, service: Arc<dyn ObjectRegistry>);
-    
+
     /// Get JournalStorage
     async fn get_journal_storage(&self) -> Option<Arc<dyn JournalStorage + Send + Sync>>;
-    
+
     /// Register JournalStorage
     async fn register_journal_storage(&self, service: Arc<dyn JournalStorage + Send + Sync>);
-    
+
     /// Get LockManager
-    async fn get_lock_manager(&self) -> Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>>;
-    
+    async fn get_lock_manager(
+        &self,
+    ) -> Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>>;
+
     /// Register LockManager
-    async fn register_lock_manager(&self, service: Arc<dyn plexspaces_locks::LockManager + Send + Sync>);
-    
+    async fn register_lock_manager(
+        &self,
+        service: Arc<dyn plexspaces_locks::LockManager + Send + Sync>,
+    );
+
     /// Get NodeMetricsAccessor
-    async fn get_node_metrics_accessor(&self) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>>;
-    
+    async fn get_node_metrics_accessor(&self)
+        -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>>;
+
     /// Register NodeMetricsAccessor
-    async fn register_node_metrics_accessor(&self, service: Arc<dyn NodeMetricsAccessor + Send + Sync>);
-    
+    async fn register_node_metrics_accessor(
+        &self,
+        service: Arc<dyn NodeMetricsAccessor + Send + Sync>,
+    );
+
     /// Get FacetManager
     async fn get_facet_manager(&self) -> Option<Arc<FacetManagerServiceWrapper>>;
-    
+
     /// Register FacetManager
     async fn register_facet_manager(&self, service: Arc<FacetManagerServiceWrapper>);
-    
+
     /// Get FacetRegistry
     async fn get_facet_registry(&self) -> Option<Arc<FacetRegistryServiceWrapper>>;
-    
+
     /// Register FacetRegistry
     async fn register_facet_registry(&self, service: Arc<FacetRegistryServiceWrapper>);
-    
+
     /// Get ActorFactory
     ///
     /// ## Purpose
@@ -167,7 +180,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Returns
     /// `Some(Arc<dyn ActorFactory>)` if registered, `None` otherwise
     async fn get_actor_factory(&self) -> Option<Arc<dyn ActorFactory>>;
-    
+
     /// Register ActorFactory
     ///
     /// ## Purpose
@@ -176,7 +189,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Arguments
     /// * `factory` - ActorFactory to register (as `Arc<dyn ActorFactory>`)
     async fn register_actor_factory(&self, factory: Arc<dyn ActorFactory>);
-    
+
     /// Initialize default services in this ServiceLocator
     ///
     /// ## Purpose
@@ -204,43 +217,46 @@ pub trait ServiceLocator: Send + Sync {
         node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
         release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
     );
-    
+
     /// Get node config
     async fn get_node_config(&self) -> Option<plexspaces_proto::node::v1::NodeConfig>;
-    
+
     /// Register node config
     async fn register_node_config(&self, config: plexspaces_proto::node::v1::NodeConfig);
-    
+
     /// Get security config (for authentication settings)
     async fn get_security_config(&self) -> Option<plexspaces_proto::node::v1::SecurityConfig>;
-    
+
     /// Register security config
     async fn register_security_config(&self, config: plexspaces_proto::node::v1::SecurityConfig);
 
     /// Get RuntimeConfig (for accessing wasm_apps_directory, save_wasm_apps, etc.)
     async fn get_runtime_config(&self) -> Option<plexspaces_proto::node::v1::RuntimeConfig>;
-    
+
     /// Register RuntimeConfig
     async fn register_runtime_config(&self, config: plexspaces_proto::node::v1::RuntimeConfig);
-    
+
     /// Check if authentication is disabled
-    /// 
+    ///
     /// Returns true if disable_auth=true in SecurityConfig or PLEXSPACES_DISABLE_AUTH env var is set.
     /// Returns false (auth enabled) if SecurityConfig is not set or disable_auth=false.
     async fn is_auth_disabled(&self) -> bool;
-    
+
     /// Get NodeConnectionInfo accessor
     async fn get_node_connection_info(&self) -> Option<Arc<dyn NodeConnectionInfo + Send + Sync>>;
-    
+
     /// Register NodeConnectionInfo accessor
-    async fn register_node_connection_info(&self, accessor: Arc<dyn NodeConnectionInfo + Send + Sync>);
-    
+    async fn register_node_connection_info(
+        &self,
+        accessor: Arc<dyn NodeConnectionInfo + Send + Sync>,
+    );
+
     /// Check if shutdown is requested
     fn is_shutdown_requested(&self) -> bool;
-    
+
     /// Request shutdown
     fn request_shutdown(&self);
-    
+
     /// Get ApplicationManager
     ///
     /// ## Purpose
@@ -254,7 +270,7 @@ pub trait ServiceLocator: Send + Sync {
     /// This method is optional - implementations that don't have ApplicationManager
     /// (e.g., in tests) can return None.
     async fn application_manager(&self) -> Option<Arc<dyn ApplicationManager>>;
-    
+
     /// Register ApplicationManager
     ///
     /// ## Purpose
@@ -263,7 +279,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Arguments
     /// * `manager` - ApplicationManager to register
     async fn register_application_manager(&self, manager: Arc<dyn ApplicationManager>);
-    
+
     /// Get BehaviorRegistry
     ///
     /// ## Purpose
@@ -272,7 +288,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Returns
     /// Some(Arc<BehaviorRegistry>) if registered, None otherwise
     async fn get_behavior_registry(&self) -> Option<Arc<BehaviorRegistry>>;
-    
+
     /// Register BehaviorRegistry
     ///
     /// ## Purpose
@@ -281,7 +297,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Arguments
     /// * `registry` - BehaviorRegistry to register
     async fn register_behavior_registry(&self, registry: Arc<BehaviorRegistry>);
-    
+
     /// Create RequestContext for operations that have no request (e.g. node registration, heartbeat).
     ///
     /// ## Purpose
@@ -293,8 +309,11 @@ pub trait ServiceLocator: Send + Sync {
     async fn request_context_for_system_operations(&self) -> RequestContext;
 
     /// Same as request_context_for_system_operations but with explicit namespace (e.g. cluster_name).
-    async fn request_context_for_system_operations_with_namespace(&self, namespace: String) -> RequestContext;
-    
+    async fn request_context_for_system_operations_with_namespace(
+        &self,
+        namespace: String,
+    ) -> RequestContext;
+
     /// Get GrpcConnectionManager
     ///
     /// ## Purpose
@@ -303,7 +322,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Returns
     /// Some(Arc<GrpcConnectionManager>) if registered, None otherwise
     async fn get_grpc_connection_manager(&self) -> Option<Arc<GrpcConnectionManager>>;
-    
+
     /// Register GrpcConnectionManager
     ///
     /// ## Purpose
@@ -312,7 +331,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Arguments
     /// * `manager` - GrpcConnectionManager to register
     async fn register_grpc_connection_manager(&self, manager: Arc<GrpcConnectionManager>);
-    
+
     /// Get ActorServiceClient for remote node
     ///
     /// ## Purpose
@@ -332,7 +351,13 @@ pub trait ServiceLocator: Send + Sync {
         &self,
         node_id: &str,
     ) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>>;
-    
+
+    /// Get ApplicationService client channel for a remote node.
+    async fn get_application_service_client(
+        &self,
+        node_id: &str,
+    ) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>>;
+
     /// Get WASM runtime
     ///
     /// ## Purpose
@@ -341,7 +366,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Returns
     /// Some(Arc<dyn WasmRuntimeTrait>) if registered, None otherwise
     async fn get_wasm_runtime(&self) -> Option<std::sync::Arc<dyn WasmRuntimeTrait>>;
-    
+
     /// Register WASM runtime
     ///
     /// ## Purpose
@@ -350,7 +375,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Arguments
     /// * `runtime` - WASM runtime to register (as Arc<dyn WasmRuntimeTrait>)
     async fn register_wasm_runtime(&self, runtime: std::sync::Arc<dyn WasmRuntimeTrait>);
-    
+
     /// Get ProcessGroupService
     ///
     /// ## Purpose
@@ -359,8 +384,10 @@ pub trait ServiceLocator: Send + Sync {
     ///
     /// ## Returns
     /// Arc<dyn ProcessGroupService> if registered, None otherwise
-    async fn get_process_group_service(&self) -> Option<std::sync::Arc<dyn crate::actor_context::ProcessGroupService>>;
-    
+    async fn get_process_group_service(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::actor_context::ProcessGroupService>>;
+
     /// Register ProcessGroupService
     ///
     /// ## Purpose
@@ -368,7 +395,10 @@ pub trait ServiceLocator: Send + Sync {
     ///
     /// ## Arguments
     /// * `service` - ProcessGroupService to register
-    async fn register_process_group_service(&self, service: std::sync::Arc<dyn crate::actor_context::ProcessGroupService>);
+    async fn register_process_group_service(
+        &self,
+        service: std::sync::Arc<dyn crate::actor_context::ProcessGroupService>,
+    );
 
     /// Get ElasticPoolService
     ///
@@ -378,7 +408,9 @@ pub trait ServiceLocator: Send + Sync {
     ///
     /// ## Returns
     /// Some(Arc<dyn ElasticPoolService>) if registered, None otherwise
-    async fn get_elastic_pool_service(&self) -> Option<std::sync::Arc<dyn crate::ElasticPoolService>> {
+    async fn get_elastic_pool_service(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::ElasticPoolService>> {
         None
     }
 
@@ -386,9 +418,12 @@ pub trait ServiceLocator: Send + Sync {
     ///
     /// ## Purpose
     /// Registers ElasticPoolService (e.g. from elastic-pool crate).
-    async fn register_elastic_pool_service(&self, _service: std::sync::Arc<dyn crate::ElasticPoolService>) {
+    async fn register_elastic_pool_service(
+        &self,
+        _service: std::sync::Arc<dyn crate::ElasticPoolService>,
+    ) {
     }
-    
+
     /// Get BlobService
     ///
     /// ## Purpose
@@ -397,7 +432,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Returns
     /// Some(Arc<dyn BlobServiceTrait>) if registered, None otherwise
     async fn get_blob_service(&self) -> Option<std::sync::Arc<dyn BlobServiceTrait>>;
-    
+
     /// Register BlobService
     ///
     /// ## Purpose
@@ -406,7 +441,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Arguments
     /// * `service` - BlobService to register (as Arc<dyn BlobServiceTrait>)
     async fn register_blob_service(&self, service: std::sync::Arc<dyn BlobServiceTrait>);
-    
+
     /// Get NodeRegistry
     ///
     /// ## Purpose
@@ -416,7 +451,7 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Returns
     /// Some(Arc<dyn NodeRegistryTrait>) if registered, None otherwise
     async fn get_node_registry(&self) -> Option<std::sync::Arc<dyn NodeRegistryTrait>>;
-    
+
     /// Register NodeRegistry
     ///
     /// ## Purpose
@@ -454,7 +489,9 @@ pub trait ServiceLocator: Send + Sync {
     ///
     /// ## Returns
     /// Some(Arc<dyn Any>) containing ProcessGroupRegistry if registered, None otherwise
-    async fn get_process_group_registry(&self) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
+    async fn get_process_group_registry(
+        &self,
+    ) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>> {
         None
     }
 
@@ -463,7 +500,10 @@ pub trait ServiceLocator: Send + Sync {
     /// ## Purpose
     /// Registers ProcessGroupRegistry for WASM actors. Created during node startup
     /// from the shared KeyValueStore.
-    async fn register_process_group_registry(&self, _registry: std::sync::Arc<dyn std::any::Any + Send + Sync>) {
+    async fn register_process_group_registry(
+        &self,
+        _registry: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+    ) {
     }
 }
 
@@ -482,10 +522,10 @@ pub trait ServiceLocator: Send + Sync {
 pub trait WasmRuntimeTrait: Send + Sync {
     /// Get the number of cached modules
     async fn module_count(&self) -> usize;
-    
+
     /// Clear the module cache
     async fn clear_cache(&self);
-    
+
     /// Load WASM module from bytes
     ///
     /// ## Returns
@@ -495,29 +535,38 @@ pub trait WasmRuntimeTrait: Send + Sync {
         name: &str,
         version: &str,
         bytes: &[u8],
-    ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, Box<dyn std::error::Error + Send + Sync>>;
-    
+    ) -> Result<
+        std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        Box<dyn std::error::Error + Send + Sync>,
+    >;
+
     /// Get cached module by hash
     ///
     /// ## Returns
     /// Arc<dyn Any> containing WasmModule if found (caller must downcast)
-    async fn get_module(&self, hash: &str) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>;
-    
+    async fn get_module(
+        &self,
+        hash: &str,
+    ) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>;
+
     /// Resolve module by reference (name@version or hash)
     ///
     /// ## Returns
     /// Arc<dyn Any> containing WasmModule if found (caller must downcast)
-    async fn resolve_module(&self, module_ref: &str) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>;
-    
+    async fn resolve_module(
+        &self,
+        module_ref: &str,
+    ) -> Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>;
+
     /// Check if module is cached
     async fn contains_module(&self, hash: &str) -> bool;
-    
+
     /// List all cached modules
     async fn list_modules(&self) -> Vec<(String, String, String)>;
-    
+
     /// Remove module from cache
     async fn evict_module(&self, hash: &str) -> bool;
-    
+
     /// Instantiate WASM module
     ///
     /// ## Returns
@@ -527,7 +576,7 @@ pub trait WasmRuntimeTrait: Send + Sync {
     /// `module` and `config` are kept as `Arc<dyn Any>` because they are concrete types
     /// specific to wasm-runtime crate. `process_group_registry` and `blob_service` are also
     /// concrete types, so they remain as `Arc<dyn Any>`.
-    /// 
+    ///
     /// `message_sender` is `Arc<dyn Any>` because the wasm-runtime crate has its own
     /// `MessageSender` trait (with ask, spawn, etc.) that differs from core's `MessageSender`.
     /// Callers pass the concrete wasm-runtime `MessageSender` wrapped in `Arc<dyn Any>`.
@@ -546,8 +595,11 @@ pub trait WasmRuntimeTrait: Send + Sync {
         object_registry: Option<std::sync::Arc<dyn ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn JournalStorage>>,
         blob_service: Option<std::sync::Arc<dyn BlobServiceTrait>>,
-    ) -> Result<std::sync::Arc<dyn std::any::Any + Send + Sync>, Box<dyn std::error::Error + Send + Sync>>;
-    
+    ) -> Result<
+        std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        Box<dyn std::error::Error + Send + Sync>,
+    >;
+
     /// Get as Arc<dyn Any> for downcasting to concrete type
     ///
     /// ## Purpose
@@ -568,14 +620,17 @@ pub trait WasmRuntimeTrait: Send + Sync {
 #[async_trait]
 pub trait ApplicationManager: Send + Sync {
     /// Get application state
-    async fn get_state(&self, name: &str) -> Option<plexspaces_proto::v1::application::ApplicationState>;
-    
+    async fn get_state(
+        &self,
+        name: &str,
+    ) -> Option<plexspaces_proto::v1::application::ApplicationState>;
+
     /// List all applications
     async fn list_applications(&self) -> Vec<String>;
-    
+
     /// Check if shutdown is requested
     async fn is_shutdown_requested(&self) -> bool;
-    
+
     /// Get application information
     ///
     /// ## Purpose
@@ -586,9 +641,24 @@ pub trait ApplicationManager: Send + Sync {
     ///
     /// ## Returns
     /// ApplicationInfo or None if not found
-    async fn get_application_info(&self, name: &str) -> Option<plexspaces_proto::application::v1::ApplicationInfo>;
-    
-    
+    async fn get_application_info(
+        &self,
+        name: &str,
+    ) -> Option<plexspaces_proto::application::v1::ApplicationInfo>;
+
+    /// Get current node-local metrics for an application.
+    async fn get_application_metrics(
+        &self,
+        name: &str,
+    ) -> Option<plexspaces_proto::application::v1::ApplicationMetrics>;
+
+    /// Merge a node-local metrics delta into an application.
+    async fn merge_application_metrics(
+        &self,
+        name: &str,
+        metrics: plexspaces_proto::application::v1::ApplicationMetrics,
+    ) -> Result<(), String>;
+
     /// Get as Arc<dyn Any> for downcasting to concrete type
     ///
     /// ## Purpose
@@ -599,7 +669,7 @@ pub trait ApplicationManager: Send + Sync {
     /// ## Returns
     /// Arc<dyn Any + Send + Sync> that can be downcast to Arc<ApplicationManagerImpl>
     fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync>;
-    
+
     /// Get node context (for behavior re-registration during reactivation)
     ///
     /// ## Purpose
@@ -635,7 +705,7 @@ pub trait BlobServiceTrait: Send + Sync {
         content_type: Option<String>,
         metadata: std::collections::HashMap<String, String>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
-    
+
     /// Download blob by internal blob_id (ULID).
     async fn download(
         &self,
@@ -649,7 +719,7 @@ pub trait BlobServiceTrait: Send + Sync {
         ctx: &RequestContext,
         name: &str,
     ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error + Send + Sync>>;
-    
+
     /// Delete blob by internal blob_id (ULID).
     async fn delete(
         &self,
@@ -663,7 +733,7 @@ pub trait BlobServiceTrait: Send + Sync {
         ctx: &RequestContext,
         name: &str,
     ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
-    
+
     /// Check if blob exists by internal blob_id.
     async fn exists(
         &self,
@@ -679,7 +749,7 @@ pub trait BlobServiceTrait: Send + Sync {
         prefix: &str,
         limit: usize,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>>;
-    
+
     /// Get as Arc<dyn Any> for downcasting to concrete type.
     /// This is needed for advanced usage where concrete BlobService methods are required
     /// (e.g., component_host.rs which uses full blob API).
@@ -708,22 +778,25 @@ pub trait NodeRegistryTrait: Send + Sync {
         &self,
         ctx: &RequestContext,
         node_id: &str,
-    ) -> Result<Option<plexspaces_proto::node::v1::NodeRegistration>, Box<dyn std::error::Error + Send + Sync>>;
-    
+    ) -> Result<
+        Option<plexspaces_proto::node::v1::NodeRegistration>,
+        Box<dyn std::error::Error + Send + Sync>,
+    >;
+
     /// Register a node (updates both cache and ObjectRegistry)
     async fn register_node(
         &self,
         ctx: &RequestContext,
         registration: plexspaces_proto::node::v1::NodeRegistration,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    
+
     /// Unregister a node (removes from cache and ObjectRegistry)
     async fn unregister_node(
         &self,
         ctx: &RequestContext,
         node_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    
+
     /// List nodes (from cache if fresh, otherwise ObjectRegistry)
     ///
     /// ## Arguments
@@ -736,8 +809,11 @@ pub trait NodeRegistryTrait: Send + Sync {
         cluster: Option<&str>,
         page_size: u32,
         page_token: &str,
-    ) -> Result<(Vec<plexspaces_proto::node::v1::NodeRegistration>, String), Box<dyn std::error::Error + Send + Sync>>;
-    
+    ) -> Result<
+        (Vec<plexspaces_proto::node::v1::NodeRegistration>, String),
+        Box<dyn std::error::Error + Send + Sync>,
+    >;
+
     /// Send heartbeat (updates liveness in cache and ObjectRegistry)
     async fn send_heartbeat(
         &self,
@@ -745,22 +821,20 @@ pub trait NodeRegistryTrait: Send + Sync {
         node_id: &str,
         capacity: Option<plexspaces_proto::node::v1::NodeCapacity>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    
+
     /// Start gossip protocol (if enabled and not using shared DB)
     ///
     /// ## Purpose
     /// Starts background task that periodically exchanges node info with random
     /// subset of nodes for liveness tracking.
     fn start_gossip_protocol(&self);
-    
+
     /// Stop gossip protocol
     fn stop_gossip_protocol(&self);
-    
+
     /// Check if gossip protocol is running
     fn is_gossip_running(&self) -> bool;
-    
+
     /// Get cache statistics (for observability)
     async fn cache_stats(&self) -> (usize, usize, std::time::Duration); // (cache_size, hits, ttl)
 }
-
-

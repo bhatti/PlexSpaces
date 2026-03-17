@@ -21,24 +21,20 @@
 use bytes::Bytes;
 use chrono::{Duration, Utc};
 use object_store::{
-    aws::AmazonS3Builder,
-    azure::MicrosoftAzureBuilder,
-    gcp::GoogleCloudStorageBuilder,
-    local::LocalFileSystem,
-    path::Path as ObjectPath,
-    ObjectStore,
+    aws::AmazonS3Builder, azure::MicrosoftAzureBuilder, gcp::GoogleCloudStorageBuilder,
+    local::LocalFileSystem, path::Path as ObjectPath, ObjectStore,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use ulid::Ulid;
 
 use crate::{
-    BlobConfigExt, BlobError, BlobResult, BlobRepository,
-    repository::ListFilters,
     helpers::{datetime_to_timestamp, get_storage_path},
+    repository::ListFilters,
+    BlobConfigExt, BlobError, BlobRepository, BlobResult,
 };
-use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 use plexspaces_core::RequestContext;
+use plexspaces_proto::storage::v1::{BlobConfig, BlobMetadata};
 
 /// Ensures the S3/MinIO bucket exists, creating it if necessary.
 /// This is called during BlobService initialization for s3/minio backends.
@@ -46,41 +42,37 @@ use plexspaces_core::RequestContext;
 async fn ensure_bucket_exists(config: &BlobConfig) -> BlobResult<()> {
     use aws_sdk_s3::config::{Credentials, Region};
     use aws_sdk_s3::Client;
-    
-    let access_key = config.get_access_key_id()
-        .ok_or_else(|| BlobError::ConfigError("access_key_id required for bucket creation".to_string()))?;
-    let secret_key = config.get_secret_access_key()
-        .ok_or_else(|| BlobError::ConfigError("secret_access_key required for bucket creation".to_string()))?;
-    
-    let credentials = Credentials::new(
-        access_key,
-        secret_key,
-        None,
-        None,
-        "plexspaces-blob",
-    );
-    
+
+    let access_key = config.get_access_key_id().ok_or_else(|| {
+        BlobError::ConfigError("access_key_id required for bucket creation".to_string())
+    })?;
+    let secret_key = config.get_secret_access_key().ok_or_else(|| {
+        BlobError::ConfigError("secret_access_key required for bucket creation".to_string())
+    })?;
+
+    let credentials = Credentials::new(access_key, secret_key, None, None, "plexspaces-blob");
+
     let region = if config.region.is_empty() {
         "us-east-1".to_string()
     } else {
         config.region.clone()
     };
-    
+
     let mut s3_config_builder = aws_sdk_s3::Config::builder()
         .credentials_provider(credentials)
         .region(Region::new(region.clone()))
         .behavior_version_latest();
-    
+
     // For MinIO or custom endpoints, set the endpoint URL
     if !config.endpoint.is_empty() {
         s3_config_builder = s3_config_builder
             .endpoint_url(&config.endpoint)
             .force_path_style(true);
     }
-    
+
     let s3_config = s3_config_builder.build();
     let client = Client::from_conf(s3_config);
-    
+
     // Check if bucket exists by trying to head it
     match client.head_bucket().bucket(&config.bucket).send().await {
         Ok(_) => {
@@ -89,20 +81,18 @@ async fn ensure_bucket_exists(config: &BlobConfig) -> BlobResult<()> {
         }
         Err(e) => {
             // Check if the error is "bucket not found" (404)
-            let is_not_found = e.raw_response()
+            let is_not_found = e
+                .raw_response()
                 .map(|r| r.status().as_u16() == 404)
                 .unwrap_or(false);
-            
+
             if is_not_found {
                 tracing::info!(bucket = %config.bucket, "Bucket does not exist, creating it");
-                
+
                 // Create the bucket
                 let create_result = if region == "us-east-1" {
                     // us-east-1 doesn't need location constraint
-                    client.create_bucket()
-                        .bucket(&config.bucket)
-                        .send()
-                        .await
+                    client.create_bucket().bucket(&config.bucket).send().await
                 } else {
                     // Other regions need location constraint
                     use aws_sdk_s3::types::{BucketLocationConstraint, CreateBucketConfiguration};
@@ -110,13 +100,14 @@ async fn ensure_bucket_exists(config: &BlobConfig) -> BlobResult<()> {
                     let cfg = CreateBucketConfiguration::builder()
                         .location_constraint(constraint)
                         .build();
-                    client.create_bucket()
+                    client
+                        .create_bucket()
                         .bucket(&config.bucket)
                         .create_bucket_configuration(cfg)
                         .send()
                         .await
                 };
-                
+
                 match create_result {
                     Ok(_) => {
                         tracing::info!(bucket = %config.bucket, "Bucket created successfully");
@@ -124,8 +115,9 @@ async fn ensure_bucket_exists(config: &BlobConfig) -> BlobResult<()> {
                     }
                     Err(create_err) => {
                         // Check if bucket was created by another process (race condition)
-                        let already_exists = create_err.to_string().contains("BucketAlreadyOwnedByYou")
-                            || create_err.to_string().contains("BucketAlreadyExists");
+                        let already_exists =
+                            create_err.to_string().contains("BucketAlreadyOwnedByYou")
+                                || create_err.to_string().contains("BucketAlreadyExists");
                         if already_exists {
                             tracing::debug!(bucket = %config.bucket, "Bucket already exists (race condition)");
                             Ok(())
@@ -177,7 +169,7 @@ impl BlobService {
         };
         let mut config_with_prefix = config;
         config_with_prefix.prefix = prefix;
-        
+
         Self {
             config: config_with_prefix,
             object_store,
@@ -186,12 +178,9 @@ impl BlobService {
     }
 
     /// Create new blob service
-    pub async fn new(
-        config: BlobConfig,
-        repository: Arc<dyn BlobRepository>,
-    ) -> BlobResult<Self> {
+    pub async fn new(config: BlobConfig, repository: Arc<dyn BlobRepository>) -> BlobResult<Self> {
         config.validate()?;
-        
+
         // Set default prefix if empty
         let prefix = if config.prefix.is_empty() {
             "/plexspaces".to_string()
@@ -201,8 +190,7 @@ impl BlobService {
 
         let object_store: Arc<dyn ObjectStore> = match config.backend.as_str() {
             "s3" => {
-                let mut builder = AmazonS3Builder::new()
-                    .with_bucket_name(&config.bucket);
+                let mut builder = AmazonS3Builder::new().with_bucket_name(&config.bucket);
 
                 if !config.region.is_empty() {
                     builder = builder.with_region(&config.region);
@@ -216,11 +204,15 @@ impl BlobService {
                     builder = builder.with_secret_access_key(&secret_access_key);
                 }
 
-                Arc::new(builder.build().map_err(|e| BlobError::ConfigError(format!("Failed to build S3 store: {}", e)))?)
+                Arc::new(builder.build().map_err(|e| {
+                    BlobError::ConfigError(format!("Failed to build S3 store: {}", e))
+                })?)
             }
             "minio" => {
                 if config.endpoint.is_empty() {
-                    return Err(BlobError::ConfigError("endpoint required for MinIO".to_string()));
+                    return Err(BlobError::ConfigError(
+                        "endpoint required for MinIO".to_string(),
+                    ));
                 }
 
                 let mut builder = AmazonS3Builder::new()
@@ -236,21 +228,26 @@ impl BlobService {
                     builder = builder.with_secret_access_key(&secret_access_key);
                 }
 
-                Arc::new(builder.build().map_err(|e| BlobError::ConfigError(format!("Failed to build MinIO store: {}", e)))?)
+                Arc::new(builder.build().map_err(|e| {
+                    BlobError::ConfigError(format!("Failed to build MinIO store: {}", e))
+                })?)
             }
             "gcp" => {
-                let mut builder = GoogleCloudStorageBuilder::new()
-                    .with_bucket_name(&config.bucket);
+                let mut builder = GoogleCloudStorageBuilder::new().with_bucket_name(&config.bucket);
 
                 if !config.gcp_service_account_json.is_empty() {
                     builder = builder.with_service_account_path(&config.gcp_service_account_json);
                 }
 
-                Arc::new(builder.build().map_err(|e| BlobError::ConfigError(format!("Failed to build GCP store: {}", e)))?)
+                Arc::new(builder.build().map_err(|e| {
+                    BlobError::ConfigError(format!("Failed to build GCP store: {}", e))
+                })?)
             }
             "azure" => {
                 if config.azure_account_name.is_empty() {
-                    return Err(BlobError::ConfigError("azure_account_name required".to_string()));
+                    return Err(BlobError::ConfigError(
+                        "azure_account_name required".to_string(),
+                    ));
                 }
 
                 let mut builder = MicrosoftAzureBuilder::new()
@@ -261,16 +258,25 @@ impl BlobService {
                     builder = builder.with_access_key(&config.azure_account_key);
                 }
 
-                Arc::new(builder.build().map_err(|e| BlobError::ConfigError(format!("Failed to build Azure store: {}", e)))?)
+                Arc::new(builder.build().map_err(|e| {
+                    BlobError::ConfigError(format!("Failed to build Azure store: {}", e))
+                })?)
             }
             "local" => {
                 // Local filesystem for testing
-                Arc::new(
-                    LocalFileSystem::new_with_prefix("/")
-                        .map_err(|e| BlobError::ConfigError(format!("Failed to create local filesystem store: {}", e)))?
-                )
+                Arc::new(LocalFileSystem::new_with_prefix("/").map_err(|e| {
+                    BlobError::ConfigError(format!(
+                        "Failed to create local filesystem store: {}",
+                        e
+                    ))
+                })?)
             }
-            _ => return Err(BlobError::ConfigError(format!("Unsupported backend: {}", config.backend))),
+            _ => {
+                return Err(BlobError::ConfigError(format!(
+                    "Unsupported backend: {}",
+                    config.backend
+                )))
+            }
         };
 
         // For S3/MinIO backends, ensure the bucket exists (auto-create if needed)
@@ -284,7 +290,7 @@ impl BlobService {
         } else {
             config.endpoint.clone()
         };
-        
+
         tracing::info!(
             backend = %config.backend,
             bucket = %config.bucket,
@@ -296,7 +302,7 @@ impl BlobService {
 
         let mut config_with_prefix = config;
         config_with_prefix.prefix = prefix;
-        
+
         Ok(Self {
             config: config_with_prefix,
             object_store,
@@ -382,7 +388,7 @@ impl BlobService {
         // Note: blob_id is returned in the metadata for callers who need it
         let now = Utc::now();
         let expires_at = expires_after.map(|d| datetime_to_timestamp(now + d));
-        
+
         let blob_metadata = BlobMetadata {
             blob_id: blob_id.clone(),
             tenant_id: ctx.tenant_id().to_string(),
@@ -407,7 +413,9 @@ impl BlobService {
 
         // Upload to object store
         let bytes = Bytes::from(data);
-        self.object_store.put(&path, bytes.into()).await
+        self.object_store
+            .put(&path, bytes.into())
+            .await
             .map_err(|e| BlobError::StorageError(format!("Failed to upload blob: {}", e)))?;
 
         // Get ETag from object store (if available)
@@ -425,13 +433,12 @@ impl BlobService {
     /// ## Arguments
     /// * `ctx` - Request context (required for tenant isolation)
     /// * `blob_id` - Blob identifier
-    pub async fn download_blob(
-        &self,
-        ctx: &RequestContext,
-        blob_id: &str,
-    ) -> BlobResult<Vec<u8>> {
+    pub async fn download_blob(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<Vec<u8>> {
         // Get metadata (automatically filtered by tenant_id and namespace)
-        let metadata = self.repository.get(ctx, blob_id).await?
+        let metadata = self
+            .repository
+            .get(ctx, blob_id)
+            .await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))?;
 
         // Get storage path
@@ -439,9 +446,14 @@ impl BlobService {
         let path = ObjectPath::from(storage_path);
 
         // Download from object store
-        let result = self.object_store.get(&path).await
+        let result = self
+            .object_store
+            .get(&path)
+            .await
             .map_err(|e| BlobError::StorageError(format!("Failed to download blob: {}", e)))?;
-        let bytes = result.bytes().await
+        let bytes = result
+            .bytes()
+            .await
             .map_err(|e| BlobError::StorageError(format!("Failed to read blob bytes: {}", e)))?;
 
         Ok(bytes.to_vec())
@@ -457,7 +469,9 @@ impl BlobService {
         ctx: &RequestContext,
         blob_id: &str,
     ) -> BlobResult<BlobMetadata> {
-        self.repository.get(ctx, blob_id).await?
+        self.repository
+            .get(ctx, blob_id)
+            .await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))
     }
 
@@ -480,7 +494,7 @@ impl BlobService {
             ..Default::default()
         };
         let (blobs, _count) = self.repository.list(ctx, &filters, 100, 0).await?;
-        
+
         // Find exact name match (prefix filter might return more)
         Ok(blobs.into_iter().find(|b| b.name == name))
     }
@@ -499,9 +513,11 @@ impl BlobService {
         name: &str,
     ) -> BlobResult<Vec<u8>> {
         // Find the blob by name
-        let metadata = self.get_metadata_by_name(ctx, name).await?
+        let metadata = self
+            .get_metadata_by_name(ctx, name)
+            .await?
             .ok_or_else(|| BlobError::NotFound(name.to_string()))?;
-        
+
         // Download using the actual blob_id
         self.download_blob(ctx, &metadata.blob_id).await
     }
@@ -514,15 +530,13 @@ impl BlobService {
     /// ## Arguments
     /// * `ctx` - Request context (required for tenant isolation)
     /// * `name` - Blob name (exact match)
-    pub async fn delete_blob_by_name(
-        &self,
-        ctx: &RequestContext,
-        name: &str,
-    ) -> BlobResult<()> {
+    pub async fn delete_blob_by_name(&self, ctx: &RequestContext, name: &str) -> BlobResult<()> {
         // Find the blob by name
-        let metadata = self.get_metadata_by_name(ctx, name).await?
+        let metadata = self
+            .get_metadata_by_name(ctx, name)
+            .await?
             .ok_or_else(|| BlobError::NotFound(name.to_string()))?;
-        
+
         // Delete using the actual blob_id
         self.delete_blob(ctx, &metadata.blob_id).await
     }
@@ -550,19 +564,20 @@ impl BlobService {
     /// ## Arguments
     /// * `ctx` - Request context (required for tenant isolation)
     /// * `blob_id` - Blob identifier
-    pub async fn delete_blob(
-        &self,
-        ctx: &RequestContext,
-        blob_id: &str,
-    ) -> BlobResult<()> {
+    pub async fn delete_blob(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<()> {
         // Get metadata (automatically filtered by tenant_id and namespace)
-        let metadata = self.repository.get(ctx, blob_id).await?
+        let metadata = self
+            .repository
+            .get(ctx, blob_id)
+            .await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))?;
 
         // Delete from object store
         let storage_path = get_storage_path(&metadata, &self.config.prefix);
         let path = ObjectPath::from(storage_path);
-        self.object_store.delete(&path).await
+        self.object_store
+            .delete(&path)
+            .await
             .map_err(|e| BlobError::StorageError(format!("Failed to delete blob: {}", e)))?;
 
         // Delete metadata
@@ -587,19 +602,23 @@ impl BlobService {
         expires_after: Duration,
     ) -> BlobResult<String> {
         // Get metadata (automatically filtered by tenant_id and namespace)
-        let metadata = self.repository.get(ctx, blob_id).await?
+        let metadata = self
+            .repository
+            .get(ctx, blob_id)
+            .await?
             .ok_or_else(|| BlobError::NotFound(blob_id.to_string()))?;
 
         // Get storage path
         let storage_path = crate::helpers::get_storage_path(&metadata, &self.config.prefix);
-        
+
         // Generate presigned URL
         crate::presigned::generate_presigned_url(
             &self.config,
             &storage_path,
             operation,
             expires_after,
-        ).await
+        )
+        .await
     }
 
     /// Find expired blobs
@@ -635,17 +654,19 @@ impl plexspaces_core::BlobServiceTrait for BlobService {
         metadata: std::collections::HashMap<String, String>,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         // Use the full name/path as provided
-        let blob_metadata = self.upload_blob(
-            ctx,
-            name,
-            data,
-            content_type,
-            None, // blob_group
-            None, // kind
-            metadata,
-            std::collections::HashMap::new(), // tags
-            None, // expires_after
-        ).await
+        let blob_metadata = self
+            .upload_blob(
+                ctx,
+                name,
+                data,
+                content_type,
+                None, // blob_group
+                None, // kind
+                metadata,
+                std::collections::HashMap::new(), // tags
+                None,                             // expires_after
+            )
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         Ok(blob_metadata.blob_id)
     }
@@ -655,7 +676,9 @@ impl plexspaces_core::BlobServiceTrait for BlobService {
         ctx: &RequestContext,
         blob_id: &str,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-        let data = self.download_blob(ctx, blob_id).await
+        let data = self
+            .download_blob(ctx, blob_id)
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         Ok(data)
     }
@@ -677,7 +700,8 @@ impl plexspaces_core::BlobServiceTrait for BlobService {
         ctx: &RequestContext,
         blob_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.delete_blob(ctx, blob_id).await
+        self.delete_blob(ctx, blob_id)
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         Ok(())
     }
@@ -716,12 +740,14 @@ impl plexspaces_core::BlobServiceTrait for BlobService {
             name_prefix: Some(prefix.to_string()),
             ..Default::default()
         };
-        let (blobs, _total) = self.list_blobs(ctx, &filters, limit as i64, 1).await
+        let (blobs, _total) = self
+            .list_blobs(ctx, &filters, limit as i64, 1)
+            .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         // Return names (paths), not blob_ids
         Ok(blobs.into_iter().map(|b| b.name).collect())
     }
-    
+
     fn as_any(self: std::sync::Arc<Self>) -> std::sync::Arc<dyn std::any::Any + Send + Sync> {
         self
     }

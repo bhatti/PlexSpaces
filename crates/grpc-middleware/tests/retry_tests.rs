@@ -50,7 +50,10 @@ async fn test_retry_interceptor_configured() {
 
     // Retry interceptor should allow initial request
     let result = chain.before_request(&context).await;
-    assert!(result.is_ok(), "Retry interceptor should allow initial request");
+    assert!(
+        result.is_ok(),
+        "Retry interceptor should allow initial request"
+    );
 }
 
 #[tokio::test]
@@ -179,4 +182,3 @@ async fn test_retry_interceptor_respects_max_retries() {
     let result = chain.after_response(&response_context).await;
     assert!(result.is_ok(), "Should handle retry configuration");
 }
-

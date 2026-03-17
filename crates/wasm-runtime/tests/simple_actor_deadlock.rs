@@ -41,23 +41,23 @@ mod tests {
         // concurrent messages to the same SimpleActor and ensuring they all complete.
         // The deadlock would occur if component_state lock wasn't dropped before
         // acquiring reinstantiation_lock.
-        
+
         // Note: This is a simplified test. A full integration test would require:
         // 1. Setting up a Node with ServiceLocator
         // 2. Creating a SimpleActor WASM component
         // 3. Spawning the actor
         // 4. Sending multiple concurrent messages
         // 5. Verifying all complete within timeout
-        
+
         // For now, we verify the code structure is correct by checking that
         // the lock is dropped before reinstantiation_lock acquisition.
         // A full E2E test would be in examples/typescript/apps/migrating_orbit/test.sh
-        
+
         // The actual fix is verified by:
         // 1. The code now drops `state` lock before acquiring `reinstantiation_lock`
         // 2. This prevents the deadlock where we held component_state lock
         //    while trying to acquire it again after getting reinstantiation_lock permit
-        
+
         // This test serves as documentation of the fix
         assert!(true, "Deadlock fix verified: component_state lock is dropped before reinstantiation_lock acquisition");
     }

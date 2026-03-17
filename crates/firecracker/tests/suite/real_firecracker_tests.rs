@@ -34,9 +34,7 @@
 
 use plexspaces_common::skip_if_unavailable;
 use plexspaces_common::test_helpers::{firecracker_available, firecracker_prerequisites_error};
-use plexspaces_firecracker::{
-    FirecrackerApiClient, FirecrackerVm, VmConfig, VmState,
-};
+use plexspaces_firecracker::{FirecrackerApiClient, FirecrackerVm, VmConfig, VmState};
 use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -342,7 +340,9 @@ async fn test_tap_device_creation_real() {
         return;
     }
 
-    use plexspaces_firecracker::network::{create_tap_device, delete_tap_device, generate_tap_name};
+    use plexspaces_firecracker::network::{
+        create_tap_device, delete_tap_device, generate_tap_name,
+    };
 
     let vm_id = ulid::Ulid::new().to_string();
     let tap_name = generate_tap_name(&vm_id);
@@ -383,60 +383,3 @@ async fn test_application_deployment_to_vm() {
     // This test verifies the design: VM contains entire applications, not individual actors
     assert!(true);
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

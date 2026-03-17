@@ -38,10 +38,7 @@ mod tests {
 
     #[async_trait]
     impl ElasticPoolService for MockPoolService {
-        async fn create_pool(
-            &self,
-            _config: PoolConfig,
-        ) -> Result<String, PoolServiceError> {
+        async fn create_pool(&self, _config: PoolConfig) -> Result<String, PoolServiceError> {
             unimplemented!("tests do not call create_pool on host")
         }
 
@@ -75,10 +72,7 @@ mod tests {
             }
         }
 
-        async fn get_metrics(
-            &self,
-            pool_name: &str,
-        ) -> Result<PoolMetrics, PoolServiceError> {
+        async fn get_metrics(&self, pool_name: &str) -> Result<PoolMetrics, PoolServiceError> {
             match &self.pool_name {
                 Some(name) if name == pool_name => Ok(PoolMetrics {
                     name: pool_name.to_string(),
@@ -125,18 +119,33 @@ mod tests {
             unimplemented!("tests do not call resume_scaling")
         }
 
-        async fn drain(&self, _pool_name: &str, _timeout: Duration) -> Result<u32, PoolServiceError> {
+        async fn drain(
+            &self,
+            _pool_name: &str,
+            _timeout: Duration,
+        ) -> Result<u32, PoolServiceError> {
             unimplemented!("tests do not call drain")
         }
 
-        async fn delete_pool(&self, _pool_name: &str, _force: bool) -> Result<(), PoolServiceError> {
+        async fn delete_pool(
+            &self,
+            _pool_name: &str,
+            _force: bool,
+        ) -> Result<(), PoolServiceError> {
             unimplemented!("tests do not call delete_pool")
         }
     }
 
     fn create_host_with_service(svc: Arc<dyn ElasticPoolService>) -> SimpleHostImpl {
         let host_functions = Arc::new(HostFunctions::with_all_services(
-            None, None, None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             Some(svc),
         ));
         SimpleHostImpl::new(
@@ -182,7 +191,10 @@ mod tests {
             "pool_checkin should succeed, got: {}",
             checkin_out
         );
-        assert_eq!(checkin_out, "", "checkin should return empty string on success");
+        assert_eq!(
+            checkin_out, "",
+            "checkin should return empty string on success"
+        );
     }
 
     #[tokio::test]

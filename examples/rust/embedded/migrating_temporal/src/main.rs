@@ -2,7 +2,9 @@
 // Comparison: Temporal Durable Workflows
 
 use plexspaces_behavior::Workflow;
-use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorRegistry, BehaviorType, Message, ServiceLocator};
+use plexspaces_core::{
+    Actor, ActorContext, BehaviorError, BehaviorRegistry, BehaviorType, Message, ServiceLocator,
+};
 use plexspaces_journaling::{DurabilityFacet, SqliteJournalStorage};
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
@@ -125,11 +127,7 @@ impl Actor for OrderWorkflow {
 
 #[async_trait::async_trait]
 impl Workflow for OrderWorkflow {
-    async fn run(
-        &mut self,
-        ctx: &ActorContext,
-        _input: Message,
-    ) -> Result<Message, BehaviorError> {
+    async fn run(&mut self, ctx: &ActorContext, _input: Message) -> Result<Message, BehaviorError> {
         info!("Order workflow started: {}", self.state.order.id);
         self.state.status = WorkflowStatus::Validating;
 
@@ -139,10 +137,13 @@ impl Workflow for OrderWorkflow {
         self.state.validation_result = Some(validation.clone());
 
         if !validation.valid {
-            self.state.status = WorkflowStatus::Failed(
-                format!("Validation failed: {}", validation.errors.join(", "))
-            );
-            return Err(BehaviorError::ProcessingError("Order validation failed".to_string()));
+            self.state.status = WorkflowStatus::Failed(format!(
+                "Validation failed: {}",
+                validation.errors.join(", ")
+            ));
+            return Err(BehaviorError::ProcessingError(
+                "Order validation failed".to_string(),
+            ));
         }
 
         // Step 2: Process payment (with retry)
@@ -178,7 +179,10 @@ impl Workflow for OrderWorkflow {
         name: String,
         _data: Message,
     ) -> Result<(), BehaviorError> {
-        info!("Received signal: {} for order: {}", name, self.state.order.id);
+        info!(
+            "Received signal: {} for order: {}",
+            name, self.state.order.id
+        );
         // Handle external signals (e.g., cancel order, update shipping address)
         Ok(())
     }
@@ -189,17 +193,22 @@ impl Workflow for OrderWorkflow {
         name: String,
         _params: Message,
     ) -> Result<Message, BehaviorError> {
-        info!("Received query: {} for order: {}", name, self.state.order.id);
-        
+        info!(
+            "Received query: {} for order: {}",
+            name, self.state.order.id
+        );
+
         match name.as_str() {
             "status" => {
-                let status_json = serde_json::to_string(&self.state.status)
-                    .map_err(|e| BehaviorError::ProcessingError(format!("Serialization failed: {}", e)))?;
+                let status_json = serde_json::to_string(&self.state.status).map_err(|e| {
+                    BehaviorError::ProcessingError(format!("Serialization failed: {}", e))
+                })?;
                 Ok(message_with(status_json.into_bytes(), "query"))
             }
             "state" => {
-                let state_json = serde_json::to_vec(&self.state)
-                    .map_err(|e| BehaviorError::ProcessingError(format!("Serialization failed: {}", e)))?;
+                let state_json = serde_json::to_vec(&self.state).map_err(|e| {
+                    BehaviorError::ProcessingError(format!("Serialization failed: {}", e))
+                })?;
                 Ok(message_with(state_json, "query"))
             }
             _ => Err(BehaviorError::ProcessingError("Unknown query".to_string())),
@@ -212,7 +221,7 @@ impl OrderWorkflow {
         // Simulate validation (in real app, this would call an external API)
         info!("Validating order: {}", self.state.order.id);
         tokio::time::sleep(Duration::from_millis(100)).await;
-        
+
         Ok(ValidationResult {
             valid: true,
             errors: vec![],
@@ -223,7 +232,7 @@ impl OrderWorkflow {
         // Simulate payment processing (in real app, this would call payment API)
         info!("Processing payment for order: {}", self.state.order.id);
         tokio::time::sleep(Duration::from_millis(200)).await;
-        
+
         Ok(PaymentResult {
             transaction_id: format!("txn-{}", ulid::Ulid::new()),
             status: "completed".to_string(),
@@ -234,7 +243,7 @@ impl OrderWorkflow {
         // Simulate shipping (in real app, this would call shipping API)
         info!("Shipping order: {}", self.state.order.id);
         tokio::time::sleep(Duration::from_millis(150)).await;
-        
+
         Ok(ShipmentResult {
             tracking_number: format!("TRACK-{}", ulid::Ulid::new()),
             carrier: "UPS".to_string(),
@@ -252,7 +261,7 @@ impl OrderWorkflow {
             self.state.order.id, shipment.tracking_number
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
-        
+
         Ok(())
     }
 }
@@ -263,7 +272,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
 
@@ -276,8 +285,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Demonstrating Durable Workflows with Journaling");
 
     // Create a node
-    let node = NodeBuilder::new("comparison-node-1")
-        .build().await;
+    let node = NodeBuilder::new("comparison-node-1").build().await;
 
     // Create order
     let order = Order {
@@ -291,13 +299,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state: "CA".to_string(),
             zip: "12345".to_string(),
         },
-        items: vec![
-            OrderItem {
-                sku: "ITEM-001".to_string(),
-                quantity: 2,
-                price: 49.99,
-            },
-        ],
+        items: vec![OrderItem {
+            sku: "ITEM-001".to_string(),
+            quantity: 2,
+            price: 49.99,
+        }],
     };
 
     // Create DurabilityFacet (Temporal-style durable workflows with journaling)
@@ -315,7 +321,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     behavior_registry
         .register("Workflow", |args: &[u8]| {
             let order: Order = serde_json::from_slice(args).unwrap_or_default();
-            Box::pin(async move { Ok(Box::new(OrderWorkflow::new(order)) as Box<dyn plexspaces_core::Actor>) })
+            Box::pin(async move {
+                Ok(Box::new(OrderWorkflow::new(order)) as Box<dyn plexspaces_core::Actor>)
+            })
         })
         .await;
     node.service_locator()
@@ -324,25 +332,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Spawn using ActorFactory with facets
     use plexspaces_actor::ActorFactory;
-    let actor_factory = node.service_locator().actor_factory().await
+    let actor_factory = node
+        .service_locator()
+        .actor_factory()
+        .await
         .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
     let actor_id = format!("order-workflow-{}@comparison-node-1", order.id);
-    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "internal".to_string(),
+        "system".to_string(),
+    )
+    .with_internal(true)
+    .with_admin(true);
     let initial_state = serde_json::to_vec(&order)?;
-    let _message_sender = actor_factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "Workflow",
-        initial_state,
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![durability_facet], // facets
-    ).await
+    let _message_sender = actor_factory
+        .spawn_actor(
+            &ctx,
+            &actor_id,
+            "Workflow",
+            initial_state,
+            None,                             // config
+            std::collections::HashMap::new(), // labels
+            vec![durability_facet],           // facets
+        )
+        .await
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-    
+
     info!("✅ DurabilityFacet attached - workflow journaling and checkpoints enabled");
     println!("✅ DurabilityFacet attached - workflow journaling and checkpoints enabled");
-    
+
     // Create ActorRef directly - no need to access mailbox
     let workflow_actor = plexspaces_actor::ActorRef::remote(
         actor_id.clone(),
@@ -364,13 +382,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start workflow (use workflow_run message type)
     let input = message_with(serde_json::to_vec(&order)?, "workflow_run");
-    let result = workflow_actor
-        .ask(input, Duration::from_secs(30))
-        .await?;
+    let result = workflow_actor.ask(input, Duration::from_secs(30)).await?;
 
     let elapsed = start_time.elapsed();
     let final_state: OrderWorkflowState = serde_json::from_slice(&result.payload)?;
-    
+
     println!();
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("📊 Workflow Execution Summary");
@@ -378,24 +394,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Order ID:          {}", final_state.order.id);
     println!("Status:            {:?}", final_state.status);
     println!("Execution Time:    {:.2}ms", elapsed.as_secs_f64() * 1000.0);
-    
+
     if let Some(ref validation) = final_state.validation_result {
-        println!("Validation:        ✅ {}", if validation.valid { "Passed" } else { "Failed" });
+        println!(
+            "Validation:        ✅ {}",
+            if validation.valid { "Passed" } else { "Failed" }
+        );
     }
-    
+
     if let Some(ref payment) = final_state.payment_result {
-        println!("Payment:           ✅ {} (Txn: {})", payment.status, payment.transaction_id);
+        println!(
+            "Payment:           ✅ {} (Txn: {})",
+            payment.status, payment.transaction_id
+        );
     }
-    
+
     if let Some(ref shipment) = final_state.shipment_result {
-        println!("Shipping:          ✅ {} (Tracking: {})", shipment.carrier, shipment.tracking_number);
+        println!(
+            "Shipping:          ✅ {} (Tracking: {})",
+            shipment.carrier, shipment.tracking_number
+        );
     }
-    
+
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!();
-    
+
     info!("Workflow completed with status: {:?}", final_state.status);
-    
+
     // Verify workflow completed successfully
     assert!(matches!(final_state.status, WorkflowStatus::Completed));
 
@@ -414,8 +439,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_order_workflow() {
-        let node = NodeBuilder::new("test-node")
-            .build().await;
+        let node = NodeBuilder::new("test-node").build().await;
 
         let order = Order {
             id: "TEST-001".to_string(),
@@ -440,7 +464,9 @@ mod tests {
         behavior_registry
             .register("Workflow", |args: &[u8]| {
                 let order: Order = serde_json::from_slice(args).unwrap_or_default();
-                Box::pin(async move { Ok(Box::new(OrderWorkflow::new(order)) as Box<dyn plexspaces_core::Actor>) })
+                Box::pin(async move {
+                    Ok(Box::new(OrderWorkflow::new(order)) as Box<dyn plexspaces_core::Actor>)
+                })
             })
             .await;
         node.service_locator()
@@ -449,22 +475,34 @@ mod tests {
 
         // Spawn using ActorFactory with facets
         use plexspaces_actor::ActorFactory;
-        let actor_factory = node.service_locator().actor_factory().await
-            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
+        let actor_factory = node
+            .service_locator()
+            .actor_factory()
+            .await
+            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))
+            .unwrap();
         let actor_id = "test-workflow@test-node".to_string();
-        let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
+        let ctx = plexspaces_core::RequestContext::new_without_auth(
+            "internal".to_string(),
+            "system".to_string(),
+        )
+        .with_internal(true)
+        .with_admin(true);
         let initial_state = serde_json::to_vec(&order).unwrap();
-        let _message_sender = actor_factory.spawn_actor(
-            &ctx,
-            &actor_id,
-            "Workflow",
-            initial_state,
-            None, // config
-            std::collections::HashMap::new(), // labels
-            vec![durability_facet], // facets
-        ).await
-            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
-        
+        let _message_sender = actor_factory
+            .spawn_actor(
+                &ctx,
+                &actor_id,
+                "Workflow",
+                initial_state,
+                None,                             // config
+                std::collections::HashMap::new(), // labels
+                vec![durability_facet],           // facets
+            )
+            .await
+            .map_err(|e| format!("Failed to spawn actor: {}", e))
+            .unwrap();
+
         // Create ActorRef directly - no need to access mailbox
         let workflow = plexspaces_actor::ActorRef::remote(
             actor_id.clone(),
@@ -477,10 +515,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         let input = message_with(serde_json::to_vec(&order).unwrap(), "workflow_run");
-        let result = workflow
-            .ask(input, Duration::from_secs(10))
-            .await
-            .unwrap();
+        let result = workflow.ask(input, Duration::from_secs(10)).await.unwrap();
 
         let state: OrderWorkflowState = serde_json::from_slice(&result.payload).unwrap();
         assert!(matches!(state.status, WorkflowStatus::Completed));

@@ -100,13 +100,13 @@ pub use application_deployment::ApplicationDeployment;
 
 // Re-exports
 pub use api_client::{FirecrackerApiClient, InstanceInfo};
-pub use health::{HealthStatus, VmHealthMonitor};
-pub use supervisor::{BackoffConfig, RestartPolicy, SupervisionStrategy, VmSupervisor};
-pub use vm_registry::{VmRegistry, VmRegistryEntry};
 pub use config::{
     BootSource, Drive, DriveConfig, MachineConfig, NetworkInterface, NetworkInterfaceConfig,
     RateLimiter, TokenBucket, VmConfig,
 };
 pub use error::{FirecrackerError, FirecrackerResult};
+pub use health::{HealthStatus, VmHealthMonitor};
 pub use network::{create_tap_device, delete_tap_device, generate_tap_name};
+pub use supervisor::{BackoffConfig, RestartPolicy, SupervisionStrategy, VmSupervisor};
 pub use vm::{FirecrackerVm, VmState};
+pub use vm_registry::{VmRegistry, VmRegistryEntry};

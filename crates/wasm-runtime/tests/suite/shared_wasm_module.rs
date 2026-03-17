@@ -6,11 +6,11 @@
 // Shared helper for loading calculator_actor.wasm once and reusing across tests
 // This avoids repeatedly loading the 40MB WASM file, significantly speeding up tests
 
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::OnceLock;
-use tokio::sync::Mutex;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 /// Get the calculator WASM file path
@@ -56,7 +56,7 @@ static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Returns None if the file doesn't exist
 pub async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
     let cache = SHARED_WASM_BYTES.get_or_init(|| Mutex::new(None));
-    
+
     // Fast path: already loaded
     {
         let guard = cache.lock().await;
@@ -64,10 +64,10 @@ pub async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
             return Some(bytes.clone());
         }
     }
-    
+
     // Slow path: need to load (use lock to ensure only one thread loads)
     let _guard = INIT_LOCK.lock().unwrap();
-    
+
     // Double-check after acquiring lock
     {
         let guard = cache.lock().await;
@@ -75,33 +75,36 @@ pub async fn get_shared_wasm_bytes() -> Option<Vec<u8>> {
             return Some(bytes.clone());
         }
     }
-    
+
     // Load WASM file (first time only)
     let wasm_path = get_calculator_wasm_path();
     if !wasm_path.exists() {
         eprintln!("⚠️  WASM test fixture not found at {:?}", wasm_path);
         return None;
     }
-    
-    eprintln!("📦 Loading WASM file (first time, ~40MB): {} (this may take a moment)", wasm_path.display());
-    
+
+    eprintln!(
+        "📦 Loading WASM file (first time, ~40MB): {} (this may take a moment)",
+        wasm_path.display()
+    );
+
     // Read file with timeout (for very slow filesystems)
     let bytes = timeout(
         Duration::from_secs(30),
-        tokio::task::spawn_blocking(move || fs::read(&wasm_path))
-    ).await
-        .ok()
-        .and_then(|r| r.ok())
-        .and_then(|r| r.ok())?;
-    
+        tokio::task::spawn_blocking(move || fs::read(&wasm_path)),
+    )
+    .await
+    .ok()
+    .and_then(|r| r.ok())
+    .and_then(|r| r.ok())?;
+
     eprintln!("✅ WASM file loaded: {} bytes", bytes.len());
-    
+
     // Cache the bytes
     {
         let mut guard = cache.lock().await;
         *guard = Some(bytes.clone());
     }
-    
+
     Some(bytes)
 }
-

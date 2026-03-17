@@ -28,10 +28,10 @@
 //! - Logs errors but doesn't fail (actor will still work, just no auto-activation)
 //! - Idempotent (safe to call multiple times)
 
+use plexspaces_facet::facet_helpers::extract_facet_config_for_registration;
+use plexspaces_facet::Facet;
 use plexspaces_proto::common::v1::Facet as ProtoFacet;
 use plexspaces_proto::v1::actor::ActorConfig;
-use plexspaces_facet::Facet;
-use plexspaces_facet::facet_helpers::extract_facet_config_for_registration;
 
 /// Register virtual actor type consistently across all entry points
 ///
@@ -69,12 +69,14 @@ pub async fn register_virtual_actor_type_consistent(
     init_config_template: Option<Vec<u8>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Get VirtualActorManager
-    let virtual_actor_manager = service_locator.virtual_actor_manager().await
+    let virtual_actor_manager = service_locator
+        .virtual_actor_manager()
+        .await
         .ok_or_else(|| "VirtualActorManager not available".to_string())?;
-    
+
     // Extract facet_config consistently from facets
     let facet_config = extract_facet_config_for_registration(facets, proto_facets);
-    
+
     // Register virtual actor type (idempotent)
     virtual_actor_manager.register_virtual_actor_type(
         actor_type.clone(),
@@ -92,12 +94,12 @@ pub async fn register_virtual_actor_type_consistent(
         );
         Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>
     })?;
-    
+
     tracing::debug!(
         actor_type = %actor_type,
         namespace = %namespace,
         "Registered virtual actor type for auto-activation"
     );
-    
+
     Ok(())
 }

@@ -71,8 +71,8 @@ impl DynamoDBConfig {
             .or_else(|_| env::var("PLEXSPACES_AWS_REGION"))
             .unwrap_or_else(|_| "us-east-1".to_string());
 
-        let table_prefix = env::var("PLEXSPACES_DDB_TABLE_PREFIX")
-            .unwrap_or_else(|_| "plexspaces-".to_string());
+        let table_prefix =
+            env::var("PLEXSPACES_DDB_TABLE_PREFIX").unwrap_or_else(|_| "plexspaces-".to_string());
 
         let endpoint_url = env::var("DYNAMODB_ENDPOINT_URL")
             .or_else(|_| env::var("PLEXSPACES_DDB_ENDPOINT_URL"))
@@ -162,8 +162,8 @@ impl SQSConfig {
             .or_else(|_| env::var("PLEXSPACES_AWS_REGION"))
             .unwrap_or_else(|_| "us-east-1".to_string());
 
-        let queue_prefix = env::var("PLEXSPACES_SQS_QUEUE_PREFIX")
-            .unwrap_or_else(|_| "plexspaces-".to_string());
+        let queue_prefix =
+            env::var("PLEXSPACES_SQS_QUEUE_PREFIX").unwrap_or_else(|_| "plexspaces-".to_string());
 
         let endpoint_url = env::var("SQS_ENDPOINT_URL")
             .or_else(|_| env::var("PLEXSPACES_SQS_ENDPOINT_URL"))
@@ -338,11 +338,7 @@ impl AWSConfig {
             s3.region = region.clone();
         }
 
-        Self {
-            dynamodb,
-            sqs,
-            s3,
-        }
+        Self { dynamodb, sqs, s3 }
     }
 
     /// Check if AWS is enabled (region is set and not empty).
@@ -413,4 +409,3 @@ mod tests {
         assert_eq!(config.bucket, "plexspaces");
     }
 }
-

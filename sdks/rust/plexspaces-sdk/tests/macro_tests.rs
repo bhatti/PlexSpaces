@@ -6,13 +6,12 @@
 // These tests verify that all SDK annotations generate correct code
 // and integrate properly with the behavior system.
 
-use plexspaces_sdk::{
-    actor, gen_server_actor, event_actor, fsm_actor, workflow_actor,
-    handler, plexspaces_handlers,
-    run_handler, signal_handler, query_handler,
-    ActorContext, BehaviorError, Message, Value, json,
-};
 use plexspaces_core::{Actor, BehaviorType};
+use plexspaces_sdk::{
+    actor, event_actor, fsm_actor, gen_server_actor, handler, json, plexspaces_handlers,
+    query_handler, run_handler, signal_handler, workflow_actor, ActorContext, BehaviorError,
+    Message, Value,
+};
 
 // ============================================================================
 // Test: #[gen_server_actor] generates correct impl Actor
@@ -32,11 +31,15 @@ impl TestGenServerActor {
 #[plexspaces_handlers]
 impl TestGenServerActor {
     #[handler("increment")]
-    async fn increment(&mut self, _ctx: &ActorContext, _msg: &Message) -> Result<Value, BehaviorError> {
+    async fn increment(
+        &mut self,
+        _ctx: &ActorContext,
+        _msg: &Message,
+    ) -> Result<Value, BehaviorError> {
         self.counter += 1;
         Ok(json!({ "counter": self.counter }))
     }
-    
+
     #[handler("get")]
     async fn get(&mut self, _ctx: &ActorContext, _msg: &Message) -> Result<Value, BehaviorError> {
         Ok(json!({ "counter": self.counter }))
@@ -183,7 +186,11 @@ struct TestFsmActor {
 #[plexspaces_handlers(fsm)]
 impl TestFsmActor {
     #[handler("transition")]
-    async fn transition(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> {
+    async fn transition(
+        &mut self,
+        _ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<Value, BehaviorError> {
         let payload: Value = serde_json::from_slice(&msg.payload).unwrap_or(json!({}));
         if let Some(new_state) = payload["state"].as_str() {
             self.state = new_state.to_string();
@@ -194,7 +201,9 @@ impl TestFsmActor {
 
 #[test]
 fn test_fsm_actor_behavior_type() {
-    let actor = TestFsmActor { state: "idle".to_string() };
+    let actor = TestFsmActor {
+        state: "idle".to_string(),
+    };
     assert_eq!(actor.behavior_type(), BehaviorType::GenStateMachine);
 }
 
@@ -206,7 +215,11 @@ struct TestFsmActorWithFacets {
 #[plexspaces_handlers(fsm)]
 impl TestFsmActorWithFacets {
     #[handler("transition")]
-    async fn transition(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> {
+    async fn transition(
+        &mut self,
+        _ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<Value, BehaviorError> {
         let payload: Value = serde_json::from_slice(&msg.payload).unwrap_or(json!({}));
         if let Some(new_state) = payload["state"].as_str() {
             self.state = new_state.to_string();
@@ -240,15 +253,23 @@ impl TestWorkflowActor {
             ..Default::default()
         })
     }
-    
+
     #[signal_handler("cancel")]
-    async fn on_cancel(&mut self, _ctx: &ActorContext, _data: Message) -> Result<(), BehaviorError> {
+    async fn on_cancel(
+        &mut self,
+        _ctx: &ActorContext,
+        _data: Message,
+    ) -> Result<(), BehaviorError> {
         self.status = "cancelled".to_string();
         Ok(())
     }
-    
+
     #[query_handler("status")]
-    async fn get_status(&self, _ctx: &ActorContext, _params: Message) -> Result<Message, BehaviorError> {
+    async fn get_status(
+        &self,
+        _ctx: &ActorContext,
+        _params: Message,
+    ) -> Result<Message, BehaviorError> {
         Ok(Message {
             payload: serde_json::to_vec(&json!({ "status": self.status })).unwrap_or_default(),
             ..Default::default()
@@ -258,7 +279,9 @@ impl TestWorkflowActor {
 
 #[test]
 fn test_workflow_actor_behavior_type() {
-    let actor = TestWorkflowActor { status: "pending".to_string() };
+    let actor = TestWorkflowActor {
+        status: "pending".to_string(),
+    };
     assert_eq!(actor.behavior_type(), BehaviorType::Workflow);
 }
 
@@ -270,26 +293,37 @@ struct TestWorkflowActorWithFacets {
 #[plexspaces_handlers(workflow)]
 impl TestWorkflowActorWithFacets {
     #[run_handler]
-    async fn run(&mut self, _ctx: &ActorContext, _input: Message) -> Result<Message, BehaviorError> {
+    async fn run(
+        &mut self,
+        _ctx: &ActorContext,
+        _input: Message,
+    ) -> Result<Message, BehaviorError> {
         self.status = "running".to_string();
         Ok(Message::default())
     }
-    
+
     #[signal_handler("stop")]
     async fn on_stop(&mut self, _ctx: &ActorContext, _data: Message) -> Result<(), BehaviorError> {
         self.status = "stopped".to_string();
         Ok(())
     }
-    
+
     #[query_handler("status")]
-    async fn get_status(&self, _ctx: &ActorContext, _params: Message) -> Result<Message, BehaviorError> {
+    async fn get_status(
+        &self,
+        _ctx: &ActorContext,
+        _params: Message,
+    ) -> Result<Message, BehaviorError> {
         Ok(Message::default())
     }
 }
 
 #[test]
 fn test_workflow_actor_with_facets() {
-    assert_eq!(TestWorkflowActorWithFacets::FACETS, &["durability", "event_sourcing"]);
+    assert_eq!(
+        TestWorkflowActorWithFacets::FACETS,
+        &["durability", "event_sourcing"]
+    );
 }
 
 // ============================================================================
@@ -333,26 +367,40 @@ struct TestMultiHandlerActor {
 #[plexspaces_handlers]
 impl TestMultiHandlerActor {
     #[handler("deposit")]
-    async fn deposit(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> {
+    async fn deposit(
+        &mut self,
+        _ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<Value, BehaviorError> {
         let payload: Value = serde_json::from_slice(&msg.payload).unwrap_or(json!({}));
         let amount = payload["amount"].as_i64().unwrap_or(0);
         self.balance += amount;
         Ok(json!({ "balance": self.balance }))
     }
-    
+
     #[handler("withdraw")]
-    async fn withdraw(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> {
+    async fn withdraw(
+        &mut self,
+        _ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<Value, BehaviorError> {
         let payload: Value = serde_json::from_slice(&msg.payload).unwrap_or(json!({}));
         let amount = payload["amount"].as_i64().unwrap_or(0);
         if amount > self.balance {
-            return Err(BehaviorError::ProcessingError("Insufficient funds".to_string()));
+            return Err(BehaviorError::ProcessingError(
+                "Insufficient funds".to_string(),
+            ));
         }
         self.balance -= amount;
         Ok(json!({ "balance": self.balance }))
     }
-    
+
     #[handler("balance")]
-    async fn get_balance(&mut self, _ctx: &ActorContext, _msg: &Message) -> Result<Value, BehaviorError> {
+    async fn get_balance(
+        &mut self,
+        _ctx: &ActorContext,
+        _msg: &Message,
+    ) -> Result<Value, BehaviorError> {
         Ok(json!({ "balance": self.balance }))
     }
 }
@@ -403,7 +451,11 @@ struct TestNamedFsmActor {
 #[plexspaces_handlers(fsm)]
 impl TestNamedFsmActor {
     #[handler("transition")]
-    async fn transition(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> {
+    async fn transition(
+        &mut self,
+        _ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<Value, BehaviorError> {
         let payload: Value = serde_json::from_slice(&msg.payload).unwrap_or(json!({}));
         if let Some(new_state) = payload["state"].as_str() {
             self.state = new_state.to_string();
@@ -414,7 +466,9 @@ impl TestNamedFsmActor {
 
 #[test]
 fn test_named_fsm_actor() {
-    let actor = TestNamedFsmActor { state: "idle".to_string() };
+    let actor = TestNamedFsmActor {
+        state: "idle".to_string(),
+    };
     match actor.behavior_type() {
         BehaviorType::Custom(name) => assert_eq!(name, "order_workflow"),
         _ => panic!("Expected Custom behavior type with name 'order_workflow'"),
@@ -433,26 +487,40 @@ struct TestNamedWorkflowActor {
 #[plexspaces_handlers(workflow)]
 impl TestNamedWorkflowActor {
     #[run_handler]
-    async fn run(&mut self, _ctx: &ActorContext, _input: Message) -> Result<Message, BehaviorError> {
+    async fn run(
+        &mut self,
+        _ctx: &ActorContext,
+        _input: Message,
+    ) -> Result<Message, BehaviorError> {
         self.status = "running".to_string();
         Ok(Message::default())
     }
-    
+
     #[signal_handler("cancel")]
-    async fn on_cancel(&mut self, _ctx: &ActorContext, _data: Message) -> Result<(), BehaviorError> {
+    async fn on_cancel(
+        &mut self,
+        _ctx: &ActorContext,
+        _data: Message,
+    ) -> Result<(), BehaviorError> {
         self.status = "cancelled".to_string();
         Ok(())
     }
-    
+
     #[query_handler("status")]
-    async fn get_status(&self, _ctx: &ActorContext, _params: Message) -> Result<Message, BehaviorError> {
+    async fn get_status(
+        &self,
+        _ctx: &ActorContext,
+        _params: Message,
+    ) -> Result<Message, BehaviorError> {
         Ok(Message::default())
     }
 }
 
 #[test]
 fn test_named_workflow_actor() {
-    let actor = TestNamedWorkflowActor { status: "pending".to_string() };
+    let actor = TestNamedWorkflowActor {
+        status: "pending".to_string(),
+    };
     match actor.behavior_type() {
         BehaviorType::Custom(name) => assert_eq!(name, "payment_pipeline"),
         _ => panic!("Expected Custom behavior type with name 'payment_pipeline'"),
@@ -519,15 +587,15 @@ use plexspaces_sdk::{call_message, cast_message, new_message};
 #[test]
 fn test_call_message_sets_message_type() {
     let msg = call_message(json!({ "action": "deposit", "amount": 100 }));
-    
+
     // Verify message_type is set to "call" for request-reply semantics
     assert_eq!(msg.message_type, "call");
-    
+
     // Verify payload is serialized correctly
     let payload: Value = serde_json::from_slice(&msg.payload).unwrap();
     assert_eq!(payload["action"], "deposit");
     assert_eq!(payload["amount"], 100);
-    
+
     // Verify message has a unique ID (ULID format)
     assert!(!msg.id.is_empty());
     assert!(msg.id.len() >= 26); // ULID is 26 characters
@@ -536,15 +604,15 @@ fn test_call_message_sets_message_type() {
 #[test]
 fn test_cast_message_sets_message_type() {
     let msg = cast_message(json!({ "event": "user_login", "user_id": "user-123" }));
-    
+
     // Verify message_type is set to "cast" for fire-and-forget semantics
     assert_eq!(msg.message_type, "cast");
-    
+
     // Verify payload is serialized correctly
     let payload: Value = serde_json::from_slice(&msg.payload).unwrap();
     assert_eq!(payload["event"], "user_login");
     assert_eq!(payload["user_id"], "user-123");
-    
+
     // Verify message has a unique ID
     assert!(!msg.id.is_empty());
 }
@@ -554,11 +622,11 @@ fn test_new_message_with_custom_invocation() {
     // Test "call" invocation
     let call_msg = new_message("call", json!({ "op": "get" }));
     assert_eq!(call_msg.message_type, "call");
-    
+
     // Test "cast" invocation
     let cast_msg = new_message("cast", json!({ "op": "notify" }));
     assert_eq!(cast_msg.message_type, "cast");
-    
+
     // Test custom invocation type (for extensibility)
     let info_msg = new_message("info", json!({ "op": "status" }));
     assert_eq!(info_msg.message_type, "info");
@@ -569,7 +637,7 @@ fn test_message_ids_are_unique() {
     let msg1 = call_message(json!({}));
     let msg2 = call_message(json!({}));
     let msg3 = cast_message(json!({}));
-    
+
     // Each message should have a unique ID
     assert_ne!(msg1.id, msg2.id);
     assert_ne!(msg2.id, msg3.id);
@@ -590,7 +658,7 @@ fn test_message_payload_serialization() {
             "source": "test"
         }
     }));
-    
+
     let payload: Value = serde_json::from_slice(&msg.payload).unwrap();
     assert_eq!(payload["user"]["name"], "John");
     assert_eq!(payload["user"]["age"], 30);

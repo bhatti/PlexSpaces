@@ -3,8 +3,11 @@
 //
 // Tests for ActorContext using services directly (convenience methods removed)
 
-use plexspaces_core::{ActorContext, ChannelService, ActorService, ObjectRegistry, TupleSpaceProvider, ProcessGroupService, FacetService, RequestContext};
 use plexspaces_core::Message;
+use plexspaces_core::{
+    ActorContext, ActorService, ChannelService, FacetService, ObjectRegistry, ProcessGroupService,
+    RequestContext, TupleSpaceProvider,
+};
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
 use std::sync::Arc;
 use ulid::Ulid;
@@ -31,17 +34,35 @@ fn create_test_message_with_correlation(payload: Vec<u8>, correlation_id: &str) 
 struct MockChannelService;
 #[async_trait::async_trait]
 impl ChannelService for MockChannelService {
-    async fn send_to_queue(&self, _queue_name: &str, _message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    async fn send_to_queue(
+        &self,
+        _queue_name: &str,
+        _message: Message,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         Ok("msg-id".to_string())
     }
-    async fn publish_to_topic(&self, _topic_name: &str, _message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    async fn publish_to_topic(
+        &self,
+        _topic_name: &str,
+        _message: Message,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         Ok("msg-id".to_string())
     }
-    async fn subscribe_to_topic(&self, _topic_name: &str) -> Result<futures::stream::BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn subscribe_to_topic(
+        &self,
+        _topic_name: &str,
+    ) -> Result<
+        futures::stream::BoxStream<'static, Message>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         use futures::stream;
         Ok(Box::pin(stream::empty()))
     }
-    async fn receive_from_queue(&self, _queue_name: &str, _timeout: Option<std::time::Duration>) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn receive_from_queue(
+        &self,
+        _queue_name: &str,
+        _timeout: Option<std::time::Duration>,
+    ) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(None)
     }
 }
@@ -51,11 +72,23 @@ struct MockActorService {
 }
 #[async_trait::async_trait]
 impl ActorService for MockActorService {
-    async fn spawn_actor(&self, _actor_id: &str, _actor_type: &str, _initial_state: Vec<u8>) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+    async fn spawn_actor(
+        &self,
+        _actor_id: &str,
+        _actor_type: &str,
+        _initial_state: Vec<u8>,
+    ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
         Err("Not implemented".into())
     }
-    async fn send(&self, actor_id: &str, message: Message) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        self.sent_messages.lock().unwrap().push((actor_id.to_string(), message));
+    async fn send(
+        &self,
+        actor_id: &str,
+        message: Message,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        self.sent_messages
+            .lock()
+            .unwrap()
+            .push((actor_id.to_string(), message));
         Ok("msg-id".to_string())
     }
 }
@@ -63,22 +96,59 @@ impl ActorService for MockActorService {
 struct MockObjectRegistry;
 #[async_trait::async_trait]
 impl ObjectRegistry for MockObjectRegistry {
-    async fn lookup(&self, _ctx: &RequestContext, _object_id: &str, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn lookup(
+        &self,
+        _ctx: &RequestContext,
+        _object_id: &str,
+        _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+    ) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>
+    {
         Ok(None)
     }
-    async fn lookup_full(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn lookup_full(
+        &self,
+        _ctx: &RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<Option<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>
+    {
         Ok(None)
     }
-    async fn register(&self, _ctx: &RequestContext, _registration: plexspaces_core::ObjectRegistration) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn register(
+        &self,
+        _ctx: &RequestContext,
+        _registration: plexspaces_core::ObjectRegistration,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
-    async fn unregister(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn unregister(
+        &self,
+        _ctx: &RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
-    async fn heartbeat(&self, _ctx: &RequestContext, _object_type: plexspaces_proto::object_registry::v1::ObjectType, _object_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn heartbeat(
+        &self,
+        _ctx: &RequestContext,
+        _object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        _object_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
-    async fn discover(&self, _ctx: &RequestContext, _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>, _object_category: Option<String>, _capabilities: Option<Vec<String>>, _labels: Option<Vec<String>>, _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>, _offset: usize, _limit: usize) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn discover(
+        &self,
+        _ctx: &RequestContext,
+        _object_type: Option<plexspaces_proto::object_registry::v1::ObjectType>,
+        _object_category: Option<String>,
+        _capabilities: Option<Vec<String>>,
+        _labels: Option<Vec<String>>,
+        _health_status: Option<plexspaces_proto::object_registry::v1::HealthStatus>,
+        _offset: usize,
+        _limit: usize,
+    ) -> Result<Vec<plexspaces_core::ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>
+    {
         Ok(vec![])
     }
 }
@@ -86,16 +156,28 @@ impl ObjectRegistry for MockObjectRegistry {
 struct MockTupleSpaceProvider;
 #[async_trait::async_trait]
 impl TupleSpaceProvider for MockTupleSpaceProvider {
-    async fn write(&self, _tuple: plexspaces_tuplespace::Tuple) -> Result<(), plexspaces_tuplespace::TupleSpaceError> {
+    async fn write(
+        &self,
+        _tuple: plexspaces_tuplespace::Tuple,
+    ) -> Result<(), plexspaces_tuplespace::TupleSpaceError> {
         Ok(())
     }
-    async fn read(&self, _pattern: &plexspaces_tuplespace::Pattern) -> Result<Vec<plexspaces_tuplespace::Tuple>, plexspaces_tuplespace::TupleSpaceError> {
+    async fn read(
+        &self,
+        _pattern: &plexspaces_tuplespace::Pattern,
+    ) -> Result<Vec<plexspaces_tuplespace::Tuple>, plexspaces_tuplespace::TupleSpaceError> {
         Ok(vec![])
     }
-    async fn take(&self, _pattern: &plexspaces_tuplespace::Pattern) -> Result<Option<plexspaces_tuplespace::Tuple>, plexspaces_tuplespace::TupleSpaceError> {
+    async fn take(
+        &self,
+        _pattern: &plexspaces_tuplespace::Pattern,
+    ) -> Result<Option<plexspaces_tuplespace::Tuple>, plexspaces_tuplespace::TupleSpaceError> {
         Ok(None)
     }
-    async fn count(&self, _pattern: &plexspaces_tuplespace::Pattern) -> Result<usize, plexspaces_tuplespace::TupleSpaceError> {
+    async fn count(
+        &self,
+        _pattern: &plexspaces_tuplespace::Pattern,
+    ) -> Result<usize, plexspaces_tuplespace::TupleSpaceError> {
         Ok(0)
     }
 }
@@ -108,13 +190,27 @@ struct MockProcessGroupService {
 }
 #[async_trait::async_trait]
 impl ProcessGroupService for MockProcessGroupService {
-    async fn create_group(&self, _ctx: &RequestContext, _group_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn create_group(
+        &self,
+        _ctx: &RequestContext,
+        _group_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
-    async fn delete_group(&self, _ctx: &RequestContext, _group_name: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn delete_group(
+        &self,
+        _ctx: &RequestContext,
+        _group_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
     }
-    async fn join_group(&self, ctx: &RequestContext, group_name: &str, actor_id: &str, _topics: Vec<String>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn join_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+        actor_id: &str,
+        _topics: Vec<String>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.joined_groups.lock().unwrap().push((
             group_name.to_string(),
             ctx.tenant_id().to_string(),
@@ -123,7 +219,12 @@ impl ProcessGroupService for MockProcessGroupService {
         ));
         Ok(())
     }
-    async fn leave_group(&self, ctx: &RequestContext, group_name: &str, actor_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn leave_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+        actor_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.left_groups.lock().unwrap().push((
             group_name.to_string(),
             ctx.tenant_id().to_string(),
@@ -132,19 +233,36 @@ impl ProcessGroupService for MockProcessGroupService {
         ));
         Ok(())
     }
-    async fn get_members(&self, _ctx: &RequestContext, group_name: &str) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_members(
+        &self,
+        _ctx: &RequestContext,
+        group_name: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let members = self.members.lock().unwrap();
         Ok(members.get(group_name).cloned().unwrap_or_default())
     }
-    async fn get_local_members(&self, _ctx: &RequestContext, group_name: &str) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_local_members(
+        &self,
+        _ctx: &RequestContext,
+        group_name: &str,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let members = self.members.lock().unwrap();
         Ok(members.get(group_name).cloned().unwrap_or_default())
     }
-    async fn list_groups(&self, _ctx: &RequestContext) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    async fn list_groups(
+        &self,
+        _ctx: &RequestContext,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
         let members = self.members.lock().unwrap();
         Ok(members.keys().cloned().collect())
     }
-    async fn publish_to_group(&self, ctx: &RequestContext, group_name: &str, _topic: Option<&str>, message: Message) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+    async fn publish_to_group(
+        &self,
+        ctx: &RequestContext,
+        group_name: &str,
+        _topic: Option<&str>,
+        message: Message,
+    ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
         self.published_messages.lock().unwrap().push((
             group_name.to_string(),
             ctx.tenant_id().to_string(),
@@ -163,7 +281,10 @@ impl FacetService for MockFacetService {
         &self,
         _actor_id: &plexspaces_core::ActorId,
         _facet_type: &str,
-    ) -> Result<std::sync::Arc<tokio::sync::RwLock<Box<dyn plexspaces_facet::Facet>>>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        std::sync::Arc<tokio::sync::RwLock<Box<dyn plexspaces_facet::Facet>>>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         Err("Not implemented".into())
     }
 }
@@ -175,9 +296,10 @@ async fn create_test_context_with_services(
     create_test_context_with_services_custom(
         actor_service,
         process_group_service,
-        String::new(), // default tenant_id (empty if auth disabled)
+        String::new(),         // default tenant_id (empty if auth disabled)
         "test-ns".to_string(), // default namespace
-    ).await
+    )
+    .await
 }
 
 async fn create_test_context_with_services_custom(
@@ -189,7 +311,7 @@ async fn create_test_context_with_services_custom(
     use plexspaces_node::service_locator_helpers::create_default_service_locator;
     // Create a ServiceLocator with all default services for testing
     let service_locator = create_default_service_locator(None, None, None).await;
-    
+
     // Register services in ServiceLocator (if needed for tests)
     // For now, just create context with ServiceLocator
     ActorContext::new(
@@ -216,10 +338,10 @@ async fn test_reply_using_actor_service() {
     });
 
     let ctx = create_test_context_with_services(actor_service.clone(), process_group_service).await;
-    
+
     // sender_id and correlation_id are in Message, not ActorContext
     let reply_msg = create_test_message_with_correlation(vec![1, 2, 3], "corr-123");
-    
+
     // Use actor_service directly
     let result = actor_service.send("sender-actor", reply_msg).await;
     assert!(result.is_ok());
@@ -246,9 +368,10 @@ async fn test_join_group_using_process_group_service() {
     });
 
     let ctx = create_test_context_with_services(actor_service, process_group_service.clone()).await;
-    
+
     // Use process_group_service directly with RequestContext
-    let request_ctx = RequestContext::new_without_auth("default".to_string(), ctx.namespace.clone());
+    let request_ctx =
+        RequestContext::new_without_auth("default".to_string(), ctx.namespace.clone());
     let result = process_group_service
         .join_group(&request_ctx, "test-group", "test-actor", vec![])
         .await;
@@ -278,9 +401,10 @@ async fn test_leave_group_using_process_group_service() {
     });
 
     let ctx = create_test_context_with_services(actor_service, process_group_service.clone()).await;
-    
+
     // Use process_group_service directly with RequestContext
-    let request_ctx = RequestContext::new_without_auth("default".to_string(), ctx.namespace.clone());
+    let request_ctx =
+        RequestContext::new_without_auth("default".to_string(), ctx.namespace.clone());
     let result = process_group_service
         .leave_group(&request_ctx, "test-group", "test-actor")
         .await;
@@ -297,7 +421,10 @@ async fn test_leave_group_using_process_group_service() {
 async fn test_publish_to_group_using_process_group_service() {
     let published_messages = Arc::new(std::sync::Mutex::new(Vec::new()));
     let members = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
-    members.lock().unwrap().insert("test-group".to_string(), vec!["actor-1".to_string(), "actor-2".to_string()]);
+    members.lock().unwrap().insert(
+        "test-group".to_string(),
+        vec!["actor-1".to_string(), "actor-2".to_string()],
+    );
 
     let process_group_service: Arc<dyn ProcessGroupService> = Arc::new(MockProcessGroupService {
         joined_groups: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -312,9 +439,10 @@ async fn test_publish_to_group_using_process_group_service() {
 
     let ctx = create_test_context_with_services(actor_service, process_group_service.clone()).await;
     let message = create_test_message(vec![1, 2, 3]);
-    
+
     // Use process_group_service directly with RequestContext
-    let request_ctx = RequestContext::new_without_auth("default".to_string(), ctx.namespace.clone());
+    let request_ctx =
+        RequestContext::new_without_auth("default".to_string(), ctx.namespace.clone());
     let result = process_group_service
         .publish_to_group(&request_ctx, "test-group", None, message.clone())
         .await;
@@ -335,7 +463,11 @@ async fn test_get_group_members_using_process_group_service() {
     let members = Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
     members.lock().unwrap().insert(
         "test-group".to_string(),
-        vec!["actor-1".to_string(), "actor-2".to_string(), "actor-3".to_string()],
+        vec![
+            "actor-1".to_string(),
+            "actor-2".to_string(),
+            "actor-3".to_string(),
+        ],
     );
 
     let process_group_service: Arc<dyn ProcessGroupService> = Arc::new(MockProcessGroupService {
@@ -350,9 +482,10 @@ async fn test_get_group_members_using_process_group_service() {
     });
 
     let ctx = create_test_context_with_services(actor_service, process_group_service.clone()).await;
-    
+
     // Use process_group_service directly with RequestContext
-    let request_ctx = RequestContext::new_without_auth("default".to_string(), ctx.namespace.clone());
+    let request_ctx =
+        RequestContext::new_without_auth("default".to_string(), ctx.namespace.clone());
     let result = process_group_service
         .get_members(&request_ctx, "test-group")
         .await;
@@ -384,18 +517,19 @@ async fn test_reply_without_sender_id() {
         process_group_service,
         "tenant-123".to_string(),
         "test-ns".to_string(),
-    ).await;
-    
+    )
+    .await;
+
     // sender_id is in Message, not ActorContext
     // This test verifies the context is created correctly
     let _reply_msg = create_test_message(vec![1, 2, 3]);
-    
+
     // In real code, sender_id would come from the message that triggered the reply
     // This test just verifies the context structure
     assert_eq!(ctx.node_id, "test-node");
     assert_eq!(ctx.tenant_id, "tenant-123");
     assert_eq!(ctx.namespace, "test-ns");
-    
+
     // Verify no message was sent
     // (This test verifies the pattern, actual error handling depends on implementation)
 }

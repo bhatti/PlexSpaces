@@ -91,7 +91,10 @@ pub struct SecretMasker {
 impl Default for SecretMasker {
     fn default() -> Self {
         Self::new(
-            DEFAULT_SECRET_PATTERNS.iter().map(|s| s.to_string()).collect(),
+            DEFAULT_SECRET_PATTERNS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             DEFAULT_MASK.to_string(),
         )
     }
@@ -105,7 +108,10 @@ impl SecretMasker {
     /// * `mask` - The string to replace secret values with
     pub fn new(secret_patterns: Vec<String>, mask: String) -> Self {
         Self {
-            secret_patterns: secret_patterns.into_iter().map(|s| s.to_lowercase()).collect(),
+            secret_patterns: secret_patterns
+                .into_iter()
+                .map(|s| s.to_lowercase())
+                .collect(),
             mask,
         }
     }
@@ -119,7 +125,9 @@ impl SecretMasker {
     /// `true` if the field name contains any secret pattern
     pub fn is_secret_field(&self, field_name: &str) -> bool {
         let lower = field_name.to_lowercase();
-        self.secret_patterns.iter().any(|pattern| lower.contains(pattern))
+        self.secret_patterns
+            .iter()
+            .any(|pattern| lower.contains(pattern))
     }
 
     /// Mask a value if it's considered secret
@@ -180,9 +188,11 @@ impl SecretMasker {
 ///
 /// ## Returns
 /// A new ReleaseSpec with secrets masked
-pub fn mask_release_spec(spec: plexspaces_proto::node::v1::ReleaseSpec) -> plexspaces_proto::node::v1::ReleaseSpec {
+pub fn mask_release_spec(
+    spec: plexspaces_proto::node::v1::ReleaseSpec,
+) -> plexspaces_proto::node::v1::ReleaseSpec {
     let mut masked = spec;
-    
+
     // Mask runtime config secrets
     if let Some(ref mut runtime) = masked.runtime {
         // Mask blob storage secrets
@@ -200,7 +210,7 @@ pub fn mask_release_spec(spec: plexspaces_proto::node::v1::ReleaseSpec) -> plexs
                 blob.gcp_service_account_json = DEFAULT_MASK.to_string();
             }
         }
-        
+
         // Mask security config secrets
         if let Some(ref mut security) = runtime.security {
             // Mask API key hashes (while they're hashes, we still mask them for extra security)
@@ -209,14 +219,14 @@ pub fn mask_release_spec(spec: plexspaces_proto::node::v1::ReleaseSpec) -> plexs
                     api_key.key_hash = DEFAULT_MASK.to_string();
                 }
             }
-            
+
             // Mask JWT secrets
             if let Some(ref mut jwt) = security.jwt {
                 if !jwt.secret.is_empty() {
                     jwt.secret = DEFAULT_MASK.to_string();
                 }
             }
-            
+
             // Mask service identity secrets (private_key is bytes)
             if let Some(ref mut identity) = security.service_identity {
                 if !identity.private_key.is_empty() {
@@ -224,13 +234,13 @@ pub fn mask_release_spec(spec: plexspaces_proto::node::v1::ReleaseSpec) -> plexs
                 }
             }
         }
-        
+
         // Mask database passwords in db config
         if let Some(ref mut db_config) = runtime.db {
             mask_database_url(&mut db_config.connection_string);
         }
     }
-    
+
     masked
 }
 
@@ -248,20 +258,20 @@ fn mask_database_url(url: &mut String) {
     if url.is_empty() || url.starts_with("sqlite:") {
         return;
     }
-    
+
     // Parse URL to find and mask password
     // Format: scheme://user:password@host:port/path
     if let Some(at_pos) = url.find('@') {
         if let Some(scheme_end) = url.find("://") {
             let credentials_start = scheme_end + 3;
             let credentials = &url[credentials_start..at_pos];
-            
+
             if let Some(colon_pos) = credentials.find(':') {
                 let user = &credentials[..colon_pos];
                 let scheme = &url[..scheme_end];
                 let rest = &url[at_pos..];
-                
-                *url = format!("{}://{}:{}{}",scheme, user, DEFAULT_MASK, rest);
+
+                *url = format!("{}://{}:{}{}", scheme, user, DEFAULT_MASK, rest);
             }
         }
     }
@@ -293,14 +303,14 @@ mod tests {
     #[test]
     fn test_default_masker() {
         let masker = SecretMasker::default();
-        
+
         // Should match secret patterns
         assert!(masker.is_secret_field("password"));
         assert!(masker.is_secret_field("secret_access_key"));
         assert!(masker.is_secret_field("api_key"));
         assert!(masker.is_secret_field("JWT_TOKEN"));
         assert!(masker.is_secret_field("my_private_key"));
-        
+
         // Should not match non-secret patterns
         assert!(!masker.is_secret_field("username"));
         assert!(!masker.is_secret_field("email"));
@@ -311,10 +321,10 @@ mod tests {
     #[test]
     fn test_mask_value() {
         let masker = SecretMasker::default();
-        
+
         // Non-empty value should be masked
         assert_eq!(masker.mask("my-secret"), DEFAULT_MASK);
-        
+
         // Empty value should remain empty
         assert_eq!(masker.mask(""), "");
     }
@@ -322,11 +332,11 @@ mod tests {
     #[test]
     fn test_mask_field() {
         let masker = SecretMasker::default();
-        
+
         // Secret field should be masked
         assert_eq!(masker.mask_field("password", "secret123"), DEFAULT_MASK);
         assert_eq!(masker.mask_field("api_key", "key123"), DEFAULT_MASK);
-        
+
         // Non-secret field should not be masked
         assert_eq!(masker.mask_field("username", "john"), "john");
         assert_eq!(masker.mask_field("host", "localhost"), "localhost");
@@ -337,19 +347,25 @@ mod tests {
         // PostgreSQL URL
         let mut pg_url = "postgres://user:secret123@localhost:5432/db".to_string();
         mask_database_url(&mut pg_url);
-        assert_eq!(pg_url, format!("postgres://user:{}@localhost:5432/db", DEFAULT_MASK));
-        
+        assert_eq!(
+            pg_url,
+            format!("postgres://user:{}@localhost:5432/db", DEFAULT_MASK)
+        );
+
         // MySQL URL
         let mut mysql_url = "mysql://admin:password@db.example.com:3306/mydb".to_string();
         mask_database_url(&mut mysql_url);
-        assert_eq!(mysql_url, format!("mysql://admin:{}@db.example.com:3306/mydb", DEFAULT_MASK));
-        
+        assert_eq!(
+            mysql_url,
+            format!("mysql://admin:{}@db.example.com:3306/mydb", DEFAULT_MASK)
+        );
+
         // SQLite URL (should not change)
         let mut sqlite_url = "sqlite:///path/to/db.sqlite".to_string();
         let original = sqlite_url.clone();
         mask_database_url(&mut sqlite_url);
         assert_eq!(sqlite_url, original);
-        
+
         // URL without password
         let mut no_pass_url = "postgres://user@localhost:5432/db".to_string();
         let original = no_pass_url.clone();
@@ -361,18 +377,18 @@ mod tests {
     fn test_mask_map_secrets() {
         let masker = SecretMasker::default();
         let mut map = std::collections::HashMap::new();
-        
+
         map.insert("username".to_string(), "john".to_string());
         map.insert("password".to_string(), "secret123".to_string());
         map.insert("api_key".to_string(), "key-abc-123".to_string());
         map.insert("host".to_string(), "localhost".to_string());
-        
+
         mask_map_secrets(&mut map, &masker);
-        
+
         // Non-secret fields should not change
         assert_eq!(map.get("username").unwrap(), "john");
         assert_eq!(map.get("host").unwrap(), "localhost");
-        
+
         // Secret fields should be masked
         assert_eq!(map.get("password").unwrap(), DEFAULT_MASK);
         assert_eq!(map.get("api_key").unwrap(), DEFAULT_MASK);
@@ -380,21 +396,18 @@ mod tests {
 
     #[test]
     fn test_custom_masker() {
-        let masker = SecretMasker::new(
-            vec!["custom_secret".to_string()],
-            "[HIDDEN]".to_string(),
-        );
-        
+        let masker = SecretMasker::new(vec!["custom_secret".to_string()], "[HIDDEN]".to_string());
+
         assert!(masker.is_secret_field("custom_secret"));
         assert!(!masker.is_secret_field("password")); // Not in custom patterns
-        
+
         assert_eq!(masker.mask("value"), "[HIDDEN]");
     }
 
     #[test]
     fn test_case_insensitive_matching() {
         let masker = SecretMasker::default();
-        
+
         // Should match regardless of case
         assert!(masker.is_secret_field("PASSWORD"));
         assert!(masker.is_secret_field("Password"));
@@ -405,7 +418,7 @@ mod tests {
     #[test]
     fn test_partial_matching() {
         let masker = SecretMasker::default();
-        
+
         // Should match substrings
         assert!(masker.is_secret_field("db_password_encrypted"));
         assert!(masker.is_secret_field("aws_secret_access_key"));

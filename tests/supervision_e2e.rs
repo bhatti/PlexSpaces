@@ -55,10 +55,11 @@ fn create_test_message(payload: Vec<u8>) -> Message {
         ..Default::default()
     }
 }
-use plexspaces_actor::supervisor::{
-    SupervisionStrategy, Supervisor, SupervisorEvent,
+use plexspaces_actor::supervisor::{SupervisionStrategy, Supervisor, SupervisorEvent};
+use plexspaces_actor::{
+    child_spec::{RestartStrategy, ShutdownSpec, StartedChild},
+    ChildSpec,
 };
-use plexspaces_actor::{ChildSpec, child_spec::{RestartStrategy, ShutdownSpec, StartedChild}};
 use plexspaces_core::ActorRef as CoreActorRef;
 
 // ============================================================================
@@ -72,20 +73,14 @@ fn create_child_spec(
     restart: RestartStrategy,
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
-    let actor_ref = CoreActorRef::new(id.clone())
-        .expect("Failed to create actor ref");
-    
-    ChildSpec::worker_sync(
-        id.clone(),
-        id.clone(),
-        factory,
-        actor_ref,
-    )
-    .with_restart(restart)
-    .with_shutdown(match shutdown_timeout_ms {
-        Some(ms) => ShutdownSpec::Timeout(std::time::Duration::from_millis(ms)),
-        None => ShutdownSpec::Infinity,
-    })
+    let actor_ref = CoreActorRef::new(id.clone()).expect("Failed to create actor ref");
+
+    ChildSpec::worker_sync(id.clone(), id.clone(), factory, actor_ref)
+        .with_restart(restart)
+        .with_shutdown(match shutdown_timeout_ms {
+            Some(ms) => ShutdownSpec::Timeout(std::time::Duration::from_millis(ms)),
+            None => ShutdownSpec::Infinity,
+        })
 }
 
 // ============================================================================
@@ -179,7 +174,8 @@ impl ActorTrait for CounterWorker {
 #[tokio::test]
 async fn test_one_for_one_restart() {
     // Create supervisor with ONE_FOR_ONE strategy
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "one-for-one-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -200,9 +196,7 @@ async fn test_one_for_one_restart() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(
-                    Mailbox::new(Default::default(), actor_id.clone())
-                )
+                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
             })
             .join()
             .expect("Thread panicked")
@@ -230,9 +224,7 @@ async fn test_one_for_one_restart() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(
-                    Mailbox::new(Default::default(), actor_id.clone())
-                )
+                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
             })
             .join()
             .expect("Thread panicked")
@@ -282,7 +274,9 @@ async fn test_one_for_one_restart() {
                 SupervisorEvent::ChildFailed(id, _) if id.as_str() == "faulty-worker@localhost" => {
                     failed_event_seen = true;
                 }
-                SupervisorEvent::ChildRestarted(id, _) if id.as_str() == "faulty-worker@localhost" => {
+                SupervisorEvent::ChildRestarted(id, _)
+                    if id.as_str() == "faulty-worker@localhost" =>
+                {
                     restarted_event_seen = true;
                 }
                 SupervisorEvent::ChildFailed(id, _) if id.as_str() == "stable-worker@localhost" => {
@@ -305,7 +299,8 @@ async fn test_one_for_one_restart() {
 #[tokio::test]
 async fn test_one_for_all_restart() {
     // Create supervisor with ONE_FOR_ALL strategy
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "one-for-all-supervisor".to_string(),
         SupervisionStrategy::OneForAll {
@@ -325,9 +320,7 @@ async fn test_one_for_all_restart() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(
-                    Mailbox::new(Default::default(), actor_id.clone())
-                )
+                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
             })
             .join()
             .expect("Thread panicked")
@@ -354,9 +347,7 @@ async fn test_one_for_all_restart() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(
-                    Mailbox::new(Default::default(), actor_id.clone())
-                )
+                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
             })
             .join()
             .expect("Thread panicked")
@@ -388,8 +379,12 @@ async fn test_one_for_all_restart() {
     let _ = event_rx.recv().await;
 
     // Trigger crash in worker1
-    let _ = worker1_ref.tell(create_test_message(b"crash".to_vec())).await;
-    let _ = worker1_ref.tell(create_test_message(b"crash".to_vec())).await;
+    let _ = worker1_ref
+        .tell(create_test_message(b"crash".to_vec()))
+        .await;
+    let _ = worker1_ref
+        .tell(create_test_message(b"crash".to_vec()))
+        .await;
 
     sleep(Duration::from_millis(100)).await;
 
@@ -404,7 +399,8 @@ async fn test_one_for_all_restart() {
 #[tokio::test]
 async fn test_rest_for_one_restart() {
     // Create supervisor with REST_FOR_ONE strategy
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "rest-for-one-supervisor".to_string(),
         SupervisionStrategy::RestForOne {
@@ -432,9 +428,7 @@ async fn test_rest_for_one_restart() {
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(
-                        Mailbox::new(Default::default(), actor_id_clone.clone())
-                    )
+                    rt.block_on(Mailbox::new(Default::default(), actor_id_clone.clone()))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -471,7 +465,8 @@ async fn test_rest_for_one_restart() {
 #[tokio::test]
 async fn test_restart_limits() {
     // Create supervisor with low restart limit
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "limited-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -491,9 +486,7 @@ async fn test_restart_limits() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(
-                    Mailbox::new(Default::default(), actor_id.clone())
-                )
+                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
             })
             .join()
             .expect("Thread panicked")
@@ -519,7 +512,9 @@ async fn test_restart_limits() {
 
     // Trigger multiple crashes
     for _ in 0..5 {
-        let _ = crasher_ref.tell(create_test_message(b"crash".to_vec())).await;
+        let _ = crasher_ref
+            .tell(create_test_message(b"crash".to_vec()))
+            .await;
         sleep(Duration::from_millis(50)).await;
     }
 
@@ -536,7 +531,8 @@ async fn test_restart_limits() {
 #[tokio::test]
 async fn test_hierarchical_supervision() {
     // Create root supervisor
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(TestServiceLocatorStub::new());
     let (mut root_supervisor, _root_events) = Supervisor::new(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -566,9 +562,7 @@ async fn test_hierarchical_supervision() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(
-                    Mailbox::new(Default::default(), actor_id.clone())
-                )
+                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
             })
             .join()
             .expect("Thread panicked")
@@ -602,7 +596,8 @@ async fn test_hierarchical_supervision() {
 
 #[tokio::test]
 async fn test_permanent_restart_policy() {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "policy-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -622,9 +617,7 @@ async fn test_permanent_restart_policy() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(
-                    Mailbox::new(Default::default(), actor_id.clone())
-                )
+                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
             })
             .join()
             .expect("Thread panicked")
@@ -653,7 +646,8 @@ async fn test_permanent_restart_policy() {
 
 #[tokio::test]
 async fn test_temporary_restart_policy() {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "temp-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -673,9 +667,7 @@ async fn test_temporary_restart_policy() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(
-                    Mailbox::new(Default::default(), actor_id.clone())
-                )
+                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
             })
             .join()
             .expect("Thread panicked")
@@ -704,7 +696,8 @@ async fn test_temporary_restart_policy() {
 
 #[tokio::test]
 async fn test_transient_restart_policy() {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        Arc::new(TestServiceLocatorStub::new());
     let (mut supervisor, mut event_rx) = Supervisor::new(
         "transient-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -724,9 +717,7 @@ async fn test_transient_restart_policy() {
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(
-                    Mailbox::new(Default::default(), actor_id.clone())
-                )
+                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
             })
             .join()
             .expect("Thread panicked")

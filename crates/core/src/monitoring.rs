@@ -23,10 +23,10 @@
 //! This module provides reusable functions for recording metrics consistently
 //! across the codebase, reducing duplication and ensuring consistent naming.
 
+use crate::ActorMetricsHandle;
+use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;
-use async_trait::async_trait;
-use crate::ActorMetricsHandle;
 
 /// Trait for accessing NodeMetrics (both reading and updating)
 ///
@@ -39,31 +39,31 @@ use crate::ActorMetricsHandle;
 pub trait NodeMetricsAccessor: Send + Sync {
     /// Get current NodeMetrics (includes node_id and cluster_name)
     async fn get_metrics(&self) -> plexspaces_proto::node::v1::NodeMetrics;
-    
+
     /// Increment messages_routed counter
     async fn increment_messages_routed(&self);
-    
+
     /// Increment local_deliveries counter
     async fn increment_local_deliveries(&self);
-    
+
     /// Increment remote_deliveries counter
     async fn increment_remote_deliveries(&self);
-    
+
     /// Increment failed_deliveries counter
     async fn increment_failed_deliveries(&self);
-    
+
     /// Increment shard_groups_created counter
     async fn increment_shard_groups_created(&self);
-    
+
     /// Increment shard_messages_sent counter
     async fn increment_shard_messages_sent(&self);
-    
+
     /// Increment shard_messages_received counter
     async fn increment_shard_messages_received(&self);
-    
+
     /// Increment shard_operations_total counter
     async fn increment_shard_operations_total(&self);
-    
+
     /// Increment shard_operations_failed counter
     async fn increment_shard_operations_failed(&self);
 }
@@ -89,8 +89,8 @@ pub trait NodeConnectionInfo: Send + Sync {
 /// * `duration` - Time taken for routing
 /// * `success` - Whether routing succeeded
 /// * `error_type` - Error type if routing failed
-    /// * `metrics_accessor` - Optional NodeMetricsAccessor to update NodeMetrics
-    /// * `actor_metrics` - Optional ActorMetricsHandle to update ActorMetrics (preferred)
+/// * `metrics_accessor` - Optional NodeMetricsAccessor to update NodeMetrics
+/// * `actor_metrics` - Optional ActorMetricsHandle to update ActorMetrics (preferred)
 pub async fn record_message_routing_metrics(
     actor_id: &str,
     node_id: &str,
@@ -103,7 +103,7 @@ pub async fn record_message_routing_metrics(
     actor_metrics: Option<ActorMetricsHandle>,
 ) {
     let location = if is_local { "local" } else { "remote" };
-    
+
     // Update ActorMetrics if available (preferred - ActorRegistry tracks metrics directly)
     if let Some(ref actor_metrics_handle) = actor_metrics {
         use crate::message_metrics::ActorMetricsExt;
@@ -120,7 +120,7 @@ pub async fn record_message_routing_metrics(
             metrics.increment_error_total();
         }
     }
-    
+
     // Update NodeMetrics if accessor is available
     if let Some(ref accessor) = metrics_accessor {
         accessor.increment_messages_routed().await;
@@ -134,7 +134,7 @@ pub async fn record_message_routing_metrics(
             accessor.increment_failed_deliveries().await;
         }
     }
-    
+
     // Counter: Total messages routed
     metrics::counter!(
         "plexspaces_messages_routed_total",
@@ -142,7 +142,7 @@ pub async fn record_message_routing_metrics(
         "location" => location.to_string(),
     )
     .increment(1);
-    
+
     // Counter: Messages delivered (success)
     if success {
         metrics::counter!(
@@ -161,23 +161,23 @@ pub async fn record_message_routing_metrics(
         )
         .increment(1);
     }
-    
+
     // Histogram: Routing duration
     let mut labels = vec![
         ("node_id", node_id.to_string()),
         ("location", location.to_string()),
     ];
-    
+
     if let Some(remote_node) = remote_node_id {
         labels.push(("remote_node_id", remote_node.to_string()));
     }
-    
+
     // Convert labels to key-value pairs for metrics macro
     let mut metric_labels = Vec::new();
     for (key, value) in labels {
         metric_labels.push((key, value));
     }
-    
+
     // Record histogram with dynamic labels
     // Note: metrics crate doesn't support dynamic labels easily, so we use a simpler approach
     if is_local {
@@ -196,19 +196,19 @@ pub async fn record_message_routing_metrics(
         )
         .record(duration.as_secs_f64());
     }
-    
+
     // Tracing (if tracing feature is enabled)
     #[cfg(feature = "tracing")]
     {
         if success {
             if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!(
-                actor_id = %actor_id,
-                node_id = %node_id,
-                location = %location,
-                duration_ms = duration.as_millis(),
-                "Message routed successfully"
-            );
+                tracing::trace!(
+                    actor_id = %actor_id,
+                    node_id = %node_id,
+                    location = %location,
+                    duration_ms = duration.as_millis(),
+                    "Message routed successfully"
+                );
             }
         } else {
             tracing::error!(
@@ -246,7 +246,7 @@ pub fn record_actor_activation_metrics(
         "status" => if success { "success" } else { "failed" }.to_string(),
     )
     .increment(1);
-    
+
     if success {
         metrics::histogram!(
             "plexspaces_actor_activation_duration_seconds",
@@ -255,17 +255,17 @@ pub fn record_actor_activation_metrics(
         )
         .record(duration.as_secs_f64());
     }
-    
+
     #[cfg(feature = "tracing")]
     if tracing::enabled!(tracing::Level::DEBUG) {
-    tracing::debug!(
-        actor_id = %actor_id,
-        node_id = %node_id,
-        activation_type = %activation_type,
-        duration_ms = duration.as_millis(),
-        success = success,
-        "Actor activation"
-    );
+        tracing::debug!(
+            actor_id = %actor_id,
+            node_id = %node_id,
+            activation_type = %activation_type,
+            duration_ms = duration.as_millis(),
+            success = success,
+            "Actor activation"
+        );
     }
 }
 
@@ -290,7 +290,7 @@ pub fn record_connection_metrics(
         "event_type" => event_type.to_string(),
     )
     .increment(1);
-    
+
     if let Some(dur) = duration {
         metrics::histogram!(
             "plexspaces_connection_duration_seconds",
@@ -299,7 +299,7 @@ pub fn record_connection_metrics(
         )
         .record(dur.as_secs_f64());
     }
-    
+
     #[cfg(feature = "tracing")]
     tracing::info!(
         node_id = %node_id,

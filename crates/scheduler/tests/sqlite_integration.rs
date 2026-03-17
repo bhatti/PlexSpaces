@@ -27,23 +27,21 @@
 
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_tests {
-    use plexspaces_scheduler::{
-        background::BackgroundScheduler,
-        capacity_tracker::CapacityTracker,
-        service::SchedulingServiceImpl,
-        state_store::SchedulingStateStore,
-        SqliteSchedulingStateStore,
-    };
     use plexspaces_channel::InMemoryChannel;
+    use plexspaces_core::RequestContext;
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
-    use plexspaces_core::RequestContext;
     use plexspaces_proto::{
         actor::v1::ActorResourceRequirements,
         channel::v1::ChannelConfig,
         common::v1::ResourceSpec,
         prost_types,
         scheduling::v1::{ScheduleActorRequest, SchedulingRequest, SchedulingStatus},
+    };
+    use plexspaces_scheduler::{
+        background::BackgroundScheduler, capacity_tracker::CapacityTracker,
+        service::SchedulingServiceImpl, state_store::SchedulingStateStore,
+        SqliteSchedulingStateStore,
     };
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -71,7 +69,6 @@ mod sqlite_tests {
                     cluster: String::new(),
                     node_ids: vec![],
                     required_labels: HashMap::new(),
-                    preferred_node_ids: vec![],
                     avoid_node_ids: vec![],
                     resource_requirements: Some(ResourceSpec {
                         cpu_cores: 1.0,
@@ -81,7 +78,6 @@ mod sqlite_tests {
                         gpu_type: String::new(),
                     }),
                     affinity_labels: HashMap::new(),
-                    preferred_node_id: String::new(),
                 }),
             }),
             namespace: "default".to_string(),
@@ -103,10 +99,14 @@ mod sqlite_tests {
 
         // Store request
         let ctx = create_test_context();
-        SchedulingStateStore::store_request(&store, &ctx, request.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&store, &ctx, request.clone())
+            .await
+            .unwrap();
 
         // Get request
-        let retrieved = SchedulingStateStore::get_request(&store, &ctx, "test-request-1").await.unwrap();
+        let retrieved = SchedulingStateStore::get_request(&store, &ctx, "test-request-1")
+            .await
+            .unwrap();
         assert!(retrieved.is_some());
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.request_id, "test-request-1");
@@ -124,7 +124,9 @@ mod sqlite_tests {
 
         // Store request
         let ctx = create_test_context();
-        SchedulingStateStore::store_request(&store, &ctx, request.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&store, &ctx, request.clone())
+            .await
+            .unwrap();
 
         // Update request to SCHEDULED
         request.status = SchedulingStatus::SchedulingStatusScheduled as i32;
@@ -132,10 +134,15 @@ mod sqlite_tests {
         request.scheduled_at = Some(prost_types::Timestamp::from(SystemTime::now()));
         request.completed_at = Some(prost_types::Timestamp::from(SystemTime::now()));
 
-        SchedulingStateStore::update_request(&store, &ctx, request.clone()).await.unwrap();
+        SchedulingStateStore::update_request(&store, &ctx, request.clone())
+            .await
+            .unwrap();
 
         // Verify update
-        let retrieved = SchedulingStateStore::get_request(&store, &ctx, "test-request-1").await.unwrap().unwrap();
+        let retrieved = SchedulingStateStore::get_request(&store, &ctx, "test-request-1")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(
             retrieved.status,
             SchedulingStatus::SchedulingStatusScheduled as i32
@@ -151,17 +158,25 @@ mod sqlite_tests {
         // Store multiple requests with different statuses
         let ctx = create_test_context();
         let mut request1 = create_test_request("request-1");
-        SchedulingStateStore::store_request(&store, &ctx, request1.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&store, &ctx, request1.clone())
+            .await
+            .unwrap();
 
         let mut request2 = create_test_request("request-2");
         request2.status = SchedulingStatus::SchedulingStatusScheduled as i32;
-        SchedulingStateStore::store_request(&store, &ctx, request2.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&store, &ctx, request2.clone())
+            .await
+            .unwrap();
 
         let request3 = create_test_request("request-3");
-        SchedulingStateStore::store_request(&store, &ctx, request3.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&store, &ctx, request3.clone())
+            .await
+            .unwrap();
 
         // Query pending requests
-        let pending = SchedulingStateStore::query_pending_requests(&store, &ctx).await.unwrap();
+        let pending = SchedulingStateStore::query_pending_requests(&store, &ctx)
+            .await
+            .unwrap();
         assert_eq!(pending.len(), 2);
         let pending_ids: Vec<String> = pending.iter().map(|r| r.request_id.clone()).collect();
         assert!(pending_ids.contains(&"request-1".to_string()));
@@ -174,7 +189,9 @@ mod sqlite_tests {
         let store = create_sqlite_state_store().await;
 
         let ctx = create_test_context();
-        let retrieved = SchedulingStateStore::get_request(&store, &ctx, "non-existent").await.unwrap();
+        let retrieved = SchedulingStateStore::get_request(&store, &ctx, "non-existent")
+            .await
+            .unwrap();
         assert!(retrieved.is_none());
     }
 
@@ -194,18 +211,26 @@ mod sqlite_tests {
 
     #[tokio::test]
     async fn test_sqlite_background_scheduler_with_sqlite_store() {
-        let state_store: Arc<dyn SchedulingStateStore> = Arc::new(create_sqlite_state_store().await);
+        let state_store: Arc<dyn SchedulingStateStore> =
+            Arc::new(create_sqlite_state_store().await);
         let lock_manager = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
 
         let channel_config = ChannelConfig {
             name: "scheduling:requests".to_string(),
-            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory as i32,
+            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory
+                as i32,
             capacity: 100,
-            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
-            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,
+            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce
+                as i32,
+            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo
+                as i32,
             ..Default::default()
         };
         let channel = Arc::new(InMemoryChannel::new(channel_config).await.unwrap());
@@ -227,35 +252,44 @@ mod sqlite_tests {
         // Store a request
         let ctx = create_test_context();
         let request = create_test_request("test-request-1");
-        SchedulingStateStore::store_request(&*state_store, &ctx, request.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&*state_store, &ctx, request.clone())
+            .await
+            .unwrap();
 
         // Verify request is stored
-        let retrieved = SchedulingStateStore::get_request(&*state_store, &ctx, "test-request-1").await.unwrap();
+        let retrieved = SchedulingStateStore::get_request(&*state_store, &ctx, "test-request-1")
+            .await
+            .unwrap();
         assert!(retrieved.is_some());
     }
 
     #[tokio::test]
     async fn test_sqlite_service_with_sqlite_store() {
-        let state_store: Arc<dyn SchedulingStateStore> = Arc::new(create_sqlite_state_store().await);
-        let repo = Arc::new(SqliteObjectRegistryRepository::new(":memory:").await.unwrap());
+        let state_store: Arc<dyn SchedulingStateStore> =
+            Arc::new(create_sqlite_state_store().await);
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
         let registry = Arc::new(ObjectRegistryImpl::new(repo));
         let capacity_tracker = Arc::new(CapacityTracker::new(registry));
 
         let channel_config = ChannelConfig {
             name: "scheduling:requests".to_string(),
-            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory as i32,
+            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory
+                as i32,
             capacity: 100,
-            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
-            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,
+            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce
+                as i32,
+            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo
+                as i32,
             ..Default::default()
         };
         let channel = Arc::new(InMemoryChannel::new(channel_config).await.unwrap());
 
-        let service = SchedulingServiceImpl::new(
-            state_store.clone(),
-            channel.clone(),
-            capacity_tracker,
-        );
+        let service =
+            SchedulingServiceImpl::new(state_store.clone(), channel.clone(), capacity_tracker);
 
         use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
         // Schedule actor
@@ -266,7 +300,6 @@ mod sqlite_tests {
                     cluster: String::new(),
                     node_ids: vec![],
                     required_labels: HashMap::new(),
-                    preferred_node_ids: vec![],
                     avoid_node_ids: vec![],
                     resource_requirements: Some(ResourceSpec {
                         cpu_cores: 1.0,
@@ -276,7 +309,6 @@ mod sqlite_tests {
                         gpu_type: String::new(),
                     }),
                     affinity_labels: HashMap::new(),
-                    preferred_node_id: String::new(),
                 }),
             }),
             request_id: String::new(),
@@ -285,19 +317,28 @@ mod sqlite_tests {
         // Create request with metadata for tenant/namespace (required by service)
         use plexspaces_proto::scheduling::v1::scheduling_service_server::SchedulingService;
         let mut request = tonic::Request::new(req);
-        request.metadata_mut().insert("x-tenant-id", "default".parse().unwrap());
-        request.metadata_mut().insert("x-namespace", "default".parse().unwrap());
+        request
+            .metadata_mut()
+            .insert("x-tenant-id", "default".parse().unwrap());
+        request
+            .metadata_mut()
+            .insert("x-namespace", "default".parse().unwrap());
         let response = SchedulingService::schedule_actor(&service, request)
             .await
             .unwrap()
             .into_inner();
 
-        assert_eq!(response.status, SchedulingStatus::SchedulingStatusPending as i32);
+        assert_eq!(
+            response.status,
+            SchedulingStatus::SchedulingStatusPending as i32
+        );
         assert!(!response.request_id.is_empty());
 
         // Verify request was stored in SQLite
         let ctx = create_test_context();
-        let stored = SchedulingStateStore::get_request(&*state_store, &ctx, &response.request_id).await.unwrap();
+        let stored = SchedulingStateStore::get_request(&*state_store, &ctx, &response.request_id)
+            .await
+            .unwrap();
         assert!(stored.is_some());
         assert_eq!(
             stored.unwrap().status,
@@ -307,7 +348,8 @@ mod sqlite_tests {
 
     #[tokio::test]
     async fn test_sqlite_recovery_pending_requests() {
-        let state_store: Arc<dyn SchedulingStateStore> = Arc::new(create_sqlite_state_store().await);
+        let state_store: Arc<dyn SchedulingStateStore> =
+            Arc::new(create_sqlite_state_store().await);
 
         // Simulate crash: store requests but don't process them
         let request1 = create_test_request("recovery-request-1");
@@ -316,13 +358,21 @@ mod sqlite_tests {
         request3.status = SchedulingStatus::SchedulingStatusScheduled as i32; // Already processed
 
         let ctx = create_test_context();
-        SchedulingStateStore::store_request(&*state_store, &ctx, request1.clone()).await.unwrap();
-        SchedulingStateStore::store_request(&*state_store, &ctx, request2.clone()).await.unwrap();
-        SchedulingStateStore::store_request(&*state_store, &ctx, request3.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&*state_store, &ctx, request1.clone())
+            .await
+            .unwrap();
+        SchedulingStateStore::store_request(&*state_store, &ctx, request2.clone())
+            .await
+            .unwrap();
+        SchedulingStateStore::store_request(&*state_store, &ctx, request3.clone())
+            .await
+            .unwrap();
 
         // Simulate recovery: query pending requests
         // Note: For recovery, we might need to query all tenants, but for this test we use the test context
-        let pending = SchedulingStateStore::query_pending_requests(&*state_store, &ctx).await.unwrap();
+        let pending = SchedulingStateStore::query_pending_requests(&*state_store, &ctx)
+            .await
+            .unwrap();
         assert_eq!(pending.len(), 2);
         let pending_ids: Vec<String> = pending.iter().map(|r| r.request_id.clone()).collect();
         assert!(pending_ids.contains(&"recovery-request-1".to_string()));
@@ -332,12 +382,15 @@ mod sqlite_tests {
 
     #[tokio::test]
     async fn test_sqlite_concurrent_updates() {
-        let state_store: Arc<dyn SchedulingStateStore> = Arc::new(create_sqlite_state_store().await);
+        let state_store: Arc<dyn SchedulingStateStore> =
+            Arc::new(create_sqlite_state_store().await);
         let request = create_test_request("concurrent-request");
 
         // Store request
         let ctx = create_test_context();
-        SchedulingStateStore::store_request(&*state_store, &ctx, request.clone()).await.unwrap();
+        SchedulingStateStore::store_request(&*state_store, &ctx, request.clone())
+            .await
+            .unwrap();
 
         // Simulate concurrent updates (different statuses)
         let mut request1 = request.clone();
@@ -349,11 +402,19 @@ mod sqlite_tests {
         request2.error_message = "test error".to_string();
 
         // Both updates should succeed (last write wins)
-        SchedulingStateStore::update_request(&*state_store, &ctx, request1.clone()).await.unwrap();
-        SchedulingStateStore::update_request(&*state_store, &ctx, request2.clone()).await.unwrap();
+        SchedulingStateStore::update_request(&*state_store, &ctx, request1.clone())
+            .await
+            .unwrap();
+        SchedulingStateStore::update_request(&*state_store, &ctx, request2.clone())
+            .await
+            .unwrap();
 
         // Verify last update
-        let retrieved = SchedulingStateStore::get_request(&*state_store, &ctx, "concurrent-request").await.unwrap().unwrap();
+        let retrieved =
+            SchedulingStateStore::get_request(&*state_store, &ctx, "concurrent-request")
+                .await
+                .unwrap()
+                .unwrap();
         assert_eq!(
             retrieved.status,
             SchedulingStatus::SchedulingStatusFailed as i32
@@ -369,11 +430,15 @@ mod sqlite_tests {
         let ctx = create_test_context();
         for i in 1..=10 {
             let request = create_test_request(&format!("request-{}", i));
-            SchedulingStateStore::store_request(&store, &ctx, request).await.unwrap();
+            SchedulingStateStore::store_request(&store, &ctx, request)
+                .await
+                .unwrap();
         }
 
         // Query pending (should return all 10)
-        let pending = SchedulingStateStore::query_pending_requests(&store, &ctx).await.unwrap();
+        let pending = SchedulingStateStore::query_pending_requests(&store, &ctx)
+            .await
+            .unwrap();
         assert_eq!(pending.len(), 10);
 
         // Verify all request IDs are present
@@ -383,4 +448,3 @@ mod sqlite_tests {
         }
     }
 }
-

@@ -786,6 +786,10 @@ message PingResponse {
   repeated MembershipUpdate updates = 4;
   // Cluster name (for same-cluster check on ConnectNodes; empty means no cluster)
   string cluster_name = 5;
+  // Responding node's gRPC address
+  string node_address = 6;
+  // Last heartbeat observed by the responding node for itself
+  google.protobuf.Timestamp last_heartbeat = 7;
 }
 
 // Indirect ping request - Ask intermediary to ping target

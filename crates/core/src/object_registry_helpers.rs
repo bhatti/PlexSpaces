@@ -22,15 +22,13 @@
 //! to simplify registration and discovery of different object types.
 //! Includes LRU caching for discovery operations to reduce registry load.
 
-use crate::{RequestContext, actor_context::ObjectRegistry as ObjectRegistryTrait};
-use plexspaces_proto::object_registry::v1::{
-    ObjectRegistration, ObjectType, HealthStatus,
-};
+use crate::{actor_context::ObjectRegistry as ObjectRegistryTrait, RequestContext};
+use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 use prost_types::Timestamp;
-use std::sync::Arc;
-use std::time::{SystemTime, Duration};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 
 /// Simple LRU cache with TTL expiration for discovery results
@@ -56,51 +54,51 @@ where
 
     fn get(&mut self, key: &K) -> Option<&V> {
         let now = SystemTime::now();
-        
+
         if !self.map.contains_key(key) {
             return None;
         }
-        
-        let expired = self.map.get(key)
-            .map(|(_, timestamp)| {
-                now.duration_since(*timestamp).unwrap_or_default() >= self.ttl
-            })
+
+        let expired = self
+            .map
+            .get(key)
+            .map(|(_, timestamp)| now.duration_since(*timestamp).unwrap_or_default() >= self.ttl)
             .unwrap_or(true);
-        
+
         if expired {
             self.remove(key);
             return None;
         }
-        
+
         // Update LRU order
         if let Some(pos) = self.queue.iter().position(|k| k == key) {
             self.queue.remove(pos);
         }
         self.queue.push_back(key.clone());
-        
+
         self.map.get(key).map(|(value, _)| value)
     }
 
     fn insert(&mut self, key: K, value: V) {
         let now = SystemTime::now();
-        
+
         if let Some((old_value, timestamp)) = self.map.get_mut(&key) {
             *old_value = value;
             *timestamp = now;
-            
+
             if let Some(pos) = self.queue.iter().position(|k| k == &key) {
                 self.queue.remove(pos);
             }
             self.queue.push_back(key.clone());
             return;
         }
-        
+
         if self.map.len() >= self.capacity {
             if let Some(lru_key) = self.queue.pop_front() {
                 self.map.remove(&lru_key);
             }
         }
-        
+
         self.queue.push_back(key.clone());
         self.map.insert(key, (value, now));
     }
@@ -126,7 +124,7 @@ where
             })
             .map(|(key, _)| key.clone())
             .collect();
-        
+
         for key in expired_keys {
             self.remove(&key);
         }
@@ -142,7 +140,7 @@ where
             .filter(|key| predicate(key))
             .cloned()
             .collect();
-        
+
         let count = matching_keys.len();
         for key in matching_keys {
             self.remove(&key);
@@ -154,13 +152,14 @@ where
 /// Global discovery cache (shared across all discovery operations)
 /// Cache key format: "{object_type}:{category}:{tenant_id}:{namespace}" (e.g., "node:cluster:tenant1:prod", "application:myapp:tenant1:default")
 type CacheKey = String;
-static DISCOVERY_CACHE: once_cell::sync::Lazy<Arc<RwLock<DiscoveryCache<CacheKey, Vec<ObjectRegistration>>>>> =
-    once_cell::sync::Lazy::new(|| {
-        Arc::new(RwLock::new(DiscoveryCache::new(
-            1000, // capacity
-            Duration::from_secs(60), // 60 second TTL
-        )))
-    });
+static DISCOVERY_CACHE: once_cell::sync::Lazy<
+    Arc<RwLock<DiscoveryCache<CacheKey, Vec<ObjectRegistration>>>>,
+> = once_cell::sync::Lazy::new(|| {
+    Arc::new(RwLock::new(DiscoveryCache::new(
+        1000,                    // capacity
+        Duration::from_secs(60), // 60 second TTL
+    )))
+});
 
 /// Clear the discovery cache (test-only helper)
 /// This is useful for tests to ensure clean state between test runs
@@ -196,7 +195,7 @@ pub async fn register_node<T: ObjectRegistryTrait + ?Sized>(
         seconds: now.as_secs() as i64,
         nanos: now.subsec_nanos() as i32,
     };
-    
+
     let registration = ObjectRegistration {
         object_type: ObjectType::ObjectTypeNode as i32,
         object_id: node_id.to_string(),
@@ -209,15 +208,17 @@ pub async fn register_node<T: ObjectRegistryTrait + ?Sized>(
         health_status: HealthStatus::HealthStatusHealthy as i32,
         created_at: Some(timestamp.clone()),
         updated_at: Some(timestamp),
-        labels: cluster_name.map(|c| vec![c.to_string()]).unwrap_or_default(),
+        labels: cluster_name
+            .map(|c| vec![c.to_string()])
+            .unwrap_or_default(),
         ..Default::default()
     };
-    
+
     // Invalidate all node cache entries for this tenant/namespace to prevent stale data
     let tenant_ns_pattern = format!("node:{}:{}", ctx.tenant_id(), ctx.namespace());
     let mut cache = DISCOVERY_CACHE.write().await;
     cache.remove_matching(|key| key.starts_with(&tenant_ns_pattern));
-    
+
     object_registry.register(ctx, registration).await
 }
 
@@ -248,7 +249,7 @@ pub async fn register_application<T: ObjectRegistryTrait + ?Sized>(
         seconds: now.as_secs() as i64,
         nanos: now.subsec_nanos() as i32,
     };
-    
+
     let registration = ObjectRegistration {
         object_type: ObjectType::ObjectTypeApplication as i32,
         object_id: format!("{}@{}", app_name, node_id),
@@ -264,13 +265,14 @@ pub async fn register_application<T: ObjectRegistryTrait + ?Sized>(
         updated_at: Some(timestamp),
         ..Default::default()
     };
-    
+
     // Invalidate all application cache entries for this tenant/namespace to prevent stale data
     // Cache key format: "application:{app_name}:{tenant_id}:{namespace}"
     let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
     let mut cache = DISCOVERY_CACHE.write().await;
-    cache.remove_matching(|key| key.starts_with("application:") && key.ends_with(&tenant_ns_suffix));
-    
+    cache
+        .remove_matching(|key| key.starts_with("application:") && key.ends_with(&tenant_ns_suffix));
+
     object_registry.register(ctx, registration).await
 }
 
@@ -297,9 +299,13 @@ pub async fn unregister_application(
     // Cache key format: "application:{app_name}:{tenant_id}:{namespace}"
     let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
     let mut cache = DISCOVERY_CACHE.write().await;
-    cache.remove_matching(|key| key.starts_with("application:") && key.ends_with(&tenant_ns_suffix));
-    
-    Err(Box::new(std::io::Error::new(std::io::ErrorKind::Unsupported, "Unregister not yet implemented via trait")))
+    cache
+        .remove_matching(|key| key.starts_with("application:") && key.ends_with(&tenant_ns_suffix));
+
+    Err(Box::new(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Unregister not yet implemented via trait",
+    )))
 }
 
 /// Register a workflow in object-registry
@@ -329,7 +335,7 @@ pub async fn register_workflow<T: ObjectRegistryTrait + ?Sized>(
         seconds: now.as_secs() as i64,
         nanos: now.subsec_nanos() as i32,
     };
-    
+
     let registration = ObjectRegistration {
         object_type: ObjectType::ObjectTypeWorkflow as i32,
         object_id: workflow_id.to_string(),
@@ -344,13 +350,13 @@ pub async fn register_workflow<T: ObjectRegistryTrait + ?Sized>(
         updated_at: Some(timestamp),
         ..Default::default()
     };
-    
+
     // Invalidate all workflow cache entries for this tenant/namespace to prevent stale data
     // Cache key format: "workflow:{definition_id}:{tenant_id}:{namespace}"
     let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
     let mut cache = DISCOVERY_CACHE.write().await;
     cache.remove_matching(|key| key.starts_with("workflow:") && key.ends_with(&tenant_ns_suffix));
-    
+
     object_registry.register(ctx, registration).await
 }
 
@@ -371,7 +377,7 @@ pub async fn discover_nodes<T: ObjectRegistryTrait + ?Sized>(
 ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
     // Tenant-aware cache key to ensure proper isolation
     let cache_key = format!("node:{}:{}", ctx.tenant_id(), ctx.namespace());
-    
+
     // Check cache first
     {
         let mut cache = DISCOVERY_CACHE.write().await;
@@ -379,25 +385,27 @@ pub async fn discover_nodes<T: ObjectRegistryTrait + ?Sized>(
             return Ok(cached.clone());
         }
     }
-    
+
     // Cache miss - query registry
-    let registrations = object_registry.discover(
-        ctx,
-        Some(ObjectType::ObjectTypeNode),
-        None, // object_category
-        None, // capabilities
-        None, // labels
-        None, // health_status
-        0, // offset
-        1000, // limit
-    ).await?;
-    
+    let registrations = object_registry
+        .discover(
+            ctx,
+            Some(ObjectType::ObjectTypeNode),
+            None, // object_category
+            None, // capabilities
+            None, // labels
+            None, // health_status
+            0,    // offset
+            1000, // limit
+        )
+        .await?;
+
     // Store in cache
     {
         let mut cache = DISCOVERY_CACHE.write().await;
         cache.insert(cache_key, registrations.clone());
     }
-    
+
     Ok(registrations)
 }
 
@@ -419,8 +427,13 @@ pub async fn discover_application_nodes<T: ObjectRegistryTrait + ?Sized>(
     app_name: &str,
 ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
     // Tenant-aware cache key to ensure proper isolation
-    let cache_key = format!("application:{}:{}:{}", app_name, ctx.tenant_id(), ctx.namespace());
-    
+    let cache_key = format!(
+        "application:{}:{}:{}",
+        app_name,
+        ctx.tenant_id(),
+        ctx.namespace()
+    );
+
     // Check cache first
     {
         let mut cache = DISCOVERY_CACHE.write().await;
@@ -428,25 +441,27 @@ pub async fn discover_application_nodes<T: ObjectRegistryTrait + ?Sized>(
             return Ok(cached.clone());
         }
     }
-    
+
     // Cache miss - query registry
-    let registrations = object_registry.discover(
-        ctx,
-        Some(ObjectType::ObjectTypeApplication),
-        Some(app_name.to_string()),
-        None, // capabilities
-        None, // labels
-        None, // health_status
-        0, // offset
-        1000, // limit
-    ).await?;
-    
+    let registrations = object_registry
+        .discover(
+            ctx,
+            Some(ObjectType::ObjectTypeApplication),
+            Some(app_name.to_string()),
+            None, // capabilities
+            None, // labels
+            None, // health_status
+            0,    // offset
+            1000, // limit
+        )
+        .await?;
+
     // Store in cache
     {
         let mut cache = DISCOVERY_CACHE.write().await;
         cache.insert(cache_key, registrations.clone());
     }
-    
+
     Ok(registrations)
 }
 
@@ -468,8 +483,13 @@ pub async fn discover_workflow_nodes<T: ObjectRegistryTrait + ?Sized>(
     definition_id: &str,
 ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
     // Tenant-aware cache key to ensure proper isolation
-    let cache_key = format!("workflow:{}:{}:{}", definition_id, ctx.tenant_id(), ctx.namespace());
-    
+    let cache_key = format!(
+        "workflow:{}:{}:{}",
+        definition_id,
+        ctx.tenant_id(),
+        ctx.namespace()
+    );
+
     // Check cache first
     {
         let mut cache = DISCOVERY_CACHE.write().await;
@@ -477,25 +497,27 @@ pub async fn discover_workflow_nodes<T: ObjectRegistryTrait + ?Sized>(
             return Ok(cached.clone());
         }
     }
-    
+
     // Cache miss - query registry
-    let registrations = object_registry.discover(
-        ctx,
-        Some(ObjectType::ObjectTypeWorkflow),
-        Some(definition_id.to_string()),
-        None, // capabilities
-        None, // labels
-        None, // health_status
-        0, // offset
-        1000, // limit
-    ).await?;
-    
+    let registrations = object_registry
+        .discover(
+            ctx,
+            Some(ObjectType::ObjectTypeWorkflow),
+            Some(definition_id.to_string()),
+            None, // capabilities
+            None, // labels
+            None, // health_status
+            0,    // offset
+            1000, // limit
+        )
+        .await?;
+
     // Store in cache
     {
         let mut cache = DISCOVERY_CACHE.write().await;
         cache.insert(cache_key, registrations.clone());
     }
-    
+
     Ok(registrations)
 }
 

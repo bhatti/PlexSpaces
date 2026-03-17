@@ -12,8 +12,8 @@
 //! ```
 
 use async_trait::async_trait;
-use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message};
+use plexspaces_node::{Node, NodeBuilder};
 
 /// Helper to create a proto Message with payload
 fn create_message(payload: Vec<u8>) -> Message {
@@ -52,10 +52,7 @@ impl Actor for Counter {
                 println!("[actor@{}] Count incremented to {}", node_id, self.count);
             }
             "get" => {
-                println!(
-                    "[actor@{}] Current count: {}",
-                    node_id, self.count
-                );
+                println!("[actor@{}] Current count: {}", node_id, self.count);
             }
             _ => {
                 println!("[actor@{}] Unknown command: {}", node_id, payload);
@@ -87,14 +84,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     let node1 = NodeBuilder::new("node1")
         .with_listen_addr("127.0.0.1:8000".to_string())
-        .build().await;
+        .build()
+        .await;
 
     // Spawn counter actor on node1
     use plexspaces_actor::ActorBuilder;
     println!("\nSpawning counter@node1...");
-    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string())
-        .with_internal(true)
-        .with_admin(true);
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "internal".to_string(),
+        "system".to_string(),
+    )
+    .with_internal(true)
+    .with_admin(true);
     let counter1_ref = ActorBuilder::new(Box::new(Counter { count: 0 }))
         .with_id("counter@node1".to_string())
         .spawn(&ctx, node1.service_locator().clone())
@@ -105,7 +106,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Create a minimal ActorContext for sending messages
     // In a real actor, you would get this from handle_message() parameter
     use plexspaces_node::create_default_service_locator;
-    let service_locator = create_default_service_locator(Some("node1".to_string()), None, None).await;
+    let service_locator =
+        create_default_service_locator(Some("node1".to_string()), None, None).await;
     let ctx = ActorContext::new(
         "node1".to_string(),
         "default".to_string(),
@@ -122,9 +124,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Method 1: Using ActorService from ActorContext (location-transparent)
     println!("\n1. Sending via ActorService (location-transparent):");
     let msg1 = create_message(b"increment".to_vec());
-    let actor_service = ctx.get_actor_service().await
+    let actor_service = ctx
+        .get_actor_service()
+        .await
         .ok_or("ActorService not available")?;
-    actor_service.send(&counter1_ref.id(), msg1).await.map_err(|e| format!("Failed to send message: {}", e))?;
+    actor_service
+        .send(&counter1_ref.id(), msg1)
+        .await
+        .map_err(|e| format!("Failed to send message: {}", e))?;
     println!("   ✅ Sent 'increment' to counter@node1 via ActorService.send_message()");
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -143,7 +150,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Method 3: Another message via ActorService
     println!("\n3. Sending 'get' command via ActorService:");
     let msg3 = create_message(b"get".to_vec());
-    let actor_service = ctx.get_actor_service().await
+    let actor_service = ctx
+        .get_actor_service()
+        .await
         .ok_or("ActorService not available")?;
     actor_service.send(&counter1_ref.id(), msg3).await?;
     println!("   ✅ Sent 'get' to counter@node1 via ActorService.send_message()");
@@ -153,7 +162,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Method 4: Increment again
     println!("\n4. Sending another 'increment' command:");
     let msg4 = create_message(b"increment".to_vec());
-    actor_service.send(&counter1_ref.id(), msg4).await.map_err(|e| format!("Failed to send message: {}", e))?;
+    actor_service
+        .send(&counter1_ref.id(), msg4)
+        .await
+        .map_err(|e| format!("Failed to send message: {}", e))?;
     println!("   ✅ Sent 'increment' to counter@node1 via ActorService.send_message()");
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -161,7 +173,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Method 5: Final get
     println!("\n5. Sending final 'get' command:");
     let msg5 = create_message(b"get".to_vec());
-    actor_service.send(&counter1_ref.id(), msg5).await.map_err(|e| format!("Failed to send message: {}", e))?;
+    actor_service
+        .send(&counter1_ref.id(), msg5)
+        .await
+        .map_err(|e| format!("Failed to send message: {}", e))?;
     println!("   ✅ Sent 'get' to counter@node1 via ActorService.send_message()");
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -173,7 +188,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Key Takeaways:");
     println!("  • Actors are created with NodeBuilder and ActorBuilder (unified API)");
     println!("  • Actor IDs use 'actor@node1' format for location transparency");
-    println!("  • ActorService.send_message() works for local and remote actors (location-transparent)");
+    println!(
+        "  • ActorService.send_message() works for local and remote actors (location-transparent)"
+    );
     println!("  • ctx.actor_service.send_message() also works for local and remote actors");
     println!("  • Omit @node to default to local node: 'actor' → 'actor@local'");
     println!("  • ActorService handles local/remote routing automatically");
@@ -192,4 +209,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     Ok(())
 }
-

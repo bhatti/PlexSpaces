@@ -274,9 +274,11 @@ impl ShutdownCoordinator {
         .await?;
 
         // Phase 6: Final cleanup
-        self.execute_phase(ShutdownPhase::ShutdownPhaseFinalCleanup, "Final cleanup", || async {
-            node.final_cleanup().await
-        })
+        self.execute_phase(
+            ShutdownPhase::ShutdownPhaseFinalCleanup,
+            "Final cleanup",
+            || async { node.final_cleanup().await },
+        )
         .await?;
 
         // Mark complete
@@ -416,11 +418,11 @@ pub enum ShutdownError {
     /// Phase execution failed
     #[error("Shutdown phase {phase} failed: {error}")]
     /// Phase failed during shutdown
-    PhaseFailed { 
+    PhaseFailed {
         /// Name of the phase that failed
-        phase: String, 
+        phase: String,
         /// Error message
-        error: String 
+        error: String,
     },
 
     /// Timeout during shutdown
@@ -595,7 +597,9 @@ mod tests {
         let coordinator = ShutdownCoordinator::new();
 
         // Simulate SIGTERM
-        coordinator.simulate_signal(ShutdownSignal::ShutdownSignalSigterm).await;
+        coordinator
+            .simulate_signal(ShutdownSignal::ShutdownSignalSigterm)
+            .await;
 
         let status = coordinator.get_status().await;
         assert_eq!(status.signal, ShutdownSignal::ShutdownSignalSigterm as i32);
@@ -605,9 +609,18 @@ mod tests {
     async fn test_different_signals() {
         // Test each signal type
         for (signal, expected) in [
-            (ShutdownSignal::ShutdownSignalSigterm, ShutdownSignal::ShutdownSignalSigterm as i32),
-            (ShutdownSignal::ShutdownSignalSigint, ShutdownSignal::ShutdownSignalSigint as i32),
-            (ShutdownSignal::ShutdownSignalSighup, ShutdownSignal::ShutdownSignalSighup as i32),
+            (
+                ShutdownSignal::ShutdownSignalSigterm,
+                ShutdownSignal::ShutdownSignalSigterm as i32,
+            ),
+            (
+                ShutdownSignal::ShutdownSignalSigint,
+                ShutdownSignal::ShutdownSignalSigint as i32,
+            ),
+            (
+                ShutdownSignal::ShutdownSignalSighup,
+                ShutdownSignal::ShutdownSignalSighup as i32,
+            ),
         ] {
             let coordinator = ShutdownCoordinator::new();
             coordinator.simulate_signal(signal).await;

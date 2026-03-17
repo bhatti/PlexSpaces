@@ -34,7 +34,7 @@
 
 #[cfg(test)]
 mod tests {
-    use plexspaces_wasm_runtime::{WasmRuntime, WasmConfig, WasmResult};
+    use plexspaces_wasm_runtime::{WasmConfig, WasmResult, WasmRuntime};
 
     /// Test: Runtime has state persistence methods available
     ///
@@ -43,7 +43,7 @@ mod tests {
     #[tokio::test]
     async fn test_wasm_runtime_supports_state_persistence() {
         let runtime = WasmRuntime::new().await.expect("Failed to create runtime");
-        
+
         // Verify runtime is created successfully
         // The actual state persistence methods are on WasmInstance (component actors)
         // WasmInstance provides: get_state_component() and set_state_component()
@@ -65,15 +65,16 @@ mod tests {
                 {"type": "deposit", "amount": 500}
             ]
         });
-        
+
         let state_json = serde_json::to_string(&state).expect("Should serialize");
-        
+
         // Verify JSON format
         assert!(state_json.contains("balance"));
         assert!(state_json.contains("1000"));
-        
+
         // Verify roundtrip
-        let restored: serde_json::Value = serde_json::from_str(&state_json).expect("Should deserialize");
+        let restored: serde_json::Value =
+            serde_json::from_str(&state_json).expect("Should deserialize");
         assert_eq!(restored["balance"], 1000);
     }
 
@@ -86,7 +87,7 @@ mod tests {
         // Empty state is valid - represents fresh actor
         let empty_state = "";
         assert!(empty_state.is_empty());
-        
+
         // Empty JSON object is also valid
         let empty_json = "{}";
         let parsed: serde_json::Value = serde_json::from_str(empty_json).expect("Should parse");
@@ -102,11 +103,14 @@ mod tests {
         // Success: empty string
         let success_response = "";
         assert!(success_response.is_empty(), "Empty string means success");
-        
+
         // Error: non-empty string with message
         let error_response = "ERROR: Invalid state format";
         assert!(!error_response.is_empty(), "Non-empty string means error");
-        assert!(error_response.starts_with("ERROR:"), "Error should be descriptive");
+        assert!(
+            error_response.starts_with("ERROR:"),
+            "Error should be descriptive"
+        );
     }
 
     /// Test: State size is tracked
@@ -122,14 +126,18 @@ mod tests {
             "transactions": (0..100).map(|i| {
                 serde_json::json!({"id": i, "type": "transfer", "amount": i * 10})
             }).collect::<Vec<_>>()
-        }).to_string();
-        
+        })
+        .to_string();
+
         // Small state
         assert!(small_state.len() < 50, "Small state should be compact");
-        
+
         // Large state with transaction history
-        assert!(large_state.len() > 1000, "Large state should be substantial");
-        
+        assert!(
+            large_state.len() > 1000,
+            "Large state should be substantial"
+        );
+
         // Both should be valid JSON
         let _: serde_json::Value = serde_json::from_str(small_state).expect("Should parse small");
         let _: serde_json::Value = serde_json::from_str(&large_state).expect("Should parse large");
@@ -146,7 +154,7 @@ mod tests {
             "version": 1,
             "balance": 1000
         });
-        
+
         // Version 2 state with additional fields
         let v2_state = serde_json::json!({
             "version": 2,
@@ -154,14 +162,14 @@ mod tests {
             "currency": "USD",
             "created_at": "2025-01-23T00:00:00Z"
         });
-        
+
         // Actor can check version and migrate
         let v1: serde_json::Value = serde_json::from_str(&v1_state.to_string()).unwrap();
         let v2: serde_json::Value = serde_json::from_str(&v2_state.to_string()).unwrap();
-        
+
         assert_eq!(v1["version"], 1);
         assert_eq!(v2["version"], 2);
-        
+
         // Both have common fields
         assert_eq!(v1["balance"], 1000);
         assert_eq!(v2["balance"], 1000);
@@ -176,14 +184,15 @@ mod tests {
         // Partial state (missing some fields)
         let partial_state = r#"{"balance": 500}"#;
         let parsed: serde_json::Value = serde_json::from_str(partial_state).unwrap();
-        
+
         // Actor should use defaults for missing fields
         let balance = parsed.get("balance").and_then(|v| v.as_i64()).unwrap_or(0);
-        let transactions = parsed.get("transactions")
+        let transactions = parsed
+            .get("transactions")
             .and_then(|v| v.as_array())
             .map(|a| a.len())
             .unwrap_or(0);
-        
+
         assert_eq!(balance, 500);
         assert_eq!(transactions, 0); // Default to empty
     }
@@ -198,7 +207,7 @@ mod integration_tests {
     async fn test_runtime_durability_configuration() {
         // Create runtime with default config
         let runtime = WasmRuntime::new().await.expect("Runtime should be created");
-        
+
         // Runtime should support component model (required for get-state/set-state)
         // The component model feature enables WIT-based state persistence
         // WasmInstance.get_state_component() and set_state_component() are the key methods

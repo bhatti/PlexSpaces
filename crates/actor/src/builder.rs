@@ -53,8 +53,8 @@
 //!     .await?;
 //! ```
 
-use crate::Actor as ActorStruct;
 use crate::resource::ResourceProfile;
+use crate::Actor as ActorStruct;
 use plexspaces_core::{Actor, ActorId};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::v1::actor::ActorConfig;
@@ -159,7 +159,7 @@ impl ActorBuilder {
         self.namespace = namespace.into();
         self
     }
-    
+
     /// Set tenant ID for multi-tenancy
     ///
     /// ## Arguments
@@ -399,7 +399,7 @@ impl ActorBuilder {
         use crate::resource::ResourceContract;
         // Convert CPU cores to CPU percent (assuming 100% per core)
         let max_cpu_percent = (cpu_cores * 100.0) as f32;
-        
+
         // Create ResourceContract
         let _resource_contract = ResourceContract {
             max_cpu_percent,
@@ -408,10 +408,10 @@ impl ActorBuilder {
             guaranteed_bandwidth_mbps: None,
             max_execution_time: Some(std::time::Duration::from_secs(300)),
         };
-        
+
         // Get or create ActorConfig
         let mut config = self.config.take().unwrap_or_default();
-        
+
         // Set resource contract in config (if ActorConfig has this field)
         // For now, store in properties
         use prost_types::Any;
@@ -429,7 +429,7 @@ impl ActorBuilder {
                 value: (memory_bytes as u64).to_le_bytes().to_vec(),
             },
         );
-        
+
         // Store labels
         for (key, value) in labels {
             config.properties.insert(
@@ -440,7 +440,7 @@ impl ActorBuilder {
                 },
             );
         }
-        
+
         // Store actor groups
         if !actor_groups.is_empty() {
             // Store as comma-separated string in properties
@@ -453,9 +453,9 @@ impl ActorBuilder {
                 },
             );
         }
-        
+
         self.config = Some(config);
-        
+
         // Also set resource profile based on CPU/memory ratio
         use crate::resource::ResourceProfile;
         let profile = if cpu_cores > memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0) {
@@ -466,7 +466,7 @@ impl ActorBuilder {
             ResourceProfile::Balanced
         };
         self.resource_profile = Some(profile);
-        
+
         self
     }
 
@@ -500,10 +500,10 @@ impl ActorBuilder {
     ) -> Self {
         // Get or create ActorConfig
         let mut config = self.config.take().unwrap_or_default();
-        
+
         // Store WASM module info in properties map
         use prost_types::Any;
-        
+
         config.properties.insert(
             "wasm.module.name".to_string(),
             Any {
@@ -525,7 +525,7 @@ impl ActorBuilder {
                 value: module_hash.into().into_bytes(),
             },
         );
-        
+
         self.config = Some(config);
         self
     }
@@ -553,10 +553,10 @@ impl ActorBuilder {
     pub fn with_firecracker_vm(mut self, vm_id: impl Into<String>) -> Self {
         // Get or create ActorConfig
         let mut config = self.config.take().unwrap_or_default();
-        
+
         // Store Firecracker VM ID in properties map
         use prost_types::Any;
-        
+
         config.properties.insert(
             "firecracker.vm_id".to_string(),
             Any {
@@ -564,7 +564,7 @@ impl ActorBuilder {
                 value: vm_id.into().into_bytes(),
             },
         );
-        
+
         self.config = Some(config);
         self
     }
@@ -599,11 +599,13 @@ impl ActorBuilder {
                 .as_millis();
             format!("actor@{}", timestamp)
         });
-        
+
         // CRITICAL: Normalize actor ID to include @node suffix if node_id is available
         // If actor_id already has @node, validate it matches node_id (or error if mismatch)
         if let Some(ref node_id) = self.node_id {
-            if let Ok((actor_name, existing_node_id)) = plexspaces_core::ActorRef::parse_actor_id(&actor_id) {
+            if let Ok((actor_name, existing_node_id)) =
+                plexspaces_core::ActorRef::parse_actor_id(&actor_id)
+            {
                 // Actor ID already has @node format
                 if !existing_node_id.is_empty() && existing_node_id != *node_id {
                     return Err(std::io::Error::new(
@@ -656,7 +658,8 @@ impl ActorBuilder {
             // For ActorBuilder, we create a minimal ServiceLocator stub that will be replaced
             // when the actor is actually spawned by Node
             use crate::TestServiceLocatorStub;
-            let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+            let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+                Arc::new(TestServiceLocatorStub::new());
             let context = Arc::new(ActorContext::new(
                 node_id_str,
                 tenant_id.clone(),
@@ -664,11 +667,25 @@ impl ActorBuilder {
                 service_locator,
                 Some(config),
             ));
-            let mut actor = ActorStruct::new(actor_id, self.behavior, mailbox, tenant_id.clone(), namespace.clone(), node_id.clone());
+            let mut actor = ActorStruct::new(
+                actor_id,
+                self.behavior,
+                mailbox,
+                tenant_id.clone(),
+                namespace.clone(),
+                node_id.clone(),
+            );
             actor = actor.set_context(context);
             actor
         } else {
-            ActorStruct::new(actor_id, self.behavior, mailbox, tenant_id.clone(), namespace.clone(), node_id)
+            ActorStruct::new(
+                actor_id,
+                self.behavior,
+                mailbox,
+                tenant_id.clone(),
+                namespace.clone(),
+                node_id,
+            )
         };
 
         // Apply resource profile if provided
@@ -678,13 +695,12 @@ impl ActorBuilder {
 
         // Attach facets after building
         for facet in self.facets {
-            actor.attach_facet(facet).await
-                .map_err(|e| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to attach facet: {}", e)
-                    )
-                })?;
+            actor.attach_facet(facet).await.map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to attach facet: {}", e),
+                )
+            })?;
         }
 
         Ok(actor)
@@ -716,11 +732,11 @@ impl ActorBuilder {
         // If auth is disabled, tenant_id will be empty string
         self.tenant_id = ctx.tenant_id().to_string();
         self.namespace = ctx.namespace().to_string();
-        
+
         // CRITICAL: Clone tenant_id before self is moved by build()
         let tenant_id_for_ref = self.tenant_id.clone();
         let namespace_for_ref = ctx.namespace().to_string();
-        
+
         // Extract actor_type from behavior before building
         let behavior_type = self.behavior.behavior_type();
         let actor_type = match behavior_type {
@@ -730,31 +746,35 @@ impl ActorBuilder {
             plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
             plexspaces_core::BehaviorType::Custom(s) => s,
         };
-        
+
         // Build the actor (facets are attached during build)
         let mut actor = self.build().await?;
-        
+
         // Extract actor ID and mailbox before spawning (needed for ActorRef creation)
         let actor_id = actor.id().clone();
         let mailbox = actor.mailbox().clone();
-        
+
         // Get required services from ServiceLocator
-        let registry = service_locator.actor_registry().await
-            .ok_or_else(|| "ActorRegistry not found in ServiceLocator. Ensure Node::start() has been called.".to_string())?;
-        let facet_manager_wrapper = service_locator.get_facet_manager().await
+        let registry = service_locator.actor_registry().await.ok_or_else(|| {
+            "ActorRegistry not found in ServiceLocator. Ensure Node::start() has been called."
+                .to_string()
+        })?;
+        let facet_manager_wrapper = service_locator
+            .get_facet_manager()
+            .await
             .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
         let facet_manager = facet_manager_wrapper.inner_clone();
-        
+
         // Get local node ID for actor ID normalization
         let local_node_id = registry.local_node_id();
-        
+
         // Normalize actor ID to include node ID
         let actor_id = if actor_id.contains('@') {
             actor_id
         } else {
             format!("{}@{}", actor_id, local_node_id)
         };
-        
+
         // Create ActorContext with proper node ID
         let actor_context = plexspaces_core::ActorContext::new(
             local_node_id.to_string(),
@@ -764,21 +784,23 @@ impl ActorBuilder {
             actor.context().config.clone(),
         );
         actor = actor.set_context(std::sync::Arc::new(actor_context));
-        
+
         // Update metrics
         metrics::gauge!("plexspaces_node_active_actors",
             "node_id" => local_node_id.to_string()
-        ).increment(1.0);
-        
+        )
+        .increment(1.0);
+
         metrics::counter!("plexspaces_node_actors_spawned_total",
             "node_id" => local_node_id.to_string(),
             "namespace" => ctx.namespace().to_string()
-        ).increment(1);
-        
+        )
+        .increment(1);
+
         // Store facets
         let facets_clone = actor.facets().clone();
         facet_manager.store_facets(&actor_id, facets_clone).await;
-        
+
         // Create ActorRef (implements MessageSender)
         // CRITICAL: Pass tenant_id from ActorBuilder to ActorRef
         use crate::ActorRef;
@@ -789,26 +811,37 @@ impl ActorBuilder {
             mailbox.clone(),
             service_locator.clone(),
         );
-        let actor_ref: std::sync::Arc<dyn plexspaces_core::MessageSender> = std::sync::Arc::new(actor_ref_impl.clone());
-        
+        let actor_ref: std::sync::Arc<dyn plexspaces_core::MessageSender> =
+            std::sync::Arc::new(actor_ref_impl.clone());
+
         // Start actor (calls init() internally, then registers in ActorRegistry)
-        let _join_handle = actor.start().await
+        let _join_handle = actor
+            .start()
+            .await
             .map_err(|e| format!("Failed to start actor: {}", e))?;
-        
+
         // Register actor in registry
-        registry.register_actor(
-            ctx,
-            actor_id.clone(),
-            actor_ref.clone(),
-            Some(actor_type),
-            actor.context().config.clone(),
-            Some(std::sync::Arc::new(actor) as std::sync::Arc<dyn std::any::Any + Send + Sync>),
-            None, // behavior_kind not available from builder (actor registers with kind in start())
-        ).await;
-        
+        registry
+            .register_actor(
+                ctx,
+                actor_id.clone(),
+                actor_ref.clone(),
+                Some(actor_type),
+                actor.context().config.clone(),
+                Some(std::sync::Arc::new(actor) as std::sync::Arc<dyn std::any::Any + Send + Sync>),
+                None, // behavior_kind not available from builder (actor registers with kind in start())
+            )
+            .await;
+
         // Return ActorRef
         // CRITICAL: Pass tenant_id from ActorBuilder to ActorRef
-        Ok(ActorRef::local(actor_id, tenant_id_for_ref, namespace_for_ref, mailbox, service_locator))
+        Ok(ActorRef::local(
+            actor_id,
+            tenant_id_for_ref,
+            namespace_for_ref,
+            mailbox,
+            service_locator,
+        ))
     }
 }
 
@@ -816,7 +849,7 @@ impl ActorBuilder {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use plexspaces_core::{BehaviorType, Actor};
+    use plexspaces_core::{Actor, BehaviorType};
 
     struct TestBehavior;
 
@@ -839,7 +872,8 @@ mod tests {
     async fn test_builder_with_defaults() {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_namespace("test".to_string())
-            .build().await
+            .build()
+            .await
             .expect("build should succeed with namespace");
 
         assert!(!actor.id().is_empty());
@@ -852,7 +886,8 @@ mod tests {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_name("test-actor")
             .with_namespace("test".to_string())
-            .build().await
+            .build()
+            .await
             .expect("build should succeed");
 
         let id = actor.id();
@@ -863,7 +898,8 @@ mod tests {
     async fn test_builder_with_namespace() {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_namespace("production")
-            .build().await
+            .build()
+            .await
             .expect("build should succeed");
 
         // Note: context() method may need to be added to Actor
@@ -879,7 +915,8 @@ mod tests {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_mailbox_config(config)
             .with_namespace("test".to_string())
-            .build().await
+            .build()
+            .await
             .expect("build should succeed");
 
         // Mailbox config is applied (verified by actor creation)
@@ -892,7 +929,8 @@ mod tests {
             .with_name("durable-actor")
             .with_durability()
             .with_namespace("test".to_string())
-            .build().await
+            .build()
+            .await
             .expect("build should succeed");
 
         // Verify actor was created with durability config
@@ -906,7 +944,8 @@ mod tests {
             .with_name("virtual-actor")
             .with_virtual_actor()
             .with_namespace("test".to_string())
-            .build().await
+            .build()
+            .await
             .expect("build should succeed");
 
         // Verify actor was created with virtual actor config
@@ -919,7 +958,8 @@ mod tests {
             .with_name("coordinator")
             .with_tuplespace()
             .with_namespace("test".to_string())
-            .build().await
+            .build()
+            .await
             .expect("build should succeed");
 
         // Verify actor was created with tuplespace capability
@@ -932,17 +972,16 @@ mod tests {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_id("resource-actor@test-node".to_string())
             .with_resource_requirements(
-                2.0,                              // CPU cores
-                8 * 1024 * 1024 * 1024,          // 8GB memory
-                100 * 1024 * 1024,                // 100MB disk
-                0,                                // No GPU
-                HashMap::from([
-                    ("workload".to_string(), "cpu-intensive".to_string()),
-                ]),
+                2.0,                    // CPU cores
+                8 * 1024 * 1024 * 1024, // 8GB memory
+                100 * 1024 * 1024,      // 100MB disk
+                0,                      // No GPU
+                HashMap::from([("workload".to_string(), "cpu-intensive".to_string())]),
                 vec!["high-priority".to_string()],
             )
             .with_namespace("test".to_string())
-            .build().await
+            .build()
+            .await
             .expect("build should succeed");
 
         assert_eq!(actor.id(), "resource-actor@test-node");
@@ -957,7 +996,8 @@ mod tests {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
             .with_id("custom-id@test-node".to_string())
             .with_namespace("test".to_string())
-            .build().await
+            .build()
+            .await
             .expect("build should succeed");
 
         assert_eq!(actor.id(), "custom-id@test-node");
@@ -970,9 +1010,12 @@ mod tests {
 
         // Create a test node with unique port to avoid conflicts
         // Services are automatically initialized in build()
-        let node = Arc::new(NodeBuilder::new("test-node-spawn".to_string())
-            .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
-            .build().await);
+        let node = Arc::new(
+            NodeBuilder::new("test-node-spawn".to_string())
+                .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
+                .build()
+                .await,
+        );
 
         // Spawn actor using ActorBuilder
         use plexspaces_core::RequestContext;
@@ -985,23 +1028,30 @@ mod tests {
             .expect("Failed to spawn actor");
 
         assert_eq!(actor_ref.id(), "spawned-actor@test-node-spawn");
-        
+
         // Verify actor is registered in the node's registry (with retry for async registration)
         use plexspaces_core::service_names;
-        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .actor_registry().await
+        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
+            .service_locator()
+            .actor_registry()
+            .await
             .expect("ActorRegistry not found");
-        
+
         // Retry lookup with timeout (actor registration is async)
         let mut found = None;
         for _ in 0..10 {
-            found = actor_registry.lookup_actor(&"spawned-actor@test-node-spawn".to_string()).await;
+            found = actor_registry
+                .lookup_actor(&"spawned-actor@test-node-spawn".to_string())
+                .await;
             if found.is_some() {
                 break;
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         }
-        assert!(found.is_some(), "Actor should be registered in ActorRegistry");
+        assert!(
+            found.is_some(),
+            "Actor should be registered in ActorRegistry"
+        );
     }
 
     #[tokio::test]
@@ -1012,9 +1062,12 @@ mod tests {
 
         // Create a test node with unique port to avoid conflicts
         // Services are automatically initialized in build()
-        let node = Arc::new(NodeBuilder::new("test-node-resource-spawn".to_string())
-            .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
-            .build().await);
+        let node = Arc::new(
+            NodeBuilder::new("test-node-resource-spawn".to_string())
+                .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
+                .build()
+                .await,
+        );
 
         // Spawn actor with resource requirements
         use plexspaces_core::RequestContext;
@@ -1022,13 +1075,11 @@ mod tests {
         let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
             .with_id("resource-spawned-actor@test-node-resource-spawn".to_string())
             .with_resource_requirements(
-                1.5,                              // CPU cores
-                4 * 1024 * 1024 * 1024,          // 4GB memory
-                0,                                // No disk
-                0,                                // No GPU
-                HashMap::from([
-                    ("workload".to_string(), "memory-intensive".to_string()),
-                ]),
+                1.5,                    // CPU cores
+                4 * 1024 * 1024 * 1024, // 4GB memory
+                0,                      // No disk
+                0,                      // No GPU
+                HashMap::from([("workload".to_string(), "memory-intensive".to_string())]),
                 vec!["test-pool".to_string()],
             )
             .with_namespace("test".to_string())
@@ -1036,18 +1087,25 @@ mod tests {
             .await
             .expect("Failed to spawn actor with resources");
 
-        assert_eq!(actor_ref.id(), "resource-spawned-actor@test-node-resource-spawn");
-        
+        assert_eq!(
+            actor_ref.id(),
+            "resource-spawned-actor@test-node-resource-spawn"
+        );
+
         // Verify actor is registered (with retry for async registration)
         use plexspaces_core::service_names;
-        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .actor_registry().await
+        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
+            .service_locator()
+            .actor_registry()
+            .await
             .expect("ActorRegistry not found");
-        
+
         // Retry lookup with timeout (actor registration is async)
         let mut found = None;
         for _ in 0..10 {
-            found = actor_registry.lookup_actor(&"resource-spawned-actor@test-node-resource-spawn".to_string()).await;
+            found = actor_registry
+                .lookup_actor(&"resource-spawned-actor@test-node-resource-spawn".to_string())
+                .await;
             if found.is_some() {
                 break;
             }
@@ -1058,15 +1116,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_builder_spawn_with_mailbox_config() {
-        use plexspaces_node::NodeBuilder;
         use plexspaces_mailbox::MailboxConfig;
+        use plexspaces_node::NodeBuilder;
         use std::sync::Arc;
 
         // Create a test node with unique port to avoid conflicts
         // Services are automatically initialized in build()
-        let node = Arc::new(NodeBuilder::new("test-node-mailbox-spawn".to_string())
-            .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
-            .build().await);
+        let node = Arc::new(
+            NodeBuilder::new("test-node-mailbox-spawn".to_string())
+                .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
+                .build()
+                .await,
+        );
 
         // Create custom mailbox config
         let mut mailbox_config = MailboxConfig::default();
@@ -1084,17 +1145,21 @@ mod tests {
             .expect("Failed to spawn actor with mailbox config");
 
         assert_eq!(actor_ref.id(), "mailbox-actor@test-node-mailbox-spawn");
-        
+
         // Verify actor is registered (with retry for async registration)
         use plexspaces_core::service_names;
-        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .actor_registry().await
+        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
+            .service_locator()
+            .actor_registry()
+            .await
             .expect("ActorRegistry not found");
-        
+
         // Retry lookup with timeout (actor registration is async)
         let mut found = None;
         for _ in 0..10 {
-            found = actor_registry.lookup_actor(&"mailbox-actor@test-node-mailbox-spawn".to_string()).await;
+            found = actor_registry
+                .lookup_actor(&"mailbox-actor@test-node-mailbox-spawn".to_string())
+                .await;
             if found.is_some() {
                 break;
             }
@@ -1110,7 +1175,8 @@ mod tests {
 
         // Create an empty ServiceLocator without required services
         // This tests the error case when ActorRegistry is not registered
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+            Arc::new(ServiceLocatorImpl::new());
 
         // Attempt to spawn actor - should fail because ActorRegistry is not registered
         use plexspaces_core::RequestContext;
@@ -1121,11 +1187,17 @@ mod tests {
             .spawn(&ctx, service_locator.clone())
             .await;
 
-        assert!(result.is_err(), "Should fail when required services are not in ServiceLocator");
+        assert!(
+            result.is_err(),
+            "Should fail when required services are not in ServiceLocator"
+        );
         let error_msg = result.unwrap_err().to_string();
         // Builder directly uses ActorRegistry, so that's the error we get
-        assert!(error_msg.contains("ActorRegistry not found"), 
-                "Error message should mention ActorRegistry not found, got: {}", error_msg);
+        assert!(
+            error_msg.contains("ActorRegistry not found"),
+            "Error message should mention ActorRegistry not found, got: {}",
+            error_msg
+        );
     }
 
     #[tokio::test]
@@ -1135,9 +1207,12 @@ mod tests {
 
         // Create a test node with unique port to avoid conflicts
         // Services are automatically initialized in build()
-        let node = Arc::new(NodeBuilder::new("test-node-multi-spawn".to_string())
-            .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
-            .build().await);
+        let node = Arc::new(
+            NodeBuilder::new("test-node-multi-spawn".to_string())
+                .with_listen_addr("127.0.0.1:0") // Port 0 = OS-assigned free port
+                .build()
+                .await,
+        );
 
         // Spawn multiple actors
         use plexspaces_core::RequestContext;
@@ -1154,13 +1229,15 @@ mod tests {
         }
 
         assert_eq!(actor_refs.len(), 5);
-        
+
         // Verify all actors are registered (with retry for async registration)
         use plexspaces_core::service_names;
-        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node.service_locator()
-            .actor_registry().await
+        let actor_registry: Arc<plexspaces_core::ActorRegistry> = node
+            .service_locator()
+            .actor_registry()
+            .await
             .expect("ActorRegistry not found");
-        
+
         for i in 0..5 {
             let actor_id = format!("multi-actor-{}@test-node-multi-spawn", i);
             // Retry lookup with timeout (actor registration is async)
@@ -1176,4 +1253,3 @@ mod tests {
         }
     }
 }
-

@@ -23,10 +23,10 @@
 //! in ServiceLocator, ensuring consistent shutdown behavior across Node
 //! and test/example code.
 
-use std::sync::Arc;
 use plexspaces_core::PlexSpacesHealthReporter;
-use plexspaces_services::ServiceLocatorImpl;
 use plexspaces_proto::system::v1::HealthProbeConfig;
+use plexspaces_services::ServiceLocatorImpl;
+use std::sync::Arc;
 
 /// Create and register HealthService in ServiceLocator
 ///
@@ -66,23 +66,30 @@ use plexspaces_proto::system::v1::HealthProbeConfig;
 pub async fn create_and_register_health_service(
     service_locator_impl: Arc<ServiceLocatorImpl>,
     config: Option<HealthProbeConfig>,
-) -> (Arc<PlexSpacesHealthReporter>, impl tonic::server::NamedService) {
+) -> (
+    Arc<PlexSpacesHealthReporter>,
+    impl tonic::server::NamedService,
+) {
     // Create HealthService with ServiceLocator reference (cast to trait object for PlexSpacesHealthReporter)
     let config = config.unwrap_or_default();
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = service_locator_impl.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
-    let (health_reporter, health_service) = PlexSpacesHealthReporter::with_config_and_service_locator(
-        config,
-        Some(service_locator.clone()),
-    );
-    
+    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator_impl.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    let (health_reporter, health_service) =
+        PlexSpacesHealthReporter::with_config_and_service_locator(
+            config,
+            Some(service_locator.clone()),
+        );
+
     let health_reporter = Arc::new(health_reporter);
-    
+
     // Register HealthService in ServiceLocator (source of truth for shutdown)
     // Use service_locator_impl directly because register_service has `where Self: Sized` constraint
-    service_locator_impl.register_service(health_reporter.clone()).await;
-    
+    service_locator_impl
+        .register_service(health_reporter.clone())
+        .await;
+
     tracing::info!("✅ Registered HealthService in ServiceLocator (shutdown source of truth)");
-    
+
     (health_reporter, health_service)
 }
 
@@ -98,7 +105,9 @@ pub async fn create_and_register_health_service(
 /// Tuple of HealthService and gRPC service
 pub async fn create_default_health_service(
     service_locator_impl: Arc<ServiceLocatorImpl>,
-) -> (Arc<PlexSpacesHealthReporter>, impl tonic::server::NamedService) {
+) -> (
+    Arc<PlexSpacesHealthReporter>,
+    impl tonic::server::NamedService,
+) {
     create_and_register_health_service(service_locator_impl, None).await
 }
-

@@ -35,14 +35,14 @@
 //! ## Design Notes
 //! - All gRPC services consolidated here for easier management
 
+pub mod actor_factory_helpers;
 pub mod service_locator;
 pub mod service_wrappers;
-pub mod actor_factory_helpers;
 
 // Re-export ServiceLocatorImpl and related types
-pub use service_locator::{ServiceLocatorImpl, ServiceStorage};
 /// Single source of truth: RequestContext from gRPC metadata (tenant/namespace propagation).
 pub use plexspaces_core::request_context_from_grpc_request;
+pub use service_locator::{ServiceLocatorImpl, ServiceStorage};
 // ActorFactory is now in core crate - use ServiceLocator methods directly:
 // Example: service_locator.get_actor_factory().await
 // Re-export Service trait from core
@@ -54,22 +54,22 @@ pub use service_wrappers::*;
 // Type alias for convenience (ServiceLocatorImpl implements ServiceLocator trait)
 pub type ServiceLocator = ServiceLocatorImpl;
 
-
 // Service implementations
 pub mod actor_service;
-pub mod blob_service;
 pub mod application_service;
-pub mod tuple_service;
-pub mod workflow_service;
-pub mod system_service;
+pub mod blob_service;
+pub mod dashboard_service;
 #[cfg(feature = "firecracker")]
 pub mod firecracker_service;
 pub mod metrics_service;
-pub mod dashboard_service;
-pub mod process_group_service;
+pub mod node_address;
 pub mod node_registry;
 pub mod node_service;
+pub mod process_group_service;
+pub mod system_service;
+pub mod tuple_service;
 pub mod wasm_file_saver;
+pub mod workflow_service;
 
 // Re-export ProcessGroupServiceImpl for convenience
 pub use process_group_service::ProcessGroupServiceImpl;
@@ -82,4 +82,3 @@ pub use node_service::NodeServiceImpl;
 
 // Re-export application deployment helpers for consistent behavior
 pub use application_service::create_default_application_spec;
-

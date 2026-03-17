@@ -44,19 +44,19 @@ async fn test_security_config_validation_jwt_missing_secret() {
         disable_auth: false,
         ..Default::default()
     };
-    
+
     std::env::remove_var("PLEXSPACES_JWT_SECRET");
     std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
-    
+
     let service_locator = ServiceLocatorImpl::new();
-    
+
     // Should panic with clear error message
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             service_locator.register_security_config(config).await;
         });
     }));
-    
+
     assert!(result.is_err(), "Should panic when JWT secret is missing");
 }
 
@@ -73,15 +73,15 @@ async fn test_security_config_validation_jwt_from_env() {
         disable_auth: false,
         ..Default::default()
     };
-    
+
     std::env::set_var("PLEXSPACES_JWT_SECRET", "test-secret-12345");
     std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
-    
+
     let service_locator = ServiceLocatorImpl::new();
-    
+
     // Should not panic
     service_locator.register_security_config(config).await;
-    
+
     std::env::remove_var("PLEXSPACES_JWT_SECRET");
 }
 
@@ -100,22 +100,25 @@ async fn test_security_config_validation_mtls_missing_certs() {
         disable_auth: false,
         ..Default::default()
     };
-    
+
     std::env::remove_var("PLEXSPACES_MTLS_CA_CERT");
     std::env::remove_var("PLEXSPACES_MTLS_SERVER_CERT");
     std::env::remove_var("PLEXSPACES_MTLS_SERVER_KEY");
     std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
-    
+
     let service_locator = ServiceLocatorImpl::new();
-    
+
     // Should panic with clear error message
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             service_locator.register_security_config(config).await;
         });
     }));
-    
-    assert!(result.is_err(), "Should panic when mTLS certificates are missing");
+
+    assert!(
+        result.is_err(),
+        "Should panic when mTLS certificates are missing"
+    );
 }
 
 #[tokio::test]
@@ -123,7 +126,7 @@ async fn test_security_config_validation_mtls_auto_generate() {
     // Test that mTLS auto-generation works
     let temp_dir = TempDir::new().unwrap();
     let cert_dir = temp_dir.path().to_str().unwrap();
-    
+
     let config = SecurityConfig {
         mtls: Some(MtlsConfig {
             enable_mtls: true,
@@ -134,27 +137,27 @@ async fn test_security_config_validation_mtls_auto_generate() {
         disable_auth: false,
         ..Default::default()
     };
-    
+
     std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
-    
+
     let service_locator = ServiceLocatorImpl::new();
-    
+
     // Should not panic - certificates will be auto-generated
     service_locator.register_security_config(config).await;
-    
+
     // Verify certificates were generated
     let ca_cert_path = format!("{}/ca.crt", cert_dir);
     let server_cert_path = format!("{}/server.crt", cert_dir);
     let server_key_path = format!("{}/server.key", cert_dir);
-    
+
     assert!(std::path::Path::new(&ca_cert_path).exists());
     assert!(std::path::Path::new(&server_cert_path).exists());
     assert!(std::path::Path::new(&server_key_path).exists());
-    
+
     // Verify certificates are valid PEM
     let ca_cert_content = std::fs::read_to_string(&ca_cert_path).unwrap();
     assert!(ca_cert_content.contains("BEGIN CERTIFICATE"));
-    
+
     let server_cert_content = std::fs::read_to_string(&server_cert_path).unwrap();
     assert!(server_cert_content.contains("BEGIN CERTIFICATE"));
 }
@@ -176,15 +179,15 @@ async fn test_security_config_validation_disabled_via_env() {
         disable_auth: false,
         ..Default::default()
     };
-    
+
     std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
     std::env::remove_var("PLEXSPACES_JWT_SECRET");
-    
+
     let service_locator = ServiceLocatorImpl::new();
-    
+
     // Should not panic - validation is disabled
     service_locator.register_security_config(config).await;
-    
+
     std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
 }
 
@@ -201,12 +204,12 @@ async fn test_security_config_validation_jwt_jwks() {
         disable_auth: false,
         ..Default::default()
     };
-    
+
     std::env::remove_var("PLEXSPACES_JWT_SECRET");
     std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
-    
+
     let service_locator = ServiceLocatorImpl::new();
-    
+
     // Should not panic - JWKS doesn't require secret
     service_locator.register_security_config(config).await;
 }

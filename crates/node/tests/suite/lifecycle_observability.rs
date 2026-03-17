@@ -38,8 +38,8 @@ use plexspaces_actor::Actor;
 use plexspaces_behavior::MockBehavior;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeBuilder, NodeId};
-use plexspaces_proto::ActorLifecycleEvent;
 use plexspaces_persistence::MemoryJournal;
+use plexspaces_proto::ActorLifecycleEvent;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -51,7 +51,6 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         ..Default::default()
     }
 }
-
 
 /// Test that subscribers receive full lifecycle events during actor spawn
 ///
@@ -78,7 +77,12 @@ async fn test_lifecycle_event_full_spawn_sequence() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(MailboxConfig::default(), "spawn-test-actor@test-node".to_string()).await.unwrap();
+    let mailbox = Mailbox::new(
+        MailboxConfig::default(),
+        "spawn-test-actor@test-node".to_string(),
+    )
+    .await
+    .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
         "spawn-test-actor@test-node".to_string(),
@@ -93,9 +97,10 @@ async fn test_lifecycle_event_full_spawn_sequence() {
 
     // Receive Created event
     let created_event = {
-        let result: Result<Option<ActorLifecycleEvent>, tokio::time::error::Elapsed> = 
+        let result: Result<Option<ActorLifecycleEvent>, tokio::time::error::Elapsed> =
             tokio::time::timeout(tokio::time::Duration::from_millis(500), event_rx.recv()).await;
-        result.expect("Timeout waiting for Created event")
+        result
+            .expect("Timeout waiting for Created event")
             .expect("Channel closed before receiving Created event")
     };
 
@@ -108,9 +113,10 @@ async fn test_lifecycle_event_full_spawn_sequence() {
 
     // Receive Starting event
     let starting_event = {
-        let result: Result<Option<ActorLifecycleEvent>, tokio::time::error::Elapsed> = 
+        let result: Result<Option<ActorLifecycleEvent>, tokio::time::error::Elapsed> =
             tokio::time::timeout(tokio::time::Duration::from_millis(500), event_rx.recv()).await;
-        result.expect("Timeout waiting for Starting event")
+        result
+            .expect("Timeout waiting for Starting event")
             .expect("Channel closed before receiving Starting event")
     };
 
@@ -123,9 +129,10 @@ async fn test_lifecycle_event_full_spawn_sequence() {
 
     // Receive Activated event
     let activated_event = {
-        let result: Result<Option<ActorLifecycleEvent>, tokio::time::error::Elapsed> = 
+        let result: Result<Option<ActorLifecycleEvent>, tokio::time::error::Elapsed> =
             tokio::time::timeout(tokio::time::Duration::from_millis(500), event_rx.recv()).await;
-        result.expect("Timeout waiting for Activated event")
+        result
+            .expect("Timeout waiting for Activated event")
             .expect("Channel closed before receiving Activated event")
     };
 
@@ -177,7 +184,9 @@ async fn test_lifecycle_event_subscription_receives_termination() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string()).await.unwrap();
+    let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string())
+        .await
+        .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
         "test-actor@test-node".to_string(),
@@ -213,14 +222,17 @@ async fn test_lifecycle_event_subscription_receives_termination() {
 
     // Unregister actor to trigger termination
     // Manually publish lifecycle event since watch_actor_termination only fires when join handle completes
-    use plexspaces_core::{ActorRegistry, ExitReason};
     use plexspaces_core::service_names;
-    use plexspaces_proto::{ActorLifecycleEvent, actor_lifecycle_event::EventType as LifecycleEventType, actor::v1::ActorTerminated};
+    use plexspaces_core::{ActorRegistry, ExitReason};
+    use plexspaces_proto::{
+        actor::v1::ActorTerminated, actor_lifecycle_event::EventType as LifecycleEventType,
+        ActorLifecycleEvent,
+    };
     use prost_types::Timestamp;
     let actor_registry: Arc<ActorRegistry> = node.service_locator().actor_registry().await.unwrap();
     let actor_id = actor_ref.id().clone();
     drop(actor_ref);
-    
+
     // Manually publish lifecycle event (watch_actor_termination would do this when join handle completes)
     let now = chrono::Utc::now();
     let lifecycle_event = ActorLifecycleEvent {
@@ -233,10 +245,14 @@ async fn test_lifecycle_event_subscription_receives_termination() {
             reason: "normal".to_string(),
         })),
     };
-    actor_registry.publish_lifecycle_event(lifecycle_event).await;
-    
+    actor_registry
+        .publish_lifecycle_event(lifecycle_event)
+        .await;
+
     // Also trigger termination handling for monitors/links
-    actor_registry.handle_actor_termination(&actor_id, ExitReason::Normal).await;
+    actor_registry
+        .handle_actor_termination(&actor_id, ExitReason::Normal)
+        .await;
 
     // Wait for lifecycle event (should be Terminated)
     let event = tokio::time::timeout(tokio::time::Duration::from_secs(2), event_rx.recv())
@@ -291,7 +307,12 @@ async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(MailboxConfig::default(), "multicast-actor@test-node".to_string()).await.unwrap();
+    let mailbox = Mailbox::new(
+        MailboxConfig::default(),
+        "multicast-actor@test-node".to_string(),
+    )
+    .await
+    .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
         "multicast-actor@test-node".to_string(),
@@ -326,14 +347,17 @@ async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
     }
 
     // Terminate actor
-    use plexspaces_core::{ActorRegistry, ExitReason};
     use plexspaces_core::service_names;
-    use plexspaces_proto::{ActorLifecycleEvent, actor_lifecycle_event::EventType as LifecycleEventType, actor::v1::ActorTerminated};
+    use plexspaces_core::{ActorRegistry, ExitReason};
+    use plexspaces_proto::{
+        actor::v1::ActorTerminated, actor_lifecycle_event::EventType as LifecycleEventType,
+        ActorLifecycleEvent,
+    };
     use prost_types::Timestamp;
     let actor_registry: Arc<ActorRegistry> = node.service_locator().actor_registry().await.unwrap();
     let actor_id = actor_ref.id().clone();
     drop(actor_ref);
-    
+
     // Manually publish lifecycle event (watch_actor_termination would do this when join handle completes)
     let now = chrono::Utc::now();
     let lifecycle_event = ActorLifecycleEvent {
@@ -346,19 +370,21 @@ async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
             reason: "normal".to_string(),
         })),
     };
-    actor_registry.publish_lifecycle_event(lifecycle_event).await;
-    
+    actor_registry
+        .publish_lifecycle_event(lifecycle_event)
+        .await;
+
     // Also trigger termination handling for monitors/links
-    actor_registry.handle_actor_termination(&actor_id, ExitReason::Normal).await;
+    actor_registry
+        .handle_actor_termination(&actor_id, ExitReason::Normal)
+        .await;
 
     // All three subscribers should receive the Terminated event
-    let prometheus_event = tokio::time::timeout(
-        tokio::time::Duration::from_secs(2),
-        prometheus_rx.recv(),
-    )
-    .await
-    .expect("Prometheus timeout")
-    .expect("Prometheus channel closed");
+    let prometheus_event =
+        tokio::time::timeout(tokio::time::Duration::from_secs(2), prometheus_rx.recv())
+            .await
+            .expect("Prometheus timeout")
+            .expect("Prometheus channel closed");
 
     let statsd_event =
         tokio::time::timeout(tokio::time::Duration::from_millis(500), statsd_rx.recv())
@@ -416,7 +442,12 @@ async fn test_lifecycle_event_timestamps() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(MailboxConfig::default(), "timestamp-actor@test-node".to_string()).await.unwrap();
+    let mailbox = Mailbox::new(
+        MailboxConfig::default(),
+        "timestamp-actor@test-node".to_string(),
+    )
+    .await
+    .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
         "timestamp-actor@test-node".to_string(),
@@ -482,7 +513,12 @@ async fn test_lifecycle_event_unsubscribe() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(MailboxConfig::default(), "unsubscribe-actor@test-node".to_string()).await.unwrap();
+    let mailbox = Mailbox::new(
+        MailboxConfig::default(),
+        "unsubscribe-actor@test-node".to_string(),
+    )
+    .await
+    .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
         "unsubscribe-actor@test-node".to_string(),
@@ -544,9 +580,9 @@ async fn test_lifecycle_event_unsubscribe() {
 async fn test_remote_actor_termination_with_lifecycle_events() {
     use plexspaces_actor::Actor;
     use plexspaces_behavior::MockBehavior;
-    use plexspaces_services::actor_service::ActorServiceImpl;
     use plexspaces_persistence::MemoryJournal;
     use plexspaces_proto::ActorServiceServer;
+    use plexspaces_services::actor_service::ActorServiceImpl;
     use tonic::transport::Server;
 
     // Create two nodes
@@ -579,7 +615,10 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
 
     // Register node2 in ObjectRegistry (node discovery now goes through ObjectRegistry/NodeRegistry)
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
-    let ctx = node1.service_locator().request_context_for_system_operations().await;
+    let ctx = node1
+        .service_locator()
+        .request_context_for_system_operations()
+        .await;
     let registration = ObjectRegistration {
         object_type: ObjectType::ObjectTypeNode as i32,
         object_id: "node2".to_string(),
@@ -608,7 +647,9 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
 
     // Spawn actor on node2
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(MailboxConfig::default(), "remote-worker@node2".to_string()).await.unwrap();
+    let mailbox = Mailbox::new(MailboxConfig::default(), "remote-worker@node2".to_string())
+        .await
+        .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
         "remote-worker@node2".to_string(),
@@ -643,14 +684,18 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
         .await
         .expect("Message processing should complete quickly");
     // Terminate actor on node2
-    use plexspaces_core::{ActorRegistry, ExitReason};
     use plexspaces_core::service_names;
-    use plexspaces_proto::{ActorLifecycleEvent, actor_lifecycle_event::EventType as LifecycleEventType, actor::v1::ActorTerminated};
+    use plexspaces_core::{ActorRegistry, ExitReason};
+    use plexspaces_proto::{
+        actor::v1::ActorTerminated, actor_lifecycle_event::EventType as LifecycleEventType,
+        ActorLifecycleEvent,
+    };
     use prost_types::Timestamp;
-    let actor_registry_node2: Arc<ActorRegistry> = node2.service_locator().actor_registry().await.unwrap();
+    let actor_registry_node2: Arc<ActorRegistry> =
+        node2.service_locator().actor_registry().await.unwrap();
     let actor_id = actor_ref.id().clone();
     drop(actor_ref);
-    
+
     // Manually publish lifecycle event (watch_actor_termination would do this when join handle completes)
     let now = chrono::Utc::now();
     let lifecycle_event = ActorLifecycleEvent {
@@ -663,19 +708,20 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
             reason: "normal".to_string(),
         })),
     };
-    actor_registry_node2.publish_lifecycle_event(lifecycle_event).await;
-    
+    actor_registry_node2
+        .publish_lifecycle_event(lifecycle_event)
+        .await;
+
     // Also trigger termination handling for monitors/links
-    actor_registry_node2.handle_actor_termination(&actor_id, ExitReason::Normal).await;
+    actor_registry_node2
+        .handle_actor_termination(&actor_id, ExitReason::Normal)
+        .await;
 
     // Receive Terminated event from node2's local subscription
-    let event = tokio::time::timeout(
-        tokio::time::Duration::from_secs(2),
-        node2_event_rx.recv(),
-    )
-    .await
-    .expect("Timeout waiting for lifecycle event")
-    .expect("Channel closed before receiving event");
+    let event = tokio::time::timeout(tokio::time::Duration::from_secs(2), node2_event_rx.recv())
+        .await
+        .expect("Timeout waiting for lifecycle event")
+        .expect("Channel closed before receiving event");
 
     // Verify event details
     assert_eq!(event.actor_id, "remote-worker@node2");

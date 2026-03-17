@@ -36,6 +36,8 @@ use tonic::transport::{Channel, Endpoint};
 /// Service type identifier for gRPC connection pooling
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum ServiceType {
+    /// Application service for application lifecycle and status
+    ApplicationService,
     /// Actor service for actor lifecycle and messaging
     ActorService,
     /// TupleSpace service for Linda-style tuple coordination
@@ -85,7 +87,7 @@ impl ServiceConnectionPool {
             // The actual validity check happens when the channel is used
             return Ok(channel);
         }
-        
+
         // Pool is empty, create new connection
         let endpoint = Endpoint::from_shared(self.node_address.clone())?;
         endpoint.connect().await
@@ -138,17 +140,12 @@ impl GrpcConnectionManager {
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
         let key = (service_type.clone(), node_id.to_string());
-        
+
         let mut pools = self.pools.write().await;
-        let pool = pools.entry(key.clone())
-            .or_insert_with(|| {
-                ServiceConnectionPool::new(
-                    service_type,
-                    node_address.to_string(),
-                    self.pool_size,
-                )
-            });
-        
+        let pool = pools.entry(key.clone()).or_insert_with(|| {
+            ServiceConnectionPool::new(service_type, node_address.to_string(), self.pool_size)
+        });
+
         pool.get_connection().await
     }
 
@@ -165,7 +162,18 @@ impl GrpcConnectionManager {
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ActorService, node_id, node_address).await
+        self.get_connection(ServiceType::ActorService, node_id, node_address)
+            .await
+    }
+
+    /// Get a connection for ApplicationService (convenience method)
+    pub async fn get_application_service_connection(
+        &self,
+        node_id: &str,
+        node_address: &str,
+    ) -> Result<Channel, tonic::transport::Error> {
+        self.get_connection(ServiceType::ApplicationService, node_id, node_address)
+            .await
     }
 
     /// Get a connection for TupleSpaceService (convenience method)
@@ -181,7 +189,8 @@ impl GrpcConnectionManager {
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::TupleSpaceService, node_id, node_address).await
+        self.get_connection(ServiceType::TupleSpaceService, node_id, node_address)
+            .await
     }
 
     /// Get a connection for ProcessGroupService (convenience method)
@@ -197,7 +206,8 @@ impl GrpcConnectionManager {
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::ProcessGroupService, node_id, node_address).await
+        self.get_connection(ServiceType::ProcessGroupService, node_id, node_address)
+            .await
     }
 
     /// Get a connection for NodeService (convenience method)
@@ -213,7 +223,8 @@ impl GrpcConnectionManager {
         node_id: &str,
         node_address: &str,
     ) -> Result<Channel, tonic::transport::Error> {
-        self.get_connection(ServiceType::NodeService, node_id, node_address).await
+        self.get_connection(ServiceType::NodeService, node_id, node_address)
+            .await
     }
 
     /// Return a connection to the pool
@@ -241,4 +252,3 @@ impl GrpcConnectionManager {
         pools.clear();
     }
 }
-

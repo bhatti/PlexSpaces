@@ -23,14 +23,17 @@
 
 #[cfg(feature = "blob-backend")]
 mod tests {
-    use plexspaces_keyvalue::{KeyValueStore, blob::{BlobKVStore, BlobKVConfig}};
-    use plexspaces_common::RequestContext;
     use object_store::local::LocalFileSystem;
+    use plexspaces_common::RequestContext;
+    use plexspaces_keyvalue::{
+        blob::{BlobKVConfig, BlobKVStore},
+        KeyValueStore,
+    };
+    use std::fs;
+    use std::path::Path;
     use std::sync::Arc;
     use std::time::Duration;
     use tempfile::TempDir;
-    use std::path::Path;
-    use std::fs;
 
     /// Create blob keyvalue store for testing with LocalFileSystem
     /// Returns the store and temp directory (which auto-cleans on drop)
@@ -56,8 +59,7 @@ mod tests {
 
         // Create LocalFileSystem object store pointing to temp directory
         let local_store = Arc::new(
-            LocalFileSystem::new_with_prefix(temp_path)
-                .expect("Failed to create LocalFileSystem")
+            LocalFileSystem::new_with_prefix(temp_path).expect("Failed to create LocalFileSystem"),
         );
 
         // Create keyvalue store with custom object store
@@ -68,10 +70,10 @@ mod tests {
     /// Verify that all test data is cleaned up
     fn verify_cleanup(temp_dir: &TempDir) {
         let path = temp_dir.path();
-        
+
         // Check if the keyvalue directory exists
         let kv_path = path.join("plexspaces/keyvalue");
-        
+
         if kv_path.exists() {
             // Count files in keyvalue directory
             let count = count_files_recursive(&kv_path);
@@ -133,7 +135,7 @@ mod tests {
 
         // Cleanup: delete the key
         kv.delete(&ctx, "test-key").await.unwrap();
-        
+
         // Verify cleanup
         drop(kv);
         drop(temp_dir); // TempDir automatically cleans up
@@ -150,9 +152,18 @@ mod tests {
         kv.put(&ctx, "key3", b"value3".to_vec()).await.unwrap();
 
         // Verify all exist
-        assert_eq!(kv.get(&ctx, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx, "key2").await.unwrap(), Some(b"value2".to_vec()));
-        assert_eq!(kv.get(&ctx, "key3").await.unwrap(), Some(b"value3".to_vec()));
+        assert_eq!(
+            kv.get(&ctx, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx, "key2").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx, "key3").await.unwrap(),
+            Some(b"value3".to_vec())
+        );
 
         // Cleanup: delete all keys
         kv.delete(&ctx, "key1").await.unwrap();
@@ -174,8 +185,12 @@ mod tests {
         let ctx = create_test_context("tenant-1", "ns-1");
 
         // Create keys with prefix
-        kv.put(&ctx, "config:timeout", b"30s".to_vec()).await.unwrap();
-        kv.put(&ctx, "config:max_size", b"10000".to_vec()).await.unwrap();
+        kv.put(&ctx, "config:timeout", b"30s".to_vec())
+            .await
+            .unwrap();
+        kv.put(&ctx, "config:max_size", b"10000".to_vec())
+            .await
+            .unwrap();
         kv.put(&ctx, "other:key", b"value".to_vec()).await.unwrap();
 
         // List config keys
@@ -210,8 +225,14 @@ mod tests {
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Verify isolation
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
 
         // Cleanup
         kv.delete(&ctx1, "key1").await.unwrap();
@@ -232,8 +253,14 @@ mod tests {
         kv.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Verify isolation
-        assert_eq!(kv.get(&ctx1, "key1").await.unwrap(), Some(b"value1".to_vec()));
-        assert_eq!(kv.get(&ctx2, "key1").await.unwrap(), Some(b"value2".to_vec()));
+        assert_eq!(
+            kv.get(&ctx1, "key1").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv.get(&ctx2, "key1").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
 
         // Cleanup
         kv.delete(&ctx1, "key1").await.unwrap();
@@ -264,7 +291,12 @@ mod tests {
 
         // CAS with correct expected value
         let acquired3 = kv
-            .cas(&ctx, "lock:resource", Some(b"node1".to_vec()), b"node2".to_vec())
+            .cas(
+                &ctx,
+                "lock:resource",
+                Some(b"node1".to_vec()),
+                b"node2".to_vec(),
+            )
             .await
             .unwrap();
         assert!(acquired3);
@@ -378,7 +410,10 @@ mod tests {
         assert_eq!(temp_keys.len(), 0);
 
         // Verify other: key still exists
-        assert_eq!(kv.get(&ctx, "other:key").await.unwrap(), Some(b"d".to_vec()));
+        assert_eq!(
+            kv.get(&ctx, "other:key").await.unwrap(),
+            Some(b"d".to_vec())
+        );
 
         // Cleanup remaining
         kv.delete(&ctx, "other:key").await.unwrap();
@@ -490,11 +525,11 @@ mod tests {
 
         // Drop to trigger cleanup
         drop(kv);
-        
+
         // Verify temp directory cleanup (TempDir auto-cleans on drop)
         let temp_path = temp_dir.path().to_path_buf();
         drop(temp_dir);
-        
+
         // After drop, directory should be cleaned up
         // (TempDir automatically removes the directory)
         assert!(!temp_path.exists(), "Temp directory should be cleaned up");
@@ -529,12 +564,15 @@ mod tests {
         }
 
         drop(kv);
-        
+
         // Capture path before dropping temp_dir
         let temp_path = temp_dir.path().to_path_buf();
         drop(temp_dir);
-        
+
         // TempDir automatically cleans up everything
-        assert!(!temp_path.exists(), "Temp directory should be completely removed");
+        assert!(
+            !temp_path.exists(),
+            "Temp directory should be completely removed"
+        );
     }
 }

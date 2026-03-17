@@ -4,7 +4,9 @@
 // Worker Actor for Data-Parallel Processing
 // Processes tasks from ShardGroup and demonstrates worker pool pattern
 
-use plexspaces_sdk::{gen_server_actor, plexspaces_handlers, ActorContext, BehaviorError, Message, json, Value};
+use plexspaces_sdk::{
+    gen_server_actor, json, plexspaces_handlers, ActorContext, BehaviorError, Message, Value,
+};
 use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,37 +39,44 @@ impl WorkerActor {
 #[plexspaces_handlers]
 impl WorkerActor {
     #[handler("*")]
-    async fn process(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<Value, BehaviorError> {
-        let payload: Value = match serde_json::from_slice::<Value>(&msg.payload) {
-            Ok(p) => {
-                // Debug log for message received (guarded)
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    let action_opt = p.get("action").and_then(|v: &serde_json::Value| v.as_str());
-                    tracing::debug!(
+    async fn process(
+        &mut self,
+        _ctx: &ActorContext,
+        msg: &Message,
+    ) -> Result<Value, BehaviorError> {
+        let payload: Value =
+            match serde_json::from_slice::<Value>(&msg.payload) {
+                Ok(p) => {
+                    // Debug log for message received (guarded)
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        let action_opt =
+                            p.get("action").and_then(|v: &serde_json::Value| v.as_str());
+                        tracing::debug!(
                         "[WORKER_ACTOR] Message received: message_id={}, action={:?}, worker_id={}",
                         msg.id, action_opt, self.worker_id
                     );
+                    }
+                    p
                 }
-                p
-            }
-            Err(e) => {
-                tracing::warn!(
+                Err(e) => {
+                    tracing::warn!(
                     "[WORKER_ACTOR] Error parsing payload: message_id={}, error={}, worker_id={}",
                     msg.id, e, self.worker_id
                 );
-                return Err(BehaviorError::ProcessingError(format!("Failed to parse payload: {}", e)));
-            }
-        };
-        
+                    return Err(BehaviorError::ProcessingError(format!(
+                        "Failed to parse payload: {}",
+                        e
+                    )));
+                }
+            };
+
         let action = payload["action"].as_str().unwrap_or("unknown");
-        
+
         let result = match action {
             "increment" => {
                 let key = payload["key"].as_str().unwrap_or("default");
                 let mut state = self.state.write().await;
-                let current = state.get(key)
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+                let current = state.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
                 state.insert(key.to_string(), json!(current + 1));
                 self.tasks_processed += 1;
                 let elapsed = std::time::Instant::now().elapsed().as_millis() as u64;
@@ -119,9 +128,7 @@ impl WorkerActor {
             }
             "get_total_count" => {
                 let state = self.state.read().await;
-                let total: u64 = state.values()
-                    .filter_map(|v| v.as_u64())
-                    .sum();
+                let total: u64 = state.values().filter_map(|v| v.as_u64()).sum();
                 Ok(json!({
                     "action": "get_total_count",
                     "total": total,
@@ -148,19 +155,23 @@ impl WorkerActor {
                 let err = BehaviorError::ProcessingError(format!("Unknown action: {}", action));
                 tracing::warn!(
                     "[WORKER_ACTOR] Unknown action: message_id={}, action={}, worker_id={}",
-                    msg.id, action, self.worker_id
+                    msg.id,
+                    action,
+                    self.worker_id
                 );
                 Err(err)
             }
         };
-        
+
         // Debug log for message processing result (guarded)
         if tracing::enabled!(tracing::Level::DEBUG) {
             match &result {
                 Ok(_) => {
                     tracing::debug!(
                         "[WORKER_ACTOR] Message processed: message_id={}, action={}, worker_id={}",
-                        msg.id, action, self.worker_id
+                        msg.id,
+                        action,
+                        self.worker_id
                     );
                 }
                 Err(_) => {
@@ -168,15 +179,18 @@ impl WorkerActor {
                 }
             }
         }
-        
+
         // Always log errors at warn level
         if let Err(e) = &result {
             tracing::warn!(
                 "[WORKER_ACTOR] Error processing: message_id={}, action={}, error={}, worker_id={}",
-                msg.id, action, e, self.worker_id
+                msg.id,
+                action,
+                e,
+                self.worker_id
             );
         }
-        
+
         result
     }
 }

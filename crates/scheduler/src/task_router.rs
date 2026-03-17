@@ -30,8 +30,8 @@
 
 use plexspaces_channel::Channel;
 use plexspaces_proto::{
-    common::v1::Message,
     actor::v1::{DataParallelConfig, PartitionStrategy, ShardGroup},
+    common::v1::Message,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -97,7 +97,14 @@ pub struct TaskRouter {
     /// Round-robin counters (group_name -> next_index)
     round_robin_counters: Arc<RwLock<HashMap<String, usize>>>,
     /// Channel factory (creates/get channels by name)
-    channel_factory: Arc<dyn Fn(&str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Arc<dyn Channel>, String>> + Send>> + Send + Sync>,
+    channel_factory: Arc<
+        dyn Fn(
+                &str,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<Arc<dyn Channel>, String>> + Send>,
+            > + Send
+            + Sync,
+    >,
 }
 
 impl TaskRouter {
@@ -114,9 +121,7 @@ impl TaskRouter {
             groups: Arc::new(RwLock::new(HashMap::new())),
             actor_loads: Arc::new(RwLock::new(HashMap::new())),
             round_robin_counters: Arc::new(RwLock::new(HashMap::new())),
-            channel_factory: Arc::new(move |name| {
-                Box::pin(channel_factory(name))
-            }),
+            channel_factory: Arc::new(move |name| Box::pin(channel_factory(name))),
         }
     }
 
@@ -155,7 +160,11 @@ impl TaskRouter {
     /// ## Arguments
     /// * `group_id`: Group to add actor to
     /// * `actor_id`: Actor ID to add
-    pub async fn add_actor_to_group(&self, group_id: &str, actor_id: String) -> TaskRouterResult<()> {
+    pub async fn add_actor_to_group(
+        &self,
+        group_id: &str,
+        actor_id: String,
+    ) -> TaskRouterResult<()> {
         let mut groups = self.groups.write().await;
         if let Some(group) = groups.get_mut(group_id) {
             if !group.shard_actor_ids.contains(&actor_id) {
@@ -173,7 +182,11 @@ impl TaskRouter {
     /// ## Arguments
     /// * `group_id`: Group to remove actor from
     /// * `actor_id`: Actor ID to remove
-    pub async fn remove_actor_from_group(&self, group_id: &str, actor_id: &str) -> TaskRouterResult<()> {
+    pub async fn remove_actor_from_group(
+        &self,
+        group_id: &str,
+        actor_id: &str,
+    ) -> TaskRouterResult<()> {
         let mut groups = self.groups.write().await;
         if let Some(group) = groups.get_mut(group_id) {
             group.shard_actor_ids.retain(|id| id != actor_id);
@@ -193,11 +206,14 @@ impl TaskRouter {
     /// * `queue_depth`: Current queue depth
     pub async fn update_actor_load(&self, actor_id: String, queue_depth: u32) {
         let mut loads = self.actor_loads.write().await;
-        loads.insert(actor_id.clone(), ActorLoad {
-            actor_id,
-            queue_depth,
-            last_update: std::time::SystemTime::now(),
-        });
+        loads.insert(
+            actor_id.clone(),
+            ActorLoad {
+                actor_id,
+                queue_depth,
+                last_update: std::time::SystemTime::now(),
+            },
+        );
     }
 
     /// Route task to shard group
@@ -218,7 +234,8 @@ impl TaskRouter {
         // Get group and actor IDs
         let actor_ids = {
             let groups = self.groups.read().await;
-            let group = groups.get(group_id)
+            let group = groups
+                .get(group_id)
                 .ok_or_else(|| TaskRouterError::GroupNotFound(group_id.to_string()))?;
             if group.shard_actor_ids.is_empty() {
                 return Err(TaskRouterError::NoActorsInGroup(group_id.to_string()));
@@ -240,7 +257,9 @@ impl TaskRouter {
             channel: group_id.to_string(),
             message_type: "task".to_string(),
             payload: task_payload,
-            timestamp: Some(plexspaces_proto::prost_types::Timestamp::from(std::time::SystemTime::now())),
+            timestamp: Some(plexspaces_proto::prost_types::Timestamp::from(
+                std::time::SystemTime::now(),
+            )),
             headers: HashMap::new(),
             priority: 50, // Normal priority
             ttl: None,
@@ -257,7 +276,9 @@ impl TaskRouter {
         match strategy {
             RoutingStrategy::Broadcast => {
                 // Publish to all subscribers
-                let count = channel.publish(channel_msg).await
+                let count = channel
+                    .publish(channel_msg)
+                    .await
                     .map_err(|e| TaskRouterError::ChannelError(e.to_string()))?;
                 Ok(count)
             }
@@ -265,7 +286,9 @@ impl TaskRouter {
                 // Select actor using round-robin, then send to channel
                 // Channel will deliver to that actor's subscription
                 let actor_id = self.select_round_robin(group_id, &actor_ids).await?;
-                channel.send(channel_msg).await
+                channel
+                    .send(channel_msg)
+                    .await
                     .map_err(|e| TaskRouterError::ChannelError(e.to_string()))?;
                 // Update load (message sent, queue depth increases)
                 self.update_actor_load(actor_id, 0).await; // TODO: Get actual queue depth
@@ -274,7 +297,9 @@ impl TaskRouter {
             RoutingStrategy::LeastLoaded => {
                 // Select least-loaded actor
                 let actor_id = self.select_least_loaded(&actor_ids).await?;
-                channel.send(channel_msg).await
+                channel
+                    .send(channel_msg)
+                    .await
                     .map_err(|e| TaskRouterError::ChannelError(e.to_string()))?;
                 // Update load
                 self.update_actor_load(actor_id, 0).await; // TODO: Get actual queue depth
@@ -286,7 +311,9 @@ impl TaskRouter {
                 let mut rng = rand::thread_rng();
                 let idx = rng.gen_range(0..actor_ids.len());
                 let actor_id = actor_ids[idx].clone();
-                channel.send(channel_msg).await
+                channel
+                    .send(channel_msg)
+                    .await
                     .map_err(|e| TaskRouterError::ChannelError(e.to_string()))?;
                 self.update_actor_load(actor_id, 0).await;
                 Ok(1)
@@ -297,7 +324,9 @@ impl TaskRouter {
                 let hash = self.hash_key(&message_id);
                 let idx = hash % actor_ids.len() as u64;
                 let actor_id = actor_ids[idx as usize].clone();
-                channel.send(channel_msg).await
+                channel
+                    .send(channel_msg)
+                    .await
                     .map_err(|e| TaskRouterError::ChannelError(e.to_string()))?;
                 self.update_actor_load(actor_id, 0).await;
                 Ok(1)
@@ -306,7 +335,11 @@ impl TaskRouter {
     }
 
     /// Select actor using round-robin
-    async fn select_round_robin(&self, group_id: &str, actor_ids: &[String]) -> TaskRouterResult<String> {
+    async fn select_round_robin(
+        &self,
+        group_id: &str,
+        actor_ids: &[String],
+    ) -> TaskRouterResult<String> {
         let mut counters = self.round_robin_counters.write().await;
         let counter = counters.entry(group_id.to_string()).or_insert(0);
         let idx = *counter % actor_ids.len();
@@ -317,21 +350,17 @@ impl TaskRouter {
     /// Select least-loaded actor
     async fn select_least_loaded(&self, actor_ids: &[String]) -> TaskRouterResult<String> {
         let loads = self.actor_loads.read().await;
-        
+
         if actor_ids.is_empty() {
             return Err(TaskRouterError::NoActorsInGroup("unknown".to_string()));
         }
 
         // Find actor with minimum queue depth
         let mut best_actor = &actor_ids[0];
-        let mut best_load = loads.get(best_actor)
-            .map(|l| l.queue_depth)
-            .unwrap_or(0);
+        let mut best_load = loads.get(best_actor).map(|l| l.queue_depth).unwrap_or(0);
 
         for actor_id in actor_ids {
-            let load = loads.get(actor_id)
-                .map(|l| l.queue_depth)
-                .unwrap_or(0);
+            let load = loads.get(actor_id).map(|l| l.queue_depth).unwrap_or(0);
             if load < best_load {
                 best_load = load;
                 best_actor = actor_id;
@@ -353,7 +382,8 @@ impl TaskRouter {
     /// Get shard group information
     pub async fn get_group(&self, group_id: &str) -> TaskRouterResult<ShardGroup> {
         let groups = self.groups.read().await;
-        groups.get(group_id)
+        groups
+            .get(group_id)
             .ok_or_else(|| TaskRouterError::GroupNotFound(group_id.to_string()))
             .map(|g| g.clone())
     }
@@ -375,13 +405,20 @@ mod tests {
     async fn create_test_channel(name: &str) -> Result<Arc<dyn Channel>, String> {
         let config = ChannelConfig {
             name: name.to_string(),
-            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory as i32,
+            provider: plexspaces_proto::channel::v1::ChannelProvider::ChannelProviderInMemory
+                as i32,
             capacity: 100,
-            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce as i32,
-            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo as i32,
+            delivery: plexspaces_proto::channel::v1::DeliveryGuarantee::DeliveryGuaranteeAtLeastOnce
+                as i32,
+            ordering: plexspaces_proto::channel::v1::OrderingGuarantee::OrderingGuaranteeFifo
+                as i32,
             ..Default::default()
         };
-        Ok(Arc::new(InMemoryChannel::new(config).await.map_err(|e| e.to_string())?))
+        Ok(Arc::new(
+            InMemoryChannel::new(config)
+                .await
+                .map_err(|e| e.to_string())?,
+        ))
     }
 
     fn create_test_router() -> TaskRouter {
@@ -397,13 +434,16 @@ mod tests {
                 group_id: group_id.to_string(),
                 shard_count: actor_ids.len() as u32,
                 partition_strategy: PartitionStrategy::PartitionStrategyHash as i32,
-                rebalance_policy: plexspaces_proto::actor::v1::RebalancePolicy::RebalancePolicyNone as i32,
+                rebalance_policy: plexspaces_proto::actor::v1::RebalancePolicy::RebalancePolicyNone
+                    as i32,
                 placement: None,
             }),
             actor_type: "test-actor".to_string(),
             shard_actor_ids: actor_ids,
             state: plexspaces_proto::actor::v1::ShardGroupState::ShardGroupStateActive as i32,
-            created_at: Some(plexspaces_proto::prost_types::Timestamp::from(std::time::SystemTime::now())),
+            created_at: Some(plexspaces_proto::prost_types::Timestamp::from(
+                std::time::SystemTime::now(),
+            )),
             metadata: HashMap::new(),
             rebalance_status: None,
         }
@@ -417,10 +457,7 @@ mod tests {
         router.register_group(group.clone()).await.unwrap();
 
         let retrieved = router.get_group("test-group").await.unwrap();
-        assert_eq!(
-            retrieved.config.as_ref().unwrap().group_id,
-            "test-group"
-        );
+        assert_eq!(retrieved.config.as_ref().unwrap().group_id, "test-group");
         assert_eq!(retrieved.shard_actor_ids.len(), 1);
     }
 
@@ -442,7 +479,10 @@ mod tests {
         let group = create_test_group("test-group", vec!["actor-1".to_string()]);
 
         router.register_group(group).await.unwrap();
-        router.add_actor_to_group("test-group", "actor-2".to_string()).await.unwrap();
+        router
+            .add_actor_to_group("test-group", "actor-2".to_string())
+            .await
+            .unwrap();
 
         let retrieved = router.get_group("test-group").await.unwrap();
         assert_eq!(retrieved.shard_actor_ids.len(), 2);
@@ -453,10 +493,16 @@ mod tests {
     #[tokio::test]
     async fn test_remove_actor_from_group() {
         let router = create_test_router();
-        let group = create_test_group("test-group", vec!["actor-1".to_string(), "actor-2".to_string()]);
+        let group = create_test_group(
+            "test-group",
+            vec!["actor-1".to_string(), "actor-2".to_string()],
+        );
 
         router.register_group(group).await.unwrap();
-        router.remove_actor_from_group("test-group", "actor-1").await.unwrap();
+        router
+            .remove_actor_from_group("test-group", "actor-1")
+            .await
+            .unwrap();
 
         let retrieved = router.get_group("test-group").await.unwrap();
         assert_eq!(retrieved.shard_actor_ids.len(), 1);
@@ -466,11 +512,20 @@ mod tests {
     #[tokio::test]
     async fn test_route_task_broadcast() {
         let router = create_test_router();
-        let group = create_test_group("test-group", vec!["actor-1".to_string(), "actor-2".to_string()]);
+        let group = create_test_group(
+            "test-group",
+            vec!["actor-1".to_string(), "actor-2".to_string()],
+        );
 
         router.register_group(group).await.unwrap();
 
-        let result = router.route_task("test-group", b"task-data".to_vec(), RoutingStrategy::Broadcast).await;
+        let result = router
+            .route_task(
+                "test-group",
+                b"task-data".to_vec(),
+                RoutingStrategy::Broadcast,
+            )
+            .await;
         // Broadcast should succeed (even if no subscribers yet)
         assert!(result.is_ok());
     }
@@ -478,14 +533,38 @@ mod tests {
     #[tokio::test]
     async fn test_route_task_round_robin() {
         let router = create_test_router();
-        let group = create_test_group("test-group", vec!["actor-1".to_string(), "actor-2".to_string()]);
+        let group = create_test_group(
+            "test-group",
+            vec!["actor-1".to_string(), "actor-2".to_string()],
+        );
 
         router.register_group(group).await.unwrap();
 
         // Route multiple tasks - should round-robin
-        let result1 = router.route_task("test-group", b"task-1".to_vec(), RoutingStrategy::RoundRobin).await.unwrap();
-        let result2 = router.route_task("test-group", b"task-2".to_vec(), RoutingStrategy::RoundRobin).await.unwrap();
-        let result3 = router.route_task("test-group", b"task-3".to_vec(), RoutingStrategy::RoundRobin).await.unwrap();
+        let result1 = router
+            .route_task(
+                "test-group",
+                b"task-1".to_vec(),
+                RoutingStrategy::RoundRobin,
+            )
+            .await
+            .unwrap();
+        let result2 = router
+            .route_task(
+                "test-group",
+                b"task-2".to_vec(),
+                RoutingStrategy::RoundRobin,
+            )
+            .await
+            .unwrap();
+        let result3 = router
+            .route_task(
+                "test-group",
+                b"task-3".to_vec(),
+                RoutingStrategy::RoundRobin,
+            )
+            .await
+            .unwrap();
 
         assert_eq!(result1, 1);
         assert_eq!(result2, 1);
@@ -495,7 +574,10 @@ mod tests {
     #[tokio::test]
     async fn test_route_task_least_loaded() {
         let router = create_test_router();
-        let group = create_test_group("test-group", vec!["actor-1".to_string(), "actor-2".to_string()]);
+        let group = create_test_group(
+            "test-group",
+            vec!["actor-1".to_string(), "actor-2".to_string()],
+        );
 
         router.register_group(group).await.unwrap();
 
@@ -504,29 +586,44 @@ mod tests {
         router.update_actor_load("actor-2".to_string(), 5).await;
 
         // Route task - should select actor-2 (least loaded)
-        let result = router.route_task("test-group", b"task".to_vec(), RoutingStrategy::LeastLoaded).await.unwrap();
+        let result = router
+            .route_task("test-group", b"task".to_vec(), RoutingStrategy::LeastLoaded)
+            .await
+            .unwrap();
         assert_eq!(result, 1);
     }
 
     #[tokio::test]
     async fn test_route_task_random() {
         let router = create_test_router();
-        let group = create_test_group("test-group", vec!["actor-1".to_string(), "actor-2".to_string()]);
+        let group = create_test_group(
+            "test-group",
+            vec!["actor-1".to_string(), "actor-2".to_string()],
+        );
 
         router.register_group(group).await.unwrap();
 
-        let result = router.route_task("test-group", b"task".to_vec(), RoutingStrategy::Random).await.unwrap();
+        let result = router
+            .route_task("test-group", b"task".to_vec(), RoutingStrategy::Random)
+            .await
+            .unwrap();
         assert_eq!(result, 1);
     }
 
     #[tokio::test]
     async fn test_route_task_hash() {
         let router = create_test_router();
-        let group = create_test_group("test-group", vec!["actor-1".to_string(), "actor-2".to_string()]);
+        let group = create_test_group(
+            "test-group",
+            vec!["actor-1".to_string(), "actor-2".to_string()],
+        );
 
         router.register_group(group).await.unwrap();
 
-        let result = router.route_task("test-group", b"task".to_vec(), RoutingStrategy::Hash).await.unwrap();
+        let result = router
+            .route_task("test-group", b"task".to_vec(), RoutingStrategy::Hash)
+            .await
+            .unwrap();
         assert_eq!(result, 1);
     }
 
@@ -534,7 +631,13 @@ mod tests {
     async fn test_route_task_group_not_found() {
         let router = create_test_router();
 
-        let result = router.route_task("non-existent", b"task".to_vec(), RoutingStrategy::RoundRobin).await;
+        let result = router
+            .route_task(
+                "non-existent",
+                b"task".to_vec(),
+                RoutingStrategy::RoundRobin,
+            )
+            .await;
         assert!(matches!(result, Err(TaskRouterError::GroupNotFound(_))));
     }
 
@@ -545,7 +648,9 @@ mod tests {
 
         router.register_group(group).await.unwrap();
 
-        let result = router.route_task("test-group", b"task".to_vec(), RoutingStrategy::RoundRobin).await;
+        let result = router
+            .route_task("test-group", b"task".to_vec(), RoutingStrategy::RoundRobin)
+            .await;
         assert!(matches!(result, Err(TaskRouterError::NoActorsInGroup(_))));
     }
 
@@ -553,8 +658,14 @@ mod tests {
     async fn test_list_groups() {
         let router = create_test_router();
 
-        router.register_group(create_test_group("group-1", vec![])).await.unwrap();
-        router.register_group(create_test_group("group-2", vec![])).await.unwrap();
+        router
+            .register_group(create_test_group("group-1", vec![]))
+            .await
+            .unwrap();
+        router
+            .register_group(create_test_group("group-2", vec![]))
+            .await
+            .unwrap();
 
         let groups = router.list_groups().await;
         assert_eq!(groups.len(), 2);
@@ -569,12 +680,17 @@ mod tests {
         router.update_actor_load("actor-1".to_string(), 5).await;
         router.update_actor_load("actor-2".to_string(), 10).await;
 
-        let group = create_test_group("test-group", vec!["actor-1".to_string(), "actor-2".to_string()]);
+        let group = create_test_group(
+            "test-group",
+            vec!["actor-1".to_string(), "actor-2".to_string()],
+        );
         router.register_group(group).await.unwrap();
 
         // Select least-loaded should return actor-1
-        let selected = router.select_least_loaded(&["actor-1".to_string(), "actor-2".to_string()]).await.unwrap();
+        let selected = router
+            .select_least_loaded(&["actor-1".to_string(), "actor-2".to_string()])
+            .await
+            .unwrap();
         assert_eq!(selected, "actor-1");
     }
 }
-

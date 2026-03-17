@@ -31,6 +31,7 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
+use futures::stream::BoxStream;
 use plexspaces_core::actor_context::{
     ActorService, ChannelService, FacetService, ProcessGroupService, TupleSpaceProvider,
 };
@@ -38,11 +39,9 @@ use plexspaces_core::Service;
 use plexspaces_facet::Facet;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_tuplespace::{Pattern, Tuple, TupleSpaceError};
-use futures::stream::BoxStream;
 use std::time::Duration;
 
 use futures::StreamExt;
-
 
 // NodeOperationsWrapper removed - ActorFactory uses ActorRegistry and VirtualActorManager directly
 
@@ -101,7 +100,11 @@ impl TupleSpaceProvider for TupleSpaceProviderWrapper {
 pub struct ChannelServiceWrapper {
     // For now, we'll use a simple in-memory channel registry
     // In production, Node should provide a proper channel manager
-    channels: Arc<tokio::sync::RwLock<std::collections::HashMap<String, Arc<dyn plexspaces_channel::Channel>>>>,
+    channels: Arc<
+        tokio::sync::RwLock<
+            std::collections::HashMap<String, Arc<dyn plexspaces_channel::Channel>>,
+        >,
+    >,
 }
 
 impl ChannelServiceWrapper {
@@ -117,16 +120,22 @@ impl ChannelServiceWrapper {
     /// ## Note
     /// This method creates channels directly. In the future, this should use
     /// ServiceLocator::create_default_channel() to respect channel_provider configuration.
-    pub async fn get_or_create_channel(&self, name: &str) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn get_or_create_channel(
+        &self,
+        name: &str,
+    ) -> Result<Arc<dyn plexspaces_channel::Channel>, Box<dyn std::error::Error + Send + Sync>>
+    {
         let mut channels = self.channels.write().await;
-        
+
         if let Some(channel) = channels.get(name) {
             return Ok(channel.clone());
         }
 
         // Create a new in-memory channel (default)
         // TODO: Use ServiceLocator::create_default_channel() when ServiceLocator is available
-        use plexspaces_proto::channel::v1::{ChannelProvider, ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
+        use plexspaces_proto::channel::v1::{
+            ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
+        };
         let config = ChannelConfig {
             name: name.to_string(),
             provider: ChannelProvider::ChannelProviderInMemory as i32,
@@ -135,11 +144,12 @@ impl ChannelServiceWrapper {
             ordering: OrderingGuarantee::OrderingGuaranteeFifo as i32,
             ..Default::default()
         };
-        
+
         let channel_result = plexspaces_channel::InMemoryChannel::new(config).await;
-        let channel = Arc::new(channel_result
-            .map_err(|e| format!("Failed to create channel {}: {}", name, e))?);
-        
+        let channel = Arc::new(
+            channel_result.map_err(|e| format!("Failed to create channel {}: {}", name, e))?,
+        );
+
         channels.insert(name.to_string(), channel.clone());
         Ok(channel)
     }
@@ -166,9 +176,11 @@ impl ChannelService for ChannelServiceWrapper {
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(queue_name).await?;
         let message_id = message.id.clone();
-        
+
         // Message is already proto Message (unified type) - send directly
-        channel.send(message).await
+        channel
+            .send(message)
+            .await
             .map_err(|e| format!("Failed to send to queue {}: {}", queue_name, e))?;
         Ok(message_id)
     }
@@ -180,9 +192,11 @@ impl ChannelService for ChannelServiceWrapper {
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(topic_name).await?;
         let message_id = message.id.clone();
-        
+
         // Message is already proto Message (unified type) - publish directly
-        channel.publish(message).await
+        channel
+            .publish(message)
+            .await
             .map_err(|e| format!("Failed to publish to topic {}: {}", topic_name, e))?;
         Ok(message_id)
     }
@@ -192,11 +206,13 @@ impl ChannelService for ChannelServiceWrapper {
         topic_name: &str,
     ) -> Result<BoxStream<'static, Message>, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(topic_name).await?;
-        
+
         // Message is already proto Message (unified type) - stream directly
-        let stream = channel.subscribe(None).await
+        let stream = channel
+            .subscribe(None)
+            .await
             .map_err(|e| format!("Failed to subscribe to topic {}: {}", topic_name, e))?;
-        
+
         Ok(Box::pin(stream))
     }
 
@@ -206,11 +222,13 @@ impl ChannelService for ChannelServiceWrapper {
         _timeout: Option<std::time::Duration>,
     ) -> Result<Option<Message>, Box<dyn std::error::Error + Send + Sync>> {
         let channel = self.get_or_create_channel(queue_name).await?;
-        
+
         // Try to receive a message
-        let messages = channel.try_receive(1).await
+        let messages = channel
+            .try_receive(1)
+            .await
             .map_err(|e| format!("Failed to receive from queue {}: {}", queue_name, e))?;
-        
+
         // Message is already proto Message (unified type) - return directly
         Ok(messages.into_iter().next())
     }
@@ -228,7 +246,10 @@ impl ChannelService for StubChannelService {
         _queue_name: &str,
         _message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        Err("StubChannelService: send_to_queue not implemented. Use real ChannelServiceWrapper.".into())
+        Err(
+            "StubChannelService: send_to_queue not implemented. Use real ChannelServiceWrapper."
+                .into(),
+        )
     }
 
     async fn publish_to_topic(
@@ -236,7 +257,10 @@ impl ChannelService for StubChannelService {
         _topic_name: &str,
         _message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        Err("StubChannelService: publish_to_topic not implemented. Use real ChannelServiceWrapper.".into())
+        Err(
+            "StubChannelService: publish_to_topic not implemented. Use real ChannelServiceWrapper."
+                .into(),
+        )
     }
 
     async fn subscribe_to_topic(
@@ -316,11 +340,11 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         // ProcessGroupRegistry requires group to exist first, so we create it if needed
         // This is a convenience - in production, groups should be created explicitly
         let _ = self.registry.create_group(ctx, group_name).await;
-        
+
         // Convert actor_id string to ActorId
         use plexspaces_core::ActorId;
         let actor_id = ActorId::from(actor_id.to_string());
-        
+
         self.registry
             .join_group(ctx, group_name, &actor_id, topics)
             .await
@@ -335,7 +359,7 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use plexspaces_core::ActorId;
         let actor_id = ActorId::from(actor_id.to_string());
-        
+
         self.registry
             .leave_group(ctx, group_name, &actor_id)
             .await
@@ -347,11 +371,12 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         ctx: &plexspaces_core::RequestContext,
         group_name: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        let actor_ids = self.registry
+        let actor_ids = self
+            .registry
             .get_members(ctx, group_name)
             .await
             .map_err(|e| format!("Failed to get members of group {}: {}", group_name, e))?;
-        
+
         // Convert ActorId to String
         Ok(actor_ids.iter().map(|id| id.to_string()).collect())
     }
@@ -361,11 +386,12 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         ctx: &plexspaces_core::RequestContext,
         group_name: &str,
     ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-        let actor_ids = self.registry
+        let actor_ids = self
+            .registry
             .get_local_members(ctx, group_name)
             .await
             .map_err(|e| format!("Failed to get local members of group {}: {}", group_name, e))?;
-        
+
         // Convert ActorId to String
         Ok(actor_ids.iter().map(|id| id.to_string()).collect())
     }
@@ -389,12 +415,13 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
     ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
         // Message is already proto Message (unified type) - use payload directly
         let payload = message.payload.clone();
-        
-        let actor_ids = self.registry
+
+        let actor_ids = self
+            .registry
             .publish_to_group(ctx, group_name, topic, payload)
             .await
             .map_err(|e| format!("Failed to publish to group {}: {}", group_name, e))?;
-        
+
         Ok(actor_ids.len() as u32)
     }
 }
@@ -427,12 +454,18 @@ impl FacetService for FacetServiceWrapper {
         &self,
         actor_id: &plexspaces_core::ActorId,
         facet_type: &str,
-    ) -> Result<std::sync::Arc<tokio::sync::RwLock<Box<dyn Facet>>>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<
+        std::sync::Arc<tokio::sync::RwLock<Box<dyn Facet>>>,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
         // Get FacetManager from ServiceLocator
-        let facet_manager_wrapper = self.service_locator.get_facet_manager().await
+        let facet_manager_wrapper = self
+            .service_locator
+            .get_facet_manager()
+            .await
             .ok_or_else(|| format!("FacetManager not found in ServiceLocator"))?;
         let facet_manager = facet_manager_wrapper.inner_clone();
-        
+
         if let Some(facets) = facet_manager.get_facets(actor_id).await {
             // Get facet from facets container
             let facets_guard = facets.read().await;
@@ -441,7 +474,7 @@ impl FacetService for FacetServiceWrapper {
             }
             drop(facets_guard); // Explicitly drop to avoid holding lock
         }
-        
+
         Err(format!("Facet '{}' not found on actor {}", facet_type, actor_id).into())
     }
 }
@@ -491,7 +524,7 @@ impl plexspaces_core::NodeMetricsAccessor for NodeMetricsAccessorWrapper {
     async fn get_metrics(&self) -> plexspaces_proto::node::v1::NodeMetrics {
         // Update metrics with current system info before returning
         self.node.update_metrics_with_system_info().await;
-        
+
         let metrics = self.node.metrics().await;
         // Ensure node_id is set (it should be set in Node::start(), but ensure here)
         let mut metrics_clone = metrics.clone();
@@ -501,39 +534,39 @@ impl plexspaces_core::NodeMetricsAccessor for NodeMetricsAccessorWrapper {
         // cluster_name is set in Node::start() from NodeConfig
         metrics_clone
     }
-    
+
     async fn increment_messages_routed(&self) {
         self.node.increment_messages_routed().await;
     }
-    
+
     async fn increment_local_deliveries(&self) {
         self.node.increment_local_deliveries().await;
     }
-    
+
     async fn increment_remote_deliveries(&self) {
         self.node.increment_remote_deliveries().await;
     }
-    
+
     async fn increment_failed_deliveries(&self) {
         self.node.increment_failed_deliveries().await;
     }
-    
+
     async fn increment_shard_groups_created(&self) {
         self.node.increment_shard_groups_created().await;
     }
-    
+
     async fn increment_shard_messages_sent(&self) {
         self.node.increment_shard_messages_sent().await;
     }
-    
+
     async fn increment_shard_messages_received(&self) {
         self.node.increment_shard_messages_received().await;
     }
-    
+
     async fn increment_shard_operations_total(&self) {
         self.node.increment_shard_operations_total().await;
     }
-    
+
     async fn increment_shard_operations_failed(&self) {
         self.node.increment_shard_operations_failed().await;
     }
@@ -566,15 +599,14 @@ impl plexspaces_core::NodeConnectionInfo for NodeConnectionInfoWrapper {
     async fn connected_nodes(&self) -> Vec<String> {
         // Get connected nodes from NodeRegistry
         let service_locator = self.node.service_locator();
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> = service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+            service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
         if let Some(node_registry) = service_locator_trait.get_node_registry().await {
-            let ctx = service_locator_trait.request_context_for_system_operations().await;
+            let ctx = service_locator_trait
+                .request_context_for_system_operations()
+                .await;
             match node_registry.list_nodes(&ctx, None, 1000, "").await {
-                Ok((nodes, _)) => {
-                    nodes.into_iter()
-                        .map(|n| n.node_id)
-                        .collect()
-                }
+                Ok((nodes, _)) => nodes.into_iter().map(|n| n.node_id).collect(),
                 Err(_) => Vec::new(),
             }
         } else {
@@ -586,13 +618,16 @@ impl plexspaces_core::NodeConnectionInfo for NodeConnectionInfoWrapper {
 #[cfg(feature = "firecracker")]
 impl FirecrackerVmServiceWrapper {
     /// Create a new wrapper from FirecrackerVmServiceImpl
-    pub fn new(inner: Arc<plexspaces_services::firecracker_service::FirecrackerVmServiceImpl>) -> Self {
+    pub fn new(
+        inner: Arc<plexspaces_services::firecracker_service::FirecrackerVmServiceImpl>,
+    ) -> Self {
         Self { inner }
     }
 
     /// Get a reference to the inner FirecrackerVmServiceImpl
-    pub fn inner(&self) -> &Arc<plexspaces_services::firecracker_service::FirecrackerVmServiceImpl> {
+    pub fn inner(
+        &self,
+    ) -> &Arc<plexspaces_services::firecracker_service::FirecrackerVmServiceImpl> {
         &self.inner
     }
 }
-

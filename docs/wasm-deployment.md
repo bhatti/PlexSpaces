@@ -6,7 +6,7 @@ PlexSpaces supports deploying WebAssembly (WASM) applications from multiple lang
 
 **📖 For comprehensive polyglot development guide covering all languages, WIT abstractions, and examples, see [Polyglot WASM Development Guide](polyglot.md)**
 
-**Native Rust actors** (embedded in the node, not compiled to WASM) use the [Rust SDK](sdk.md#rust-sdk): `plexspaces_impl_handlers!`, `spawn_actor` with facets, and GenServer. For WASM deployment of Rust actors, the same WIT world as Python/TypeScript applies.
+**Native Rust actors** (embedded in the node, not compiled to WASM) use the [Rust SDK](sdk.md#rust-sdk): annotations such as `#[gen_server_actor]`, `#[handler]`, `#[plexspaces_handlers]`, plus SDK spawn helpers like `spawn`, `spawn_with_facets`, and `spawn_with_storage`. For Rust WASM deployment, use the same SDK macro family in WASM mode (for example `#[gen_server_actor(wasm)]` and `#[plexspaces_handlers(wasm)]`) so the SDK generates the framework-owned WIT bindings instead of hand-written exports.
 
 **Quick Start**: See [DEPLOY_EMPTY_NODE_GUIDE.md](../DEPLOY_EMPTY_NODE_GUIDE.md) for a complete workflow showing how to start an empty node, deploy a WASM application, and verify deployment via the dashboard.
 
@@ -59,11 +59,11 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 
 ### WASM Dependencies Verification
 
-**✅ WASM actors only use WIT (WebAssembly Interface Types) APIs** - they do NOT include framework dependencies:
+**✅ WASM actors only use SDK/WIT-safe APIs** - they do NOT embed host runtime services or hand-written ABI glue:
 
-- ✅ **WIT Interfaces**: Actors import host functions via WIT (e.g., `host::send_message`, `host::tuplespace_write`, simple-actor `host.ts_write` for TupleSpace)
+- ✅ **SDK-generated WIT bindings**: Actors call framework services through SDK wrappers generated from WIT
 - ✅ **Standard Library**: Actors can use their language's standard library (e.g., Python's `json`, Rust's `std`)
-- ❌ **No Framework Code**: WASM modules do NOT include PlexSpaces framework code - the framework is provided by the runtime
+- ❌ **No Host Runtime Dependencies**: WASM modules do NOT embed `plexspaces-node`, Tokio runtimes, or direct gRPC clients - the framework is provided by the host runtime
 
 **Example (Python Actor):**
 ```python
@@ -82,22 +82,22 @@ def handle_request(from_actor: str, message_type: str, payload: bytes) -> bytes:
 
 **Example (Rust Actor):**
 ```rust
-// ✅ Correct - only uses standard library and WIT
-use std::collections::HashMap;
+use plexspaces_sdk::{
+    gen_server_actor, handler, json, plexspaces_handlers, ActorContext, BehaviorError, Message,
+    Value,
+};
 
-#[export_name = "handle_request"]
-pub extern "C" fn handle_request(
-    from: *const u8, from_len: usize,
-    msg_type: *const u8, msg_type_len: usize,
-    payload: *const u8, payload_len: usize,
-) -> *const u8 {
-    // Uses WIT host functions (provided by runtime)
-    // host::send_message(...)  // WIT import
-    
-    // Uses standard library
-    let mut map = HashMap::new();
-    map.insert("result", 42);
-    // ... serialize and return
+#[gen_server_actor(wasm)]
+struct CounterActor {
+    value: i64,
+}
+
+#[plexspaces_handlers(wasm)]
+impl CounterActor {
+    #[handler("get")]
+    async fn get(&mut self, _ctx: &ActorContext, _msg: &Message) -> Result<Value, BehaviorError> {
+        Ok(json!({ "value": self.value }))
+    }
 }
 ```
 

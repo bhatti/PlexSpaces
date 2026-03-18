@@ -695,7 +695,7 @@ const actorRef = await client.spawnActorOnNode(ids[0], "worker", "w-1");
 
 ## Rust SDK
 
-The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use attribute macros like `#[gen_server_actor]`, `#[handler("op")]`, and `#[plexspaces_handlers]` for clean, declarative actor definitions. Use it for native (embedded) Rust actors; WASM Rust actors follow the same WIT world as Python/TypeScript.
+The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use the same core macros across native Rust and deployable Rust WASM: `#[gen_server_actor]`, `#[handler("op")]`, and `#[plexspaces_handlers]`. For deployable Rust WASM actors on the `plexspaces:simple-actor` WIT surface, use the WASM mode forms `#[gen_server_actor(wasm)]` and `#[plexspaces_handlers(wasm)]`.
 
 **Location**: `sdks/rust/plexspaces-sdk` and `sdks/rust/plexspaces-sdk-macros`.
 
@@ -721,6 +721,7 @@ The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use
 | `#[event_actor(name = "audit")]` | N/A | Custom type name for routing |
 | `#[fsm_actor]` | `@fsm_actor` | `impl Actor` with GenStateMachine behavior |
 | `#[workflow_actor]` | `@workflow_actor` | `impl Actor` with Workflow behavior |
+| `#[gen_server_actor(wasm)]` | `@gen_server_actor` for Rust WASM apps | Marks a deployable Rust WASM request-reply handler |
 
 #### Handler Annotations
 
@@ -734,6 +735,21 @@ The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use
 | `#[run_handler]` | N/A | Workflow main execution handler |
 | `#[signal_handler("name")]` | N/A | Workflow signal handler |
 | `#[query_handler("name")]` | N/A | Workflow query handler (read-only) |
+
+#### Deployable Rust WASM Annotations
+
+For deployable Rust WASM apps, keep the WIT guest wrapper thin and put role logic in annotated
+leader/worker structs:
+
+| Rust Annotation | Purpose |
+|-----------------|---------|
+| `#[gen_server_actor(wasm)]` | Marks a leader/worker struct as a deployable Rust WASM request-reply handler |
+| `#[plexspaces_handlers(wasm)]` | Generates `SimpleActorHandlers` dispatch from `#[handler]` methods |
+
+These macros are intended for the same role-oriented patterns used by the Rust WASM app examples
+such as `heat_diffusion` and `genomics_pipeline`. The outer app still chooses the role, but the
+role-specific message handling uses the same annotation style as the native SDK instead of
+hand-written operation matching in each module.
 
 #### Dispatch Annotations
 
@@ -759,9 +775,9 @@ The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use
 | `spawn(ctx, sl, id, ns, actor)` | Spawn actor using declared facets from annotation |
 | `spawn_with_facets(ctx, sl, id, ns, actor, facets)` | Spawn actor with explicit facets |
 | `spawn_with_storage(ctx, sl, id, ns, actor, storage)` | Spawn durable actor with storage backend |
-
-**Note**: For examples and production code, prefer using `Node` for spawning actors instead of `ActorFactory` directly. The SDK helpers (`spawn`, `spawn_with_facets`) internally use `Node` which provides better integration and observability.
 | `create_facets(&["timer", "durability"], &config)` | Create facet instances from names (convenience helper) |
+
+**Note**: For examples and production code, prefer using `Node` or SDK spawn helpers instead of calling `ActorFactory` directly. The SDK helpers delegate to the framework-owned actor spawn path and return canonical typed refs without exposing mailbox or registry internals to application code.
 
 ### Workflow retry (all SDKs)
 
@@ -1597,9 +1613,9 @@ sdks/
 │   │   └── index.ts       # Exports
 │   ├── package.json
 │   └── README.md          # TypeScript SDK docs
-├── rust/                  # Rust SDK (native embedded actors)
-│   ├── plexspaces-sdk/    # Re-exports, spawn/spawn_with_facets, plexspaces_impl_handlers!
-│   └── plexspaces-sdk-macros/  # #[derive(PlexSpacesActor)]
+├── rust/                  # Rust SDK (native and WASM actor decorators)
+│   ├── plexspaces-sdk/    # Re-exports, spawn helpers, typed refs, WASM-safe SDK surface
+│   └── plexspaces-sdk-macros/  # #[actor], #[gen_server_actor], #[plexspaces_handlers], etc.
 └── go/                    # Go SDK (TinyGo WASM actors)
     └── plexspaces/
         ├── actor.go       # Actor interface + BaseActor

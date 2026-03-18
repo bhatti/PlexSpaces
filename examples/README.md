@@ -17,15 +17,15 @@ Every example must be evaluated to ensure it uses the **correct abstractions and
 
 ### Apps (WASM)
 
-- **Correct ABI**: WASM apps implement the **plexspaces:simple-actor** ABI expected by the node: `init`, `handle`, `get-state`, `set-state` (and `cabi_realloc` / `cabi_post_*` as required). Export names must match the WIT (e.g. `plexspaces:simple-actor/actor@0.1.0#handle`).
+- **Correct SDK/WIT surface**: WASM apps should use the Rust/Python/TypeScript/Go SDK wrappers for the framework-owned **plexspaces:simple-actor** WIT world instead of hand-writing raw ABI exports. The node still executes the same `init`, `handle`, `get-state`, and `set-state` contract, but examples should express that through SDK annotations and generated bindings.
 - **GenServer-style ops**: Messages use an `op` (or `message_type`) field; handler dispatches on op (e.g. `run`, `query`, `signal`, `get_status`). State is serializable (e.g. JSON) for get/set-state and durability.
 - **Config**: `app-config.toml` declares the actor as a GenServer child with the correct `id`/`type`; test script uses the same actor type and instance id when calling the HTTP API.
 - **Framework services via WIT**: Use simple-actor host functions for tuple space, pools, and shard-group scatter-gather (`create-shard-group`, `bulk-update-shard-group`, `scatter-gather`) instead of direct gRPC clients in examples.
-- **No host-only code in WASM**: WASM crate does not depend on tokio, plexspaces-node, or other host-only crates; only serde/serde_json (or language equivalents) and the export surface. Host provides the runtime.
+- **No host-only code in WASM**: WASM crate does not depend on tokio, plexspaces-node, or other host-only crates; only SDK/WIT-safe dependencies plus serde/serde_json (or language equivalents). Host provides the runtime.
 
 ### Checklist before marking an example done
 
-- [ ] Uses SDK decorators and helpers (or simple-actor ABI for WASM) — no raw ActorFactory / manual Message construction where SDK exists.
+- [ ] Uses SDK decorators and helpers (or SDK-generated WIT wrappers for WASM) — no raw ActorFactory / manual Message construction where SDK exists.
 - [ ] README documents which abstractions/APIs the example uses.
 - [ ] Shared target and debug build by default; scripts (build.sh / test.sh) in example directory.
 - [ ] Benchmarks block (for blog/HPC examples) with data size, compute vs coord, latency, errors.

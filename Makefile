@@ -847,7 +847,7 @@ fmt-paths:
 	done; \
 	if [ -n "$$RUST_PATHS" ]; then \
 		echo "Formatting Rust paths:$$RUST_PATHS"; \
-		$(RUSTFMT) $$RUST_PATHS; \
+		$(RUSTFMT) --edition 2021 $$RUST_PATHS; \
 	fi; \
 	if [ -n "$$PROTO_PATHS" ]; then \
 		echo "Formatting proto paths:$$PROTO_PATHS"; \

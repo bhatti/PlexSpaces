@@ -40,6 +40,7 @@
 
 use async_trait::async_trait;
 use plexspaces_proto::common::v1::Message;
+use std::any::Any;
 
 /// MessageSender trait - interface for sending messages to actors
 ///
@@ -62,7 +63,7 @@ use plexspaces_proto::common::v1::Message;
 /// - `Actor` (ActorBehavior): What you implement to create an actor (handles messages)
 /// - `MessageSender`: What you use to send messages to an actor
 #[async_trait]
-pub trait MessageSender: Send + Sync {
+pub trait MessageSender: Send + Sync + Any {
     /// Send a message to the actor (fire-and-forget)
     ///
     /// ## Purpose

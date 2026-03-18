@@ -1,5 +1,7 @@
-# Genomics Pipeline - DNA Sequencing Workflow (Rust WASM)
-# GenServer: run (pipeline), query (status/progress/metrics), signal (pause/resume/cancel).
+name = "genomics-pipeline-rust"
+version = "1.0.0"
+namespace = "genomics-pipeline-rust"
+seed_nodes = ["localhost:8091", "localhost:8093"]
 
 [supervisor]
 strategy = "one_for_one"
@@ -7,11 +9,15 @@ max_restarts = 10
 max_restart_window_seconds = 60
 
 [[supervisor.children]]
-id = "pipeline"
+id = "leader"
+type = "leader"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "leader" }
+
+[[supervisor.children]]
+id = "worker"
 type = "worker"
 restart = "permanent"
 shutdown_timeout_seconds = 10
-behavior_kind = "GenServer"
-facets = [
-  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } }
-]
+args = { role = "worker" }

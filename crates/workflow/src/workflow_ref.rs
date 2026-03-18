@@ -34,13 +34,13 @@
 //! ```
 
 use crate::WorkflowError;
-use plexspaces_actor::{ActorFactoryImpl, WorkflowRef};
+use plexspaces_actor::{ActorBuilder, WorkflowRef};
 use plexspaces_core::{RequestContext, ServiceLocator as ServiceLocatorTrait};
 use std::sync::Arc;
 
 /// Spawn a workflow actor and return a WorkflowRef for interacting with it.
 ///
-/// Delegates to `ActorFactoryImpl::spawn_workflow` for centralized actor creation.
+/// Delegates to the framework-owned actor spawn path and returns a typed workflow reference.
 ///
 /// ## Example
 /// ```ignore
@@ -67,23 +67,19 @@ pub async fn spawn_workflow<B>(
 where
     B: plexspaces_core::Actor + Send + 'static,
 {
-    // Get ActorFactory from service locator and downcast to ActorFactoryImpl
-    let factory_dyn = service_locator.get_actor_factory().await.ok_or_else(|| {
-        WorkflowError::Execution("ActorFactory not found in ServiceLocator".to_string())
-    })?;
+    let mut builder = ActorBuilder::new(Box::new(behavior))
+        .with_id(workflow_id.into())
+        .with_namespace(ctx.namespace().to_string());
+    for facet in facets {
+        builder = builder.with_facet(facet);
+    }
 
-    let factory = factory_dyn
-        .as_any()
-        .downcast_ref::<ActorFactoryImpl>()
-        .ok_or_else(|| {
-            WorkflowError::Execution("ActorFactory is not ActorFactoryImpl".to_string())
-        })?;
-
-    // Delegate to factory's typed spawn method
-    factory
-        .spawn_workflow(ctx, workflow_id, behavior, facets)
+    let actor_ref = builder
+        .spawn(ctx, service_locator)
         .await
-        .map_err(|e: plexspaces_actor::WorkflowRefError| WorkflowError::Execution(e.to_string()))
+        .map_err(|e| WorkflowError::Execution(e.to_string()))?;
+
+    Ok(WorkflowRef::new(actor_ref))
 }
 
 #[cfg(test)]

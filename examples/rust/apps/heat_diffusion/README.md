@@ -5,9 +5,50 @@ Heat diffusion benchmark using a deployed Rust WASM application with two actor r
 - `leader` creates a shard group of `worker` actors and runs scatter/gather iterations.
 - `worker` owns one grid region, exchanges ghost boundaries through TupleSpace, and reports compute versus coordination time.
 
+## Code layout
+
+- `src/lib.rs`
+  Shared WIT entrypoint, role/config initialization, tuple-space helpers, and shared metrics aggregation helpers.
+- `src/leader.rs`
+  Annotated `#[gen_server_actor(wasm)]` leader role with scatter/gather orchestration logic.
+- `src/worker.rs`
+  Annotated `#[gen_server_actor(wasm)]` worker role with region init and compute handlers.
+
+## Parallel flow
+
+```mermaid
+flowchart LR
+  client["Client / test.sh"] --> leader["Leader actor"]
+  leader --> create["Create shard group"]
+  create --> workers["Worker actors on all seeded nodes"]
+  leader --> init["Initialize regions"]
+  init --> workers
+  leader --> scatter["ScatterGather: compute iteration"]
+  scatter --> workers
+  workers --> tuple["TupleSpace ghost-boundary exchange"]
+  tuple --> workers
+  workers --> scatter
+  scatter --> converge["Leader checks convergence"]
+  converge -->|repeat| scatter
+  converge -->|done| status["Get application status from each node"]
+  status --> output["Aggregate metrics + result"]
+```
+
+## Metrics flow
+
+```mermaid
+flowchart TD
+  worker["Worker compute + coordination metrics"] --> local["Node-local ApplicationMetrics"]
+  leader["Leader orchestration metrics"] --> local
+  local --> status["application-get-status per node"]
+  status --> aggregate["Leader aggregates per-node + per-role totals"]
+  aggregate --> output["Benchmark output in test.sh"]
+```
+
 ## APIs used
 
 - `plexspaces:simple-actor` WIT host
+- Rust SDK WASM annotations: `#[gen_server_actor(wasm)]`, `#[plexspaces_handlers(wasm)]`, `#[handler(...)]`
 - ShardGroup create / bulk-update / scatter-gather
 - TupleSpace `ts-write` / `ts-read`
 - ApplicationSpec deploy with `seed_nodes`

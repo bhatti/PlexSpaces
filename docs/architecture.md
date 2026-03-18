@@ -454,7 +454,7 @@ graph TB
 - **Temporary Sender Pattern**: Uses single temporary sender ActorRef with per-shard correlation IDs for reply routing
 - **ReplyWaiterRegistry**: Centralized registry for async reply waiting (not used for routing, only waiting)
 
-**Example**: See [Event Analytics Example](../examples/rust/embedded/event_analytics/) for a complete demonstration of shard groups with hash-based routing and scatter-gather queries using SDK patterns (`#[gen_server_actor]`, `spawn_gen_server()`, `GenServerRef.cast()`/`call()`).
+**Example**: See [Event Analytics Example](../examples/rust/embedded/event_analytics/) for a complete demonstration of shard groups with hash-based routing and scatter-gather queries using SDK patterns (`#[gen_server_actor]`, SDK spawn helpers, `GenServerRef.cast()`/`call()`).
 
 **Routing Architecture**:
 - **Unified Routing Module**: `crates/actor/src/routing.rs` centralizes all routing logic

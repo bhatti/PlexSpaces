@@ -94,6 +94,11 @@ fn parse_name_attr(attr: TokenStream) -> Option<String> {
     None
 }
 
+fn attr_contains_mode(attr: &TokenStream, needle: &str) -> bool {
+    let attr_str = attr.to_string();
+    attr_str.contains(needle)
+}
+
 // ============================================================================
 // Helper: Generate facets const
 // ============================================================================
@@ -219,9 +224,20 @@ pub fn gen_server_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemStruct);
     let name = &input.ident;
     let facets = parse_facets(attr.clone());
-    let custom_name = parse_name_attr(attr);
+    let custom_name = parse_name_attr(attr.clone());
+    let is_wasm = attr_contains_mode(&attr, "wasm");
 
     let facets_impl = gen_facets_const(name, &facets);
+
+    if is_wasm {
+        let expanded = quote! {
+            #input
+
+            #facets_impl
+        };
+
+        return TokenStream::from(expanded);
+    }
 
     // If custom name is provided, use Custom(name) behavior type for HTTP gateway routing
     let behavior_type_expr = if let Some(ref custom) = custom_name {
@@ -832,6 +848,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
 
     // Determine behavior type from attr: gen_server (default), event, custom, fsm, workflow
     let attr_str = attr.to_string();
+    let is_wasm = attr_str.contains("wasm");
     let is_gen_server = attr_str.is_empty() || attr_str.contains("gen_server");
     let is_event = attr_str.contains("event");
     let is_fsm = attr_str.contains("fsm");
@@ -848,6 +865,66 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                     && !attr.path().is_ident("query_handler")
             });
         }
+    }
+
+    if is_wasm {
+        let catch_all_handler = handlers.iter().find(|h| h.op == "*" || h.op == "_");
+
+        let match_arms: Vec<TokenStream2> = handlers
+            .iter()
+            .filter(|h| h.op != "*" && h.op != "_")
+            .map(|h| {
+                let op = &h.op;
+                let method = &h.method_name;
+                quote! {
+                    #op => self.#method(from_actor, payload_json),
+                }
+            })
+            .collect();
+
+        let default_arm = if let Some(catch_all) = catch_all_handler {
+            let method = &catch_all.method_name;
+            quote! {
+                self.#method(from_actor, payload_json)
+            }
+        } else {
+            quote! {
+                Err(format!("unsupported op '{}'", op))
+            }
+        };
+
+        let init_impl = if let Some(init) = init_handler {
+            let method = init.method_name;
+            quote! {
+                fn init(&mut self, config_json: &str) -> Result<(), String> {
+                    self.#method(config_json)
+                }
+            }
+        } else {
+            quote! {}
+        };
+
+        let expanded = quote! {
+            #impl_block
+
+            impl plexspaces_sdk::simple_actor::SimpleActorHandlers for #self_ty {
+                #init_impl
+
+                fn handle_operation(
+                    &mut self,
+                    from_actor: &str,
+                    op: &str,
+                    payload_json: &str,
+                ) -> Result<String, String> {
+                    match op {
+                        #(#match_arms)*
+                        _ => #default_arm,
+                    }
+                }
+            }
+        };
+
+        return TokenStream::from(expanded);
     }
 
     // Generate init call if present
@@ -979,7 +1056,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
             let op = &h.op;
             let method = &h.method_name;
             let is_call = h.invocation == "call";
-            
+
             if is_call {
                 // Call semantics: handler returns Result<Value, BehaviorError>, we send reply
                 quote! {

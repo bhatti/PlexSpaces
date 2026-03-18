@@ -312,7 +312,7 @@ cd examples/simple/wasm_calculator
 - Shard Groups - Data-parallel horizontal scaling via hash-based sharding
 - Hash-based routing - Partition key (user_id) → hash → shard_id
 - Scatter-gather queries - Aggregate metrics across all shards
-- SDK patterns - `#[gen_server_actor]`, `spawn_gen_server()`, `GenServerRef.cast()`/`call()`
+- SDK patterns - `#[gen_server_actor]`, node-friendly SDK spawn helpers, and `GenServerRef.cast()`/`call()`
 - Performance metrics - Coordination vs computation analysis, throughput metrics
 
 **Run**:

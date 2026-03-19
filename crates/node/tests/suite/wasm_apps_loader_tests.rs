@@ -407,6 +407,77 @@ async fn test_node_auto_deploy_with_webapps_directory() {
 }
 
 #[tokio::test]
+async fn test_node_startup_is_not_blocked_by_auto_deploy() {
+    use plexspaces_node::NodeBuilder;
+    use std::net::TcpStream;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    let webapps_path = get_webapps_path();
+    if !webapps_path.exists() {
+        eprintln!(
+            "⚠️  Skipping test: webapps directory not found at {:?}",
+            webapps_path
+        );
+        return;
+    }
+
+    let calculator_dir = webapps_path.join("calculator");
+    let calculator_wasm = calculator_dir.join("app.wasm");
+    if !calculator_wasm.exists() {
+        eprintln!(
+            "⚠️  Skipping test: calculator/app.wasm not found at {:?}",
+            calculator_wasm
+        );
+        return;
+    }
+
+    let env_var_name = "PLEXSPACES_WASM_APPS_DIR";
+    let original_value = std::env::var(env_var_name).ok();
+    std::env::set_var(env_var_name, webapps_path.to_str().unwrap());
+
+    let reserved_port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("Failed to reserve test port");
+    let grpc_port = reserved_port.local_addr().unwrap().port();
+    drop(reserved_port);
+
+    let node = Arc::new(
+        NodeBuilder::new("auto-deploy-readiness-test")
+            .with_listen_addr(&format!("127.0.0.1:{grpc_port}"))
+            .build()
+            .await,
+    );
+
+    let node_clone = node.clone();
+    let handle = tokio::spawn(async move {
+        let _ = node_clone.start().await;
+    });
+
+    let http_addr = format!("127.0.0.1:{}", grpc_port + 1);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut connected = false;
+    while Instant::now() < deadline {
+        if TcpStream::connect(&http_addr).is_ok() {
+            connected = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    handle.abort();
+    if let Some(val) = original_value {
+        std::env::set_var(env_var_name, val);
+    } else {
+        std::env::remove_var(env_var_name);
+    }
+
+    assert!(
+        connected,
+        "HTTP gateway did not become reachable within 5 seconds while auto-deploy was configured"
+    );
+}
+
+#[tokio::test]
 async fn test_node_startup_with_empty_wasm_apps_dir() {
     use plexspaces_node::NodeBuilder;
     use std::sync::Arc;

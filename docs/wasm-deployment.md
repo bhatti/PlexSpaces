@@ -1123,6 +1123,7 @@ Deployable WASM apps can also use the framework shard-group APIs through the sim
 |--------------|-------------|
 | `create-shard-group(request-json)` | Creates a shard group from JSON fields such as `group_id`, `actor_type`, `shard_count`, and `placement`. Returns JSON with the created group metadata or `"ERROR:message"`. |
 | `bulk-update-shard-group(request-json)` | Sends update messages to shards using JSON fields `group_id`, `updates`, `consistency_level`, `timeout_ms`, and `wait_for_responses`. |
+| `map-shard-group(request-json)` | Maps a query across shards using JSON fields `group_id`, `query`, and `timeout_ms`. Returns per-shard results and aggregate stats as JSON. |
 | `scatter-gather(request-json)` | Broadcasts a query to all shards using JSON fields `group_id`, `query`, `aggregation`, `min_responses`, and `timeout_ms`. Returns aggregate result, per-shard payloads, and stats as JSON. |
 
 Use this for WASM leader-worker applications that need framework-owned scatter/gather without dropping down to gRPC or hand-written host bindings. See [Heat Diffusion](../examples/rust/apps/heat_diffusion/README.md) for a Rust WASM example that deploys to multiple nodes and drives workers through the host shard-group surface.

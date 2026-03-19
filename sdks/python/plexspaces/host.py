@@ -261,6 +261,60 @@ class _MockHost:
             "current_load": 0.0,
         })
 
+    def create_shard_group(self, request_json: str) -> str:
+        return json.dumps({
+            "group_id": "mock-group",
+            "actor_type": "worker",
+            "shard_actor_ids": ["worker-0@test-node"],
+        })
+
+    def bulk_update_shard_group(self, request_json: str) -> str:
+        return json.dumps({
+            "updates_sent": 1,
+            "updates_succeeded": 1,
+            "updates_failed": 0,
+            "errors": [],
+        })
+
+    def map_shard_group(self, request_json: str) -> str:
+        return json.dumps({
+            "results": [],
+            "stats": {"succeeded": 0, "failed": 0, "total": 0},
+        })
+
+    def scatter_gather(self, request_json: str) -> str:
+        return json.dumps({
+            "result": None,
+            "shard_responses": [],
+            "stats": {"shards_queried": 0, "shards_responded": 0, "shards_failed": 0},
+        })
+
+    def application_metrics_add(self, application_id: str, metrics_json: str) -> str:
+        return metrics_json
+
+    def application_get_status(self, application_id: str, node_id: str) -> str:
+        return json.dumps({
+            "node_id": node_id,
+            "node_address": "http://localhost:8092",
+            "application": {
+                "application_id": application_id,
+                "name": application_id,
+                "version": "1.0.0",
+                "status": 2,
+                "metrics": {
+                    "actor_counts": {},
+                    "supervisor_count": 1,
+                    "uptime_seconds": 0,
+                    "message_count": 0,
+                    "error_count": 0,
+                    "counter_metrics": {},
+                    "latency_totals_ms": {},
+                    "latency_max_ms": {},
+                    "latency_samples": {},
+                },
+            },
+        })
+
 
 class _TupleSpaceHelper:
     """
@@ -887,6 +941,80 @@ class Host:
             return json.loads(result)
         except (json.JSONDecodeError, ValueError):
             return None
+
+    def create_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a shard group using proto field names in the request payload."""
+        h = _get_host()
+        fn = getattr(h, "create_shard_group", None) or getattr(h, "create-shard-group", None)
+        if fn is None:
+            raise RuntimeError("create_shard_group not available")
+        result = fn(json.dumps(request))
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
+
+    def bulk_update_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Bulk update a shard group using proto field names in the request payload."""
+        h = _get_host()
+        fn = getattr(h, "bulk_update_shard_group", None) or getattr(
+            h, "bulk-update-shard-group", None
+        )
+        if fn is None:
+            raise RuntimeError("bulk_update_shard_group not available")
+        result = fn(json.dumps(request))
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
+
+    def map_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Map across shards using proto field names in the request payload."""
+        h = _get_host()
+        fn = getattr(h, "map_shard_group", None) or getattr(h, "map-shard-group", None)
+        if fn is None:
+            raise RuntimeError("map_shard_group not available")
+        result = fn(json.dumps(request))
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
+
+    def scatter_gather(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Scatter/gather using proto field names in the request payload."""
+        h = _get_host()
+        fn = getattr(h, "scatter_gather", None) or getattr(h, "scatter-gather", None)
+        if fn is None:
+            raise RuntimeError("scatter_gather not available")
+        result = fn(json.dumps(request))
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
+
+    def application_metrics_add(
+        self, application_id: str, metrics: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Merge a node-local application metrics delta."""
+        h = _get_host()
+        fn = getattr(h, "application_metrics_add", None) or getattr(
+            h, "application-metrics-add", None
+        )
+        if fn is None:
+            raise RuntimeError("application_metrics_add not available")
+        result = fn(application_id, json.dumps(metrics))
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
+
+    def application_get_status(self, application_id: str, node_id: str) -> Dict[str, Any]:
+        """Get application status for a participating node."""
+        h = _get_host()
+        fn = getattr(h, "application_get_status", None) or getattr(
+            h, "application-get-status", None
+        )
+        if fn is None:
+            raise RuntimeError("application_get_status not available")
+        result = fn(application_id, node_id)
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
 
     def send_after(self, delay_ms: int, msg_type: str, payload: Any = None) -> str:
         """

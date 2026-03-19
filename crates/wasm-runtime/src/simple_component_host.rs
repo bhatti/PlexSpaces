@@ -45,8 +45,8 @@ use plexspaces_core::{ActorId, LockManager, RequestContext, TupleSpaceProvider};
 use plexspaces_locks::{AcquireLockOptions, RenewLockOptions};
 use plexspaces_proto::actor::v1::{
     BulkUpdateShardGroupRequest, ConsistencyLevel, CreateShardGroupRequest, DataParallelConfig,
-    NodePlacement, NodePlacementStrategy, PartitionStrategy, RebalancePolicy, ScatterGatherRequest,
-    ShardGroupAggregationStrategy,
+    MapShardGroupRequest, NodePlacement, NodePlacementStrategy, PartitionStrategy,
+    RebalancePolicy, ScatterGatherRequest, ShardGroupAggregationStrategy,
 };
 use plexspaces_proto::application::v1::{ApplicationInfo, ApplicationMetrics};
 use plexspaces_proto::common::v1::Message;
@@ -216,98 +216,29 @@ impl SimpleHostImpl {
     }
 }
 
-#[derive(Deserialize)]
-struct SimpleNodePlacement {
-    #[serde(default)]
-    strategy: Option<String>,
-    #[serde(default)]
-    cluster: String,
-    #[serde(default)]
-    node_ids: Vec<String>,
-    #[serde(default)]
-    required_labels: HashMap<String, String>,
-    #[serde(default)]
-    avoid_node_ids: Vec<String>,
-    #[serde(default)]
-    affinity_labels: HashMap<String, String>,
-}
-
-#[derive(Deserialize)]
-struct SimpleCreateShardGroupRequest {
-    group_id: String,
-    actor_type: String,
-    shard_count: u32,
-    #[serde(default)]
-    partition_strategy: Option<String>,
-    #[serde(default)]
-    rebalance_policy: Option<String>,
-    #[serde(default)]
-    placement: Option<SimpleNodePlacement>,
-    #[serde(default)]
-    initial_state: serde_json::Value,
-    #[serde(default)]
-    metadata: HashMap<String, String>,
-}
-
-#[derive(Deserialize)]
-struct SimpleBulkUpdateRequest {
-    group_id: String,
-    updates: HashMap<String, serde_json::Value>,
-    #[serde(default)]
-    consistency_level: Option<String>,
-    #[serde(default)]
-    timeout_ms: Option<u64>,
-    #[serde(default)]
-    wait_for_responses: bool,
-}
-
-#[derive(Deserialize)]
-struct SimpleScatterGatherRequest {
-    group_id: String,
-    query: serde_json::Value,
-    #[serde(default)]
-    timeout_ms: Option<u64>,
-    #[serde(default)]
-    aggregation: Option<String>,
-    #[serde(default)]
-    min_responses: u32,
-}
-
-#[derive(Deserialize, Default)]
-struct SimpleApplicationMetricsPayload {
-    #[serde(default)]
-    actor_counts: HashMap<String, u64>,
-    #[serde(default)]
-    supervisor_count: u32,
-    #[serde(default)]
-    uptime_seconds: u64,
-    #[serde(default)]
-    message_count: u64,
-    #[serde(default)]
-    error_count: u64,
-    #[serde(default)]
-    counter_metrics: HashMap<String, u64>,
-    #[serde(default)]
-    latency_totals_ms: HashMap<String, u64>,
-    #[serde(default)]
-    latency_max_ms: HashMap<String, u64>,
-    #[serde(default)]
-    latency_samples: HashMap<String, u64>,
-}
-
-fn application_metrics_from_payload(
-    payload: SimpleApplicationMetricsPayload,
-) -> ApplicationMetrics {
+fn application_metrics_from_json(payload: &serde_json::Value) -> ApplicationMetrics {
     ApplicationMetrics {
-        actor_counts: payload.actor_counts,
-        supervisor_count: payload.supervisor_count,
-        uptime_seconds: payload.uptime_seconds,
-        message_count: payload.message_count,
-        error_count: payload.error_count,
-        counter_metrics: payload.counter_metrics,
-        latency_totals_ms: payload.latency_totals_ms,
-        latency_max_ms: payload.latency_max_ms,
-        latency_samples: payload.latency_samples,
+        actor_counts: value_to_u64_map(payload.get("actor_counts")),
+        supervisor_count: payload
+            .get("supervisor_count")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0) as u32,
+        uptime_seconds: payload
+            .get("uptime_seconds")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        message_count: payload
+            .get("message_count")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        error_count: payload
+            .get("error_count")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        counter_metrics: value_to_u64_map(payload.get("counter_metrics")),
+        latency_totals_ms: value_to_u64_map(payload.get("latency_totals_ms")),
+        latency_max_ms: value_to_u64_map(payload.get("latency_max_ms")),
+        latency_samples: value_to_u64_map(payload.get("latency_samples")),
     }
 }
 
@@ -336,6 +267,95 @@ fn application_info_to_json(info: &ApplicationInfo) -> serde_json::Value {
             "nanos": ts.nanos,
         })),
         "metrics": info.metrics.as_ref().map(application_metrics_to_json),
+    })
+}
+
+fn value_to_string_map(value: Option<&serde_json::Value>) -> Result<HashMap<String, String>, String> {
+    let Some(value) = value else {
+        return Ok(HashMap::new());
+    };
+    let Some(map) = value.as_object() else {
+        return Err("expected object".to_string());
+    };
+    Ok(map
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.clone(),
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| value.to_string()),
+            )
+        })
+        .collect())
+}
+
+fn value_to_u64_map(value: Option<&serde_json::Value>) -> HashMap<String, u64> {
+    value
+        .and_then(|value| value.as_object())
+        .map(|map| {
+            map.iter()
+                .filter_map(|(key, value)| value.as_u64().map(|value| (key.clone(), value)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_simple_node_placement(
+    value: Option<&serde_json::Value>,
+) -> Result<Option<NodePlacement>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let Some(map) = value.as_object() else {
+        return Err("placement must be an object".to_string());
+    };
+    let strategy = map.get("strategy").and_then(|value| value.as_str());
+    let cluster = map
+        .get("cluster")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let node_ids = map
+        .get("node_ids")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let avoid_node_ids = map
+        .get("avoid_node_ids")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let required_labels = value_to_string_map(map.get("required_labels"))?;
+    let affinity_labels = value_to_string_map(map.get("affinity_labels"))?;
+
+    Ok(Some(NodePlacement {
+        strategy: parse_node_placement_strategy(strategy) as i32,
+        cluster,
+        node_ids,
+        required_labels,
+        avoid_node_ids,
+        resource_requirements: None,
+        affinity_labels,
+    }))
+}
+
+fn parse_timeout_duration(value: Option<&serde_json::Value>) -> Option<Duration> {
+    let timeout_ms = value.and_then(|value| value.as_u64())?;
+    Some(Duration {
+        seconds: (timeout_ms / 1000) as i64,
+        nanos: ((timeout_ms % 1000) * 1_000_000) as i32,
     })
 }
 
@@ -1454,37 +1474,54 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     }
 
     async fn create_shard_group(&mut self, request_json: String) -> String {
-        let request: SimpleCreateShardGroupRequest = match serde_json::from_str(&request_json) {
+        let request: serde_json::Value = match serde_json::from_str(&request_json) {
             Ok(request) => request,
             Err(err) => return format!("ERROR: invalid create-shard-group request: {}", err),
         };
-        let placement = request.placement.map(|placement| NodePlacement {
-            strategy: parse_node_placement_strategy(placement.strategy.as_deref()) as i32,
-            cluster: placement.cluster,
-            node_ids: placement.node_ids,
-            required_labels: placement.required_labels,
-            avoid_node_ids: placement.avoid_node_ids,
-            resource_requirements: None,
-            affinity_labels: placement.affinity_labels,
-        });
-        let initial_state = match serde_json::to_vec(&request.initial_state) {
+        let group_id = request
+            .get("group_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let actor_type = request
+            .get("actor_type")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let shard_count = request
+            .get("shard_count")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0) as u32;
+        let placement = match parse_simple_node_placement(request.get("placement")) {
+            Ok(placement) => placement,
+            Err(err) => return format!("ERROR: invalid placement: {}", err),
+        };
+        let initial_state = match serde_json::to_vec(
+            request.get("initial_state").unwrap_or(&serde_json::Value::Null),
+        ) {
             Ok(bytes) => bytes,
             Err(err) => return format!("ERROR: invalid initial_state: {}", err),
         };
+        let metadata = match value_to_string_map(request.get("metadata")) {
+            Ok(metadata) => metadata,
+            Err(err) => return format!("ERROR: invalid metadata: {}", err),
+        };
         let req = CreateShardGroupRequest {
             config: Some(DataParallelConfig {
-                group_id: request.group_id.clone(),
-                shard_count: request.shard_count,
-                partition_strategy: parse_partition_strategy(request.partition_strategy.as_deref())
-                    as i32,
-                rebalance_policy: parse_rebalance_policy(request.rebalance_policy.as_deref())
-                    as i32,
+                group_id: group_id.clone(),
+                shard_count,
+                partition_strategy: parse_partition_strategy(
+                    request.get("partition_strategy").and_then(|value| value.as_str()),
+                ) as i32,
+                rebalance_policy: parse_rebalance_policy(
+                    request.get("rebalance_policy").and_then(|value| value.as_str()),
+                ) as i32,
                 placement,
             }),
-            actor_type: request.actor_type,
+            actor_type,
             shard_config: None,
             initial_state,
-            metadata: request.metadata,
+            metadata,
         };
         let ctx = self.pg_context();
         match self.host_functions.create_shard_group(&ctx, req).await {
@@ -1506,28 +1543,38 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     }
 
     async fn bulk_update_shard_group(&mut self, request_json: String) -> String {
-        let request: SimpleBulkUpdateRequest = match serde_json::from_str(&request_json) {
+        let request: serde_json::Value = match serde_json::from_str(&request_json) {
             Ok(request) => request,
             Err(err) => return format!("ERROR: invalid bulk-update-shard-group request: {}", err),
         };
-        let mut updates = HashMap::with_capacity(request.updates.len());
-        for (partition_key, payload) in request.updates {
+        let Some(updates_json) = request.get("updates").and_then(|value| value.as_object()) else {
+            return "ERROR: invalid bulk-update-shard-group request: updates must be an object"
+                .to_string();
+        };
+        let mut updates = HashMap::with_capacity(updates_json.len());
+        for (partition_key, payload) in updates_json {
             let mut message = match make_call_message(&payload) {
                 Ok(message) => message,
                 Err(err) => return format!("ERROR: {}", err),
             };
             message.sender_id = self.actor_id.to_string();
-            updates.insert(partition_key, message);
+            updates.insert(partition_key.clone(), message);
         }
         let req = BulkUpdateShardGroupRequest {
-            group_id: request.group_id,
+            group_id: request
+                .get("group_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
             updates,
-            consistency_level: parse_consistency_level(request.consistency_level.as_deref()) as i32,
-            timeout: request.timeout_ms.map(|timeout_ms| Duration {
-                seconds: (timeout_ms / 1000) as i64,
-                nanos: ((timeout_ms % 1000) * 1_000_000) as i32,
-            }),
-            wait_for_responses: request.wait_for_responses,
+            consistency_level: parse_consistency_level(
+                request.get("consistency_level").and_then(|value| value.as_str()),
+            ) as i32,
+            timeout: parse_timeout_duration(request.get("timeout_ms")),
+            wait_for_responses: request
+                .get("wait_for_responses")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false),
         };
         let ctx = self.pg_context();
         match self.host_functions.bulk_update_shard_group(&ctx, req).await {
@@ -1546,25 +1593,101 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         }
     }
 
+    async fn map_shard_group(&mut self, request_json: String) -> String {
+        let request: serde_json::Value = match serde_json::from_str(&request_json) {
+            Ok(request) => request,
+            Err(err) => return format!("ERROR: invalid map-shard-group request: {}", err),
+        };
+        let mut query = match make_call_message(
+            request.get("query").unwrap_or(&serde_json::Value::Null),
+        ) {
+            Ok(message) => message,
+            Err(err) => return format!("ERROR: {}", err),
+        };
+        query.sender_id = self.actor_id.to_string();
+        let req = MapShardGroupRequest {
+            group_id: request
+                .get("group_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            map_function: Some(query),
+            timeout: parse_timeout_duration(request.get("timeout_ms")),
+            min_responses: request
+                .get("min_responses")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0) as u32,
+        };
+        let ctx = self.pg_context();
+        match self.host_functions.map_shard_group(&ctx, req).await {
+            Ok(response) => {
+                let shard_results: Vec<serde_json::Value> = response
+                    .shard_results
+                    .into_iter()
+                    .map(|shard| {
+                        let payload = shard
+                            .response
+                            .and_then(|message| {
+                                serde_json::from_slice::<serde_json::Value>(&message.payload).ok()
+                            })
+                            .unwrap_or(serde_json::Value::Null);
+                        serde_json::json!({
+                            "shard_id": shard.shard_id,
+                            "shard_actor_id": shard.shard_actor_id,
+                            "success": shard.success,
+                            "error": shard.error,
+                            "payload": payload,
+                        })
+                    })
+                    .collect();
+                let stats = response
+                    .stats
+                    .map(|stats| {
+                        serde_json::json!({
+                            "shards_queried": stats.shards_queried,
+                            "shards_responded": stats.shards_responded,
+                            "shards_failed": stats.shards_failed,
+                        })
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                let payload = serde_json::json!({
+                    "results": shard_results,
+                    "stats": stats,
+                });
+                serde_json::to_string(&payload)
+                    .unwrap_or_else(|_| "ERROR: serialize map_shard_group response".to_string())
+            }
+            Err(err) => format!("ERROR: {}", err),
+        }
+    }
+
     async fn scatter_gather(&mut self, request_json: String) -> String {
-        let request: SimpleScatterGatherRequest = match serde_json::from_str(&request_json) {
+        let request: serde_json::Value = match serde_json::from_str(&request_json) {
             Ok(request) => request,
             Err(err) => return format!("ERROR: invalid scatter-gather request: {}", err),
         };
-        let mut query = match make_call_message(&request.query) {
+        let mut query = match make_call_message(
+            request.get("query").unwrap_or(&serde_json::Value::Null),
+        ) {
             Ok(message) => message,
             Err(err) => return format!("ERROR: {}", err),
         };
         query.sender_id = self.actor_id.to_string();
         let req = ScatterGatherRequest {
-            group_id: request.group_id,
+            group_id: request
+                .get("group_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
             query: Some(query),
-            timeout: request.timeout_ms.map(|timeout_ms| Duration {
-                seconds: (timeout_ms / 1000) as i64,
-                nanos: ((timeout_ms % 1000) * 1_000_000) as i32,
-            }),
-            aggregation: parse_aggregation_strategy(request.aggregation.as_deref()) as i32,
-            min_responses: request.min_responses,
+            timeout: parse_timeout_duration(request.get("timeout_ms")),
+            aggregation: parse_aggregation_strategy(
+                request.get("aggregation").and_then(|value| value.as_str()),
+            ) as i32,
+            min_responses: request
+                .get("min_responses")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0) as u32,
         };
         let ctx = self.pg_context();
         match self.host_functions.scatter_gather(&ctx, req).await {
@@ -1621,7 +1744,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         application_id: String,
         metrics_json: String,
     ) -> String {
-        let payload: SimpleApplicationMetricsPayload = match serde_json::from_str(&metrics_json) {
+        let payload: serde_json::Value = match serde_json::from_str(&metrics_json) {
             Ok(payload) => payload,
             Err(err) => return format!("ERROR: invalid application metrics payload: {}", err),
         };
@@ -1631,7 +1754,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             .merge_application_metrics(
                 &ctx,
                 &application_id,
-                application_metrics_from_payload(payload),
+                application_metrics_from_json(&payload),
             )
             .await
         {
@@ -1686,10 +1809,12 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use plexspaces_proto::actor::v1::{
-        CreateShardGroupRequest, CreateShardGroupResponse, ScatterGatherRequest,
-        ScatterGatherResponse, ShardGroup, ShardQueryResponse,
+        CreateShardGroupRequest, CreateShardGroupResponse, MapShardGroupRequest,
+        MapShardGroupResponse, ScatterGatherRequest, ScatterGatherResponse,
+        ScatterGatherStats, ShardGroup, ShardQueryResponse,
     };
     use std::sync::Arc;
+    use crate::simple_component_host::plexspaces::simple_actor::host::Host;
 
     #[test]
     fn test_simple_actor_module_compiles() {
@@ -1791,6 +1916,32 @@ mod tests {
                     created_at: None,
                     metadata: HashMap::new(),
                     rebalance_status: None,
+                }),
+            })
+        }
+
+        async fn map_shard_group(
+            &self,
+            _ctx: &RequestContext,
+            _req: MapShardGroupRequest,
+        ) -> Result<MapShardGroupResponse, String> {
+            Ok(MapShardGroupResponse {
+                shard_results: vec![ShardQueryResponse {
+                    shard_id: 0,
+                    shard_actor_id: "worker-0@node-a".to_string(),
+                    response: Some(Message {
+                        payload: br#"{"samples_processed":128,"gradient_checksum":42}"#.to_vec(),
+                        ..Default::default()
+                    }),
+                    latency: None,
+                    success: true,
+                    error: String::new(),
+                }],
+                stats: Some(ScatterGatherStats {
+                    shards_queried: 1,
+                    shards_responded: 1,
+                    shards_failed: 0,
+                    max_latency: None,
                 }),
             })
         }
@@ -1901,6 +2052,26 @@ mod tests {
             .await;
         assert!(response.contains("\"compute_time_ms\":3"));
         assert!(response.contains("\"coordination_time_ms\":1"));
+    }
+
+    #[tokio::test]
+    async fn map_shard_group_serializes_results() {
+        let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
+            MockMessageSender,
+        )));
+        let mut host =
+            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+        let response = host
+            .map_shard_group(
+                serde_json::json!({
+                    "group_id": "heat-group",
+                    "query": { "op": "compute_gradient", "iteration": 1 },
+                })
+                .to_string(),
+            )
+            .await;
+        assert!(response.contains("\"samples_processed\":128"));
+        assert!(response.contains("\"gradient_checksum\":42"));
     }
 
     #[tokio::test]

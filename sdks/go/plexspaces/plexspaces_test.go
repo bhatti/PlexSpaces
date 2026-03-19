@@ -136,6 +136,18 @@ func TestBaseActorGetStateWithoutSelf(t *testing.T) {
 	}
 }
 
+func TestBaseActorRuntimeMetadata(t *testing.T) {
+	actor := &BaseActor{}
+	actor.SetRuntimeMetadata("01KM1SX3YM67ZK3PCRGTSNRAYZ//worker::parameter-server-go@test-node-8093")
+
+	if got := actor.ActorID(); got != "01KM1SX3YM67ZK3PCRGTSNRAYZ//worker::parameter-server-go@test-node-8093" {
+		t.Fatalf("ActorID() = %q", got)
+	}
+	if got := actor.ApplicationID(); got != "parameter-server-go" {
+		t.Fatalf("ApplicationID() = %q, want parameter-server-go", got)
+	}
+}
+
 func TestHandle(t *testing.T) {
 	counter := newCounterActor()
 
@@ -256,6 +268,34 @@ func TestIsHostError(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("isHostError(%q) = %v, want %v", tt.input, got, tt.expected)
 		}
+	}
+}
+
+func TestHostCreateShardGroup(t *testing.T) {
+	ResetStubs()
+	host := NewHost()
+	out, err := host.CreateShardGroup(map[string]any{
+		"group_id":    "group-a",
+		"actor_type":  "worker",
+		"shard_count": 1,
+	})
+	if err != nil {
+		t.Fatalf("CreateShardGroup returned error: %v", err)
+	}
+	if out["group_id"] != "mock-group" {
+		t.Fatalf("expected mock-group, got %v", out["group_id"])
+	}
+}
+
+func TestHostApplicationGetStatus(t *testing.T) {
+	ResetStubs()
+	host := NewHost()
+	out, err := host.ApplicationGetStatus("app-a", "node-a")
+	if err != nil {
+		t.Fatalf("ApplicationGetStatus returned error: %v", err)
+	}
+	if out["node_id"] != "node-a" {
+		t.Fatalf("expected node-a, got %v", out["node_id"])
 	}
 }
 
@@ -459,6 +499,16 @@ func TestActorRouterInitWithNamespace(t *testing.T) {
 	}
 }
 
+func TestActorRouterInitWithCanonicalActorID(t *testing.T) {
+	router := NewActorRouter()
+	router.Route("leader", func() Actor { return newEchoActor() })
+
+	result := router.Init(`{"actor_id":"01KM1SX3YM67ZK3PCRGTSNRAYZ//leader::parameter-server-go@test-node-8091"}`)
+	if result != "" {
+		t.Errorf("expected success for canonical actor id, got %q", result)
+	}
+}
+
 func TestActorRouterPrefixMatching(t *testing.T) {
 	router := NewActorRouter()
 	router.Route("counter", func() Actor { return newCounterActor() })
@@ -467,6 +517,16 @@ func TestActorRouterPrefixMatching(t *testing.T) {
 	result := router.Init(`{"actor_id":"counter-1:ns@node"}`)
 	if result != "" {
 		t.Errorf("prefix matching should work, got %q", result)
+	}
+}
+
+func TestActorRouterCanonicalPrefixMatching(t *testing.T) {
+	router := NewActorRouter()
+	router.Route("worker", func() Actor { return newCounterActor() })
+
+	result := router.Init(`{"actor_id":"01KM1SX3YM67ZK3PCRGTSNRAYZ//worker-3::parameter-server-go@test-node-8093"}`)
+	if result != "" {
+		t.Errorf("canonical prefix matching should work, got %q", result)
 	}
 }
 
@@ -821,6 +881,43 @@ func TestActorRouterInitWithEmptyActorID(t *testing.T) {
 	}
 }
 
+func TestNormalizeRoleActorID(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "bare",
+			input: "worker",
+			want:  "worker",
+		},
+		{
+			name:  "child style",
+			input: "worker-0:parameter-server-go@test-node-8093",
+			want:  "worker-0",
+		},
+		{
+			name:  "canonical",
+			input: "01KM1SX3YM67ZK3PCRGTSNRAYZ//leader::parameter-server-go@test-node-8091",
+			want:  "leader",
+		},
+		{
+			name:  "canonical prefix",
+			input: "01KM1SX3YM67ZK3PCRGTSNRAYZ//worker-3::parameter-server-go@test-node-8093",
+			want:  "worker-3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeRoleActorID(tt.input); got != tt.want {
+				t.Fatalf("normalizeRoleActorID(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestActorRouterEchoActorInit(t *testing.T) {
 	router := NewActorRouter()
 	router.Route("echo", func() Actor { return newEchoActor() })
@@ -837,4 +934,3 @@ func TestActorRouterEchoActorInit(t *testing.T) {
 		t.Errorf("expected state to contain 'initialized', got %q", state)
 	}
 }
-

@@ -1,0 +1,29 @@
+# Batch Image Classification - Rust WASM app
+#
+# Deployable WASM application using the plexspaces:simple-actor WIT host surface.
+# Build: ./build.sh
+# Test: ./test.sh [HTTP_PORT|host:port ...]
+
+[workspace]
+
+[package]
+name = "batch-image-classification-wasm"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Batch image classification leader/worker WASM app with shard-group scatter-gather"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen = "0.51.0"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

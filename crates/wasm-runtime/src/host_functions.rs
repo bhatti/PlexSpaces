@@ -14,7 +14,8 @@ use plexspaces_core::{
 use plexspaces_process_groups::ProcessGroupRegistry;
 use plexspaces_proto::actor::v1::{
     BulkUpdateShardGroupRequest, BulkUpdateShardGroupResponse, CreateShardGroupRequest,
-    CreateShardGroupResponse, ScatterGatherRequest, ScatterGatherResponse,
+    CreateShardGroupResponse, MapShardGroupRequest, MapShardGroupResponse,
+    ScatterGatherRequest, ScatterGatherResponse,
 };
 use plexspaces_proto::application::v1::{ApplicationInfo, ApplicationMetrics};
 use plexspaces_proto::common::v1::Message;
@@ -181,6 +182,16 @@ pub trait MessageSender: Send + Sync {
     ) -> Result<BulkUpdateShardGroupResponse, String> {
         let _ = (ctx, req);
         Err("bulk_update_shard_group not implemented".to_string())
+    }
+
+    /// Map across a shard group via the framework actor service.
+    async fn map_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: MapShardGroupRequest,
+    ) -> Result<MapShardGroupResponse, String> {
+        let _ = (ctx, req);
+        Err("map_shard_group not implemented".to_string())
     }
 
     /// Scatter-gather via the framework actor service.
@@ -527,6 +538,19 @@ impl HostFunctions {
             sender.bulk_update_shard_group(ctx, req).await
         } else {
             Err("Actor service not configured for bulk_update_shard_group".to_string())
+        }
+    }
+
+    /// Map across a shard group through the framework actor service.
+    pub async fn map_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: MapShardGroupRequest,
+    ) -> Result<MapShardGroupResponse, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.map_shard_group(ctx, req).await
+        } else {
+            Err("Actor service not configured for map_shard_group".to_string())
         }
     }
 

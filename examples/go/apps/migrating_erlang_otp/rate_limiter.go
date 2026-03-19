@@ -30,8 +30,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"github.com/plexobject/plexspaces/sdks/go/plexspaces"
+	"math"
 )
 
 // ========================================================================
@@ -44,9 +44,8 @@ type SlidingWindowLimiter struct {
 	plexspaces.BaseActor
 
 	// Configuration
-	WindowSizeMs  uint64 `json:"window_size_ms"`
-	MaxRequests   int    `json:"max_requests"`
-	ActorID       string `json:"actor_id"`
+	WindowSizeMs uint64 `json:"window_size_ms"`
+	MaxRequests  int    `json:"max_requests"`
 
 	// Per-client state: client_id -> window entries
 	// Each entry is a timestamp (ms) of a request within the window
@@ -87,7 +86,7 @@ func (s *SlidingWindowLimiter) Init(configJSON string) string {
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		return "ERROR: " + err.Error()
 	}
-	s.ActorID = config.ActorID
+	s.SetRuntimeMetadata(config.ActorID)
 
 	if args := config.Args; args != nil {
 		if v, ok := args["window_size_ms"]; ok {
@@ -105,7 +104,7 @@ func (s *SlidingWindowLimiter) Init(configJSON string) string {
 	}
 
 	host.Info(fmt.Sprintf("RateLimiter %s: window=%dms, max=%d req/window",
-		s.ActorID, s.WindowSizeMs, s.MaxRequests))
+		s.ActorID(), s.WindowSizeMs, s.MaxRequests))
 	return ""
 }
 
@@ -370,10 +369,10 @@ func (s *SlidingWindowLimiter) getStats() string {
 			"max_requests": s.MaxRequests,
 		},
 		"counters": map[string]any{
-			"total_checks":  s.TotalChecks,
-			"total_allowed": s.TotalAllowed,
-			"total_denied":  s.TotalDenied,
-			"deny_rate_pct": math.Round(denyRate*100) / 100,
+			"total_checks":   s.TotalChecks,
+			"total_allowed":  s.TotalAllowed,
+			"total_denied":   s.TotalDenied,
+			"deny_rate_pct":  math.Round(denyRate*100) / 100,
 			"active_clients": len(s.Clients),
 		},
 		"benchmarks": map[string]any{

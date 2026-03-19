@@ -57,6 +57,25 @@ from .decorators import (
 )
 
 
+def normalize_role_actor_id(actor_id: str) -> str:
+    """
+    Normalize runtime actor IDs to the logical child/base ID used by ACTOR_ROLES.
+
+    Supported inputs:
+    - child form: ``worker-0:my-app@node-1`` -> ``worker-0``
+    - canonical form: ``01ABC//worker-0::my-app@node-1`` -> ``worker-0``
+    - bare form: ``worker-0`` -> ``worker-0``
+    """
+    if not actor_id:
+        return ""
+    if "//" in actor_id:
+        suffix = actor_id.split("//", 1)[1]
+        return suffix.split("::", 1)[0]
+    if ":" in actor_id:
+        return actor_id.split(":", 1)[0]
+    return actor_id
+
+
 def generate_wrapper(actor_classes: List[Type], module_name: str) -> str:
     """
     Generate the WIT interface wrapper code for one or more actor classes.
@@ -92,6 +111,17 @@ def generate_wrapper(actor_classes: List[Type], module_name: str) -> str:
         "    _sanitize_payload_for_wasm, _desanitize_from_wasm, _has_float,",
         "    payload_from_request_json,",
         ")",
+        "",
+        "def _normalize_role_actor_id(actor_id: str) -> str:",
+        '    """Normalize runtime actor IDs to logical child/base IDs."""',
+        "    if not actor_id:",
+        '        return ""',
+        '    if "//" in actor_id:',
+        '        suffix = actor_id.split("//", 1)[1]',
+        '        return suffix.split("::", 1)[0]',
+        '    if ":" in actor_id:',
+        '        return actor_id.split(":", 1)[0]',
+        "    return actor_id",
         "",
     ]
 
@@ -131,6 +161,7 @@ def generate_wrapper(actor_classes: List[Type], module_name: str) -> str:
         '    """Select actor class based on init config actor_id."""',
         "    global _actor_class",
         '    actor_id = config.get("actor_id", "") if isinstance(config, dict) else ""',
+        "    actor_id = _normalize_role_actor_id(actor_id)",
         "    if not actor_id or not _ROLE_MAP:",
         "        return _actor_class",
         "    # Exact match first",

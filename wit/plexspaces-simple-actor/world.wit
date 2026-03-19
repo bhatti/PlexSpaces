@@ -187,6 +187,11 @@ interface host {
     /// Returns JSON object with update statistics or "ERROR:message".
     bulk-update-shard-group: func(request-json: string) -> string;
 
+    /// Map a query across all shards in parallel.
+    /// request-json uses group_id, query, timeout_ms.
+    /// Returns JSON object with per-shard results and stats or "ERROR:message".
+    map-shard-group: func(request-json: string) -> string;
+
     /// Scatter a query to all shards and gather responses.
     /// request-json uses group_id, query, timeout_ms, aggregation, min_responses.
     /// Returns JSON object with aggregate result, shard responses, and stats or "ERROR:message".

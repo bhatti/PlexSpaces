@@ -1864,48 +1864,16 @@ impl Node {
             Some(node_service.clone() as Arc<dyn plexspaces_core::NodeConnectivity>),
         ));
 
-        // Auto-deploy WASM applications from configured directory (Tomcat-style webapps)
-        // wasm_apps_directory is now in RuntimeConfig (set by config_manager::initialize)
-        let wasm_apps_directory: Option<String> = futures::executor::block_on(async {
-            self.release_spec
-                .read()
-                .await
-                .as_ref()
-                .and_then(|spec| spec.runtime.as_ref())
-                .map(|runtime| runtime.wasm_apps_directory.clone())
-                .filter(|s| !s.is_empty())
-        });
-
-        if let Some(wasm_apps_dir_str) = wasm_apps_directory {
-            let wasm_apps_dir = std::path::Path::new(&wasm_apps_dir_str);
-            tracing::info!(
-                wasm_apps_directory = %wasm_apps_dir_str,
-                "Auto-deploying WASM applications from configured directory"
-            );
-            match crate::wasm_apps_loader::deploy_all_from_directory(
-                wasm_apps_dir,
-                self.service_locator.clone(),
-                Some(node_service.clone() as Arc<dyn plexspaces_core::NodeConnectivity>),
-            )
+        // Capture configured auto-deploy directory now, but deploy after the server starts
+        // accepting requests so large WASM compilation does not block node readiness.
+        let wasm_apps_directory: Option<String> = self
+            .release_spec
+            .read()
             .await
-            {
-                Ok(deployed) => {
-                    if !deployed.is_empty() {
-                        tracing::info!(
-                            count = deployed.len(),
-                            apps = ?deployed,
-                            "Successfully auto-deployed WASM applications"
-                        );
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "Failed to auto-deploy some WASM applications (node will continue)"
-                    );
-                }
-            }
-        }
+            .as_ref()
+            .and_then(|spec| spec.runtime.as_ref())
+            .map(|runtime| runtime.wasm_apps_directory.clone())
+            .filter(|s| !s.is_empty());
 
         // Create Firecracker VM Service (if Firecracker support is enabled)
         #[cfg(feature = "firecracker")]
@@ -2113,8 +2081,8 @@ impl Node {
 
         let http_gateway_handle = {
             let service_locator_for_http = self.service_locator.clone();
+            let service_locator_for_deploy_handler = service_locator_for_http.clone();
             let node_id_for_http = self.id.as_str().to_string();
-            let grpc_addr = addr;
             let node_for_http = self.clone();
             let application_manager_for_http = self.application_manager.clone();
             let node_connectivity_for_http =
@@ -2824,7 +2792,7 @@ impl Node {
                         use plexspaces_services::application_service::ApplicationServiceImpl;
                         use tonic::metadata::MetadataValue;
                         let app_service = ApplicationServiceImpl::new(
-                            service_locator_for_http.clone(),
+                            service_locator_for_deploy_handler.clone(),
                             Some(node_connectivity_for_http.clone()),
                         );
                         let mut grpc_request = tonic::Request::new(request);
@@ -2867,7 +2835,7 @@ impl Node {
                 // Body limit is already applied globally above (100MB)
                 // The route-specific limit below ensures it's definitely applied
                 let _app_mgr_for_undeploy = application_manager_for_http.clone();
-                let service_locator_for_undeploy = self.service_locator().clone();
+                let service_locator_for_undeploy = service_locator_for_http.clone();
                 let undeploy_handler =
                     move |axum::extract::State((
                         _actor_svc,
@@ -2990,6 +2958,42 @@ impl Node {
                 }
             })
         };
+
+        if let Some(wasm_apps_dir_str) = wasm_apps_directory {
+            let service_locator_for_deploy = self.service_locator.clone();
+            let node_connectivity_for_deploy =
+                node_service.clone() as Arc<dyn plexspaces_core::NodeConnectivity>;
+            tokio::spawn(async move {
+                let wasm_apps_dir = std::path::PathBuf::from(&wasm_apps_dir_str);
+                tracing::info!(
+                    wasm_apps_directory = %wasm_apps_dir_str,
+                    "Starting background auto-deploy of WASM applications"
+                );
+                match crate::wasm_apps_loader::deploy_all_from_directory(
+                    &wasm_apps_dir,
+                    service_locator_for_deploy,
+                    Some(node_connectivity_for_deploy),
+                )
+                .await
+                {
+                    Ok(deployed) => {
+                        if !deployed.is_empty() {
+                            tracing::info!(
+                                count = deployed.len(),
+                                apps = ?deployed,
+                                "Successfully auto-deployed WASM applications"
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "Failed to auto-deploy some WASM applications (node will continue)"
+                        );
+                    }
+                }
+            });
+        }
 
         tokio::select! {
             result = grpc_server => {

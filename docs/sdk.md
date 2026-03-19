@@ -300,6 +300,13 @@ class ChatRoom:
 | `host.pool_checkout(pool_name, timeout_ms)` (Python) / `host.PoolCheckout` (Go) / `host.poolCheckout` (TS) | Checkout an actor from a named pool. Returns handle `{actor_id, pool_name, checkout_id}` or null on failure. |
 | `host.pool_checkin(pool_name, actor_id, checkout_id, healthy)` | Checkin an actor to the pool. Use values from the handle returned by checkout. |
 | `host.pool_get_metrics(pool_name)` | Get pool metrics (total_actors, available_actors, busy_actors, current_load). Returns JSON or null if not available. |
+| **ShardGroup / Application Metrics** | |
+| `host.create_shard_group(request)` | Create a shard group. Request uses proto field names such as `group_id`, `actor_type`, `shard_count`, and `placement`. |
+| `host.bulk_update_shard_group(request)` | Bulk update shards. Request uses proto field names such as `group_id`, `updates`, `consistency_level`, `timeout_ms`, and `wait_for_responses`. |
+| `host.map_shard_group(request)` | Map a query across shards. Request uses proto field names such as `group_id`, `query`, and `timeout_ms`. |
+| `host.scatter_gather(request)` | Scatter/gather across shards. Request uses proto field names such as `group_id`, `query`, `aggregation`, `min_responses`, and `timeout_ms`. |
+| `host.application_metrics_add(application_id, metrics)` | Merge a node-local application metrics delta using proto field names. |
+| `host.application_get_status(application_id, node_id)` | Get application status and per-node metrics for a participating node. |
 
 **Example**: [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) uses the pool API with tuple space (work queue) and fallback to process group; available in Python, Go, TypeScript, and Rust.
 
@@ -950,6 +957,19 @@ For WASM apps using the simple-actor WIT world, node-local benchmark counters sh
 through `application-metrics-add` and read back with `application-get-status`. The SDK/WIT layer is
 only the decorator; the authoritative per-node application metrics live in the application manager
 inside the main Rust framework crates.
+
+**Cross-SDK WASM parity**: Python, TypeScript, Go, and Rust WASM all expose the same shard-group
+host surface through the simple-actor WIT world:
+- `create-shard-group`
+- `bulk-update-shard-group`
+- `map-shard-group`
+- `scatter-gather`
+- `application-metrics-add`
+- `application-get-status`
+
+These WASM-facing SDK wrappers are transport decorators only. They serialize requests using the
+framework field names and delegate to the underlying framework `ActorService` / application-manager
+implementations through the WIT host boundary.
 
 See [Firecracker Multi-Tenant Example](../examples/rust/embedded/firecracker_multi_tenant/README.md) for a complete data-parallel actors demonstration.
 

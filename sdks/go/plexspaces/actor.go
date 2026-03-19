@@ -32,7 +32,10 @@
 
 package plexspaces
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Actor is the interface that all PlexSpaces actors must implement.
 // It maps directly to the simple-actor WIT interface.
@@ -61,6 +64,10 @@ type Actor interface {
 type BaseActor struct {
 	// self is set by Register() to point to the embedding struct
 	self Actor
+	// runtime metadata is framework-owned identity derived from init config.
+	// Keep these out of actor JSON state so helpers do not silently alter persisted state shape.
+	actorID       string
+	applicationID string
 }
 
 // Init is a no-op default. Override in your actor if needed.
@@ -94,6 +101,51 @@ func (b *BaseActor) SetState(stateJSON string) string {
 // Call this in your actor's constructor or before registering.
 func (b *BaseActor) SetSelf(self Actor) {
 	b.self = self
+}
+
+// SetRuntimeMetadata stores framework-owned actor identity derived from init config.
+func (b *BaseActor) SetRuntimeMetadata(actorID string) {
+	b.actorID = actorID
+	b.applicationID = applicationIDFromActorID(actorID)
+}
+
+// ActorID returns the runtime actor identifier assigned by the framework.
+func (b *BaseActor) ActorID() string {
+	return b.actorID
+}
+
+// ApplicationID returns the actor namespace/application identifier derived from ActorID.
+func (b *BaseActor) ApplicationID() string {
+	return b.applicationID
+}
+
+func normalizeRoleActorID(actorID string) string {
+	if actorID == "" {
+		return ""
+	}
+	if strings.Contains(actorID, "//") {
+		suffix := strings.SplitN(actorID, "//", 2)[1]
+		return strings.SplitN(suffix, "::", 2)[0]
+	}
+	if strings.Contains(actorID, ":") {
+		return strings.SplitN(actorID, ":", 2)[0]
+	}
+	return actorID
+}
+
+func applicationIDFromActorID(actorID string) string {
+	if strings.Contains(actorID, "//") && strings.Contains(actorID, "::") {
+		suffix := strings.SplitN(actorID, "//", 2)[1]
+		qualified := strings.SplitN(suffix, "@", 2)[0]
+		parts := strings.SplitN(qualified, "::", 2)
+		if len(parts) == 2 {
+			return parts[1]
+		}
+	}
+	if strings.Contains(actorID, ":") && strings.Contains(actorID, "@") {
+		return strings.SplitN(strings.SplitN(actorID, ":", 2)[1], "@", 2)[0]
+	}
+	return ""
 }
 
 // WorkflowActor extends Actor with run/signal/query for workflow behavior (aligned with Rust/Python/TS).

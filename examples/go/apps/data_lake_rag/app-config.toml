@@ -1,0 +1,23 @@
+name = "data-lake-rag-go"
+version = "1.0.0"
+namespace = "data-lake-rag-go"
+seed_nodes = ["localhost:8091", "localhost:8093"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "leader"
+type = "leader"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "leader", worker_count = "8", query_count = "12", chunks_per_query = "48", chunk_size_bytes = "2048", embedding_dim = "384", top_k = "5" }
+
+[[supervisor.children]]
+id = "worker"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "worker" }

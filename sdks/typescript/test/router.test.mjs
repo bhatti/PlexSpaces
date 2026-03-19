@@ -34,8 +34,7 @@ class TestActorRouter {
         : {};
 
       const actorId = config.actor_id || "";
-      const colonIdx = actorId.indexOf(":");
-      const name = colonIdx >= 0 ? actorId.substring(0, colonIdx) : actorId;
+      const name = normalizeActorRole(actorId);
 
       let bestPrefix = "";
       let bestFactory = null;
@@ -76,6 +75,23 @@ class TestActorRouter {
     if (!this.#active) return "ERROR: no active actor";
     return this.#active.setState(stateJson);
   }
+}
+
+function normalizeActorRole(actorId) {
+  if (!actorId) return "";
+  const canonicalSep = actorId.indexOf("//");
+  if (canonicalSep >= 0 && canonicalSep + 2 < actorId.length) {
+    const rest = actorId.substring(canonicalSep + 2);
+    const behaviorSep = rest.indexOf("::");
+    if (behaviorSep >= 0) return rest.substring(0, behaviorSep);
+    const nodeSep = rest.indexOf("@");
+    return nodeSep >= 0 ? rest.substring(0, nodeSep) : rest;
+  }
+  const childSep = actorId.indexOf(":");
+  if (childSep >= 0) return actorId.substring(0, childSep);
+  const nodeSep = actorId.indexOf("@");
+  if (nodeSep >= 0) return actorId.substring(0, nodeSep);
+  return actorId;
 }
 
 // Mock actors for testing
@@ -140,6 +156,22 @@ describe("ActorRouter", () => {
         "counter": () => new CounterActor(),
       });
       const result = router.init('{"actor_id":"counter-1:ns@node"}');
+      assert.equal(result, "");
+    });
+
+    it("should handle canonical actor IDs", () => {
+      const router = new TestActorRouter({
+        "leader": () => new CounterActor(),
+      });
+      const result = router.init('{"actor_id":"01ABC//leader::streaming-pipeline-ts@test-node-8091"}');
+      assert.equal(result, "");
+    });
+
+    it("should handle canonical worker prefix matching", () => {
+      const router = new TestActorRouter({
+        "worker": () => new CounterActor(),
+      });
+      const result = router.init('{"actor_id":"01ABC//worker-3::streaming-pipeline-ts@test-node-8093"}');
       assert.equal(result, "");
     });
 

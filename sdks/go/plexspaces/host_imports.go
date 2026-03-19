@@ -349,3 +349,55 @@ func hostPoolGetMetrics(poolName string) string {
 	rawHostPoolGetMetrics(poolName, unsafe.Pointer(&retArea))
 	return readRetString(unsafe.Pointer(&retArea))
 }
+
+// ============================================================================
+// ShardGroup / Application Metrics
+// ============================================================================
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 create-shard-group
+func rawHostCreateShardGroup(requestJSON string, retptr unsafe.Pointer)
+
+func hostCreateShardGroup(requestJSON string) string {
+	rawHostCreateShardGroup(requestJSON, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 bulk-update-shard-group
+func rawHostBulkUpdateShardGroup(requestJSON string, retptr unsafe.Pointer)
+
+func hostBulkUpdateShardGroup(requestJSON string) string {
+	rawHostBulkUpdateShardGroup(requestJSON, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 map-shard-group
+func rawHostMapShardGroup(requestJSON string, retptr unsafe.Pointer)
+
+func hostMapShardGroup(requestJSON string) string {
+	rawHostMapShardGroup(requestJSON, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 scatter-gather
+func rawHostScatterGather(requestJSON string, retptr unsafe.Pointer)
+
+func hostScatterGather(requestJSON string) string {
+	rawHostScatterGather(requestJSON, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 application-metrics-add
+func rawHostApplicationMetricsAdd(applicationID, metricsJSON string, retptr unsafe.Pointer)
+
+func hostApplicationMetricsAdd(applicationID, metricsJSON string) string {
+	rawHostApplicationMetricsAdd(applicationID, metricsJSON, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 application-get-status
+func rawHostApplicationGetStatus(applicationID, nodeID string, retptr unsafe.Pointer)
+
+func hostApplicationGetStatus(applicationID, nodeID string) string {
+	rawHostApplicationGetStatus(applicationID, nodeID, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}

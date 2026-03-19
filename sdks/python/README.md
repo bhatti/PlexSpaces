@@ -263,6 +263,21 @@ PlexSpaces provides comprehensive host functions for WASM actors, following wasm
 
 **Backends:** S3, Azure Blob, GCP Storage, MinIO, Filesystem
 
+#### ShardGroup / Application Metrics
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.create_shard_group(request)` | Create a shard group using framework/proto field names | `group = host.create_shard_group({"group_id": "g1", "actor_type": "worker", "shard_count": 4})` |
+| `host.bulk_update_shard_group(request)` | Bulk update shard members | `host.bulk_update_shard_group({"group_id": "g1", "updates": {"k1": {"op": "init"}}})` |
+| `host.map_shard_group(request)` | Map a query across shards | `resp = host.map_shard_group({"group_id": "g1", "query": {"op": "stats"}})` |
+| `host.scatter_gather(request)` | Scatter/gather across shards | `resp = host.scatter_gather({"group_id": "g1", "query": {"op": "compute"}, "aggregation": "concat"})` |
+| `host.application_metrics_add(application_id, metrics)` | Merge node-local application metrics delta | `host.application_metrics_add("heat-app", {"counter_metrics": {"worker_messages": 1}})` |
+| `host.application_get_status(application_id, node_id)` | Get per-node application status and metrics | `status = host.application_get_status("heat-app", "test-node-8093")` |
+
+These methods use the same simple-actor WIT host surface as Rust WASM apps. The SDK wrapper is
+thin: it serializes request/response JSON using the framework field names and delegates to the
+underlying framework `ActorService` and application manager.
+
 #### TupleSpace (Linda-style Coordination)
 
 **Preferred: `host.ts`** — list-in, list-out; use `None` in patterns for wildcards.

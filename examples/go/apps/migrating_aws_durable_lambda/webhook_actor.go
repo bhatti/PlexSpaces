@@ -19,12 +19,11 @@ var host = plexspaces.NewHost()
 type WebhookProcessor struct {
 	plexspaces.BaseActor
 
-	ActorID         string            `json:"actor_id"`
-	Processed       map[string]string `json:"processed"`         // idempotency_key -> response JSON
-	TotalProcessed  int               `json:"total_processed"`
-	TotalDedupHits  int               `json:"total_dedup_hits"`
-	TotalComputeMs  float64           `json:"total_compute_ms"`
-	TotalCoordMs    float64           `json:"total_coord_ms"`
+	Processed      map[string]string `json:"processed"` // idempotency_key -> response JSON
+	TotalProcessed int               `json:"total_processed"`
+	TotalDedupHits int               `json:"total_dedup_hits"`
+	TotalComputeMs float64           `json:"total_compute_ms"`
+	TotalCoordMs   float64           `json:"total_coord_ms"`
 	CreatedAtMs    uint64            `json:"created_at_ms"`
 	UpdatedAtMs    uint64            `json:"updated_at_ms"`
 }
@@ -43,7 +42,7 @@ func (w *WebhookProcessor) Init(configJSON string) string {
 	}
 	_ = json.Unmarshal([]byte(configJSON), &config)
 	if config.ActorID != "" {
-		w.ActorID = config.ActorID
+		w.SetRuntimeMetadata(config.ActorID)
 	}
 	w.CreatedAtMs = host.NowMs()
 	w.UpdatedAtMs = w.CreatedAtMs
@@ -112,8 +111,8 @@ func (w *WebhookProcessor) handleWebhook(payloadJSON string) string {
 
 func (w *WebhookProcessor) handleStatus(_ string) string {
 	return marshal(map[string]any{
-		"actor_id":         w.ActorID,
-		"total_processed": w.TotalProcessed,
+		"actor_id":         w.ActorID(),
+		"total_processed":  w.TotalProcessed,
 		"total_dedup_hits": w.TotalDedupHits,
 		"total_compute_ms": w.TotalComputeMs,
 		"total_coord_ms":   w.TotalCoordMs,

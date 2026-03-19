@@ -84,11 +84,7 @@ func (r *ActorRouter) Init(configJSON string) string {
 	}
 	r.actorID = config.ActorID
 
-	// Extract the name part from full actor ID (name:namespace@node)
-	name := config.ActorID
-	if idx := strings.Index(name, ":"); idx >= 0 {
-		name = name[:idx]
-	}
+	name := normalizeRoleActorID(config.ActorID)
 
 	// Find matching factory by prefix (longest match wins)
 	var bestPrefix string

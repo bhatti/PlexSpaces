@@ -214,3 +214,27 @@ func hostPoolGetMetrics(poolName string) string {
 	})
 	return string(out)
 }
+
+func hostCreateShardGroup(requestJSON string) string {
+	return `{"group_id":"mock-group","actor_type":"worker","shard_actor_ids":["worker-0@test-node"]}`
+}
+
+func hostBulkUpdateShardGroup(requestJSON string) string {
+	return `{"updates_sent":1,"updates_succeeded":1,"updates_failed":0,"errors":[]}`
+}
+
+func hostMapShardGroup(requestJSON string) string {
+	return `{"results":[],"stats":{"succeeded":0,"failed":0,"total":0}}`
+}
+
+func hostScatterGather(requestJSON string) string {
+	return `{"result":null,"shard_responses":[],"stats":{"shards_queried":0,"shards_responded":0,"shards_failed":0}}`
+}
+
+func hostApplicationMetricsAdd(applicationID, metricsJSON string) string {
+	return metricsJSON
+}
+
+func hostApplicationGetStatus(applicationID, nodeID string) string {
+	return `{"node_id":"` + nodeID + `","application":{"application_id":"` + applicationID + `"}}`
+}

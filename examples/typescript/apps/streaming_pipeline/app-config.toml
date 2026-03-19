@@ -1,0 +1,23 @@
+name = "streaming-pipeline-ts"
+version = "1.0.0"
+namespace = "streaming-pipeline-ts"
+seed_nodes = ["localhost:8091", "localhost:8093"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "leader"
+type = "leader"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "leader", worker_count = "8", batch_count = "18", events_per_batch = "1200", drop_rate = "0.08", enrich_fields = "6" }
+
+[[supervisor.children]]
+id = "worker"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+args = { role = "worker" }

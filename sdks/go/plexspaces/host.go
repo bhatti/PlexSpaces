@@ -405,6 +405,84 @@ func (h *Host) PoolGetMetrics(poolName string) map[string]any {
 	return out
 }
 
+// CreateShardGroup creates a shard group using proto field names in the JSON payload.
+func (h *Host) CreateShardGroup(request any) (map[string]any, error) {
+	result := hostCreateShardGroup(marshalPayload(request))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// BulkUpdateShardGroup sends bulk updates to shards using proto field names in the JSON payload.
+func (h *Host) BulkUpdateShardGroup(request any) (map[string]any, error) {
+	result := hostBulkUpdateShardGroup(marshalPayload(request))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// MapShardGroup maps a query across shards using proto field names in the JSON payload.
+func (h *Host) MapShardGroup(request any) (map[string]any, error) {
+	result := hostMapShardGroup(marshalPayload(request))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ScatterGather runs scatter/gather using proto field names in the JSON payload.
+func (h *Host) ScatterGather(request any) (map[string]any, error) {
+	result := hostScatterGather(marshalPayload(request))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ApplicationMetricsAdd merges a node-local application metrics delta.
+func (h *Host) ApplicationMetricsAdd(applicationID string, metrics any) (map[string]any, error) {
+	result := hostApplicationMetricsAdd(applicationID, marshalPayload(metrics))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ApplicationGetStatus returns application status for a participating node.
+func (h *Host) ApplicationGetStatus(applicationID, nodeID string) (map[string]any, error) {
+	result := hostApplicationGetStatus(applicationID, nodeID)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ========================================================================
 // Helpers
 // ========================================================================

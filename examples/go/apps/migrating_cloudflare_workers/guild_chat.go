@@ -61,9 +61,9 @@ type ChatRoom struct {
 	Members map[string]*MemberInfo `json:"members"`
 
 	// Message history (bounded ring buffer, like DO storage)
-	Messages    []ChatMessage `json:"messages"`
-	MaxHistory  int           `json:"max_history"`
-	MessageSeq  uint64        `json:"message_seq"`
+	Messages   []ChatMessage `json:"messages"`
+	MaxHistory int           `json:"max_history"`
+	MessageSeq uint64        `json:"message_seq"`
 
 	// Room statistics
 	TotalMessages   int     `json:"total_messages"`
@@ -499,8 +499,6 @@ func (c *ChatRoom) persistHistory() {
 type RateLimiter struct {
 	plexspaces.BaseActor
 
-	ActorID string `json:"actor_id"`
-
 	// Token bucket config
 	MaxTokens    int    `json:"max_tokens"`
 	RefillRateMs uint64 `json:"refill_rate_ms"` // ms between token refills
@@ -524,8 +522,8 @@ type TokenBucket struct {
 
 func NewRateLimiter() plexspaces.Actor {
 	a := &RateLimiter{
-		MaxTokens:    5,     // 5 messages
-		RefillRateMs: 1000,  // 1 token per second
+		MaxTokens:    5,    // 5 messages
+		RefillRateMs: 1000, // 1 token per second
 		Buckets:      make(map[string]*TokenBucket),
 	}
 	a.SetSelf(a)
@@ -540,7 +538,7 @@ func (r *RateLimiter) Init(configJSON string) string {
 	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
 		return "ERROR: " + err.Error()
 	}
-	r.ActorID = config.ActorID
+	r.SetRuntimeMetadata(config.ActorID)
 
 	if args := config.Args; args != nil {
 		if v, ok := args["max_tokens"]; ok {
@@ -558,7 +556,7 @@ func (r *RateLimiter) Init(configJSON string) string {
 	}
 
 	host.Info(fmt.Sprintf("RateLimiter %s: max_tokens=%d, refill_rate=%dms",
-		r.ActorID, r.MaxTokens, r.RefillRateMs))
+		r.ActorID(), r.MaxTokens, r.RefillRateMs))
 	return ""
 }
 

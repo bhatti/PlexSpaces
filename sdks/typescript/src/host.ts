@@ -44,6 +44,12 @@ import {
   poolCheckout as hostPoolCheckout,
   poolCheckin as hostPoolCheckin,
   poolGetMetrics as hostPoolGetMetrics,
+  createShardGroup as hostCreateShardGroup,
+  bulkUpdateShardGroup as hostBulkUpdateShardGroup,
+  mapShardGroup as hostMapShardGroup,
+  scatterGather as hostScatterGather,
+  applicationMetricsAdd as hostApplicationMetricsAdd,
+  applicationGetStatus as hostApplicationGetStatus,
   // @ts-expect-error Virtual import
 } from 'plexspaces:simple-actor/host@0.1.0';
 
@@ -382,6 +388,54 @@ export class Host {
     } catch {
       return null;
     }
+  }
+
+  createShardGroup(request: Record<string, unknown>): Record<string, unknown> {
+    const result = safeCall(hostCreateShardGroup, JSON.stringify(request)) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  bulkUpdateShardGroup(request: Record<string, unknown>): Record<string, unknown> {
+    const result = safeCall(hostBulkUpdateShardGroup, JSON.stringify(request)) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  mapShardGroup(request: Record<string, unknown>): Record<string, unknown> {
+    const result = safeCall(hostMapShardGroup, JSON.stringify(request)) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  scatterGather(request: Record<string, unknown>): Record<string, unknown> {
+    const result = safeCall(hostScatterGather, JSON.stringify(request)) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  applicationMetricsAdd(applicationId: string, metrics: Record<string, unknown>): Record<string, unknown> {
+    const result = safeCall(hostApplicationMetricsAdd, applicationId, JSON.stringify(metrics)) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  applicationGetStatus(applicationId: string, nodeId: string): Record<string, unknown> {
+    const result = safeCall(hostApplicationGetStatus, applicationId, nodeId) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
   }
 }
 

@@ -26,10 +26,11 @@
 
 use anyhow::{Context, Result};
 use plexspaces_proto::application::v1::{
-    application_service_client::ApplicationServiceClient, ApplicationSpec, ApplicationType,
-    DeployApplicationRequest, ListApplicationsRequest, ShutdownStrategy,
-    UndeployApplicationRequest,
+    application_service_client::ApplicationServiceClient, ApplicationInfo, ApplicationMetrics,
+    ApplicationSpec, ApplicationType, DeployApplicationRequest, ListApplicationsRequest,
+    ListApplicationsResponse, ShutdownStrategy, UndeployApplicationRequest,
 };
+use plexspaces_proto::prost_types;
 use plexspaces_proto::wasm::v1::WasmModule;
 use reqwest::multipart;
 use std::fs;
@@ -422,8 +423,8 @@ pub async fn undeploy(node_addr: &str, app_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// List deployed applications
-pub async fn list(node_addr: &str) -> Result<()> {
+/// List deployed applications (gRPC `ApplicationService::list_applications`).
+pub async fn list(node_addr: &str, json_output: bool) -> Result<()> {
     // Set max message size to 5MB for gRPC (matches server setting)
     // Note: For large WASM files (>5MB), use HTTP multipart endpoint instead
     const GRPC_MAX_MESSAGE_SIZE: usize = 5 * 1024 * 1024; // 5MB
@@ -438,8 +439,6 @@ pub async fn list(node_addr: &str) -> Result<()> {
         .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
         .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE);
 
-    println!("📋 Listing applications on node: {}", node_addr);
-
     let request = ListApplicationsRequest {
         status_filter: None,
     };
@@ -449,6 +448,15 @@ pub async fn list(node_addr: &str) -> Result<()> {
         .await
         .context("Failed to list applications")?
         .into_inner();
+
+    if json_output {
+        let s = list_applications_response_to_json_string(&response)
+            .context("Failed to serialize list response to JSON")?;
+        println!("{}", s);
+        return Ok(());
+    }
+
+    println!("📋 Listing applications on node: {}", node_addr);
 
     if response.applications.is_empty() {
         println!("   No applications deployed");
@@ -462,4 +470,114 @@ pub async fn list(node_addr: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn list_applications_response_to_json_string(resp: &ListApplicationsResponse) -> serde_json::Result<String> {
+    let apps: Vec<serde_json::Value> = resp
+        .applications
+        .iter()
+        .map(application_info_to_json)
+        .collect();
+    serde_json::to_string(&serde_json::json!({ "applications": apps }))
+}
+
+fn application_info_to_json(a: &ApplicationInfo) -> serde_json::Value {
+    serde_json::json!({
+        "application_id": a.application_id,
+        "name": a.name,
+        "version": a.version,
+        "status": a.status,
+        "deployed_at": a.deployed_at.as_ref().map(timestamp_to_rfc3339),
+        "metrics": a.metrics.as_ref().map(application_metrics_to_json),
+    })
+}
+
+fn application_metrics_to_json(m: &ApplicationMetrics) -> serde_json::Value {
+    serde_json::json!({
+        "actor_counts": m.actor_counts,
+        "supervisor_count": m.supervisor_count,
+        "uptime_seconds": m.uptime_seconds,
+        "message_count": m.message_count,
+        "error_count": m.error_count,
+        "counter_metrics": m.counter_metrics,
+        "latency_totals_ms": m.latency_totals_ms,
+        "latency_max_ms": m.latency_max_ms,
+        "latency_samples": m.latency_samples,
+    })
+}
+
+fn timestamp_to_rfc3339(t: &prost_types::Timestamp) -> String {
+    use chrono::{TimeZone, Utc};
+    let nanos = t.nanos.clamp(0, 999_999_999) as u32;
+    match Utc.timestamp_opt(t.seconds, nanos).single() {
+        Some(dt) => dt.to_rfc3339(),
+        None => format!("{}.{:09}Z", t.seconds, nanos),
+    }
+}
+
+#[cfg(test)]
+mod list_json_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn list_applications_json_empty_applications() {
+        let r = ListApplicationsResponse {
+            applications: vec![],
+        };
+        let s = list_applications_response_to_json_string(&r).unwrap();
+        assert_eq!(s, r#"{"applications":[]}"#);
+    }
+
+    #[test]
+    fn list_applications_json_includes_metrics_maps() {
+        let mut counter = HashMap::new();
+        counter.insert("tuple_operations".to_string(), 42u64);
+        let m = ApplicationMetrics {
+            actor_counts: HashMap::new(),
+            supervisor_count: 1,
+            uptime_seconds: 10,
+            message_count: 5,
+            error_count: 0,
+            counter_metrics: counter,
+            latency_totals_ms: HashMap::new(),
+            latency_max_ms: HashMap::new(),
+            latency_samples: HashMap::new(),
+        };
+        let r = ListApplicationsResponse {
+            applications: vec![ApplicationInfo {
+                application_id: "app-1".into(),
+                name: "my-app".into(),
+                version: "1.0.0".into(),
+                status: 0,
+                deployed_at: None,
+                metrics: Some(m),
+            }],
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&list_applications_response_to_json_string(&r).unwrap()).unwrap();
+        assert_eq!(v["applications"][0]["application_id"], "app-1");
+        assert_eq!(v["applications"][0]["metrics"]["counter_metrics"]["tuple_operations"], 42);
+    }
+
+    #[test]
+    fn list_applications_json_serializes_deployed_at() {
+        let r = ListApplicationsResponse {
+            applications: vec![ApplicationInfo {
+                application_id: "a".into(),
+                name: "n".into(),
+                version: "1".into(),
+                status: 0,
+                deployed_at: Some(prost_types::Timestamp {
+                    seconds: 1_700_000_000,
+                    nanos: 123_456_789,
+                }),
+                metrics: None,
+            }],
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&list_applications_response_to_json_string(&r).unwrap()).unwrap();
+        let s = v["applications"][0]["deployed_at"].as_str().expect("deployed_at string");
+        assert!(s.contains('T'), "RFC 3339 shape: {s}");
+    }
 }

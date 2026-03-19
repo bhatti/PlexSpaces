@@ -44,9 +44,11 @@ use plexspaces_core::actor_id::parse_actor_id;
 use plexspaces_core::{ActorId, LockManager, RequestContext, TupleSpaceProvider};
 use plexspaces_locks::{AcquireLockOptions, RenewLockOptions};
 use plexspaces_proto::actor::v1::{
-    BulkUpdateShardGroupRequest, ConsistencyLevel, CreateShardGroupRequest, DataParallelConfig,
-    MapShardGroupRequest, NodePlacement, NodePlacementStrategy, PartitionStrategy,
-    RebalancePolicy, ScatterGatherRequest, ShardGroupAggregationStrategy,
+    AllReduceShardGroupRequest, BarrierShardGroupRequest, BroadcastShardGroupRequest,
+    BulkUpdateShardGroupRequest, CollectiveReduction, CollectiveTargetField, ConsistencyLevel,
+    CreateShardGroupRequest, DataParallelConfig, MapShardGroupRequest, NodePlacement,
+    NodePlacementStrategy, PartitionStrategy, RebalancePolicy, ReduceShardGroupRequest,
+    ScatterGatherRequest, ShardGroupAggregationStrategy, SpawnActorRequest, SpawnActorsRequest,
 };
 use plexspaces_proto::application::v1::{ApplicationInfo, ApplicationMetrics};
 use plexspaces_proto::common::v1::Message;
@@ -411,6 +413,90 @@ fn make_call_message(payload: &serde_json::Value) -> Result<Message, String> {
         payload: bytes,
         message_type: "call".to_string(),
         ..Default::default()
+    })
+}
+
+fn make_message_with_type(payload: &serde_json::Value, message_type: &str) -> Result<Message, String> {
+    let mut message = make_call_message(payload)?;
+    message.message_type = message_type.to_string();
+    Ok(message)
+}
+
+fn make_message_from_request(
+    request: &serde_json::Value,
+    field_name: &str,
+    default_type: &str,
+) -> Result<Message, String> {
+    let payload = request.get(field_name).unwrap_or(&serde_json::Value::Null);
+    let message_type = request
+        .get("message_type")
+        .and_then(|value| value.as_str())
+        .unwrap_or(default_type);
+    let mut message = make_message_with_type(payload, message_type)?;
+    if let Some(headers) = request.get("headers").and_then(|value| value.as_object()) {
+        message.headers = headers
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    value
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| value.to_string()),
+                )
+            })
+            .collect();
+    }
+    Ok(message)
+}
+
+fn parse_collective_target(
+    value: Option<&serde_json::Value>,
+) -> Result<Option<CollectiveTargetField>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if let Some(path) = value.as_str() {
+        return Ok(Some(CollectiveTargetField {
+            value_path: path.to_string(),
+        }));
+    }
+    let Some(map) = value.as_object() else {
+        return Err("target must be a string or object".to_string());
+    };
+    Ok(Some(CollectiveTargetField {
+        value_path: map
+            .get("value_path")
+            .and_then(|entry| entry.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    }))
+}
+
+fn parse_collective_reduction(value: Option<&str>) -> CollectiveReduction {
+    match value.unwrap_or_default() {
+        "sum" => CollectiveReduction::CollectiveReductionSum,
+        "min" => CollectiveReduction::CollectiveReductionMin,
+        "max" => CollectiveReduction::CollectiveReductionMax,
+        "product" => CollectiveReduction::CollectiveReductionProduct,
+        "concat" => CollectiveReduction::CollectiveReductionConcat,
+        "bool_and" => CollectiveReduction::CollectiveReductionBoolAnd,
+        "bool_or" => CollectiveReduction::CollectiveReductionBoolOr,
+        _ => CollectiveReduction::CollectiveReductionUnspecified,
+    }
+}
+
+fn shard_query_response_to_json(shard: plexspaces_proto::actor::v1::ShardQueryResponse) -> serde_json::Value {
+    let payload = shard
+        .response
+        .and_then(|message| serde_json::from_slice::<serde_json::Value>(&message.payload).ok())
+        .unwrap_or(serde_json::Value::Null);
+    serde_json::json!({
+        "shard_id": shard.shard_id,
+        "shard_actor_id": shard.shard_actor_id,
+        "success": shard.success,
+        "error": shard.error,
+        "payload": payload,
     })
 }
 
@@ -1598,9 +1684,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Ok(request) => request,
             Err(err) => return format!("ERROR: invalid map-shard-group request: {}", err),
         };
-        let mut query = match make_call_message(
-            request.get("query").unwrap_or(&serde_json::Value::Null),
-        ) {
+        let mut query = match make_message_from_request(&request, "query", "call") {
             Ok(message) => message,
             Err(err) => return format!("ERROR: {}", err),
         };
@@ -1666,9 +1750,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Ok(request) => request,
             Err(err) => return format!("ERROR: invalid scatter-gather request: {}", err),
         };
-        let mut query = match make_call_message(
-            request.get("query").unwrap_or(&serde_json::Value::Null),
-        ) {
+        let mut query = match make_message_from_request(&request, "query", "call") {
             Ok(message) => message,
             Err(err) => return format!("ERROR: {}", err),
         };
@@ -1734,6 +1816,320 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
                 });
                 serde_json::to_string(&payload)
                     .unwrap_or_else(|_| "ERROR: serialize scatter_gather response".to_string())
+            }
+            Err(err) => format!("ERROR: {}", err),
+        }
+    }
+
+    async fn broadcast_shard_group(&mut self, request_json: String) -> String {
+        let request: serde_json::Value = match serde_json::from_str(&request_json) {
+            Ok(request) => request,
+            Err(err) => return format!("ERROR: invalid broadcast-shard-group request: {}", err),
+        };
+        let mut message = match make_message_from_request(&request, "message", "cast") {
+            Ok(message) => message,
+            Err(err) => return format!("ERROR: {}", err),
+        };
+        message.sender_id = self.actor_id.to_string();
+        let req = BroadcastShardGroupRequest {
+            group_id: request
+                .get("group_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            message: Some(message),
+            timeout: parse_timeout_duration(request.get("timeout_ms")),
+            min_acks: request
+                .get("min_acks")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0) as u32,
+        };
+        let ctx = self.pg_context();
+        match self.host_functions.broadcast_shard_group(&ctx, req).await {
+            Ok(response) => {
+                let shard_responses: Vec<serde_json::Value> = response
+                    .shard_responses
+                    .into_iter()
+                    .map(shard_query_response_to_json)
+                    .collect();
+                let stats = response
+                    .stats
+                    .map(|stats| {
+                        serde_json::json!({
+                            "shards_queried": stats.shards_queried,
+                            "shards_responded": stats.shards_responded,
+                            "shards_failed": stats.shards_failed,
+                        })
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                serde_json::to_string(&serde_json::json!({
+                    "shard_responses": shard_responses,
+                    "stats": stats,
+                }))
+                .unwrap_or_else(|_| "ERROR: serialize broadcast_shard_group response".to_string())
+            }
+            Err(err) => format!("ERROR: {}", err),
+        }
+    }
+
+    async fn reduce_shard_group(&mut self, request_json: String) -> String {
+        let request: serde_json::Value = match serde_json::from_str(&request_json) {
+            Ok(request) => request,
+            Err(err) => return format!("ERROR: invalid reduce-shard-group request: {}", err),
+        };
+        let mut map_function = match make_message_from_request(&request, "map_function", "call") {
+            Ok(message) => message,
+            Err(err) => return format!("ERROR: {}", err),
+        };
+        map_function.sender_id = self.actor_id.to_string();
+        let target = match parse_collective_target(request.get("target")) {
+            Ok(target) => target,
+            Err(err) => return format!("ERROR: invalid target: {}", err),
+        };
+        let req = ReduceShardGroupRequest {
+            group_id: request
+                .get("group_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            map_function: Some(map_function),
+            timeout: parse_timeout_duration(request.get("timeout_ms")),
+            min_responses: request
+                .get("min_responses")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0) as u32,
+            reduction: parse_collective_reduction(
+                request.get("reduction").and_then(|value| value.as_str()),
+            ) as i32,
+            target,
+        };
+        let ctx = self.pg_context();
+        match self.host_functions.reduce_shard_group(&ctx, req).await {
+            Ok(response) => {
+                let result = response
+                    .result
+                    .and_then(|message| serde_json::from_slice::<serde_json::Value>(&message.payload).ok())
+                    .unwrap_or(serde_json::Value::Null);
+                let shard_responses: Vec<serde_json::Value> = response
+                    .shard_responses
+                    .into_iter()
+                    .map(shard_query_response_to_json)
+                    .collect();
+                let stats = response
+                    .stats
+                    .map(|stats| {
+                        serde_json::json!({
+                            "shards_queried": stats.shards_queried,
+                            "shards_responded": stats.shards_responded,
+                            "shards_failed": stats.shards_failed,
+                        })
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                serde_json::to_string(&serde_json::json!({
+                    "result": result,
+                    "shard_responses": shard_responses,
+                    "stats": stats,
+                }))
+                .unwrap_or_else(|_| "ERROR: serialize reduce_shard_group response".to_string())
+            }
+            Err(err) => format!("ERROR: {}", err),
+        }
+    }
+
+    async fn all_reduce_shard_group(&mut self, request_json: String) -> String {
+        let request: serde_json::Value = match serde_json::from_str(&request_json) {
+            Ok(request) => request,
+            Err(err) => return format!("ERROR: invalid all-reduce-shard-group request: {}", err),
+        };
+        let mut map_function = match make_message_from_request(&request, "map_function", "call") {
+            Ok(message) => message,
+            Err(err) => return format!("ERROR: {}", err),
+        };
+        map_function.sender_id = self.actor_id.to_string();
+        let target = match parse_collective_target(request.get("target")) {
+            Ok(target) => target,
+            Err(err) => return format!("ERROR: invalid target: {}", err),
+        };
+        let req = AllReduceShardGroupRequest {
+            group_id: request
+                .get("group_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            map_function: Some(map_function),
+            timeout: parse_timeout_duration(request.get("timeout_ms")),
+            min_responses: request
+                .get("min_responses")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0) as u32,
+            reduction: parse_collective_reduction(
+                request.get("reduction").and_then(|value| value.as_str()),
+            ) as i32,
+            target,
+        };
+        let ctx = self.pg_context();
+        match self.host_functions.all_reduce_shard_group(&ctx, req).await {
+            Ok(response) => {
+                let result = response
+                    .result
+                    .and_then(|message| serde_json::from_slice::<serde_json::Value>(&message.payload).ok())
+                    .unwrap_or(serde_json::Value::Null);
+                let shard_responses: Vec<serde_json::Value> = response
+                    .shard_responses
+                    .into_iter()
+                    .map(shard_query_response_to_json)
+                    .collect();
+                let stats = response
+                    .stats
+                    .map(|stats| {
+                        serde_json::json!({
+                            "shards_queried": stats.shards_queried,
+                            "shards_responded": stats.shards_responded,
+                            "shards_failed": stats.shards_failed,
+                        })
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                serde_json::to_string(&serde_json::json!({
+                    "result": result,
+                    "shard_responses": shard_responses,
+                    "stats": stats,
+                }))
+                .unwrap_or_else(|_| "ERROR: serialize all_reduce_shard_group response".to_string())
+            }
+            Err(err) => format!("ERROR: {}", err),
+        }
+    }
+
+    async fn barrier_shard_group(&mut self, request_json: String) -> String {
+        let request: serde_json::Value = match serde_json::from_str(&request_json) {
+            Ok(request) => request,
+            Err(err) => return format!("ERROR: invalid barrier-shard-group request: {}", err),
+        };
+        let req = BarrierShardGroupRequest {
+            group_id: request
+                .get("group_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            barrier_id: request
+                .get("barrier_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            round: request
+                .get("round")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0),
+            timeout: parse_timeout_duration(request.get("timeout_ms")),
+            min_acks: request
+                .get("min_acks")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0) as u32,
+        };
+        let ctx = self.pg_context();
+        match self.host_functions.barrier_shard_group(&ctx, req).await {
+            Ok(response) => {
+                let shard_responses: Vec<serde_json::Value> = response
+                    .shard_responses
+                    .into_iter()
+                    .map(shard_query_response_to_json)
+                    .collect();
+                let stats = response
+                    .stats
+                    .map(|stats| {
+                        serde_json::json!({
+                            "shards_queried": stats.shards_queried,
+                            "shards_responded": stats.shards_responded,
+                            "shards_failed": stats.shards_failed,
+                        })
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                serde_json::to_string(&serde_json::json!({
+                    "shard_responses": shard_responses,
+                    "stats": stats,
+                }))
+                .unwrap_or_else(|_| "ERROR: serialize barrier_shard_group response".to_string())
+            }
+            Err(err) => format!("ERROR: {}", err),
+        }
+    }
+
+    async fn spawn_actors(&mut self, request_json: String) -> String {
+        let request: serde_json::Value = match serde_json::from_str(&request_json) {
+            Ok(request) => request,
+            Err(err) => return format!("ERROR: invalid spawn-actors request: {}", err),
+        };
+        let Some(items) = request.get("requests").and_then(|value| value.as_array()) else {
+            return "ERROR: invalid spawn-actors request: requests must be an array".to_string();
+        };
+        let mut requests = Vec::with_capacity(items.len());
+        for item in items {
+            let Some(map) = item.as_object() else {
+                return "ERROR: invalid spawn-actors request: each request must be an object".to_string();
+            };
+            let labels = match value_to_string_map(map.get("labels")) {
+                Ok(labels) => labels,
+                Err(err) => return format!("ERROR: invalid labels: {}", err),
+            };
+            let initial_state = match serde_json::to_vec(
+                map.get("initial_state").unwrap_or(&serde_json::Value::Null),
+            ) {
+                Ok(bytes) => bytes,
+                Err(err) => return format!("ERROR: invalid initial_state: {}", err),
+            };
+            requests.push(SpawnActorRequest {
+                actor_type: map
+                    .get("actor_type")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                actor_id: map
+                    .get("actor_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                initial_state,
+                config: None,
+                labels,
+                facets: Vec::new(),
+                namespace: map
+                    .get("namespace")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                instances_count: map
+                    .get("instances_count")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(1) as u32,
+            });
+        }
+        let ctx = self.pg_context();
+        match self
+            .host_functions
+            .spawn_actors(&ctx, SpawnActorsRequest { requests })
+            .await
+        {
+            Ok(response) => {
+                let results: Vec<serde_json::Value> = response
+                    .results
+                    .into_iter()
+                    .map(|result| {
+                        serde_json::json!({
+                            "success": result.success,
+                            "error": result.error,
+                            "response": result.response.map(|resp| serde_json::json!({
+                                "actor_ref": resp.actor_ref,
+                                "actor_id": resp
+                                    .actor
+                                    .as_ref()
+                                    .map(|actor| actor.actor_id.clone())
+                                    .unwrap_or_default(),
+                            })),
+                        })
+                    })
+                    .collect();
+                serde_json::to_string(&serde_json::json!({ "results": results }))
+                    .unwrap_or_else(|_| "ERROR: serialize spawn_actors response".to_string())
             }
             Err(err) => format!("ERROR: {}", err),
         }
@@ -1970,6 +2366,155 @@ mod tests {
             })
         }
 
+        async fn broadcast_shard_group(
+            &self,
+            _ctx: &RequestContext,
+            _req: BroadcastShardGroupRequest,
+        ) -> Result<plexspaces_proto::actor::v1::BroadcastShardGroupResponse, String> {
+            Ok(plexspaces_proto::actor::v1::BroadcastShardGroupResponse {
+                shard_responses: vec![ShardQueryResponse {
+                    shard_id: 0,
+                    shard_actor_id: "worker-0@node-a".to_string(),
+                    response: Some(Message {
+                        payload: br#"{"ack":true}"#.to_vec(),
+                        ..Default::default()
+                    }),
+                    latency: None,
+                    success: true,
+                    error: String::new(),
+                }],
+                stats: Some(ScatterGatherStats {
+                    shards_queried: 1,
+                    shards_responded: 1,
+                    shards_failed: 0,
+                    max_latency: None,
+                }),
+            })
+        }
+
+        async fn reduce_shard_group(
+            &self,
+            _ctx: &RequestContext,
+            _req: ReduceShardGroupRequest,
+        ) -> Result<plexspaces_proto::actor::v1::ReduceShardGroupResponse, String> {
+            Ok(plexspaces_proto::actor::v1::ReduceShardGroupResponse {
+                result: Some(Message {
+                    payload: br#"{"sum":42}"#.to_vec(),
+                    ..Default::default()
+                }),
+                shard_responses: vec![ShardQueryResponse {
+                    shard_id: 0,
+                    shard_actor_id: "worker-0@node-a".to_string(),
+                    response: Some(Message {
+                        payload: br#"{"value":21}"#.to_vec(),
+                        ..Default::default()
+                    }),
+                    latency: None,
+                    success: true,
+                    error: String::new(),
+                }],
+                stats: Some(ScatterGatherStats {
+                    shards_queried: 1,
+                    shards_responded: 1,
+                    shards_failed: 0,
+                    max_latency: None,
+                }),
+            })
+        }
+
+        async fn all_reduce_shard_group(
+            &self,
+            _ctx: &RequestContext,
+            _req: AllReduceShardGroupRequest,
+        ) -> Result<plexspaces_proto::actor::v1::AllReduceShardGroupResponse, String> {
+            Ok(plexspaces_proto::actor::v1::AllReduceShardGroupResponse {
+                result: Some(Message {
+                    payload: br#"{"sum":42}"#.to_vec(),
+                    ..Default::default()
+                }),
+                shard_responses: vec![ShardQueryResponse {
+                    shard_id: 0,
+                    shard_actor_id: "worker-0@node-a".to_string(),
+                    response: Some(Message {
+                        payload: br#"{"ack":true}"#.to_vec(),
+                        ..Default::default()
+                    }),
+                    latency: None,
+                    success: true,
+                    error: String::new(),
+                }],
+                stats: Some(ScatterGatherStats {
+                    shards_queried: 1,
+                    shards_responded: 1,
+                    shards_failed: 0,
+                    max_latency: None,
+                }),
+            })
+        }
+
+        async fn barrier_shard_group(
+            &self,
+            _ctx: &RequestContext,
+            _req: BarrierShardGroupRequest,
+        ) -> Result<plexspaces_proto::actor::v1::BarrierShardGroupResponse, String> {
+            Ok(plexspaces_proto::actor::v1::BarrierShardGroupResponse {
+                shard_responses: vec![ShardQueryResponse {
+                    shard_id: 0,
+                    shard_actor_id: "worker-0@node-a".to_string(),
+                    response: Some(Message {
+                        payload: br#"{"barrier":"ready"}"#.to_vec(),
+                        ..Default::default()
+                    }),
+                    latency: None,
+                    success: true,
+                    error: String::new(),
+                }],
+                stats: Some(ScatterGatherStats {
+                    shards_queried: 1,
+                    shards_responded: 1,
+                    shards_failed: 0,
+                    max_latency: None,
+                }),
+            })
+        }
+
+        async fn spawn_actors(
+            &self,
+            _ctx: &RequestContext,
+            req: SpawnActorsRequest,
+        ) -> Result<plexspaces_proto::actor::v1::SpawnActorsResponse, String> {
+            Ok(plexspaces_proto::actor::v1::SpawnActorsResponse {
+                results: req
+                    .requests
+                    .into_iter()
+                    .map(|request| plexspaces_proto::actor::v1::SpawnActorResult {
+                        success: true,
+                        error: String::new(),
+                        response: Some(plexspaces_proto::actor::v1::SpawnActorResponse {
+                            actor_ref: format!(
+                                "{}@node-a",
+                                if request.actor_id.is_empty() {
+                                    request.actor_type.clone()
+                                } else {
+                                    request.actor_id.clone()
+                                }
+                            ),
+                            actor: Some(plexspaces_proto::actor::v1::Actor {
+                                actor_id: if request.actor_id.is_empty() {
+                                    request.actor_type.clone()
+                                } else {
+                                    request.actor_id.clone()
+                                },
+                                actor_type: request.actor_type,
+                                namespace: request.namespace,
+                                ..Default::default()
+                            }),
+                        }),
+                    })
+                    .collect(),
+            })
+        }
+
         async fn merge_application_metrics(
             &self,
             _ctx: &RequestContext,
@@ -2112,5 +2657,70 @@ mod tests {
         assert!(response.contains("\"node_id\":\"test-node-8092\""));
         assert!(response.contains("\"node_address\":\"http://127.0.0.1:8092\""));
         assert!(response.contains("\"tuple_operations\":7"));
+    }
+
+    #[tokio::test]
+    async fn broadcast_shard_group_serializes_response() {
+        let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
+            MockMessageSender,
+        )));
+        let mut host =
+            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+        let response = host
+            .broadcast_shard_group(
+                serde_json::json!({
+                    "group_id": "mpi-group",
+                    "message": { "op": "broadcast", "value": 7 },
+                })
+                .to_string(),
+            )
+            .await;
+        assert!(response.contains("\"ack\":true"));
+        assert!(response.contains("\"shards_responded\":1"));
+    }
+
+    #[tokio::test]
+    async fn reduce_shard_group_serializes_response() {
+        let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
+            MockMessageSender,
+        )));
+        let mut host =
+            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+        let response = host
+            .reduce_shard_group(
+                serde_json::json!({
+                    "group_id": "mpi-group",
+                    "map_function": { "op": "local-sum" },
+                    "reduction": "sum",
+                })
+                .to_string(),
+            )
+            .await;
+        assert!(response.contains("\"sum\":42"));
+        assert!(response.contains("\"value\":21"));
+    }
+
+    #[tokio::test]
+    async fn spawn_actors_serializes_results() {
+        let host_functions = Arc::new(HostFunctions::with_message_sender(Arc::new(
+            MockMessageSender,
+        )));
+        let mut host =
+            SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
+        let response = host
+            .spawn_actors(
+                serde_json::json!({
+                    "requests": [{
+                        "actor_type": "worker",
+                        "actor_id": "worker-0",
+                        "namespace": "mpi-app",
+                        "initial_state": { "rank": 0 }
+                    }]
+                })
+                .to_string(),
+            )
+            .await;
+        assert!(response.contains("\"success\":true"));
+        assert!(response.contains("\"actor_ref\":\"worker-0@node-a\""));
     }
 }

@@ -220,5 +220,5 @@ Running consensus...
 ## See Also
 
 - [Chat Room](../chat_room/) - ProcessGroup broadcast
-- [MPI Collectives](../mpi_collectives/) - Collective operations
+- [MPI Collectives (Go WASM)](../../../go/apps/mpi_collectives/) - Collective operations with shard-group APIs
 - [Architecture Docs](../../../../docs/architecture.md)

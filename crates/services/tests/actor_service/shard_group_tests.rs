@@ -1476,6 +1476,7 @@ async fn test_remote_spawn_actor_uses_request_namespace_for_actor_id() {
             labels: HashMap::new(),
             facets: vec![],
             namespace: "heat-diffusion-rust".to_string(),
+            instances_count: 1,
         }))
         .await
         .expect("remote spawn should succeed")
@@ -1789,4 +1790,358 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
         .collect::<std::collections::BTreeSet<_>>();
     assert!(node_ids.contains("node1"));
     assert!(node_ids.contains("node2"));
+}
+
+// ========================================================================
+// Collective Operation Tests (Broadcast, Reduce, AllReduce, Barrier, SpawnActors)
+// ========================================================================
+
+use plexspaces_proto::actor::v1::{
+    AllReduceShardGroupRequest, BarrierShardGroupRequest, BroadcastShardGroupRequest,
+    CollectiveReduction, ReduceShardGroupRequest, SpawnActorsRequest,
+};
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_broadcast_shard_group_success() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let create_req = Request::new(new_create_shard_group_request(
+        "broadcast-group",
+        "counter",
+        3,
+        HashMap::new(),
+    ));
+    let _ = service.create_shard_group(create_req).await;
+
+    let req = Request::new(BroadcastShardGroupRequest {
+        group_id: "broadcast-group".to_string(),
+        message: Some(create_test_proto_message(
+            serde_json::to_vec(&serde_json::json!({"action": "ping"})).unwrap(),
+        )),
+        timeout: Some(prost_types::Duration {
+            seconds: 5,
+            nanos: 0,
+        }),
+        min_acks: 0,
+    });
+
+    let result = service.broadcast_shard_group(req).await;
+    assert!(result.is_ok(), "Broadcast should succeed: {:?}", result.err());
+    let resp = result.unwrap().into_inner();
+    let stats = resp.stats.as_ref().expect("stats should be present");
+    assert_eq!(stats.shards_queried, 3);
+    assert_eq!(resp.shard_responses.len(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_broadcast_shard_group_not_found() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let req = Request::new(BroadcastShardGroupRequest {
+        group_id: "nonexistent-group".to_string(),
+        message: Some(create_test_proto_message(b"test".to_vec())),
+        timeout: Some(prost_types::Duration {
+            seconds: 5,
+            nanos: 0,
+        }),
+        min_acks: 0,
+    });
+
+    let result = service.broadcast_shard_group(req).await;
+    assert!(result.is_err(), "Non-existent group should fail");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_reduce_shard_group_no_reducible_values() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let create_req = Request::new(new_create_shard_group_request(
+        "reduce-group",
+        "counter",
+        3,
+        HashMap::new(),
+    ));
+    let _ = service.create_shard_group(create_req).await;
+
+    // CounterActor's handle_request returns Ok(()) without an explicit reply payload,
+    // so reduce cannot extract numeric values from shard responses.
+    let req = Request::new(ReduceShardGroupRequest {
+        group_id: "reduce-group".to_string(),
+        map_function: Some(create_test_proto_message(
+            serde_json::to_vec(&serde_json::json!({"action": "get_count"})).unwrap(),
+        )),
+        timeout: Some(prost_types::Duration {
+            seconds: 5,
+            nanos: 0,
+        }),
+        min_responses: 0,
+        reduction: CollectiveReduction::CollectiveReductionSum as i32,
+        target: None,
+    });
+
+    let result = service.reduce_shard_group(req).await;
+    // Reduce correctly fails when shard responses don't contain reducible values
+    assert!(result.is_err(), "Reduce should fail when actors return empty payloads");
+    let status = result.unwrap_err();
+    assert!(
+        status.message().contains("No values available for reduction")
+            || status.message().contains("reduction"),
+        "Error should indicate reduction failure: {}",
+        status.message()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_reduce_shard_group_not_found() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let req = Request::new(ReduceShardGroupRequest {
+        group_id: "nonexistent-group".to_string(),
+        map_function: Some(create_test_proto_message(b"test".to_vec())),
+        timeout: Some(prost_types::Duration {
+            seconds: 5,
+            nanos: 0,
+        }),
+        min_responses: 0,
+        reduction: CollectiveReduction::CollectiveReductionSum as i32,
+        target: None,
+    });
+
+    let result = service.reduce_shard_group(req).await;
+    assert!(result.is_err(), "Non-existent group should fail");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_all_reduce_shard_group_no_reducible_values() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let create_req = Request::new(new_create_shard_group_request(
+        "allreduce-group",
+        "counter",
+        2,
+        HashMap::new(),
+    ));
+    let _ = service.create_shard_group(create_req).await;
+
+    // All-reduce fails at the reduce step when actors don't return reducible payloads
+    let req = Request::new(AllReduceShardGroupRequest {
+        group_id: "allreduce-group".to_string(),
+        map_function: Some(create_test_proto_message(
+            serde_json::to_vec(&serde_json::json!({"action": "get_count"})).unwrap(),
+        )),
+        timeout: Some(prost_types::Duration {
+            seconds: 5,
+            nanos: 0,
+        }),
+        min_responses: 0,
+        reduction: CollectiveReduction::CollectiveReductionSum as i32,
+        target: None,
+    });
+
+    let result = service.all_reduce_shard_group(req).await;
+    assert!(result.is_err(), "AllReduce should fail when actors return empty payloads");
+    let status = result.unwrap_err();
+    assert!(
+        status.message().contains("reduction") || status.message().contains("reduce"),
+        "Error should indicate reduction failure: {}",
+        status.message()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_all_reduce_shard_group_not_found() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let req = Request::new(AllReduceShardGroupRequest {
+        group_id: "nonexistent-group".to_string(),
+        map_function: Some(create_test_proto_message(b"test".to_vec())),
+        timeout: Some(prost_types::Duration {
+            seconds: 5,
+            nanos: 0,
+        }),
+        min_responses: 0,
+        reduction: CollectiveReduction::CollectiveReductionSum as i32,
+        target: None,
+    });
+
+    let result = service.all_reduce_shard_group(req).await;
+    assert!(result.is_err(), "Non-existent group should fail");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_barrier_shard_group_success() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let create_req = Request::new(new_create_shard_group_request(
+        "barrier-group",
+        "counter",
+        3,
+        HashMap::new(),
+    ));
+    let _ = service.create_shard_group(create_req).await;
+
+    let req = Request::new(BarrierShardGroupRequest {
+        group_id: "barrier-group".to_string(),
+        barrier_id: "barrier-1".to_string(),
+        round: 1,
+        timeout: Some(prost_types::Duration {
+            seconds: 5,
+            nanos: 0,
+        }),
+        min_acks: 0,
+    });
+
+    let result = service.barrier_shard_group(req).await;
+    assert!(result.is_ok(), "Barrier should succeed: {:?}", result.err());
+    let resp = result.unwrap().into_inner();
+    let stats = resp.stats.as_ref().expect("stats should be present");
+    assert_eq!(stats.shards_queried, 3);
+    assert_eq!(resp.shard_responses.len(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_barrier_shard_group_not_found() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let req = Request::new(BarrierShardGroupRequest {
+        group_id: "nonexistent-group".to_string(),
+        barrier_id: "b1".to_string(),
+        round: 1,
+        timeout: Some(prost_types::Duration {
+            seconds: 5,
+            nanos: 0,
+        }),
+        min_acks: 0,
+    });
+
+    let result = service.barrier_shard_group(req).await;
+    assert!(result.is_err(), "Non-existent group should fail");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_spawn_actors_success() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let req = Request::new(SpawnActorsRequest {
+        requests: vec![
+            SpawnActorRequest {
+                actor_type: "counter".to_string(),
+                namespace: "default".to_string(),
+                ..Default::default()
+            },
+            SpawnActorRequest {
+                actor_type: "counter".to_string(),
+                namespace: "default".to_string(),
+                ..Default::default()
+            },
+        ],
+    });
+
+    let result = service.spawn_actors(req).await;
+    assert!(
+        result.is_ok(),
+        "SpawnActors should succeed: {:?}",
+        result.err()
+    );
+    let resp = result.unwrap().into_inner();
+    assert_eq!(resp.results.len(), 2);
+    assert!(resp.results.iter().all(|r| r.success));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_spawn_actors_empty_request() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    let req = Request::new(SpawnActorsRequest { requests: vec![] });
+
+    let result = service.spawn_actors(req).await;
+    assert!(result.is_ok(), "Empty SpawnActors should succeed");
+    let resp = result.unwrap().into_inner();
+    assert_eq!(resp.results.len(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_spawn_actors_instances_count_replicas() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    // Spawn 3 replicas of the same actor type with a single request
+    let req = Request::new(SpawnActorsRequest {
+        requests: vec![SpawnActorRequest {
+            actor_type: "counter".to_string(),
+            namespace: "default".to_string(),
+            actor_id: "worker".to_string(),
+            instances_count: 3,
+            ..Default::default()
+        }],
+    });
+
+    let result = service.spawn_actors(req).await;
+    assert!(
+        result.is_ok(),
+        "SpawnActors with instances_count=3 should succeed: {:?}",
+        result.err()
+    );
+    let resp = result.unwrap().into_inner();
+    assert_eq!(resp.results.len(), 3, "Should have 3 results for 3 replicas");
+    assert!(resp.results.iter().all(|r| r.success));
+
+    // Verify actor IDs are prefixed correctly: worker-0, worker-1, worker-2
+    let actor_refs: Vec<&str> = resp
+        .results
+        .iter()
+        .filter_map(|r| r.response.as_ref())
+        .map(|r| r.actor_ref.as_str())
+        .collect();
+    assert_eq!(actor_refs.len(), 3);
+    assert!(actor_refs[0].starts_with("worker-0"));
+    assert!(actor_refs[1].starts_with("worker-1"));
+    assert!(actor_refs[2].starts_with("worker-2"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_spawn_actors_instances_count_zero_spawns_one() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    // instances_count=0 should behave as 1
+    let req = Request::new(SpawnActorsRequest {
+        requests: vec![SpawnActorRequest {
+            actor_type: "counter".to_string(),
+            namespace: "default".to_string(),
+            instances_count: 0,
+            ..Default::default()
+        }],
+    });
+
+    let result = service.spawn_actors(req).await;
+    assert!(result.is_ok());
+    let resp = result.unwrap().into_inner();
+    assert_eq!(resp.results.len(), 1, "instances_count=0 should spawn 1 actor");
+    assert!(resp.results[0].success);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_spawn_actors_instances_count_auto_id() {
+    let (service, _registry, _locator) = create_test_actor_service("test-node").await;
+
+    // No actor_id + instances_count=2 should generate ULID-based IDs
+    let req = Request::new(SpawnActorsRequest {
+        requests: vec![SpawnActorRequest {
+            actor_type: "counter".to_string(),
+            namespace: "default".to_string(),
+            instances_count: 2,
+            ..Default::default()
+        }],
+    });
+
+    let result = service.spawn_actors(req).await;
+    assert!(result.is_ok());
+    let resp = result.unwrap().into_inner();
+    assert_eq!(resp.results.len(), 2);
+    assert!(resp.results.iter().all(|r| r.success));
+
+    // IDs should be auto-generated (not empty)
+    for r in &resp.results {
+        let actor_ref = &r.response.as_ref().unwrap().actor_ref;
+        assert!(!actor_ref.is_empty(), "Auto-generated ID should not be empty");
+    }
 }

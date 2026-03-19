@@ -1963,7 +1963,7 @@ The PlexSpaces unified actor system provides:
 
 ### Next Steps
 
-- Explore [Examples](examples.md) for practical usage patterns
+- Explore [Examples](../examples/README.md) for practical usage patterns
 - Check [Getting Started](getting-started.md) to build your first actor
 
 ---
@@ -1973,7 +1973,7 @@ The PlexSpaces unified actor system provides:
 - [Architecture Overview](architecture.md) - System architecture
 - [Concepts](concepts.md) - Core concepts
 - [Getting Started](getting-started.md) - Quick start guide
-- [Examples](examples.md) - More examples
+- [Examples](../examples/README.md) - More examples
 - [Durability](durability.md) - Durability and journaling
 - [Security](security.md) - Security features
 

@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //
-// Order Fulfillment Workflow - Rust WASM (Temporal-style)
+// Order fulfillment workflow — Rust WASM (Temporal-style run / signal / query).
+// SDK macros + WIT: same pattern as data_parallel_worker (gen_server_actor(wasm), plexspaces_handlers(wasm)).
 //
-// Exports the plexspaces-simple-actor interface (init, handle, get-state, set-state)
-// with the same component ABI as the Go SDK. Build with build.sh then deploy via HTTP.
-//
-// Facets: virtual_actor + durability (app-config.toml).
+// Important (wasm32): `std::sync::Mutex` is non-reentrant. Never call `host::application_metrics_add`
+// (or anything that resolves `application_id` via the same mutex) while holding the state lock.
 
 use serde::{Deserialize, Serialize};
-use std::alloc::{alloc, dealloc, Layout};
-use std::ptr::write_volatile;
-use std::slice;
+use std::sync::{Mutex, OnceLock};
 
-// ---------------------------------------------------------------------------
-// State (one workflow instance per actor ID)
-// ---------------------------------------------------------------------------
+wit_bindgen::generate!({
+    path: "../../../../wit/plexspaces-simple-actor",
+    world: "actor-world",
+});
+
+use exports::plexspaces::simple_actor::actor::Guest;
+use plexspaces::simple_actor::host;
+use plexspaces_sdk::simple_actor::SimpleActorHandlers;
+use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct OrderStep {
@@ -25,6 +28,7 @@ struct OrderStep {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct OrderState {
+    application_id: String,
     order_id: String,
     customer_id: String,
     status: String,
@@ -45,73 +49,73 @@ impl OrderState {
     }
 }
 
-// Global state (WASM is single-threaded). Set by init/restore, read/written by handle/get_state/set_state.
-static mut STATE: Option<OrderState> = None;
+fn state_cell() -> &'static Mutex<OrderState> {
+    static STATE: OnceLock<Mutex<OrderState>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(OrderState::new()))
+}
 
-// Return area for canonical ABI: (ptr: u32, len: u32). Host reads then calls cabi_post_*.
-static mut RETURN_AREA: [u8; 8] = [0; 8];
-// Keep last return string alive until host calls cabi_post.
-static mut RETURN_BUF: Option<Vec<u8>> = None;
+fn with_state<T>(f: impl FnOnce(&mut OrderState) -> T) -> T {
+    let mut guard = state_cell()
+        .lock()
+        .expect("order state lock poisoned");
+    f(&mut *guard)
+}
 
-static mut NOW_MS_COUNTER: u64 = 0;
-
-fn now_ms() -> u64 {
-    // Use counter so we build without host import (component embed validates imports).
-    // At runtime the node provides host; for now timestamps are monotonic counters.
-    #[cfg(target_arch = "wasm32")]
+fn actor_application_id(actor_id: &str) -> String {
+    if let Some(namespace) = actor_id
+        .split_once("//")
+        .and_then(|(_, suffix)| suffix.split_once('@').map(|(qualified, _)| qualified))
+        .and_then(|qualified| qualified.rsplit_once("::").map(|(_, namespace)| namespace))
     {
-        unsafe {
-            NOW_MS_COUNTER += 1;
-            NOW_MS_COUNTER
-        }
+        return namespace.to_string();
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    0u64
+
+    actor_id
+        .split_once(':')
+        .and_then(|(_, suffix)| suffix.split_once('@').map(|(namespace, _)| namespace))
+        .map(str::to_string)
+        .unwrap_or_default()
 }
 
-fn ptr_len_to_string(ptr: u32, len: u32) -> String {
-    if len == 0 {
-        return String::new();
+/// Resolve application id for metrics. Do **not** call while holding `state_cell()` — it locks the same mutex.
+fn resolve_application_id() -> String {
+    let id = state_cell()
+        .lock()
+        .expect("order state lock poisoned")
+        .application_id
+        .clone();
+    if !id.is_empty() {
+        return id;
     }
-    let p = ptr as *const u8;
-    unsafe {
-        let s = slice::from_raw_parts(p, len as usize);
-        String::from_utf8_unchecked(s.to_vec())
-    }
+    actor_application_id(&host::self_id())
 }
 
-fn str_to_return(s: &str) -> u32 {
-    let bytes = s.as_bytes();
-    let n = bytes.len();
-    let ret_ptr = if n == 0 {
-        0u32
+fn merge_application_metrics_for(
+    application_id: &str,
+    metrics: serde_json::Value,
+    context: &str,
+) -> Result<(), String> {
+    let response = host::application_metrics_add(application_id, &metrics.to_string());
+    if response.starts_with("ERROR:") {
+        Err(format!("{}: {}", context, response))
     } else {
-        let layout = Layout::array::<u8>(n).unwrap();
-        let ptr = unsafe { alloc(layout) };
-        if ptr.is_null() {
-            0u32
-        } else {
-            unsafe {
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, n);
-                RETURN_BUF = Some(Vec::from_raw_parts(ptr, n, n));
-            }
-            ptr as u32
-        }
-    };
-    unsafe {
-        let area = &mut RETURN_AREA as *mut [u8; 8] as *mut u8;
-        write_volatile(area as *mut u32, ret_ptr);
-        write_volatile(area.add(4) as *mut u32, n as u32);
-        &RETURN_AREA as *const [u8; 8] as u32
+        Ok(())
     }
 }
 
-fn state_mut() -> &'static mut OrderState {
-    unsafe {
-        if STATE.is_none() {
-            STATE = Some(OrderState::new());
-        }
-        STATE.as_mut().unwrap()
+fn parse_op(msg_type: &str, payload_json: &str) -> Result<String, String> {
+    let payload: serde_json::Value =
+        serde_json::from_str(payload_json).map_err(|e| format!("invalid payload: {}", e))?;
+    if let Some(op) = payload
+        .get("op")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+    {
+        Ok(op)
+    } else if msg_type == "call" || msg_type == "cast" {
+        Err("missing op".to_string())
+    } else {
+        Ok(msg_type.to_string())
     }
 }
 
@@ -119,287 +123,348 @@ fn has_step(steps: &[OrderStep], name: &str) -> bool {
     steps.iter().any(|s| s.name == name)
 }
 
-fn run_workflow(payload: &serde_json::Value) -> String {
-    let state = state_mut();
-    let t0 = now_ms();
-    if state.created_at_ms == 0 {
-        state.created_at_ms = t0;
-    }
-    state.order_id = payload
-        .get("order_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or(&state.order_id)
-        .to_string();
-    state.customer_id = payload
-        .get("customer_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or(&state.customer_id)
-        .to_string();
-    state.updated_at_ms = now_ms();
-
-    if state.status != "pending" && state.status != "validated" {
-        return serde_json::json!({
-            "status": state.status,
-            "order_id": state.order_id,
-            "message": "Workflow already completed or cancelled"
-        })
-        .to_string();
-    }
-
-    let mut compute_ms = 0.0f64;
-
-    if !has_step(&state.steps, "validate") {
-        compute_ms += 8.0;
-        state.steps.push(OrderStep {
-            name: "validate".to_string(),
-            completed_at_ms: now_ms(),
-        });
-        state.status = "validated".to_string();
-        state.updated_at_ms = now_ms();
-    }
-    if state.cancel_requested {
-        return compensate("cancel_requested");
-    }
-
-    if !has_step(&state.steps, "reserve_inventory") {
-        compute_ms += 12.0;
-        state.steps.push(OrderStep {
-            name: "reserve_inventory".to_string(),
-            completed_at_ms: now_ms(),
-        });
-        state.status = "inventory_reserved".to_string();
-        state.updated_at_ms = now_ms();
-    }
-    if state.cancel_requested {
-        return compensate("cancel_requested");
-    }
-
-    if !has_step(&state.steps, "charge_payment") {
-        compute_ms += 10.0;
-        state.steps.push(OrderStep {
-            name: "charge_payment".to_string(),
-            completed_at_ms: now_ms(),
-        });
-        state.status = "payment_charged".to_string();
-        state.updated_at_ms = now_ms();
-    }
-    if state.cancel_requested {
-        return compensate("cancel_requested");
-    }
-
-    if !has_step(&state.steps, "ship") {
-        compute_ms += 15.0;
-        state.steps.push(OrderStep {
-            name: "ship".to_string(),
-            completed_at_ms: now_ms(),
-        });
-        state.status = "shipped".to_string();
-        state.updated_at_ms = now_ms();
-    }
-
-    let total_elapsed = (now_ms() - t0) as f64;
-    let compute_reported = compute_ms.min(total_elapsed);
-    let coord_reported = (total_elapsed - compute_reported).max(0.0);
-    state.total_compute_ms += compute_reported;
-    state.total_coord_ms += coord_reported;
-
-    serde_json::json!({
-        "status": state.status,
-        "order_id": state.order_id,
-        "steps_completed": state.steps.len(),
-        "total_compute_ms": state.total_compute_ms,
-        "total_coord_ms": state.total_coord_ms
-    })
-    .to_string()
-}
-
-fn compensate(reason: &str) -> String {
-    let state = state_mut();
+/// Build cancelled response JSON and metrics delta — no host calls; caller merges metrics **after** dropping state lock.
+fn compensate_body(state: &mut OrderState, reason: &str) -> (String, serde_json::Value) {
     state.status = "cancelled".to_string();
-    state.updated_at_ms = now_ms();
-    serde_json::json!({
+    state.updated_at_ms = host::now_ms();
+    let body = serde_json::json!({
         "status": "cancelled",
         "order_id": state.order_id,
         "reason": reason,
         "steps_rolled_back": state.steps.len()
     })
-    .to_string()
+    .to_string();
+    let metrics = serde_json::json!({
+        "message_count": 1,
+        "counter_metrics": { "workflow_compensations": 1 },
+    });
+    (body, metrics)
+}
+
+enum RunWorkflowPhase {
+    Early(String),
+    WithHostMetrics {
+        response: String,
+        metrics: serde_json::Value,
+        context: &'static str,
+    },
+}
+
+fn run_workflow(payload: &serde_json::Value) -> String {
+    let application_id = resolve_application_id();
+    let phase = with_state(|state| {
+        let t0 = host::now_ms();
+        if state.created_at_ms == 0 {
+            state.created_at_ms = t0;
+        }
+        state.order_id = payload
+            .get("order_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&state.order_id)
+            .to_string();
+        state.customer_id = payload
+            .get("customer_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&state.customer_id)
+            .to_string();
+        state.updated_at_ms = host::now_ms();
+
+        if state.status != "pending" && state.status != "validated" {
+            return RunWorkflowPhase::Early(
+                serde_json::json!({
+                    "status": state.status,
+                    "order_id": state.order_id,
+                    "message": "Workflow already completed or cancelled"
+                })
+                .to_string(),
+            );
+        }
+
+        let mut compute_ms = 0.0f64;
+
+        if !has_step(&state.steps, "validate") {
+            compute_ms += 8.0;
+            state.steps.push(OrderStep {
+                name: "validate".to_string(),
+                completed_at_ms: host::now_ms(),
+            });
+            state.status = "validated".to_string();
+            state.updated_at_ms = host::now_ms();
+        }
+        if state.cancel_requested {
+            let (body, metrics) = compensate_body(state, "cancel_requested");
+            return RunWorkflowPhase::WithHostMetrics {
+                response: body,
+                metrics,
+                context: "workflow compensate metrics",
+            };
+        }
+
+        if !has_step(&state.steps, "reserve_inventory") {
+            compute_ms += 12.0;
+            state.steps.push(OrderStep {
+                name: "reserve_inventory".to_string(),
+                completed_at_ms: host::now_ms(),
+            });
+            state.status = "inventory_reserved".to_string();
+            state.updated_at_ms = host::now_ms();
+        }
+        if state.cancel_requested {
+            let (body, metrics) = compensate_body(state, "cancel_requested");
+            return RunWorkflowPhase::WithHostMetrics {
+                response: body,
+                metrics,
+                context: "workflow compensate metrics",
+            };
+        }
+
+        if !has_step(&state.steps, "charge_payment") {
+            compute_ms += 10.0;
+            state.steps.push(OrderStep {
+                name: "charge_payment".to_string(),
+                completed_at_ms: host::now_ms(),
+            });
+            state.status = "payment_charged".to_string();
+            state.updated_at_ms = host::now_ms();
+        }
+        if state.cancel_requested {
+            let (body, metrics) = compensate_body(state, "cancel_requested");
+            return RunWorkflowPhase::WithHostMetrics {
+                response: body,
+                metrics,
+                context: "workflow compensate metrics",
+            };
+        }
+
+        if !has_step(&state.steps, "ship") {
+            compute_ms += 15.0;
+            state.steps.push(OrderStep {
+                name: "ship".to_string(),
+                completed_at_ms: host::now_ms(),
+            });
+            state.status = "shipped".to_string();
+            state.updated_at_ms = host::now_ms();
+        }
+
+        let total_elapsed = (host::now_ms().saturating_sub(t0)) as f64;
+        let compute_reported = compute_ms.min(total_elapsed);
+        let coord_reported = (total_elapsed - compute_reported).max(0.0);
+        state.total_compute_ms += compute_reported;
+        state.total_coord_ms += coord_reported;
+
+        let metrics = serde_json::json!({
+            "message_count": 1,
+            "counter_metrics": {
+                "workflow_runs": 1,
+                "workflow_steps_completed": state.steps.len() as u64,
+            },
+            "latency_totals_ms": {
+                "workflow.compute": compute_reported as u64,
+                "workflow.coordination": coord_reported as u64,
+            },
+            "latency_max_ms": {
+                "workflow.compute": compute_reported as u64,
+                "workflow.coordination": coord_reported as u64,
+            },
+            "latency_samples": {
+                "workflow.compute": 1,
+                "workflow.coordination": 1,
+            },
+        });
+
+        let response = serde_json::json!({
+            "status": state.status,
+            "order_id": state.order_id,
+            "steps_completed": state.steps.len(),
+            "total_compute_ms": state.total_compute_ms,
+            "total_coord_ms": state.total_coord_ms
+        })
+        .to_string();
+
+        RunWorkflowPhase::WithHostMetrics {
+            response,
+            metrics,
+            context: "workflow_run metrics",
+        }
+    });
+
+    match phase {
+        RunWorkflowPhase::Early(s) => s,
+        RunWorkflowPhase::WithHostMetrics {
+            response,
+            metrics,
+            context,
+        } => {
+            if let Err(err) = merge_application_metrics_for(&application_id, metrics, context) {
+                return serde_json::json!({ "error": err }).to_string();
+            }
+            response
+        }
+    }
 }
 
 fn query_status() -> String {
-    let state = state_mut();
-    serde_json::json!({
-        "order_id": state.order_id,
-        "customer_id": state.customer_id,
-        "status": state.status,
-        "steps_count": state.steps.len(),
-        "cancel_requested": state.cancel_requested,
-        "total_compute_ms": state.total_compute_ms,
-        "total_coord_ms": state.total_coord_ms,
-        "created_at_ms": state.created_at_ms,
-        "updated_at_ms": state.updated_at_ms
+    let application_id = resolve_application_id();
+    if let Err(err) = merge_application_metrics_for(
+        &application_id,
+        serde_json::json!({
+            "message_count": 1,
+            "counter_metrics": { "workflow_queries": 1 },
+        }),
+        "workflow_query metrics",
+    ) {
+        return serde_json::json!({ "error": err }).to_string();
+    }
+    with_state(|state| {
+        serde_json::json!({
+            "order_id": state.order_id,
+            "customer_id": state.customer_id,
+            "status": state.status,
+            "steps_count": state.steps.len(),
+            "cancel_requested": state.cancel_requested,
+            "total_compute_ms": state.total_compute_ms,
+            "total_coord_ms": state.total_coord_ms,
+            "created_at_ms": state.created_at_ms,
+            "updated_at_ms": state.updated_at_ms
+        })
+        .to_string()
     })
-    .to_string()
 }
 
-// ---------------------------------------------------------------------------
-// Canonical ABI: cabi_realloc (required by component model)
-// ---------------------------------------------------------------------------
+#[gen_server_actor(wasm)]
+#[derive(Default)]
+struct OrderFulfillmentActor;
 
-#[export_name = "cabi_realloc"]
-pub extern "C" fn cabi_realloc(
-    old_ptr: u32,
-    old_size: u32,
-    align: u32,
-    new_size: u32,
-) -> u32 {
-    if new_size == 0 {
-        if old_ptr != 0 {
-            unsafe {
-                dealloc(
-                    old_ptr as *mut u8,
-                    Layout::from_size_align(old_size as usize, align as usize).unwrap(),
-                );
+#[plexspaces_handlers(wasm)]
+impl OrderFulfillmentActor {
+    #[init_handler]
+    fn configure(&mut self, config_json: &str) -> Result<(), String> {
+        let v: serde_json::Value =
+            serde_json::from_str(config_json).map_err(|e| format!("invalid init JSON: {}", e))?;
+        with_state(|state| {
+            let actor_id = v.get("actor_id").and_then(|x| x.as_str()).unwrap_or("");
+            state.application_id = if actor_id.is_empty() {
+                actor_application_id(&host::self_id())
+            } else {
+                actor_application_id(actor_id)
+            };
+            if let Some(id) = v.get("order_id").and_then(|x| x.as_str()) {
+                state.order_id = id.to_string();
             }
-        }
-        return 0;
+            if let Some(id) = v.get("customer_id").and_then(|x| x.as_str()) {
+                state.customer_id = id.to_string();
+            }
+            let now = host::now_ms();
+            state.created_at_ms = now;
+            state.updated_at_ms = now;
+        });
+        Ok(())
     }
-    let layout = Layout::from_size_align(new_size as usize, align as usize).unwrap();
-    let ptr = unsafe { alloc(layout) };
-    if ptr.is_null() {
-        return 0;
+
+    #[handler("workflow_run")]
+    fn workflow_run(
+        &mut self,
+        _from_actor: &str,
+        payload_json: &str,
+    ) -> Result<String, String> {
+        let payload: serde_json::Value =
+            serde_json::from_str(payload_json).map_err(|e| format!("invalid payload: {}", e))?;
+        Ok(run_workflow(&payload))
     }
-    if old_ptr != 0 && old_size > 0 {
-        let copy_len = old_size.min(new_size) as usize;
-        unsafe {
-            std::ptr::copy_nonoverlapping(old_ptr as *const u8, ptr, copy_len);
-        }
-        unsafe {
-            dealloc(
-                old_ptr as *mut u8,
-                Layout::from_size_align(old_size as usize, align as usize).unwrap(),
-            );
-        }
+
+    #[handler("workflow_signal:cancel")]
+    fn workflow_signal_cancel(
+        &mut self,
+        _from_actor: &str,
+        _payload_json: &str,
+    ) -> Result<String, String> {
+        let application_id = resolve_application_id();
+        with_state(|state| {
+            state.cancel_requested = true;
+            state.updated_at_ms = host::now_ms();
+        });
+        merge_application_metrics_for(
+            &application_id,
+            serde_json::json!({
+                "message_count": 1,
+                "counter_metrics": { "workflow_signals_cancel": 1 },
+            }),
+            "workflow_signal cancel metrics",
+        )?;
+        Ok("{}".to_string())
     }
-    ptr as u32
-}
 
-// ---------------------------------------------------------------------------
-// Actor exports (plexspaces:simple-actor/actor@0.1.0#...)
-// ---------------------------------------------------------------------------
-
-#[export_name = "plexspaces:simple-actor/actor@0.1.0#init"]
-pub extern "C" fn wasm_init(config_ptr: u32, config_len: u32) -> u32 {
-    let config_json = ptr_len_to_string(config_ptr, config_len);
-    let _ = serde_json::from_str::<serde_json::Value>(&config_json).map(|v| {
-        if let Some(id) = v.get("order_id").and_then(|x| x.as_str()) {
-            state_mut().order_id = id.to_string();
-        }
-        if let Some(id) = v.get("customer_id").and_then(|x| x.as_str()) {
-            state_mut().customer_id = id.to_string();
-        }
-        let now = now_ms();
-        state_mut().created_at_ms = now;
-        state_mut().updated_at_ms = now;
-    });
-    str_to_return("")
-}
-
-#[export_name = "plexspaces:simple-actor/actor@0.1.0#handle"]
-pub extern "C" fn wasm_handle(
-    from_ptr: u32,
-    from_len: u32,
-    msg_type_ptr: u32,
-    msg_type_len: u32,
-    payload_ptr: u32,
-    payload_len: u32,
-) -> u32 {
-    let _from = ptr_len_to_string(from_ptr, from_len);
-    let msg_type = ptr_len_to_string(msg_type_ptr, msg_type_len);
-    let payload_json = ptr_len_to_string(payload_ptr, payload_len);
-
-    let effective_type = if msg_type == "call" || msg_type == "cast" {
-        serde_json::from_str::<serde_json::Value>(&payload_json)
-            .ok()
-            .and_then(|v| {
-                for key in ["message_type", "op", "msg_type"] {
-                    if let Some(s) = v.get(key).and_then(|x| x.as_str()) {
-                        if !s.is_empty() && s != "call" && s != "cast" {
-                            return Some(s.to_string());
-                        }
-                    }
-                }
-                None
-            })
-            .unwrap_or_else(|| msg_type.to_string())
-    } else {
-        msg_type.to_string()
-    };
-
-    let result = if effective_type == "workflow_run" {
-        let payload: serde_json::Value = serde_json::from_str(&payload_json).unwrap_or_default();
-        run_workflow(&payload)
-    } else if effective_type.starts_with("workflow_signal:") {
-        let name = effective_type.trim_start_matches("workflow_signal:").trim();
-        if name == "cancel" {
-            state_mut().cancel_requested = true;
-            state_mut().updated_at_ms = now_ms();
-        }
-        "{}".to_string()
-    } else if effective_type.starts_with("workflow_query:") {
-        let name = effective_type.trim_start_matches("workflow_query:").trim();
-        if name == "status" {
-            query_status()
-        } else {
-            serde_json::json!({ "error": "unknown_query", "name": name }).to_string()
-        }
-    } else {
-        serde_json::json!({ "error": "use workflow_run / workflow_signal / workflow_query" }).to_string()
-    };
-
-    str_to_return(&result)
-}
-
-#[export_name = "plexspaces:simple-actor/actor@0.1.0#get-state"]
-pub extern "C" fn wasm_get_state() -> u32 {
-    let state = unsafe { STATE.as_ref() };
-    let json = state
-        .map(|s| serde_json::to_string(s).unwrap_or_else(|_| "{}".to_string()))
-        .unwrap_or_else(|| "{}".to_string());
-    str_to_return(&json)
-}
-
-#[export_name = "plexspaces:simple-actor/actor@0.1.0#set-state"]
-pub extern "C" fn wasm_set_state(state_ptr: u32, state_len: u32) -> u32 {
-    let state_json = ptr_len_to_string(state_ptr, state_len);
-    if state_json.is_empty() {
-        return str_to_return("");
-    }
-    match serde_json::from_str::<OrderState>(&state_json) {
-        Ok(s) => {
-            unsafe { STATE = Some(s) };
-            str_to_return("")
-        }
-        Err(_) => str_to_return("ERROR: invalid state JSON"),
+    #[handler("workflow_query:status")]
+    fn workflow_query_status(
+        &mut self,
+        _from_actor: &str,
+        _payload_json: &str,
+    ) -> Result<String, String> {
+        Ok(query_status())
     }
 }
 
-#[export_name = "cabi_post_plexspaces:simple-actor/actor@0.1.0#init"]
-pub extern "C" fn cabi_post_init(_: u32) {
-    unsafe { RETURN_BUF = None };
+struct OrderFulfillmentBridge;
+
+impl Guest for OrderFulfillmentBridge {
+    fn init(config_json: String) -> String {
+        let mut actor = OrderFulfillmentActor::default();
+        match SimpleActorHandlers::init(&mut actor, &config_json) {
+            Ok(()) => String::new(),
+            Err(err) => err,
+        }
+    }
+
+    fn handle(from_actor: String, msg_type: String, payload_json: String) -> String {
+        let op = match parse_op(&msg_type, &payload_json) {
+            Ok(op) => op,
+            Err(err) => return serde_json::json!({ "error": err }).to_string(),
+        };
+        let mut actor = OrderFulfillmentActor::default();
+        actor
+            .handle_operation(&from_actor, &op, &payload_json)
+            .unwrap_or_else(|err| serde_json::json!({ "error": err }).to_string())
+    }
+
+    fn get_state() -> String {
+        with_state(|state| serde_json::to_string(state).unwrap_or_else(|_| "{}".to_string()))
+    }
+
+    fn set_state(state_json: String) -> String {
+        if state_json.is_empty() {
+            return String::new();
+        }
+        match serde_json::from_str::<OrderState>(&state_json) {
+            Ok(next) => {
+                with_state(|state| {
+                    *state = next;
+                });
+                String::new()
+            }
+            Err(err) => format!("ERROR: invalid state JSON: {}", err),
+        }
+    }
 }
 
-#[export_name = "cabi_post_plexspaces:simple-actor/actor@0.1.0#handle"]
-pub extern "C" fn cabi_post_handle(_: u32) {
-    unsafe { RETURN_BUF = None };
-}
+export!(OrderFulfillmentBridge);
 
-#[export_name = "cabi_post_plexspaces:simple-actor/actor@0.1.0#get-state"]
-pub extern "C" fn cabi_post_get_state(_: u32) {
-    unsafe { RETURN_BUF = None };
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[export_name = "cabi_post_plexspaces:simple-actor/actor@0.1.0#set-state"]
-pub extern "C" fn cabi_post_set_state(_: u32) {
-    unsafe { RETURN_BUF = None };
+    #[test]
+    fn parse_op_reads_embedded_op() {
+        assert_eq!(
+            parse_op("call", r#"{"op":"workflow_run","order_id":"a"}"#).expect("op"),
+            "workflow_run"
+        );
+    }
+
+    #[test]
+    fn actor_application_id_parses_qualified_actor() {
+        assert_eq!(
+            actor_application_id("01ABC//order-fulfillment::temporal-order-fulfillment-rust@test-node"),
+            "temporal-order-fulfillment-rust"
+        );
+    }
 }

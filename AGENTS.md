@@ -32,7 +32,17 @@ Guidelines for AI and human contributors. No backward compatibility, no legacy o
 
 ---
 
-## 4. SDK and API design
+## 4. Parallel and collective operations
+
+- **Pure logic in actor crate**: Stateless parallel helpers (reduction operations, stats computation, collective message construction, result conversion) live in `crates/actor/src/parallel.rs`. This module has no service state, no gRPC dependencies, and is independently testable.
+- **Services are thin controllers**: The actor-service (`crates/services/src/actor_service/`) handles gRPC request/response, request context extraction, shard group state (RwLock), and parallel fan-out orchestration (temp sender lifecycle). It delegates pure computation to `plexspaces_actor::parallel`.
+- **No MPI naming in core APIs**: Public API names use shard-group vocabulary (`BroadcastShardGroup`, `ReduceShardGroup`, etc.). MPI conceptual mapping is documentation-only, never in type/function names.
+- **Built-in reductions only**: Collective reductions use the proto `CollectiveReduction` enum (SUM, PRODUCT, MAX, MIN, BOOL_AND, BOOL_OR, CONCAT). Do not introduce arbitrary user-defined reducer functions over RPC.
+- **Framework-owned barriers**: `BarrierShardGroup` is built on broadcast semantics with round tracking. Do not revive or depend on tuplespace barrier APIs.
+
+---
+
+## 5. SDK and API design
 
 - **Core in main crates**: Real business logic and core functionality live in the main (Rust) crates. The SDK is a **decorator** that removes boilerplate and simplifies usage; it must not reimplement or duplicate core logic.
 - **SDK surface**: Provide helpers, annotations, and wrappers so that typical client code stays thin. WASM support should wrap/expose the same underlying framework (no RPC for in-process integration). gRPC (or other RPC) can be built separately for remote access.
@@ -40,7 +50,7 @@ Guidelines for AI and human contributors. No backward compatibility, no legacy o
 
 ---
 
-## 5. Rust-specific conventions
+## 6. Rust-specific conventions
 
 - **Spawning**: In examples and docs, use **node** (or equivalent high-level spawn API) to spawn actors, not **actor-factory** directly, unless the example is specifically demonstrating low-level usage.
 - **Messages**: Use **`new_message`** (or the canonical constructor) instead of **`Message::new`** in examples and docs. Prefer SDK helpers for message construction.
@@ -48,7 +58,7 @@ Guidelines for AI and human contributors. No backward compatibility, no legacy o
 
 ---
 
-## 6. No legacy or compatibility debt
+## 7. No legacy or compatibility debt
 
 - **No backward compatibility** for unreleased or internal surfaces: remove obsolete code paths, deprecated APIs, and unused options rather than carrying them forward.
 - **No legacy or dead code**: Delete unused code, commented-out blocks, and obsolete branches. Do not leave “for backward compat” or “legacy” paths “just in case.”
@@ -56,14 +66,14 @@ Guidelines for AI and human contributors. No backward compatibility, no legacy o
 
 ---
 
-## 7. Documentation
+## 8. Documentation
 
 - Keep **docs/*.md** and crate/example READMEs in sync with the code. When changing behavior, APIs, or patterns (e.g. spawn style, message construction, annotations), update the relevant docs.
 - Ensure any references to old patterns (e.g. ActorTrait, actor-factory spawn, `Message::new`) are replaced with the current approach (annotations, node spawn, `new_message` or SDK helpers).
 
 ---
 
-## 8. Checklist before considering work done
+## 9. Checklist before considering work done
 
 - [ ] `make build` and `make test` pass; no failing or skipped tests.
 - [ ] No temporary or debug-only logging left in code.

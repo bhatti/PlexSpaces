@@ -125,6 +125,10 @@ use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
 use crate::ServiceLocatorImpl;
+use plexspaces_actor::parallel::{
+    build_collective_message, reduce_values, resolve_timeout, scatter_stats_from_results,
+    select_collective_value, shard_group_config, shard_query_responses_from_results,
+};
 use plexspaces_actor::ActorRef as ActorRefImpl;
 use plexspaces_actor::{Actor, ActorFactory};
 use plexspaces_core::{
@@ -144,11 +148,17 @@ use ulid::Ulid;
 
 // Import proto types and gRPC service trait
 use plexspaces_proto::actor::v1::{
+    AllReduceShardGroupRequest,
+    AllReduceShardGroupResponse,
     // gRPC service trait and server
     actor_service_server::ActorService as ActorServiceTrait,
     ActivateActorRequest,
     ActivateActorResponse,
     ActorDownNotification,
+    BarrierShardGroupRequest,
+    BarrierShardGroupResponse,
+    BroadcastShardGroupRequest,
+    BroadcastShardGroupResponse,
     BulkUpdateShardGroupRequest,
     BulkUpdateShardGroupResponse,
     CheckActorExistsRequest,
@@ -199,10 +209,15 @@ use plexspaces_proto::actor::v1::{
     ShardUpdateStats,
     SpawnActorRequest,
     SpawnActorResponse,
+    SpawnActorResult,
+    SpawnActorsRequest,
+    SpawnActorsResponse,
     StreamMessageRequest,
     StreamMessageResponse,
     TerminateActorRequest,
     TerminateActorResponse,
+    ReduceShardGroupRequest,
+    ReduceShardGroupResponse,
     UnlinkActorRequest,
     UnlinkActorResponse,
 };
@@ -1016,6 +1031,137 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
             .await
             .map_err(|e| format!("Service not accepting requests: {}", e))?;
         self.scatter_gather_internal(ctx, req).await
+    }
+
+    async fn broadcast_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::BroadcastShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::BroadcastShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        self.check_accepting_requests()
+            .await
+            .map_err(|e| format!("Service not accepting requests: {}", e))?;
+        self.broadcast_shard_group_internal(ctx, req).await
+    }
+
+    async fn reduce_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::ReduceShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::ReduceShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        self.check_accepting_requests()
+            .await
+            .map_err(|e| format!("Service not accepting requests: {}", e))?;
+        self.reduce_shard_group_internal(ctx, req).await
+    }
+
+    async fn all_reduce_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::AllReduceShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::AllReduceShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        self.check_accepting_requests()
+            .await
+            .map_err(|e| format!("Service not accepting requests: {}", e))?;
+        self.all_reduce_shard_group_internal(ctx, req).await
+    }
+
+    async fn barrier_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::BarrierShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::BarrierShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        self.check_accepting_requests()
+            .await
+            .map_err(|e| format!("Service not accepting requests: {}", e))?;
+        self.barrier_shard_group_internal(ctx, req).await
+    }
+
+    async fn spawn_actors(
+        &self,
+        ctx: &RequestContext,
+        req: plexspaces_proto::actor::v1::SpawnActorsRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::SpawnActorsResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        self.check_accepting_requests()
+            .await
+            .map_err(|e| format!("Service not accepting requests: {}", e))?;
+
+        let mut results = Vec::new();
+        for spawn_req in req.requests {
+            let actor_type = spawn_req.actor_type.clone();
+            let namespace = if spawn_req.namespace.is_empty() {
+                ctx.namespace().to_string()
+            } else {
+                spawn_req.namespace.clone()
+            };
+            // instances_count == 0 or 1 means spawn one actor
+            let count = if spawn_req.instances_count <= 1 {
+                1
+            } else {
+                spawn_req.instances_count
+            };
+
+            for i in 0..count {
+                let actor_id = if spawn_req.actor_id.is_empty() {
+                    build_actor_id(
+                        &Ulid::new().to_string(),
+                        &actor_type,
+                        Some(&namespace),
+                        &self.local_node_id,
+                    )
+                } else if count > 1 {
+                    format!("{}-{}", spawn_req.actor_id, i)
+                } else {
+                    spawn_req.actor_id.clone()
+                };
+
+                match self
+                    .spawn_actor(
+                        ctx,
+                        &actor_id,
+                        &actor_type,
+                        spawn_req.initial_state.clone(),
+                        spawn_req.config.clone(),
+                        spawn_req.labels.clone(),
+                    )
+                    .await
+                {
+                    Ok(_actor_ref) => {
+                        results.push(plexspaces_proto::actor::v1::SpawnActorResult {
+                            success: true,
+                            error: String::new(),
+                            response: Some(plexspaces_proto::actor::v1::SpawnActorResponse {
+                                actor_ref: actor_id.clone(),
+                                actor: None,
+                            }),
+                        });
+                    }
+                    Err(e) => {
+                        results.push(plexspaces_proto::actor::v1::SpawnActorResult {
+                            success: false,
+                            error: e.to_string(),
+                            response: None,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(plexspaces_proto::actor::v1::SpawnActorsResponse { results })
     }
 }
 
@@ -2222,6 +2368,25 @@ impl ActorServiceTrait for ActorServiceImpl {
         Ok(Response::new(resp))
     }
 
+    async fn spawn_actors(
+        &self,
+        request: Request<SpawnActorsRequest>,
+    ) -> Result<Response<SpawnActorsResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+        let resp = plexspaces_core::actor_context::ActorService::spawn_actors(self, &ctx, req)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to spawn actors: {}", e)))?;
+        Ok(Response::new(resp))
+    }
+
     async fn bulk_update_shard_group(
         &self,
         request: Request<BulkUpdateShardGroupRequest>,
@@ -2284,6 +2449,86 @@ impl ActorServiceTrait for ActorServiceImpl {
             .scatter_gather_internal(&ctx, req)
             .await
             .map_err(|e| Status::internal(format!("Failed to scatter-gather ShardGroup: {}", e)))?;
+        Ok(Response::new(resp))
+    }
+
+    async fn broadcast_shard_group(
+        &self,
+        request: Request<BroadcastShardGroupRequest>,
+    ) -> Result<Response<BroadcastShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+        let resp = self
+            .broadcast_shard_group_internal(&ctx, req)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to broadcast ShardGroup: {}", e)))?;
+        Ok(Response::new(resp))
+    }
+
+    async fn reduce_shard_group(
+        &self,
+        request: Request<ReduceShardGroupRequest>,
+    ) -> Result<Response<ReduceShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+        let resp = self
+            .reduce_shard_group_internal(&ctx, req)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to reduce ShardGroup: {}", e)))?;
+        Ok(Response::new(resp))
+    }
+
+    async fn all_reduce_shard_group(
+        &self,
+        request: Request<AllReduceShardGroupRequest>,
+    ) -> Result<Response<AllReduceShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+        let resp = self
+            .all_reduce_shard_group_internal(&ctx, req)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to all-reduce ShardGroup: {}", e)))?;
+        Ok(Response::new(resp))
+    }
+
+    async fn barrier_shard_group(
+        &self,
+        request: Request<BarrierShardGroupRequest>,
+    ) -> Result<Response<BarrierShardGroupResponse>, Status> {
+        self.check_accepting_requests().await?;
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &std::collections::HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let req = request.into_inner();
+        let resp = self
+            .barrier_shard_group_internal(&ctx, req)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to barrier ShardGroup: {}", e)))?;
         Ok(Response::new(resp))
     }
 
@@ -2456,8 +2701,8 @@ impl ActorServiceTrait for ActorServiceImpl {
         use crate::actor_service::partition::calculate_shard_id;
         let shard_id = calculate_shard_id(
             &req.partition_key,
-            Self::shard_group_config(&group).partition_strategy,
-            Self::shard_group_config(&group).shard_count,
+            shard_group_config(&group).partition_strategy,
+            shard_group_config(&group).shard_count,
             None, // TODO: Support range boundaries from group metadata
         )
         .map_err(|e| Status::invalid_argument(format!("Partition calculation failed: {}", e)))?;
@@ -2520,10 +2765,6 @@ impl ActorServiceTrait for ActorServiceImpl {
 }
 
 impl ActorServiceImpl {
-    /// Returns the unified DataParallelConfig for a ShardGroup (required).
-    fn shard_group_config(group: &ShardGroup) -> &DataParallelConfig {
-        group.config.as_ref().expect("ShardGroup.config required")
-    }
 
     /// Resolve the target node IDs for shard placement.
     ///
@@ -2705,6 +2946,7 @@ impl ActorServiceImpl {
                     labels: std::collections::HashMap::new(),
                     facets: vec![],
                     namespace: ctx.namespace().to_string(),
+                    instances_count: 1,
                 };
                 let spawn_response = client
                     .spawn_actor(tonic::Request::new(spawn_req))
@@ -2813,13 +3055,7 @@ impl ActorServiceImpl {
         use crate::actor_service::partition::calculate_shard_id;
         use futures::future::join_all;
 
-        let timeout = req
-            .timeout
-            .map(|d| {
-                std::time::Duration::from_secs(d.seconds as u64)
-                    + std::time::Duration::from_nanos(d.nanos as u64)
-            })
-            .unwrap_or(std::time::Duration::from_secs(30));
+        let timeout = resolve_timeout(req.timeout.as_ref());
 
         // Group updates by shard_id
         let total_updates = req.updates.len();
@@ -2829,8 +3065,8 @@ impl ActorServiceImpl {
             let partition_key = partition_key_str.as_bytes();
             let shard_id = calculate_shard_id(
                 partition_key,
-                Self::shard_group_config(&group).partition_strategy,
-                Self::shard_group_config(&group).shard_count,
+                shard_group_config(&group).partition_strategy,
+                shard_group_config(&group).shard_count,
                 None,
             )
             .map_err(|e| format!("Partition calculation failed: {}", e))?;
@@ -3326,7 +3562,7 @@ impl ActorServiceImpl {
             tracing::warn!(
                 group_id = %group_id,
                 total_duration_ms = total_duration.as_millis(),
-                shards_queried = Self::shard_group_config(&group).shard_count,
+                shards_queried = shard_group_config(&group).shard_count,
                 shards_responded,
                 shards_failed,
                 failed_shards = ?failed_shards,
@@ -3334,20 +3570,20 @@ impl ActorServiceImpl {
                 max_latency_ms = max_latency.as_millis(),
                 "⚠️  [MAP_SHARD_GROUP] Parallel map operation completed: {}/{} shards responded, {} failed",
                 shards_responded,
-                Self::shard_group_config(&group).shard_count,
+                shard_group_config(&group).shard_count,
                 shards_failed
             );
         } else {
             tracing::info!(
                 group_id = %group_id,
                 total_duration_ms = total_duration.as_millis(),
-                shards_queried = Self::shard_group_config(&group).shard_count,
+                shards_queried = shard_group_config(&group).shard_count,
                 shards_responded,
                 min_latency_ms = if min_latency == Duration::MAX { 0 } else { min_latency.as_millis() },
                 max_latency_ms = max_latency.as_millis(),
                 "✅ [MAP_SHARD_GROUP] Parallel map operation completed: {}/{} shards responded successfully",
                 shards_responded,
-                Self::shard_group_config(&group).shard_count
+                shard_group_config(&group).shard_count
             );
         }
 
@@ -3355,7 +3591,7 @@ impl ActorServiceImpl {
         Ok(MapShardGroupResponse {
             shard_results: shard_responses,
             stats: Some(ScatterGatherStats {
-                shards_queried: Self::shard_group_config(&group).shard_count,
+                shards_queried: shard_group_config(&group).shard_count,
                 shards_responded,
                 shards_failed,
                 max_latency: Some(prost_types::Duration {
@@ -3548,7 +3784,7 @@ impl ActorServiceImpl {
         tracing::info!(
             group_id = %group_id,
             total_duration_ms = total_duration.as_millis(),
-            shards_queried = Self::shard_group_config(&group).shard_count,
+            shards_queried = shard_group_config(&group).shard_count,
             shards_responded,
             shards_failed,
             min_latency_ms = if min_latency == Duration::MAX { 0 } else { min_latency.as_millis() },
@@ -3556,14 +3792,14 @@ impl ActorServiceImpl {
             has_aggregated_result = result.is_some(),
             "✅ [SCATTER_GATHER] Scatter-gather operation completed: {}/{} shards responded successfully",
             shards_responded,
-            Self::shard_group_config(&group).shard_count
+            shard_group_config(&group).shard_count
         );
 
         Ok(ScatterGatherResponse {
             result,
             shard_responses,
             stats: Some(ScatterGatherStats {
-                shards_queried: Self::shard_group_config(&group).shard_count,
+                shards_queried: shard_group_config(&group).shard_count,
                 shards_responded: shards_responded as u32,
                 shards_failed: shards_failed as u32,
                 max_latency: Some(prost_types::Duration {
@@ -3571,6 +3807,181 @@ impl ActorServiceImpl {
                     nanos: max_latency.subsec_nanos() as i32,
                 }),
             }),
+        })
+    }
+
+    async fn broadcast_shard_group_internal(
+        &self,
+        ctx: &RequestContext,
+        req: BroadcastShardGroupRequest,
+    ) -> Result<BroadcastShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups
+                .get(&req.group_id)
+                .ok_or_else(|| format!("ShardGroup {} not found", req.group_id))?
+                .clone()
+        };
+        let timeout = req
+            .timeout
+            .map(|d| Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64))
+            .unwrap_or(Duration::from_secs(5));
+        let message = req.message.ok_or("message is required")?;
+        let results = self
+            .parallel_operation_unified(
+                ctx.clone(),
+                req.group_id.clone(),
+                group.shard_actor_ids.clone(),
+                message,
+                timeout,
+                "BROADCAST_SHARD_GROUP",
+            )
+            .await?;
+        let stats = scatter_stats_from_results(shard_group_config(&group).shard_count, &results);
+        if stats.shards_responded < req.min_acks {
+            return Err(format!(
+                "Broadcast failed: only {} shards acknowledged, minimum required: {}",
+                stats.shards_responded, req.min_acks
+            )
+            .into());
+        }
+        Ok(BroadcastShardGroupResponse {
+            shard_responses: shard_query_responses_from_results(results),
+            stats: Some(stats),
+        })
+    }
+
+    async fn reduce_shard_group_internal(
+        &self,
+        ctx: &RequestContext,
+        req: ReduceShardGroupRequest,
+    ) -> Result<ReduceShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let group = {
+            let groups = self.shard_groups.read().await;
+            groups
+                .get(&req.group_id)
+                .ok_or_else(|| format!("ShardGroup {} not found", req.group_id))?
+                .clone()
+        };
+        let timeout = req
+            .timeout
+            .map(|d| Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64))
+            .unwrap_or(Duration::from_secs(5));
+        let map_function = req.map_function.ok_or("map_function is required")?;
+        let results = self
+            .parallel_operation_unified(
+                ctx.clone(),
+                req.group_id.clone(),
+                group.shard_actor_ids.clone(),
+                map_function,
+                timeout,
+                "REDUCE_SHARD_GROUP",
+            )
+            .await?;
+        let stats = scatter_stats_from_results(shard_group_config(&group).shard_count, &results);
+        if stats.shards_responded < req.min_responses {
+            return Err(format!(
+                "Reduce failed: only {} shards responded, minimum required: {}",
+                stats.shards_responded, req.min_responses
+            )
+            .into());
+        }
+        let mut values = Vec::new();
+        for (_shard_id, _actor_id, _latency, success, _error, response) in &results {
+            if *success {
+                let response = response.as_ref().ok_or("Missing shard response for successful reduction")?;
+                values.push(select_collective_value(response, req.target.as_ref())?);
+            }
+        }
+        let reduced_value = reduce_values(values, req.reduction as i32)?;
+        let result = build_collective_message(
+            "collective",
+            serde_json::to_vec(&reduced_value)?,
+            HashMap::from([
+                ("plexspaces-collective-op".to_string(), "reduce".to_string()),
+                ("plexspaces-group-id".to_string(), req.group_id.clone()),
+            ]),
+        );
+        Ok(ReduceShardGroupResponse {
+            result: Some(result),
+            shard_responses: shard_query_responses_from_results(results),
+            stats: Some(stats),
+        })
+    }
+
+    async fn all_reduce_shard_group_internal(
+        &self,
+        ctx: &RequestContext,
+        req: AllReduceShardGroupRequest,
+    ) -> Result<AllReduceShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let reduce_req = ReduceShardGroupRequest {
+            group_id: req.group_id.clone(),
+            map_function: req.map_function.clone(),
+            timeout: req.timeout.clone(),
+            min_responses: req.min_responses,
+            reduction: req.reduction,
+            target: req.target.clone(),
+        };
+        let reduce_resp = self.reduce_shard_group_internal(ctx, reduce_req).await?;
+        let reduced_message = reduce_resp
+            .result
+            .clone()
+            .ok_or("AllReduce failed to produce reduced result")?;
+        let mut broadcast_message = reduced_message.clone();
+        broadcast_message.message_type = "event".to_string();
+        broadcast_message.headers.insert(
+            "plexspaces-collective-op".to_string(),
+            "all-reduce-result".to_string(),
+        );
+        let broadcast_resp = self
+            .broadcast_shard_group_internal(
+                ctx,
+                BroadcastShardGroupRequest {
+                    group_id: req.group_id,
+                    message: Some(broadcast_message),
+                    timeout: req.timeout,
+                    min_acks: req.min_responses,
+                },
+            )
+            .await?;
+        Ok(AllReduceShardGroupResponse {
+            result: Some(reduced_message),
+            shard_responses: broadcast_resp.shard_responses,
+            stats: broadcast_resp.stats,
+        })
+    }
+
+    async fn barrier_shard_group_internal(
+        &self,
+        ctx: &RequestContext,
+        req: BarrierShardGroupRequest,
+    ) -> Result<BarrierShardGroupResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let payload = serde_json::json!({
+            "barrier_id": req.barrier_id,
+            "round": req.round,
+        });
+        let message = build_collective_message(
+            "info",
+            serde_json::to_vec(&payload)?,
+            HashMap::from([(
+                "plexspaces-collective-op".to_string(),
+                "barrier".to_string(),
+            )]),
+        );
+        let response = self
+            .broadcast_shard_group_internal(
+                ctx,
+                BroadcastShardGroupRequest {
+                    group_id: req.group_id,
+                    message: Some(message),
+                    timeout: req.timeout,
+                    min_acks: req.min_acks,
+                },
+            )
+            .await?;
+        Ok(BarrierShardGroupResponse {
+            shard_responses: response.shard_responses,
+            stats: response.stats,
         })
     }
 
@@ -3743,8 +4154,8 @@ impl ActorServiceImpl {
         use crate::actor_service::partition::calculate_shard_id;
         let shard_id = calculate_shard_id(
             &req.partition_key,
-            Self::shard_group_config(&group).partition_strategy,
-            Self::shard_group_config(&group).shard_count,
+            shard_group_config(&group).partition_strategy,
+            shard_group_config(&group).shard_count,
             None, // TODO: Support range boundaries from group metadata
         )
         .map_err(|e| Status::invalid_argument(format!("Partition calculation failed: {}", e)))?;
@@ -3837,13 +4248,7 @@ impl ActorServiceImpl {
         use crate::actor_service::partition::calculate_shard_id;
         use futures::future::join_all;
 
-        let timeout = req
-            .timeout
-            .map(|d| {
-                std::time::Duration::from_secs(d.seconds as u64)
-                    + std::time::Duration::from_nanos(d.nanos as u64)
-            })
-            .unwrap_or(std::time::Duration::from_secs(30));
+        let timeout = resolve_timeout(req.timeout.as_ref());
 
         // Group updates by shard_id
         let mut updates_by_shard: std::collections::HashMap<u32, Vec<(String, Message)>> =
@@ -3852,8 +4257,8 @@ impl ActorServiceImpl {
             let partition_key = partition_key_str.as_bytes();
             let shard_id = calculate_shard_id(
                 partition_key,
-                Self::shard_group_config(&group).partition_strategy,
-                Self::shard_group_config(&group).shard_count,
+                shard_group_config(&group).partition_strategy,
+                shard_group_config(&group).shard_count,
                 None,
             )
             .map_err(|e| {
@@ -4234,6 +4639,34 @@ impl ActorServiceTrait for ActorServiceWrapper {
         self.0.send_to_shard(request).await
     }
 
+    async fn broadcast_shard_group(
+        &self,
+        request: Request<BroadcastShardGroupRequest>,
+    ) -> Result<Response<BroadcastShardGroupResponse>, Status> {
+        self.0.broadcast_shard_group(request).await
+    }
+
+    async fn reduce_shard_group(
+        &self,
+        request: Request<ReduceShardGroupRequest>,
+    ) -> Result<Response<ReduceShardGroupResponse>, Status> {
+        self.0.reduce_shard_group(request).await
+    }
+
+    async fn all_reduce_shard_group(
+        &self,
+        request: Request<AllReduceShardGroupRequest>,
+    ) -> Result<Response<AllReduceShardGroupResponse>, Status> {
+        self.0.all_reduce_shard_group(request).await
+    }
+
+    async fn barrier_shard_group(
+        &self,
+        request: Request<BarrierShardGroupRequest>,
+    ) -> Result<Response<BarrierShardGroupResponse>, Status> {
+        self.0.barrier_shard_group(request).await
+    }
+
     async fn scatter_gather(
         &self,
         request: Request<ScatterGatherRequest>,
@@ -4253,6 +4686,13 @@ impl ActorServiceTrait for ActorServiceWrapper {
         request: Request<MapShardGroupRequest>,
     ) -> Result<Response<MapShardGroupResponse>, Status> {
         self.0.map_shard_group(request).await
+    }
+
+    async fn spawn_actors(
+        &self,
+        request: Request<SpawnActorsRequest>,
+    ) -> Result<Response<SpawnActorsResponse>, Status> {
+        self.0.spawn_actors(request).await
     }
 }
 

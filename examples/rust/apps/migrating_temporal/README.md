@@ -1,12 +1,35 @@
 # Order Fulfillment Workflow (Rust WASM)
 
-E-commerce order fulfillment workflow as a **Rust WASM app** using the same interface as the Go/TypeScript/Python variants: **plexspaces-simple-actor** (init, handle, get-state, set-state) with workflow_run / workflow_signal / workflow_query.
+E-commerce order fulfillment as a **Rust WASM** app on **plexspaces-simple-actor** (init, handle, get-state, set-state), aligned with Go/TypeScript/Python: `workflow_run` / `workflow_signal:*` / `workflow_query:*`.
+
+## Stack (same class as `data_parallel_worker`)
+
+- `wit_bindgen::generate!` → `wit/plexspaces-simple-actor`, `actor-world`
+- `#[gen_server_actor(wasm)]` + `#[plexspaces_handlers(wasm)]` — handlers for `workflow_run`, `workflow_signal:cancel`, `workflow_query:status`; `#[init_handler]` for config
+- `plexspaces::simple_actor::host` — `now_ms`, **`application_metrics_add`** (counters + latency maps for workflow compute/coordination; no scatter/gather). On **wasm32**, the Rust standard mutex is non-reentrant: never call `application_metrics_add` (or `resolve_application_id`, which uses the same state lock) **while holding** the workflow state mutex—merge metrics **after** the state update closure returns.
+- Thin `impl Guest` + `export!(...)` bridge (no Tokio, no hand-written `#[no_mangle]` exports)
 
 ## Purpose
 
-- **Rust WASM app**: Built as a cdylib for `wasm32-wasip2`, then wrapped with `wasm-tools component embed` and the WASI adapter so the node loads it as a component (same pipeline as Go).
-- **Workflow behavior**: Implements run (saga steps), signal(cancel), query(status) with the same message types as the other languages.
-- **Facets**: virtual_actor + durability (configured in `app-config.toml`).
+- **cdylib** for `wasm32-wasip1` → `wasm-tools component embed` + WASI adapter → `order_fulfillment_actor.wasm`
+- **Workflow**: saga steps (validate → reserve → charge → ship), cancel signal, status query
+- **Facets**: virtual_actor + durability (`app-config.toml`)
+
+## Flow
+
+```mermaid
+flowchart LR
+  subgraph run["workflow_run"]
+    V[validate]
+    R[reserve_inventory]
+    C[charge_payment]
+    S[ship]
+    V --> R --> C --> S
+  end
+  Q[workflow_query:status]
+  X[workflow_signal:cancel]
+  run --> Metrics["host::application_metrics_add"]
+```
 
 ## Quick Start
 
@@ -22,17 +45,14 @@ cd examples/rust/apps/migrating_temporal
 
 ## Build
 
-- **Requirements**: Rust (wasm32-wasip1 target), `wasm-tools`, WASI adapter (e.g. from `jco`).
-- **Steps**: `cargo build --release --target wasm32-wasip1` → `wasm-tools component embed` (WIT) → `wasm-tools component new` (WASI adapter) → `order_fulfillment_actor.wasm`.
-- **Time**: The actor uses a monotonic counter for step timestamps so the module has no host imports and builds with `wasm-tools component embed`. For real timestamps the runtime can wire the host interface when instantiating.
+- **Requirements**: Rust (`wasm32-wasip1`), `wasm-tools`, WASI adapter (e.g. from `jco`)
+- **Steps**: `cargo build` (see `build.sh` for profile) → embed WIT → component new → `order_fulfillment_actor.wasm`
 
 ## API
 
-Same as Go/TS/Python:
-
 - **Run**: `POST /api/v1/actors/{app_id}/order-fulfillment:{order_id}` with `{"op":"workflow_run","order_id":"...","customer_id":"..."}`.
-- **Signal**: Same path with `{"op":"workflow_signal:cancel"}`.
-- **Query**: Same path with `{"op":"workflow_query:status"}`.
+- **Signal**: same path with `{"op":"workflow_signal:cancel"}`.
+- **Query**: same path with `{"op":"workflow_query:status"}`.
 
 ## Polyglot
 
@@ -48,3 +68,4 @@ Same as Go/TS/Python:
 
 - [PLAN.md – Workflow behavior](../../../../PLAN.md)
 - [Rust embedded example](../../embedded/migrating_temporal) (in-process Node + WorkflowBehavior)
+- [SDK + WIT checklist](../SDK_WIT_APPS_CHECKLIST.md)

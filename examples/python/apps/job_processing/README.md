@@ -117,4 +117,4 @@ cd examples/python/apps/job_processing
 
 - [PlexSpaces Python SDK](../../../../sdks/python/README.md) - SDK documentation
 - [SDK Guide](../../../../docs/sdk.md) - TupleSpace API reference
-- [MPI Collectives (Rust)](../../rust/embedded/mpi_collectives/) - Rust TupleSpace example
+- [MPI Collectives (Go WASM)](../../../go/apps/mpi_collectives/) - Go shard-group collective example

@@ -1,25 +1,26 @@
-# WASM Actor - Rust fallback for testing
-# This is a simple Rust-based WASM actor that can be used for testing
-# when TypeScript/Javy is not available
+# N-body gravitational simulation — Rust WASM (SDK + WIT)
 
 [workspace]
 
 [package]
-name = "nbody-wasm-actor"
+name = "nbody-wasm"
 version = "0.1.0"
 edition = "2021"
 license = "LGPL-2.1-or-later"
+publish = false
+description = "N-body gravitational dynamics WASM actor (GenServer-style ops)"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+wit-bindgen = "0.51.0"
 
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
-

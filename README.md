@@ -342,7 +342,7 @@ See [Examples](examples/README.md) for the complete list.
 - **[Testing](docs/testing.md)**: How to run unit tests, integration tests, and example tests
 - **[WASM Deployment](docs/wasm-deployment.md)**: Deploy polyglot WASM applications (Rust, Python, TypeScript, Go)
 - **[Use Cases](docs/use-cases.md)**: Real-world application patterns and use cases (including FaaS Platforms)
-- **[Examples](docs/examples.md)**: Example gallery with feature matrix
+- **[Examples](examples/README.md)**: Example gallery by language
 - **[CLI Reference](docs/cli.md)**: Command-line tools and operations
 - **[API Reference](https://docs.rs/plexspaces/)**: Full API documentation
 

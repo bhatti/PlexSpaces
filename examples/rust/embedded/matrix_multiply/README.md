@@ -146,5 +146,5 @@ Granularity Analysis:
 ## See Also
 
 - [Heat Diffusion](../heat_diffusion/) - TupleSpace coordination for stencil computation
-- [MPI Collectives](../mpi_collectives/) - Collective communication patterns
+- [MPI Collectives (Go WASM)](../../../go/apps/mpi_collectives/) - Collective communication patterns with shard-group APIs
 - [Event Analytics](../event_analytics/) - Shard groups for distributed analytics

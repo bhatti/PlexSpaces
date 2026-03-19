@@ -837,10 +837,11 @@ curl http://localhost:8001/api/v1/dashboard/summary | jq '.total_applications'
 # Should return: 1
 ```
 
-**List Applications:**
+**List applications** (gRPC; when HTTP is on 8001, gRPC is typically 8000):
 ```bash
-curl http://localhost:8001/api/v1/applications
+cargo run --bin plexspaces -- list --node localhost:8000 --json
 ```
+Use the same `ListApplications` RPC with `grpcurl` or other gRPC clients if you are not using the CLI.
 
 **View Dashboard:**
 ```bash

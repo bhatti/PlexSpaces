@@ -53,49 +53,9 @@ job = sky.launch(
 
 ---
 
-## PlexSpaces Implementation
+## PlexSpaces implementation
 
-### Rust Code
-
-```rust
-// Multi-cloud resource scheduler
-use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor};
-use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-use std::sync::Arc;
-
-let behavior = Box::new(SkyPilotSchedulerActor::new());
-let actor_id = "scheduler@node1".to_string();
-let mut mailbox_config = mailbox_config_default();
-mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
-let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await?;
-let actor = Actor::new(actor_id.clone(), behavior, mailbox, "default".to_string(), None);
-
-let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-    .ok_or_else(|| "ActorFactory not found")?;
-let ctx = plexspaces_core::RequestContext::internal();
-let _message_sender = actor_factory.spawn_actor(
-    &ctx,
-    &actor_id,
-    "GenServer", // actor_type
-    vec![], // initial_state
-    None, // config
-    std::collections::HashMap::new(), // labels
-).await?;
-let scheduler = plexspaces_core::ActorRef::new(actor_id)?;
-
-// Submit AI task (SkyPilot finds cheapest resources)
-let task = AITask {
-    task_id: "training-1".to_string(),
-    gpu_required: true,
-    gpu_memory_gb: 16,
-    cpu_cores: 4,
-    memory_gb: 16,
-    cloud_preference: None, // Find cheapest
-};
-
-let allocation = scheduler.ask(SubmitTask { task }).await?;
-// Returns: cheapest available instance across AWS, GCP, Azure
-```
+The runnable example is in `src/main.rs`: it builds a node, registers a GenServer-style scheduler actor, and demonstrates task submission. For **new** code, prefer the patterns in [Architecture](../../../../docs/architecture.md) and [SDK](../../../../docs/sdk.md): SDK annotations (`#[gen_server_actor]`, `#[handler("op")]`), `plexspaces_sdk` spawn helpers, `call_message` / `cast_message` (or `new_message`), and `RequestContext::new_without_auth(tenant, namespace)` (not `internal()`). Avoid reaching for `ActorFactory` in application examples unless you are intentionally showing the low-level path.
 
 ---
 

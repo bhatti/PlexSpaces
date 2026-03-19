@@ -876,7 +876,7 @@ ctx = {"tenant-id": "tenant-123", "namespace": "production"}
 
 4. **Parameter sweep (migrating_merlin)** (`examples/python/apps/migrating_merlin/`, and Go, TypeScript, Rust under `examples/{lang}/apps/migrating_merlin/`)
    - Elastic pool (checkout/checkin) + tuple space work queue; fallback to process group
-   - Same API and flow in Python, Go, TypeScript, and Rust; see [Examples](examples.md) and each README
+   - Same API and flow in Python, Go, TypeScript, and Rust; see [Examples](../examples/README.md) and each README
 
 ### Quick Start
 

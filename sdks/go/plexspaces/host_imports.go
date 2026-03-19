@@ -386,6 +386,46 @@ func hostScatterGather(requestJSON string) string {
 	return readRetString(unsafe.Pointer(&retArea))
 }
 
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 broadcast-shard-group
+func rawHostBroadcastShardGroup(requestJSON string, retptr unsafe.Pointer)
+
+func hostBroadcastShardGroup(requestJSON string) string {
+	rawHostBroadcastShardGroup(requestJSON, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 reduce-shard-group
+func rawHostReduceShardGroup(requestJSON string, retptr unsafe.Pointer)
+
+func hostReduceShardGroup(requestJSON string) string {
+	rawHostReduceShardGroup(requestJSON, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 all-reduce-shard-group
+func rawHostAllReduceShardGroup(requestJSON string, retptr unsafe.Pointer)
+
+func hostAllReduceShardGroup(requestJSON string) string {
+	rawHostAllReduceShardGroup(requestJSON, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 barrier-shard-group
+func rawHostBarrierShardGroup(requestJSON string, retptr unsafe.Pointer)
+
+func hostBarrierShardGroup(requestJSON string) string {
+	rawHostBarrierShardGroup(requestJSON, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 spawn-actors
+func rawHostSpawnActors(requestJSON string, retptr unsafe.Pointer)
+
+func hostSpawnActors(requestJSON string) string {
+	rawHostSpawnActors(requestJSON, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}
+
 //go:wasmimport plexspaces:simple-actor/host@0.1.0 application-metrics-add
 func rawHostApplicationMetricsAdd(applicationID, metricsJSON string, retptr unsafe.Pointer)
 

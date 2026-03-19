@@ -1093,6 +1093,76 @@ message MapShardGroupResponse {
   ScatterGatherStats stats = 2;
 }
 
+enum CollectiveReduction {
+  COLLECTIVE_REDUCTION_UNSPECIFIED = 0;
+  COLLECTIVE_REDUCTION_SUM = 1;
+  COLLECTIVE_REDUCTION_MIN = 2;
+  COLLECTIVE_REDUCTION_MAX = 3;
+  COLLECTIVE_REDUCTION_PRODUCT = 4;
+  COLLECTIVE_REDUCTION_CONCAT = 5;
+  COLLECTIVE_REDUCTION_BOOL_AND = 6;
+  COLLECTIVE_REDUCTION_BOOL_OR = 7;
+}
+
+message CollectiveTargetField {
+  string value_path = 1;
+}
+
+message BroadcastShardGroupRequest {
+  string group_id = 1;
+  plexspaces.common.v1.Message message = 2;
+  google.protobuf.Duration timeout = 3;
+  uint32 min_acks = 4;
+}
+
+message BroadcastShardGroupResponse {
+  repeated ShardQueryResponse shard_responses = 1;
+  ScatterGatherStats stats = 2;
+}
+
+message ReduceShardGroupRequest {
+  string group_id = 1;
+  plexspaces.common.v1.Message map_function = 2;
+  google.protobuf.Duration timeout = 3;
+  uint32 min_responses = 4;
+  CollectiveReduction reduction = 5;
+  CollectiveTargetField target = 6;
+}
+
+message ReduceShardGroupResponse {
+  plexspaces.common.v1.Message result = 1;
+  repeated ShardQueryResponse shard_responses = 2;
+  ScatterGatherStats stats = 3;
+}
+
+message AllReduceShardGroupRequest {
+  string group_id = 1;
+  plexspaces.common.v1.Message map_function = 2;
+  google.protobuf.Duration timeout = 3;
+  uint32 min_responses = 4;
+  CollectiveReduction reduction = 5;
+  CollectiveTargetField target = 6;
+}
+
+message AllReduceShardGroupResponse {
+  plexspaces.common.v1.Message result = 1;
+  repeated ShardQueryResponse shard_responses = 2;
+  ScatterGatherStats stats = 3;
+}
+
+message BarrierShardGroupRequest {
+  string group_id = 1;
+  string barrier_id = 2;
+  uint64 round = 3;
+  google.protobuf.Duration timeout = 4;
+  uint32 min_acks = 5;
+}
+
+message BarrierShardGroupResponse {
+  repeated ShardQueryResponse shard_responses = 1;
+  ScatterGatherStats stats = 2;
+}
+
 // Scale shard group (add/remove shards with rebalancing)
 message ScaleShardGroupRequest {
   // Group to scale
@@ -1284,7 +1354,8 @@ message SpawnActorRequest {
   // Examples: "user/123", "session/abc-xyz", "counter@node1"
   // Industry standard: Client-specified IDs for virtual actors (Orleans pattern)
   string actor_id = 2 [
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 255}
   ];
 
   // Optional serialized initial state for actor
@@ -1314,6 +1385,16 @@ message SpawnActorRequest {
   string namespace = 7 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Number of identical replicas to spawn (default: 1)
+  // When > 1, spawns N identical actors of this type with auto-generated IDs.
+  // The actor_id field is used as a prefix (e.g. "worker" → "worker-0", "worker-1", ...).
+  // If actor_id is empty, server generates ULID-based IDs for each replica.
+  // Use case: data-parallel workloads, shard groups, worker pools.
+  uint32 instances_count = 8 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).uint32 = {gte: 0, lte: 1024}
   ];
 
   // RESERVED for future WASM support (Week 11-12)
@@ -1358,6 +1439,20 @@ message SpawnActorResponse {
   // Full actor details (state, config, metrics)
   // Useful for inspection and monitoring
   Actor actor = 2;
+}
+
+message SpawnActorsRequest {
+  repeated SpawnActorRequest requests = 1;
+}
+
+message SpawnActorResult {
+  bool success = 1;
+  string error = 2;
+  SpawnActorResponse response = 3;
+}
+
+message SpawnActorsResponse {
+  repeated SpawnActorResult results = 1;
 }
 
 // Request to get an actor
@@ -2081,6 +2176,18 @@ service ActorService {
     };
   }
 
+  rpc SpawnActors(SpawnActorsRequest) returns (SpawnActorsResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/actors/spawn-batch"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Spawn Actors"
+      description: "Spawn multiple actors on the node receiving this request using the same canonical spawn semantics as SpawnActor."
+      tags: "Actors"
+    };
+  }
+
   // Get an actor by ID
   rpc GetActor(GetActorRequest) returns (GetActorResponse) {
     option (google.api.http) = {
@@ -2462,6 +2569,10 @@ service ActorService {
   rpc ListShardGroups(ListShardGroupsRequest) returns (ListShardGroupsResponse);
   rpc ScaleShardGroup(ScaleShardGroupRequest) returns (ScaleShardGroupResponse);
   rpc SendToShard(SendToShardRequest) returns (SendToShardResponse);
+  rpc BroadcastShardGroup(BroadcastShardGroupRequest) returns (BroadcastShardGroupResponse);
+  rpc ReduceShardGroup(ReduceShardGroupRequest) returns (ReduceShardGroupResponse);
+  rpc AllReduceShardGroup(AllReduceShardGroupRequest) returns (AllReduceShardGroupResponse);
+  rpc BarrierShardGroup(BarrierShardGroupRequest) returns (BarrierShardGroupResponse);
   rpc ScatterGather(ScatterGatherRequest) returns (ScatterGatherResponse);
   // Bulk update: send update messages to multiple shards (DPA UpdateFunction)
   rpc BulkUpdateShardGroup(BulkUpdateShardGroupRequest) returns (BulkUpdateShardGroupResponse);

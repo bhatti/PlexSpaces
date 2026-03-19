@@ -457,6 +457,71 @@ func (h *Host) ScatterGather(request any) (map[string]any, error) {
 	return out, nil
 }
 
+// BroadcastShardGroup broadcasts a message to every shard in a group.
+func (h *Host) BroadcastShardGroup(request any) (map[string]any, error) {
+	result := hostBroadcastShardGroup(marshalPayload(request))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ReduceShardGroup reduces values returned by a shard-group map operation.
+func (h *Host) ReduceShardGroup(request any) (map[string]any, error) {
+	result := hostReduceShardGroup(marshalPayload(request))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AllReduceShardGroup reduces values and broadcasts the reduced result back to all shards.
+func (h *Host) AllReduceShardGroup(request any) (map[string]any, error) {
+	result := hostAllReduceShardGroup(marshalPayload(request))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// BarrierShardGroup synchronizes a shard group at a framework barrier round.
+func (h *Host) BarrierShardGroup(request any) (map[string]any, error) {
+	result := hostBarrierShardGroup(marshalPayload(request))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// SpawnActors spawns multiple actors using the framework actor service.
+func (h *Host) SpawnActors(request any) (map[string]any, error) {
+	result := hostSpawnActors(marshalPayload(request))
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ApplicationMetricsAdd merges a node-local application metrics delta.
 func (h *Host) ApplicationMetricsAdd(applicationID string, metrics any) (map[string]any, error) {
 	result := hostApplicationMetricsAdd(applicationID, marshalPayload(metrics))

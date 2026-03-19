@@ -1,59 +1,53 @@
 # SkyPilot → PlexSpaces: Multi-Cloud ML Orchestration (Rust WASM App)
 
-Rust WASM app: SkyPilot-style multi-cloud AI workload orchestration with cost optimization. Deploy via HTTP; test with `./scripts/server.sh` then `./test.sh [HTTP_PORT]`.
+Rust WASM scheduler: SkyPilot-style multi-cloud AI workload placement with a **simulated** instance catalog. Deploy via HTTP; test with `./scripts/server.sh` then `./test.sh [HTTP_PORT]`.
+
+## Stack (aligned with `migrating_temporal` / `data_parallel_worker`)
+
+- `wit_bindgen::generate!` → `wit/plexspaces-simple-actor`, `actor-world`
+- `#[gen_server_actor(wasm)]` + `#[plexspaces_handlers(wasm)]` — `submit_task`, `get_best_resources`, `get_status`, `status`
+- `plexspaces::simple_actor::host` — `application_metrics_add` with **`application_id` resolved before** state updates; merges run **after** releasing the scheduler mutex (wasm32-safe)
+- `SkyPilotBridge`: `impl Guest` + `export!(...)` — no Tokio, no manual exports
 
 ## Use Case
 
-A scheduler actor that:
+- Picks cost-effective instances from a small AWS/GCP catalog for each `AITask`
+- Ops: `submit_task`, `get_best_resources`, `get_status` (alias `status`)
 
-- Finds cheapest available resources across AWS, GCP (simulated catalog)
-- Matches task requirements (GPU, CPU, memory) to instances
-- Supports ops: `submit_task`, `get_best_resources`, `get_status`
+## Flow
 
-## PlexSpaces Abstractions
-
-- **GenServer** – Request-reply for task scheduling
-- **Virtual actor** – Lazy activation, one logical scheduler per instance id
-- **Durability** – Checkpointed state for recovery
+```mermaid
+flowchart LR
+  T[submit_task / get_best_resources] --> M[host::application_metrics_add]
+  S[get_status] --> M
+  M --> R[HTTP test: GET /api/v1/applications]
+```
 
 ## API (HTTP JSON)
 
 | Op | Payload | Returns |
 |----|---------|--------|
-| `submit_task` | `{"op":"submit_task","task":{...}}` | `{"allocation":{...}}` or `{"error":"..."}` |
-| `get_best_resources` | `{"op":"get_best_resources","task":{...}}` | `{"allocation":{...}}` or `{"error":"..."}` |
-| `get_status` | `{"op":"get_status"}` | See below (includes metrics). |
+| `submit_task` | `{"op":"submit_task","task":{...}}` | `{"allocation":{...}}` or queued / error |
+| `get_best_resources` | `{"op":"get_best_resources","task":{...}}` | `{"allocation":{...}}` or error |
+| `get_status` / `status` | `{"op":"get_status"}` | Queue/running + coord vs compute rollups |
 
 Task shape: `task_id`, `task_type`, `gpu_required`, `gpu_memory_gb`, `cpu_cores`, `memory_gb`, `cloud_preference` (optional).
 
-### Metrics (get_status)
+### Metrics
 
-`get_status` returns coordination vs computation metrics (mandatory for all examples):
-
-- **queue_size**, **running** – Current queue and running task counts.
-- **tasks_scheduled** – Total tasks successfully scheduled (throughput).
-- **total_compute_ms** – Time spent in compute (catalog matching).
-- **total_coord_ms** – Coordination overhead (message handling, state).
-- **compute_pct**, **coord_pct** – Percent of time in compute vs coord.
-- **granularity_ratio** – compute/coordinate (target ≥ 10×).
-
-## Metrics & Benchmarks
-
-- **Coordination vs computation**: Each `submit_task` / `get_best_resources` adds simulated compute ms (catalog scan) and coord ms (overhead); accumulated in state.
-- **Cost analysis**: `get_status` returns `compute_pct` and `coord_pct`.
-- **Granularity ratio**: `granularity_ratio` = total_compute_ms / total_coord_ms (target ≥ 10×).
-- **Non-trivial run**: `test.sh` runs a batch of 20 submit_task calls (~2+ s wall time) and prints benchmarks.
+- **Actor state** (`get_status`): `queue_size`, `running`, `tasks_scheduled`, `total_compute_ms`, `total_coord_ms`, `compute_pct`, `coord_pct`, `granularity_ratio`
+- **Merged application metrics** (via host): counters such as `scheduler_submits`, `scheduler_get_best`, `scheduler_status_queries`, and `latency_totals_ms` keys under `scheduler.*`
 
 ## Build and Test
-
-From this directory:
 
 ```bash
 ./build.sh
 ./test.sh 8092
 ```
 
-Requires: Rust (wasm32-wasip1), `wasm-tools`, WASI adapter (e.g. from `jco`). Node must be running: `./scripts/server.sh` from repo root.
+Requires: Rust (`wasm32-wasip1`), `wasm-tools`, WASI adapter (e.g. from `jco`). See `build.sh` for `CARGO_PROFILE` / shared `target`.
+
+`test.sh` step 7 prints **actor** rollups from `get_status` plus **application** `counter_metrics` / latency maps from `GET /api/v1/applications` (merged counters from `host::application_metrics_add`). The script passes JSON to Python via **environment variables** so stdin is not consumed by a heredoc by mistake.
 
 ## Comparison
 
@@ -66,9 +60,10 @@ Requires: Rust (wasm32-wasip1), `wasm-tools`, WASI adapter (e.g. from `jco`). No
 
 ## Native reference
 
-See `native/skypilot_ref.md` for SkyPilot concepts and mapping to this actor.
+See [`native/skypilot_ref.md`](native/skypilot_ref.md).
 
 ## References
 
 - [SkyPilot](https://skypilot.readthedocs.io/)
 - [PlexSpaces architecture](../../../../docs/architecture.md)
+- [SDK + WIT checklist](../SDK_WIT_APPS_CHECKLIST.md)

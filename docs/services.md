@@ -237,6 +237,8 @@ Application lifecycle management and deployment.
 | `RestartApplication` | Restart application | `RestartApplicationRequest` | `RestartApplicationResponse` |
 | `GetApplicationLogs` | Stream application logs | `GetApplicationLogsRequest` | `stream LogEntry` |
 
+**Listing from clients**: Use gRPC `ListApplications` (for example `plexspaces list --node <gRPC host:port> --json`). Proto `google.api.http` on this RPC feeds generated OpenAPI (`make proto-openapi` → `docs/openapi.json`) and gateway-style tooling; the embedded node’s Axum gateway wires deploy/undeploy (and related) HTTP routes, not a separate list handler—list flows go through gRPC or the CLI.
+
 ---
 
 ## Coordination Services

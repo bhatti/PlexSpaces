@@ -2,13 +2,22 @@
 
 **Single actor type**: coordinator (`workflow_run`) and **worker pool** workers (`work_available`). Uses **elastic pool API** (checkout/checkin) when the pool is configured, with **tuple space** as the work queue. Falls back to **process group** broadcast when the pool is not available.
 
-This Rust example is a WASM component that implements the same behavior as the Python, Go, and TypeScript migrating_merlin examples. It uses in-crate host stubs for local simulation; when deployed, the framework provides the real host bindings.
+This Rust example is a WASM component built with **`wit_bindgen::generate!`** (world `actor-world`), **`#[gen_server_actor(wasm)]`**, and **`plexspaces::simple_actor::host`** (`pool_checkout` / `pool_checkin`, `ts_*`, `pg_*`, `send`, `application_metrics_add`) — the same SDK + WIT pattern as [`migrating_temporal`](../migrating_temporal/README.md) and [`migrating_eflows4hpc`](../migrating_eflows4hpc/README.md).
 
 ## Abstractions
 
-- **Pool** = elastic pool `merlin-workers`. Coordinator calls pool_checkout, send(actor_id, "work_available", ...), then pool_checkin after gather. If checkout returns error/empty, falls back to pg_broadcast.
-- **Work queue** = tuple space: coordinator ts_write tasks; workers ts_take, run simulation, ts_write results.
+- **Pool** = elastic pool `merlin-workers`. Coordinator calls `host::pool_checkout`, `host::send(..., "work_available", ...)`, then `host::pool_checkin` after gather. If checkout returns error/empty, falls back to `host::pg_broadcast`.
+- **Work queue** = tuple space: coordinator `host::ts_write` tasks; workers `host::ts_take`, run simulation, `host::ts_write` results.
 - **Flow**: Coordinator scatter → checkout (or broadcast) → workers take/work/write → coordinator gather → checkin.
+
+```mermaid
+flowchart LR
+  C[coord workflow_run] --> S[ts_write tasks]
+  S --> P[pool_checkout / pg_broadcast work_available]
+  P --> W[workers ts_take / ts_write results]
+  W --> G[coord ts_read_all gather]
+  G --> I[pool_checkin]
+```
 
 ## Convention
 

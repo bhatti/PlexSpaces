@@ -918,6 +918,197 @@ func TestNormalizeRoleActorID(t *testing.T) {
 	}
 }
 
+// ========================================================================
+// Collective / Parallel Host Operation Tests
+// ========================================================================
+
+func TestHostBroadcastShardGroup(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.BroadcastShardGroup(map[string]any{
+		"group_id": "workers",
+		"message":  map[string]any{"op": "reset"},
+		"min_acks": 1,
+	})
+	if err != nil {
+		t.Fatalf("BroadcastShardGroup returned error: %v", err)
+	}
+	stats, ok := out["stats"].(map[string]any)
+	if !ok {
+		t.Fatal("expected stats in response")
+	}
+	if _, exists := stats["shards_queried"]; !exists {
+		t.Error("expected shards_queried in stats")
+	}
+}
+
+func TestHostReduceShardGroup(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.ReduceShardGroup(map[string]any{
+		"group_id":      "workers",
+		"query":         map[string]any{"action": "get_count"},
+		"reduction":     1,
+		"min_responses": 1,
+	})
+	if err != nil {
+		t.Fatalf("ReduceShardGroup returned error: %v", err)
+	}
+	if _, exists := out["stats"]; !exists {
+		t.Error("expected stats in response")
+	}
+	if _, exists := out["shard_responses"]; !exists {
+		t.Error("expected shard_responses in response")
+	}
+}
+
+func TestHostAllReduceShardGroup(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.AllReduceShardGroup(map[string]any{
+		"group_id":      "workers",
+		"query":         map[string]any{"action": "sum"},
+		"reduction":     1,
+		"min_responses": 1,
+	})
+	if err != nil {
+		t.Fatalf("AllReduceShardGroup returned error: %v", err)
+	}
+	if _, exists := out["stats"]; !exists {
+		t.Error("expected stats in response")
+	}
+}
+
+func TestHostBarrierShardGroup(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.BarrierShardGroup(map[string]any{
+		"group_id":   "workers",
+		"barrier_id": "round-1",
+		"round":      1,
+		"min_acks":   1,
+	})
+	if err != nil {
+		t.Fatalf("BarrierShardGroup returned error: %v", err)
+	}
+	if _, exists := out["stats"]; !exists {
+		t.Error("expected stats in response")
+	}
+}
+
+func TestHostSpawnActors(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.SpawnActors(map[string]any{
+		"requests": []any{
+			map[string]any{"actor_type": "counter", "actor_id": "c-0"},
+			map[string]any{"actor_type": "counter", "actor_id": "c-1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SpawnActors returned error: %v", err)
+	}
+	results, ok := out["results"].([]any)
+	if !ok {
+		t.Fatal("expected results array in response")
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	for i, r := range results {
+		result := r.(map[string]any)
+		if result["success"] != true {
+			t.Errorf("result[%d] should be success", i)
+		}
+	}
+}
+
+func TestHostSpawnActorsEmpty(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.SpawnActors(map[string]any{
+		"requests": []any{},
+	})
+	if err != nil {
+		t.Fatalf("SpawnActors returned error: %v", err)
+	}
+	results, ok := out["results"].([]any)
+	if !ok {
+		t.Fatal("expected results array in response")
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected 0 results for empty request, got %d", len(results))
+	}
+}
+
+func TestHostSpawnActorsWithInstancesCount(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.SpawnActors(map[string]any{
+		"requests": []any{
+			map[string]any{
+				"actor_type":      "worker",
+				"actor_id":        "w",
+				"instances_count": 3,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SpawnActors returned error: %v", err)
+	}
+	if _, exists := out["results"]; !exists {
+		t.Error("expected results in response")
+	}
+}
+
+func TestHostBulkUpdateShardGroup(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.BulkUpdateShardGroup(map[string]any{
+		"group_id": "workers",
+		"updates":  map[string]any{"key1": map[string]any{"payload": "data"}},
+	})
+	if err != nil {
+		t.Fatalf("BulkUpdateShardGroup returned error: %v", err)
+	}
+	if _, exists := out["updates_sent"]; !exists {
+		t.Error("expected updates_sent in response")
+	}
+}
+
+func TestHostMapShardGroup(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.MapShardGroup(map[string]any{
+		"group_id": "workers",
+		"query":    map[string]any{"action": "status"},
+	})
+	if err != nil {
+		t.Fatalf("MapShardGroup returned error: %v", err)
+	}
+	if _, exists := out["results"]; !exists {
+		t.Error("expected results in response")
+	}
+}
+
+func TestHostScatterGather(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.ScatterGather(map[string]any{
+		"group_id": "workers",
+		"query":    map[string]any{"action": "get_all"},
+	})
+	if err != nil {
+		t.Fatalf("ScatterGather returned error: %v", err)
+	}
+	if _, exists := out["stats"]; !exists {
+		t.Error("expected stats in response")
+	}
+	if _, exists := out["shard_responses"]; !exists {
+		t.Error("expected shard_responses in response")
+	}
+}
+
 func TestActorRouterEchoActorInit(t *testing.T) {
 	router := NewActorRouter()
 	router.Route("echo", func() Actor { return newEchoActor() })

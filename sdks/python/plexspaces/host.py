@@ -289,6 +289,47 @@ class _MockHost:
             "stats": {"shards_queried": 0, "shards_responded": 0, "shards_failed": 0},
         })
 
+    def broadcast_shard_group(self, request_json: str) -> str:
+        return json.dumps({
+            "shard_responses": [],
+            "stats": {"shards_queried": 0, "shards_responded": 0, "shards_failed": 0},
+        })
+
+    def reduce_shard_group(self, request_json: str) -> str:
+        return json.dumps({
+            "result": None,
+            "shard_responses": [],
+            "stats": {"shards_queried": 0, "shards_responded": 0, "shards_failed": 0},
+        })
+
+    def all_reduce_shard_group(self, request_json: str) -> str:
+        return json.dumps({
+            "result": None,
+            "shard_responses": [],
+            "stats": {"shards_queried": 0, "shards_responded": 0, "shards_failed": 0},
+        })
+
+    def barrier_shard_group(self, request_json: str) -> str:
+        return json.dumps({
+            "shard_responses": [],
+            "stats": {"shards_queried": 0, "shards_responded": 0, "shards_failed": 0},
+        })
+
+    def spawn_actors(self, request_json: str) -> str:
+        request = json.loads(request_json)
+        results = []
+        for item in request.get("requests", []):
+            actor_id = item.get("actor_id") or item.get("actor_type", "actor")
+            results.append({
+                "success": True,
+                "error": "",
+                "response": {
+                    "actor_ref": f"{actor_id}@test-node",
+                    "actor_id": actor_id,
+                },
+            })
+        return json.dumps({"results": results})
+
     def application_metrics_add(self, application_id: str, metrics_json: str) -> str:
         return metrics_json
 
@@ -983,6 +1024,67 @@ class Host:
         fn = getattr(h, "scatter_gather", None) or getattr(h, "scatter-gather", None)
         if fn is None:
             raise RuntimeError("scatter_gather not available")
+        result = fn(json.dumps(request))
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
+
+    def broadcast_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Broadcast a message to every shard in a group."""
+        h = _get_host()
+        fn = getattr(h, "broadcast_shard_group", None) or getattr(
+            h, "broadcast-shard-group", None
+        )
+        if fn is None:
+            raise RuntimeError("broadcast_shard_group not available")
+        result = fn(json.dumps(request))
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
+
+    def reduce_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Reduce values returned by a shard-group map operation."""
+        h = _get_host()
+        fn = getattr(h, "reduce_shard_group", None) or getattr(h, "reduce-shard-group", None)
+        if fn is None:
+            raise RuntimeError("reduce_shard_group not available")
+        result = fn(json.dumps(request))
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
+
+    def all_reduce_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Reduce values across a shard group and broadcast the reduced result."""
+        h = _get_host()
+        fn = getattr(h, "all_reduce_shard_group", None) or getattr(
+            h, "all-reduce-shard-group", None
+        )
+        if fn is None:
+            raise RuntimeError("all_reduce_shard_group not available")
+        result = fn(json.dumps(request))
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
+
+    def barrier_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Synchronize a shard group at a barrier round."""
+        h = _get_host()
+        fn = getattr(h, "barrier_shard_group", None) or getattr(
+            h, "barrier-shard-group", None
+        )
+        if fn is None:
+            raise RuntimeError("barrier_shard_group not available")
+        result = fn(json.dumps(request))
+        if result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        return json.loads(result)
+
+    def spawn_actors(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Spawn multiple actors using the framework actor service."""
+        h = _get_host()
+        fn = getattr(h, "spawn_actors", None) or getattr(h, "spawn-actors", None)
+        if fn is None:
+            raise RuntimeError("spawn_actors not available")
         result = fn(json.dumps(request))
         if result.startswith("ERROR:"):
             raise RuntimeError(result)

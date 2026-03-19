@@ -1,9 +1,4 @@
-# Merlin parameter sweep - Rust WASM app
-#
-# Builds a WASM component compatible with plexspaces-simple-actor.
-# Uses tuple space (ts_write, ts_take, ts_read_all), process group (pg_join, pg_broadcast),
-# and elastic pool (pool_checkout, pool_checkin) with fallback to PG.
-# Build: ./build.sh (cargo build --target wasm32-wasip1 then wasm-tools component embed + new).
+# Merlin parameter sweep — Rust WASM (SDK + WIT)
 
 [workspace]
 
@@ -19,8 +14,10 @@ description = "Merlin parameter sweep WASM actor (pool + tuple space; fallback: 
 crate-type = ["cdylib"]
 
 [dependencies]
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+wit-bindgen = "0.51.0"
 
 [profile.release]
 opt-level = "z"

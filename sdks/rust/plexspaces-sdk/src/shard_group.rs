@@ -6,9 +6,13 @@
 
 use anyhow::{Context, Result};
 use plexspaces_proto::actor::v1::{
-    BulkUpdateShardGroupRequest, ConsistencyLevel, CreateShardGroupRequest, DataParallelConfig,
-    MapShardGroupRequest, NodePlacement, PartitionStrategy, RebalancePolicy, ScatterGatherRequest,
-    ShardGroupAggregationStrategy,
+    AllReduceShardGroupRequest, AllReduceShardGroupResponse, BarrierShardGroupRequest,
+    BarrierShardGroupResponse, BroadcastShardGroupRequest, BroadcastShardGroupResponse,
+    BulkUpdateShardGroupRequest, CollectiveReduction, CollectiveTargetField, ConsistencyLevel,
+    CreateShardGroupRequest, DataParallelConfig, MapShardGroupRequest, NodePlacement,
+    PartitionStrategy, RebalancePolicy, ReduceShardGroupRequest, ReduceShardGroupResponse,
+    ScatterGatherRequest, ShardGroupAggregationStrategy, SpawnActorRequest, SpawnActorsRequest,
+    SpawnActorsResponse,
 };
 use plexspaces_proto::common::v1::Message as ProtoMessage;
 use prost_types::Duration;
@@ -39,6 +43,35 @@ fn create_shard_group_request(
         initial_state: Vec::new(),
         metadata: HashMap::new(),
     }
+}
+
+fn make_call_message(payload: Vec<u8>) -> ProtoMessage {
+    ProtoMessage {
+        id: ulid::Ulid::new().to_string(),
+        sender_id: "client".to_string(),
+        receiver_id: String::new(),
+        channel: String::new(),
+        message_type: "call".to_string(),
+        payload,
+        timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
+        headers: HashMap::new(),
+        priority: 0,
+        ttl: None,
+        delivery_count: 0,
+        idempotency_key: String::new(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        partition_key: String::new(),
+        uri_method: String::new(),
+        uri_path: String::new(),
+    }
+}
+
+fn default_timeout() -> Option<Duration> {
+    Some(Duration {
+        seconds: plexspaces_actor::parallel::DEFAULT_SHARD_TIMEOUT_SECS as i64,
+        nanos: 0,
+    })
 }
 
 #[cfg(test)]
@@ -167,6 +200,49 @@ pub trait ShardGroupClientTrait: Send + Sync {
         aggregation: ShardGroupAggregationStrategy,
         min_responses: u32,
     ) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse>;
+
+    /// Broadcast a message to all shards in a group.
+    async fn broadcast(
+        &mut self,
+        group_id: String,
+        message: serde_json::Value,
+        min_acks: u32,
+    ) -> Result<BroadcastShardGroupResponse>;
+
+    /// Reduce shard responses using a built-in collective reduction.
+    async fn reduce(
+        &mut self,
+        group_id: String,
+        query: serde_json::Value,
+        reduction: CollectiveReduction,
+        target: Option<String>,
+        min_responses: u32,
+    ) -> Result<ReduceShardGroupResponse>;
+
+    /// All-reduce: reduce shard responses and fan the result back to all shards.
+    async fn all_reduce(
+        &mut self,
+        group_id: String,
+        query: serde_json::Value,
+        reduction: CollectiveReduction,
+        target: Option<String>,
+        min_responses: u32,
+    ) -> Result<AllReduceShardGroupResponse>;
+
+    /// Synchronize a shard group at a framework barrier round.
+    async fn barrier(
+        &mut self,
+        group_id: String,
+        barrier_id: String,
+        round: u64,
+        min_acks: u32,
+    ) -> Result<BarrierShardGroupResponse>;
+
+    /// Spawn multiple actors using the canonical framework spawn contract.
+    async fn spawn_actors(
+        &mut self,
+        requests: Vec<SpawnActorRequest>,
+    ) -> Result<SpawnActorsResponse>;
 }
 
 /// ShardGroup client for WASM/internal apps (uses ServiceLocator directly)
@@ -199,8 +275,6 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
         partition_strategy: PartitionStrategy,
         placement: Option<NodePlacement>,
     ) -> Result<plexspaces_proto::actor::v1::ShardGroup> {
-        // Create request context (use system context for internal operations)
-        // Clone service_locator to avoid Send bound issues
         let service_locator = self.service_locator.clone();
         let ctx = service_locator
             .request_context_for_system_operations()
@@ -214,8 +288,6 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             placement,
         );
 
-        // Call ActorService directly (no gRPC)
-        // Clone actor_service to avoid Send bound issues
         let actor_service = self.actor_service.clone();
         let resp = actor_service
             .create_shard_group(&ctx, req)
@@ -238,28 +310,10 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             .request_context_for_system_operations()
             .await;
 
-        // Convert JSON values to Messages
         let mut proto_updates = HashMap::new();
         for (key, value) in updates {
-            let message = ProtoMessage {
-                id: ulid::Ulid::new().to_string(),
-                sender_id: "client".to_string(),
-                receiver_id: String::new(),
-                channel: String::new(),
-                message_type: "call".to_string(),
-                payload: serde_json::to_vec(&value)?,
-                timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
-                headers: HashMap::new(),
-                priority: 0,
-                ttl: None,
-                delivery_count: 0,
-                idempotency_key: String::new(),
-                correlation_id: String::new(),
-                reply_to: String::new(),
-                partition_key: key.clone(),
-                uri_method: String::new(),
-                uri_path: String::new(),
-            };
+            let mut message = make_call_message(serde_json::to_vec(&value)?);
+            message.partition_key = key.clone();
             proto_updates.insert(key, message);
         }
 
@@ -267,10 +321,7 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             group_id,
             updates: proto_updates,
             consistency_level: consistency_level as i32,
-            timeout: Some(Duration {
-                seconds: 30,
-                nanos: 0,
-            }),
+            timeout: default_timeout(),
             wait_for_responses,
         };
 
@@ -293,33 +344,12 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             .request_context_for_system_operations()
             .await;
 
-        let message = ProtoMessage {
-            id: ulid::Ulid::new().to_string(),
-            sender_id: "client".to_string(),
-            receiver_id: String::new(),
-            channel: String::new(),
-            message_type: "call".to_string(),
-            payload: serde_json::to_vec(&query)?,
-            timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
-            headers: HashMap::new(),
-            priority: 0,
-            ttl: None,
-            delivery_count: 0,
-            idempotency_key: String::new(),
-            correlation_id: String::new(),
-            reply_to: String::new(),
-            partition_key: String::new(),
-            uri_method: String::new(),
-            uri_path: String::new(),
-        };
+        let message = make_call_message(serde_json::to_vec(&query)?);
 
         let req = MapShardGroupRequest {
             group_id: group_id.clone(),
             map_function: Some(message),
-            timeout: Some(Duration {
-                seconds: 30, // Increased timeout for multi-node scenarios
-                nanos: 0,
-            }),
+            timeout: default_timeout(),
             min_responses: 0,
         };
 
@@ -328,7 +358,6 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
 
         match result {
             Ok(resp) => {
-                // Check if we got any successful responses
                 if resp.shard_results.is_empty() {
                     tracing::error!(group_id = %group_id_for_logging, "Map ShardGroup returned no results - all shards may have failed");
                     return Err(anyhow::anyhow!(
@@ -399,34 +428,13 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             .request_context_for_system_operations()
             .await;
 
-        let message = ProtoMessage {
-            id: ulid::Ulid::new().to_string(),
-            sender_id: "client".to_string(),
-            receiver_id: String::new(),
-            channel: String::new(),
-            message_type: "call".to_string(),
-            payload: serde_json::to_vec(&query)?,
-            timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
-            headers: HashMap::new(),
-            priority: 0,
-            ttl: None,
-            delivery_count: 0,
-            idempotency_key: String::new(),
-            correlation_id: String::new(),
-            reply_to: String::new(),
-            partition_key: String::new(),
-            uri_method: String::new(),
-            uri_path: String::new(),
-        };
+        let message = make_call_message(serde_json::to_vec(&query)?);
 
         let req = ScatterGatherRequest {
             group_id,
             query: Some(message),
             aggregation: aggregation as i32,
-            timeout: Some(Duration {
-                seconds: 30, // Increased timeout for multi-node scenarios
-                nanos: 0,
-            }),
+            timeout: default_timeout(),
             min_responses,
         };
 
@@ -435,6 +443,140 @@ impl ShardGroupClientTrait for ShardGroupClientLocal {
             .scatter_gather(&ctx, req)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to scatter-gather ShardGroup: {}", e))
+    }
+
+    async fn broadcast(
+        &mut self,
+        group_id: String,
+        message: serde_json::Value,
+        min_acks: u32,
+    ) -> Result<BroadcastShardGroupResponse> {
+        let service_locator = self.service_locator.clone();
+        let ctx = service_locator
+            .request_context_for_system_operations()
+            .await;
+
+        let msg = make_call_message(serde_json::to_vec(&message)?);
+
+        let req = BroadcastShardGroupRequest {
+            group_id,
+            message: Some(msg),
+            timeout: default_timeout(),
+            min_acks,
+        };
+
+        let actor_service = self.actor_service.clone();
+        actor_service
+            .broadcast_shard_group(&ctx, req)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to broadcast ShardGroup: {}", e))
+    }
+
+    async fn reduce(
+        &mut self,
+        group_id: String,
+        query: serde_json::Value,
+        reduction: CollectiveReduction,
+        target: Option<String>,
+        min_responses: u32,
+    ) -> Result<ReduceShardGroupResponse> {
+        let service_locator = self.service_locator.clone();
+        let ctx = service_locator
+            .request_context_for_system_operations()
+            .await;
+
+        let msg = make_call_message(serde_json::to_vec(&query)?);
+
+        let req = ReduceShardGroupRequest {
+            group_id,
+            map_function: Some(msg),
+            timeout: default_timeout(),
+            min_responses,
+            reduction: reduction as i32,
+            target: target.map(|p| CollectiveTargetField { value_path: p }),
+        };
+
+        let actor_service = self.actor_service.clone();
+        actor_service
+            .reduce_shard_group(&ctx, req)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to reduce ShardGroup: {}", e))
+    }
+
+    async fn all_reduce(
+        &mut self,
+        group_id: String,
+        query: serde_json::Value,
+        reduction: CollectiveReduction,
+        target: Option<String>,
+        min_responses: u32,
+    ) -> Result<AllReduceShardGroupResponse> {
+        let service_locator = self.service_locator.clone();
+        let ctx = service_locator
+            .request_context_for_system_operations()
+            .await;
+
+        let msg = make_call_message(serde_json::to_vec(&query)?);
+
+        let req = AllReduceShardGroupRequest {
+            group_id,
+            map_function: Some(msg),
+            timeout: default_timeout(),
+            min_responses,
+            reduction: reduction as i32,
+            target: target.map(|p| CollectiveTargetField { value_path: p }),
+        };
+
+        let actor_service = self.actor_service.clone();
+        actor_service
+            .all_reduce_shard_group(&ctx, req)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to all-reduce ShardGroup: {}", e))
+    }
+
+    async fn barrier(
+        &mut self,
+        group_id: String,
+        barrier_id: String,
+        round: u64,
+        min_acks: u32,
+    ) -> Result<BarrierShardGroupResponse> {
+        let service_locator = self.service_locator.clone();
+        let ctx = service_locator
+            .request_context_for_system_operations()
+            .await;
+
+        let req = BarrierShardGroupRequest {
+            group_id,
+            barrier_id,
+            round,
+            timeout: default_timeout(),
+            min_acks,
+        };
+
+        let actor_service = self.actor_service.clone();
+        actor_service
+            .barrier_shard_group(&ctx, req)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to barrier ShardGroup: {}", e))
+    }
+
+    async fn spawn_actors(
+        &mut self,
+        requests: Vec<SpawnActorRequest>,
+    ) -> Result<SpawnActorsResponse> {
+        let service_locator = self.service_locator.clone();
+        let ctx = service_locator
+            .request_context_for_system_operations()
+            .await;
+
+        let req = SpawnActorsRequest { requests };
+
+        let actor_service = self.actor_service.clone();
+        actor_service
+            .spawn_actors(&ctx, req)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to spawn actors: {}", e))
     }
 }
 
@@ -497,28 +639,10 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         consistency_level: ConsistencyLevel,
         wait_for_responses: bool,
     ) -> Result<plexspaces_proto::actor::v1::BulkUpdateShardGroupResponse> {
-        // Convert JSON values to Messages
         let mut proto_updates = HashMap::new();
         for (key, value) in updates {
-            let message = ProtoMessage {
-                id: ulid::Ulid::new().to_string(),
-                sender_id: "client".to_string(),
-                receiver_id: String::new(),
-                channel: String::new(),
-                message_type: "call".to_string(),
-                payload: serde_json::to_vec(&value)?,
-                timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
-                headers: HashMap::new(),
-                priority: 0,
-                ttl: None,
-                delivery_count: 0,
-                idempotency_key: String::new(),
-                correlation_id: String::new(),
-                reply_to: String::new(),
-                partition_key: key.clone(),
-                uri_method: String::new(),
-                uri_path: String::new(),
-            };
+            let mut message = make_call_message(serde_json::to_vec(&value)?);
+            message.partition_key = key.clone();
             proto_updates.insert(key, message);
         }
 
@@ -526,10 +650,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
             group_id,
             updates: proto_updates,
             consistency_level: consistency_level as i32,
-            timeout: Some(Duration {
-                seconds: 30,
-                nanos: 0,
-            }),
+            timeout: default_timeout(),
             wait_for_responses,
         };
 
@@ -548,25 +669,7 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         group_id: String,
         query: serde_json::Value,
     ) -> Result<plexspaces_proto::actor::v1::MapShardGroupResponse> {
-        let message = ProtoMessage {
-            id: ulid::Ulid::new().to_string(),
-            sender_id: "client".to_string(),
-            receiver_id: String::new(),
-            channel: String::new(),
-            message_type: "call".to_string(),
-            payload: serde_json::to_vec(&query)?,
-            timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
-            headers: HashMap::new(),
-            priority: 0,
-            ttl: None,
-            delivery_count: 0,
-            idempotency_key: String::new(),
-            correlation_id: String::new(),
-            reply_to: String::new(),
-            partition_key: String::new(),
-            uri_method: String::new(),
-            uri_path: String::new(),
-        };
+        let message = make_call_message(serde_json::to_vec(&query)?);
 
         let req = MapShardGroupRequest {
             group_id,
@@ -595,34 +698,13 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
         aggregation: ShardGroupAggregationStrategy,
         min_responses: u32,
     ) -> Result<plexspaces_proto::actor::v1::ScatterGatherResponse> {
-        let message = ProtoMessage {
-            id: ulid::Ulid::new().to_string(),
-            sender_id: "client".to_string(),
-            receiver_id: String::new(),
-            channel: String::new(),
-            message_type: "call".to_string(),
-            payload: serde_json::to_vec(&query)?,
-            timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
-            headers: HashMap::new(),
-            priority: 0,
-            ttl: None,
-            delivery_count: 0,
-            idempotency_key: String::new(),
-            correlation_id: String::new(),
-            reply_to: String::new(),
-            partition_key: String::new(),
-            uri_method: String::new(),
-            uri_path: String::new(),
-        };
+        let message = make_call_message(serde_json::to_vec(&query)?);
 
         let req = ScatterGatherRequest {
             group_id,
             query: Some(message),
             aggregation: aggregation as i32,
-            timeout: Some(Duration {
-                seconds: 30, // Increased timeout for multi-node scenarios
-                nanos: 0,
-            }),
+            timeout: default_timeout(),
             min_responses,
         };
 
@@ -631,6 +713,130 @@ impl ShardGroupClientTrait for ShardGroupClientGrpc {
             .scatter_gather(Request::new(req))
             .await
             .context("Failed to scatter-gather ShardGroup")?
+            .into_inner();
+
+        Ok(resp)
+    }
+
+    async fn broadcast(
+        &mut self,
+        group_id: String,
+        message: serde_json::Value,
+        min_acks: u32,
+    ) -> Result<BroadcastShardGroupResponse> {
+        let msg = make_call_message(serde_json::to_vec(&message)?);
+
+        let req = BroadcastShardGroupRequest {
+            group_id,
+            message: Some(msg),
+            timeout: default_timeout(),
+            min_acks,
+        };
+
+        let resp = self
+            .client
+            .broadcast_shard_group(Request::new(req))
+            .await
+            .context("Failed to broadcast ShardGroup")?
+            .into_inner();
+
+        Ok(resp)
+    }
+
+    async fn reduce(
+        &mut self,
+        group_id: String,
+        query: serde_json::Value,
+        reduction: CollectiveReduction,
+        target: Option<String>,
+        min_responses: u32,
+    ) -> Result<ReduceShardGroupResponse> {
+        let msg = make_call_message(serde_json::to_vec(&query)?);
+
+        let req = ReduceShardGroupRequest {
+            group_id,
+            map_function: Some(msg),
+            timeout: default_timeout(),
+            min_responses,
+            reduction: reduction as i32,
+            target: target.map(|p| CollectiveTargetField { value_path: p }),
+        };
+
+        let resp = self
+            .client
+            .reduce_shard_group(Request::new(req))
+            .await
+            .context("Failed to reduce ShardGroup")?
+            .into_inner();
+
+        Ok(resp)
+    }
+
+    async fn all_reduce(
+        &mut self,
+        group_id: String,
+        query: serde_json::Value,
+        reduction: CollectiveReduction,
+        target: Option<String>,
+        min_responses: u32,
+    ) -> Result<AllReduceShardGroupResponse> {
+        let msg = make_call_message(serde_json::to_vec(&query)?);
+
+        let req = AllReduceShardGroupRequest {
+            group_id,
+            map_function: Some(msg),
+            timeout: default_timeout(),
+            min_responses,
+            reduction: reduction as i32,
+            target: target.map(|p| CollectiveTargetField { value_path: p }),
+        };
+
+        let resp = self
+            .client
+            .all_reduce_shard_group(Request::new(req))
+            .await
+            .context("Failed to all-reduce ShardGroup")?
+            .into_inner();
+
+        Ok(resp)
+    }
+
+    async fn barrier(
+        &mut self,
+        group_id: String,
+        barrier_id: String,
+        round: u64,
+        min_acks: u32,
+    ) -> Result<BarrierShardGroupResponse> {
+        let req = BarrierShardGroupRequest {
+            group_id,
+            barrier_id,
+            round,
+            timeout: default_timeout(),
+            min_acks,
+        };
+
+        let resp = self
+            .client
+            .barrier_shard_group(Request::new(req))
+            .await
+            .context("Failed to barrier ShardGroup")?
+            .into_inner();
+
+        Ok(resp)
+    }
+
+    async fn spawn_actors(
+        &mut self,
+        requests: Vec<SpawnActorRequest>,
+    ) -> Result<SpawnActorsResponse> {
+        let req = SpawnActorsRequest { requests };
+
+        let resp = self
+            .client
+            .spawn_actors(Request::new(req))
+            .await
+            .context("Failed to spawn actors")?
             .into_inner();
 
         Ok(resp)
@@ -776,6 +982,90 @@ impl ShardGroupClientTrait for UnifiedShardGroupClient {
                     .scatter_gather(group_id, query, aggregation, min_responses)
                     .await
             }
+        }
+    }
+
+    async fn broadcast(
+        &mut self,
+        group_id: String,
+        message: serde_json::Value,
+        min_acks: u32,
+    ) -> Result<BroadcastShardGroupResponse> {
+        match self {
+            Self::Local(client) => client.broadcast(group_id, message, min_acks).await,
+            #[cfg(feature = "grpc")]
+            Self::Grpc(client) => client.broadcast(group_id, message, min_acks).await,
+        }
+    }
+
+    async fn reduce(
+        &mut self,
+        group_id: String,
+        query: serde_json::Value,
+        reduction: CollectiveReduction,
+        target: Option<String>,
+        min_responses: u32,
+    ) -> Result<ReduceShardGroupResponse> {
+        match self {
+            Self::Local(client) => {
+                client
+                    .reduce(group_id, query, reduction, target, min_responses)
+                    .await
+            }
+            #[cfg(feature = "grpc")]
+            Self::Grpc(client) => {
+                client
+                    .reduce(group_id, query, reduction, target, min_responses)
+                    .await
+            }
+        }
+    }
+
+    async fn all_reduce(
+        &mut self,
+        group_id: String,
+        query: serde_json::Value,
+        reduction: CollectiveReduction,
+        target: Option<String>,
+        min_responses: u32,
+    ) -> Result<AllReduceShardGroupResponse> {
+        match self {
+            Self::Local(client) => {
+                client
+                    .all_reduce(group_id, query, reduction, target, min_responses)
+                    .await
+            }
+            #[cfg(feature = "grpc")]
+            Self::Grpc(client) => {
+                client
+                    .all_reduce(group_id, query, reduction, target, min_responses)
+                    .await
+            }
+        }
+    }
+
+    async fn barrier(
+        &mut self,
+        group_id: String,
+        barrier_id: String,
+        round: u64,
+        min_acks: u32,
+    ) -> Result<BarrierShardGroupResponse> {
+        match self {
+            Self::Local(client) => client.barrier(group_id, barrier_id, round, min_acks).await,
+            #[cfg(feature = "grpc")]
+            Self::Grpc(client) => client.barrier(group_id, barrier_id, round, min_acks).await,
+        }
+    }
+
+    async fn spawn_actors(
+        &mut self,
+        requests: Vec<SpawnActorRequest>,
+    ) -> Result<SpawnActorsResponse> {
+        match self {
+            Self::Local(client) => client.spawn_actors(requests).await,
+            #[cfg(feature = "grpc")]
+            Self::Grpc(client) => client.spawn_actors(requests).await,
         }
     }
 }

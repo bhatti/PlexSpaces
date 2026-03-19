@@ -1797,5 +1797,5 @@ docker push plexobject/plexspaces:latest
 - [Security Guide](security.md): Configure security, mTLS, JWT, and tenant isolation
 - [Concepts Guide](concepts.md): Understand core concepts
 - [Architecture](architecture.md): Understand the system design
-- [Examples](../examples/): Explore example applications
+- [Examples](../examples/README.md): Explore example applications
 - [Use Cases](use-cases.md): See real-world applications

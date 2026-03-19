@@ -207,7 +207,7 @@ The [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) uses inheritance: extend 
 See [examples/typescript/apps/bank_account](../examples/typescript/apps/bank_account/README.md) for a full example and E2E test.
 
 See [SDK Guide](sdk.md) for complete Python and TypeScript SDK documentation.
-See [WASM Deployment](wasm-deployment.md) and [Examples](examples.md) for Python, TypeScript, Go, and Rust WASM actor examples. For parameter sweep with elastic pool (checkout/checkin) and tuple space, see [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) (available in all four languages).
+See [WASM Deployment](wasm-deployment.md) and [Examples](../examples/README.md) for Python, TypeScript, Go, and Rust WASM actor examples. For parameter sweep with elastic pool (checkout/checkin) and tuple space, see [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) (available in all four languages).
 
 ## Key Concepts
 
@@ -262,7 +262,7 @@ Facets add dynamic capabilities to actors:
 1. **Learn Core Concepts**: Read the [concepts guide](concepts.md) to understand Actors, Behaviors, Facets, and more
 2. **Configure Security**: Set up mTLS, JWT, and tenant isolation - see [Security Guide](security.md)
 3. **Usage Patterns**: Learn practical usage patterns with [Usage Guide](usage.md)
-4. **Explore Examples**: Check out the [examples directory](../examples/) for more patterns
+4. **Explore Examples**: Check out the [examples directory](../examples/README.md) for more patterns
 5. **Read Architecture**: Understand the [system design](architecture.md)
 6. **FaaS Invocation**: Learn how to invoke actors via HTTP: GET uses request-reply (ask); POST/PUT/DELETE use fire-and-forget (tell) by default. Use query param `invocation=call` to force request-reply. Valid `invocation` values: **call**, **cast**, **info** (Erlang-style). Use `msg_type` in query for handler name (e.g. GET `?msg_type=count`) - see [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation)
 7. **Deploy to Production**: Follow the [installation guide](installation.md)
@@ -520,10 +520,10 @@ If you encounter build errors:
 ## Resources
 
 - **Documentation**: [Full API docs](https://docs.rs/plexspaces/)
-- **Examples**: [Example gallery](../examples/)
+- **Examples**: [Example gallery](../examples/README.md)
 - **Community**: [GitHub Discussions](https://github.com/plexobject/plexspaces/discussions)
 - **Issues**: [Report bugs](https://github.com/plexobject/plexspaces/issues)
 
 ---
 
-**Ready to build?** Check out the [examples](../examples/) or read the [architecture guide](architecture.md)!
+**Ready to build?** Check out the [examples](../examples/README.md) or read the [architecture guide](architecture.md)!

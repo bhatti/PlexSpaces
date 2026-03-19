@@ -121,11 +121,15 @@ enum Commands {
         payload: String,
     },
 
-    /// List applications on a node
+    /// List deployed applications
     List {
-        /// Node address
+        /// Node gRPC address (HTTP gateway is often this port + 1)
         #[arg(short, long, default_value = "localhost:8000")]
         node: String,
+
+        /// Print JSON (`ListApplicationsResponse` shape, snake_case)
+        #[arg(long)]
+        json: bool,
     },
 
     /// Undeploy an application (graceful shutdown)
@@ -285,7 +289,7 @@ async fn main() -> Result<()> {
             actor,
             payload,
         } => actor::invoke(&node, &actor, &payload).await,
-        Commands::List { node } => application::list(&node).await,
+        Commands::List { node, json } => application::list(&node, json).await,
         Commands::Undeploy { node, app_id } => application::undeploy(&node, &app_id).await,
         #[cfg(feature = "firecracker")]
         Commands::Vm(cmd) => firecracker::handle_vm_command(cmd).await,

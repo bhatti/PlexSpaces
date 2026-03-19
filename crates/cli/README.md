@@ -40,8 +40,8 @@ plexspaces actor list --node-id node1
 # Deploy application
 plexspaces application deploy --name my-app --wasm app.wasm
 
-# List applications
-plexspaces application list
+# List applications (gRPC ListApplications; JSON for scripts)
+plexspaces list --node localhost:8000 --json
 
 # Stop application
 plexspaces application stop --name my-app

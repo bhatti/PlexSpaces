@@ -270,6 +270,7 @@ async fn test_spawn_actor_with_virtual_actor_facet() {
         config: None,
         labels: HashMap::new(),
         facets: vec![facet.clone()],
+        instances_count: 1,
     };
 
     // Add required metadata for RequestContext
@@ -360,6 +361,7 @@ async fn test_spawn_actor_with_multiple_facets() {
         config: None,
         labels: HashMap::new(),
         facets: vec![virtual_facet, unknown_facet],
+        instances_count: 1,
     };
 
     let mut grpc_request = Request::new(request);
@@ -411,6 +413,7 @@ async fn test_spawn_actor_without_facets() {
         config: None,
         labels: HashMap::new(),
         facets: vec![], // No facets
+        instances_count: 1,
     };
 
     let mut grpc_request = Request::new(request);

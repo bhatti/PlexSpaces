@@ -50,4 +50,4 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
 ## See also
 
 - [Architecture](../../../../docs/architecture.md)
-- [Examples](../../../../docs/examples.md)
+- [Examples](../../../README.md)

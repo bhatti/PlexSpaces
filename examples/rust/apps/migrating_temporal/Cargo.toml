@@ -1,11 +1,6 @@
-# Order Fulfillment Workflow - Rust WASM app (Temporal-style)
+# Order fulfillment workflow — Rust WASM (Temporal-style)
 #
-# Builds a WASM component compatible with plexspaces-simple-actor (init/handle/get-state/set-state).
-# Uses the same component ABI as Go: export names and cabi_realloc.
-# Build: ./build.sh (cargo build --target wasm32-wasip2 then wasm-tools component embed + new).
-#
-# Facets: virtual_actor + durability (configured in app-config.toml).
-# Standalone crate (not part of root workspace).
+# SDK + WIT: wit_bindgen Guest. Build: ./build.sh
 
 [workspace]
 
@@ -21,8 +16,10 @@ description = "Order fulfillment workflow WASM actor (Temporal-style run/signal/
 crate-type = ["cdylib"]
 
 [dependencies]
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+wit-bindgen = "0.51.0"
 
 [profile.release]
 opt-level = "z"

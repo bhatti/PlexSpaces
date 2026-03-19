@@ -231,6 +231,47 @@ func hostScatterGather(requestJSON string) string {
 	return `{"result":null,"shard_responses":[],"stats":{"shards_queried":0,"shards_responded":0,"shards_failed":0}}`
 }
 
+func hostBroadcastShardGroup(requestJSON string) string {
+	return `{"shard_responses":[],"stats":{"shards_queried":0,"shards_responded":0,"shards_failed":0}}`
+}
+
+func hostReduceShardGroup(requestJSON string) string {
+	return `{"result":null,"shard_responses":[],"stats":{"shards_queried":0,"shards_responded":0,"shards_failed":0}}`
+}
+
+func hostAllReduceShardGroup(requestJSON string) string {
+	return `{"result":null,"shard_responses":[],"stats":{"shards_queried":0,"shards_responded":0,"shards_failed":0}}`
+}
+
+func hostBarrierShardGroup(requestJSON string) string {
+	return `{"shard_responses":[],"stats":{"shards_queried":0,"shards_responded":0,"shards_failed":0}}`
+}
+
+func hostSpawnActors(requestJSON string) string {
+	var request struct {
+		Requests []map[string]any `json:"requests"`
+	}
+	_ = json.Unmarshal([]byte(requestJSON), &request)
+	results := make([]map[string]any, 0, len(request.Requests))
+	for _, item := range request.Requests {
+		actorID, _ := item["actor_id"].(string)
+		actorType, _ := item["actor_type"].(string)
+		if actorID == "" {
+			actorID = actorType
+		}
+		results = append(results, map[string]any{
+			"success": true,
+			"error":   "",
+			"response": map[string]any{
+				"actor_ref": actorID + "@test-node",
+				"actor_id":  actorID,
+			},
+		})
+	}
+	out, _ := json.Marshal(map[string]any{"results": results})
+	return string(out)
+}
+
 func hostApplicationMetricsAdd(applicationID, metricsJSON string) string {
 	return metricsJSON
 }

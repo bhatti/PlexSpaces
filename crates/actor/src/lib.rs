@@ -100,6 +100,9 @@ pub use child_spec::{ChildSpec, ShutdownSpec, StartFn, StartedChild};
 
 pub use plexspaces_core::facet_helpers::{create_facet_from_proto, create_facets_from_proto};
 
+// Stateless helpers for parallel / collective shard-group operations
+pub mod parallel;
+
 // Unified routing module
 pub mod routing;
 pub use routing::{

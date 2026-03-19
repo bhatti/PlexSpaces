@@ -93,33 +93,39 @@ plexspaces actor list --node-id node1
 plexspaces actor status --actor-id counter@node1
 ```
 
-### Application Deployment
+### Application deployment
 
-#### Deploy Application
+Commands map to gRPC `ApplicationService` (see `proto/plexspaces/v1/application/application.proto`). The node listens on `--listen-addr` for gRPC; the HTTP gateway (when enabled) is typically the next port (for example `scripts/server.sh`: gRPC `8091`, HTTP `8092`).
+
+#### Deploy application
 
 ```bash
-plexspaces application deploy \
+plexspaces deploy \
+  --node localhost:8000 \
+  --app-id my-app-id \
   --name my-app \
+  --version 1.0.0 \
   --wasm app.wasm \
-  --config app-config.yaml
+  --config app-config.toml
 ```
 
-#### List Applications
+#### List applications
+
+Uses `ApplicationService.ListApplications` over gRPC.
 
 ```bash
-plexspaces application list
+plexspaces list --node localhost:8000
+plexspaces list --node localhost:8000 --json
 ```
 
-#### Application Status
+`--json` prints a single JSON object shaped like `ListApplicationsResponse` (for scripts and tooling).
+
+#### Undeploy application
+
+Gracefully stops an application (same RPC family as deploy).
 
 ```bash
-plexspaces application status --name my-app
-```
-
-#### Stop Application
-
-```bash
-plexspaces application stop --name my-app
+plexspaces undeploy --node localhost:8000 --app-id my-app-id
 ```
 
 ### Firecracker VM Management

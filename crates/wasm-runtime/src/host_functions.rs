@@ -13,9 +13,12 @@ use plexspaces_core::{
 };
 use plexspaces_process_groups::ProcessGroupRegistry;
 use plexspaces_proto::actor::v1::{
+    AllReduceShardGroupRequest, AllReduceShardGroupResponse, BarrierShardGroupRequest,
+    BarrierShardGroupResponse, BroadcastShardGroupRequest, BroadcastShardGroupResponse,
     BulkUpdateShardGroupRequest, BulkUpdateShardGroupResponse, CreateShardGroupRequest,
-    CreateShardGroupResponse, MapShardGroupRequest, MapShardGroupResponse,
-    ScatterGatherRequest, ScatterGatherResponse,
+    CreateShardGroupResponse, MapShardGroupRequest, MapShardGroupResponse, ReduceShardGroupRequest,
+    ReduceShardGroupResponse, ScatterGatherRequest, ScatterGatherResponse, SpawnActorsRequest,
+    SpawnActorsResponse,
 };
 use plexspaces_proto::application::v1::{ApplicationInfo, ApplicationMetrics};
 use plexspaces_proto::common::v1::Message;
@@ -202,6 +205,56 @@ pub trait MessageSender: Send + Sync {
     ) -> Result<ScatterGatherResponse, String> {
         let _ = (ctx, req);
         Err("scatter_gather not implemented".to_string())
+    }
+
+    /// Broadcast via the framework actor service.
+    async fn broadcast_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: BroadcastShardGroupRequest,
+    ) -> Result<BroadcastShardGroupResponse, String> {
+        let _ = (ctx, req);
+        Err("broadcast_shard_group not implemented".to_string())
+    }
+
+    /// Reduce via the framework actor service.
+    async fn reduce_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: ReduceShardGroupRequest,
+    ) -> Result<ReduceShardGroupResponse, String> {
+        let _ = (ctx, req);
+        Err("reduce_shard_group not implemented".to_string())
+    }
+
+    /// All-reduce via the framework actor service.
+    async fn all_reduce_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: AllReduceShardGroupRequest,
+    ) -> Result<AllReduceShardGroupResponse, String> {
+        let _ = (ctx, req);
+        Err("all_reduce_shard_group not implemented".to_string())
+    }
+
+    /// Barrier via the framework actor service.
+    async fn barrier_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: BarrierShardGroupRequest,
+    ) -> Result<BarrierShardGroupResponse, String> {
+        let _ = (ctx, req);
+        Err("barrier_shard_group not implemented".to_string())
+    }
+
+    /// Batch spawn actors via the framework actor service.
+    async fn spawn_actors(
+        &self,
+        ctx: &RequestContext,
+        req: SpawnActorsRequest,
+    ) -> Result<SpawnActorsResponse, String> {
+        let _ = (ctx, req);
+        Err("spawn_actors not implemented".to_string())
     }
 
     /// Merge a node-local metrics delta into an application.
@@ -564,6 +617,71 @@ impl HostFunctions {
             sender.scatter_gather(ctx, req).await
         } else {
             Err("Actor service not configured for scatter_gather".to_string())
+        }
+    }
+
+    /// Broadcast a message to all shards in a shard group.
+    pub async fn broadcast_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: BroadcastShardGroupRequest,
+    ) -> Result<BroadcastShardGroupResponse, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.broadcast_shard_group(ctx, req).await
+        } else {
+            Err("Actor service not configured for broadcast_shard_group".to_string())
+        }
+    }
+
+    /// Reduce shard responses using a built-in framework reduction.
+    pub async fn reduce_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: ReduceShardGroupRequest,
+    ) -> Result<ReduceShardGroupResponse, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.reduce_shard_group(ctx, req).await
+        } else {
+            Err("Actor service not configured for reduce_shard_group".to_string())
+        }
+    }
+
+    /// Reduce shard responses and broadcast the reduced result back to the group.
+    pub async fn all_reduce_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: AllReduceShardGroupRequest,
+    ) -> Result<AllReduceShardGroupResponse, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.all_reduce_shard_group(ctx, req).await
+        } else {
+            Err("Actor service not configured for all_reduce_shard_group".to_string())
+        }
+    }
+
+    /// Synchronize all shards in a group at a barrier round.
+    pub async fn barrier_shard_group(
+        &self,
+        ctx: &RequestContext,
+        req: BarrierShardGroupRequest,
+    ) -> Result<BarrierShardGroupResponse, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.barrier_shard_group(ctx, req).await
+        } else {
+            Err("Actor service not configured for barrier_shard_group".to_string())
+        }
+    }
+
+    /// Spawn multiple actors through the framework actor service.
+    pub async fn spawn_actors(
+        &self,
+        ctx: &RequestContext,
+        req: SpawnActorsRequest,
+    ) -> Result<SpawnActorsResponse, String> {
+        if let Some(sender) = &self.message_sender {
+            sender.spawn_actors(ctx, req).await
+        } else {
+            Err("Actor service not configured for spawn_actors".to_string())
         }
     }
 

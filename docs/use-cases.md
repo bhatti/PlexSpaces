@@ -219,5 +219,5 @@ Low-latency real-time applications:
 
 - [Getting Started Guide](getting-started.md): Learn the basics
 - [Concepts Guide](concepts.md): Understand core concepts
-- [Examples](../examples/): Explore example applications
+- [Examples](../examples/README.md): Explore example applications
 - [Architecture](architecture.md): Understand the system design

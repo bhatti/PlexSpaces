@@ -1,39 +1,53 @@
-# Session Manager App
+# Session manager (Rust WASM)
 
-**Real-world timer example**: user session with **idle timeout** (one-shot) and **heartbeat** (periodic) using PlexSpaces `TimerFacet`.
+**Idle timeout** and **heartbeat** using the WIT host **`send-after`** API (`host::send_after` in Rust): delayed messages are delivered back to this actor as **`session_idle`** and **`session_heartbeat`** handlers. Metrics via **`host::application_metrics_add`**.
 
-- **Location**: `examples/rust/apps/session_manager/` (same layout as TypeScript apps under `examples/typescript/apps/`).
-- **Build**: Debug by default for tests/examples (`cargo build`, `cargo run`).
-- **Future**: Deploy as WASM app (when Rust SDK + WASM target is ready), analogous to TypeScript `bank_account`.
+For **TimerFacet** + **node spawn** (native Tokio) the previous `cargo run` demo lived in this crate’s history; the current layout matches other `examples/rust/apps/*` WASM examples.
 
-## Quick start
+## Layout
+
+| Path | Role |
+|------|------|
+| `src/lib.rs` | GenServer handlers + `Guest` export |
+| `app-config.toml` | Supervisor child `session` |
+| `build.sh` | → `session_manager_actor.wasm` |
+| `test.sh` | Deploy, `start_session`, `touch`, short wait, metrics |
+
+## Handlers
+
+| Op | Behavior |
+|----|----------|
+| `start_session` | `{ user_id?, idle_timeout_ms?, heartbeat_ms? }` — schedules idle + first heartbeat |
+| `touch` | Activity + reschedules idle timer |
+| `session_idle` / `session_heartbeat` | Fired by runtime when `send_after` elapses; heartbeat reschedules itself |
+| `reset`, `get_stats`, `get_status` / `status` | State + rollups |
+
+## Build & test
 
 ```bash
 cd examples/rust/apps/session_manager
-cargo build
-cargo run --bin session_manager
+./build.sh
+./scripts/server.sh   # repo root
+./test.sh
 ```
 
-Or run the test script (debug build + run with timeout):
+`./scripts/test.sh` runs `./test.sh`.
 
-```bash
-./scripts/test.sh
+## Flow
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant A as session GenServer
+  participant H as Host
+  C->>A: start_session
+  A->>H: send_after (idle, heartbeat)
+  H-->>A: session_heartbeat (periodic)
+  A->>H: send_after (next heartbeat)
 ```
 
-## What it demonstrates
+## References
 
-1. **TimerFacet** attached to a session actor.
-2. **idle_timeout**: one-shot timer (e.g. 5s) – session expires if no activity.
-3. **heartbeat**: periodic timer (e.g. 2s) – keep-alive / health ping.
-4. **Registration from main**: after spawn, `node.get_facets(actor_id)` + downcast to `TimerFacet` to call `register_once` / `register_periodic`.
-
-## PlexSpaces APIs (SDK style)
-
-- **SDK spawn**: `plexspaces_sdk::spawn_actor(ctx, service_locator, actor_id, namespace, SessionActor::new(...), facets)` — facets passed at spawn (like Python `@actor(facets=[...])`).
-- **Handler dispatch**: `#[plexspaces_handlers]` with `#[handler("timer_fired")]` — message_type → method (like Python `@handler("timer_fired")`).
-- `NodeBuilder`, `RequestContext`, `TimerFacet::new()`, `register_once()`, `register_periodic()`
-- `node.get_facets()`, facet downcast via `as_any().downcast_ref::<TimerFacet>()`
-
-## Convention
-
-Examples and tests use **debug** builds; use `cargo build` / `cargo run` (no `--release`) unless you need optimized binaries.
+- [Architecture](../../../../docs/architecture.md)
+- [SDK](../../../../docs/sdk.md)
+- [Apps checklist](../SDK_WIT_APPS_CHECKLIST.md)

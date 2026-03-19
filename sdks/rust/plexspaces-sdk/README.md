@@ -459,7 +459,7 @@ let final_result = client.reduce(
 ).await?;
 ```
 
-See [examples/rust/apps/data_parallel_worker](../examples/rust/apps/data_parallel_worker) for a complete example.
+See [examples/rust/apps/data_parallel_worker](../examples/rust/apps/data_parallel_worker) for a deployable WASM example (shard group + scatter/gather, SDK + WIT).
 
 ## Leader-worker (multi-node)
 
@@ -469,7 +469,7 @@ For **one logical run** with work split across nodes, the **first node** is the 
 - **Virtual actors are lazy** — No explicit ensure. Deploy the worker type as virtual on all nodes; the leader sends to `worker/chunk@node_id` and the target node creates the actor on first message receive. Same in all SDKs (Rust, Python, TypeScript, Go).
 - **`spawn_actor_on_node(...)`** — Spawn a non-virtual worker on a given node (calls that node’s SpawnActor). Use only when not using virtual actors.
 
-Core logic is in main crates (NodeRegistry, ActorService); the SDK wraps it. See [docs/sdk.md](../../../docs/sdk.md#leader-worker-multi-node-one-run) and [examples/README.md](../../../examples/README.md#what-multi-node-parallelization-means-one-run-work-split) for cross-language semantics and patterns.
+Core logic is in main crates (NodeRegistry, ActorService); the SDK wraps it. See [docs/sdk.md](../../../docs/sdk.md#leader-worker-multi-node-one-run) and [examples/README.md](../../../examples/README.md) for cross-language semantics and patterns.
 
 ## Best Practices
 
@@ -543,7 +543,7 @@ let ctx = RequestContext::new_without_auth("tenant".into(), "namespace".into());
 ## Examples
 
 - [Entity Recognition](../examples/rust/apps/entity_recognition) - GenServer with specific handlers
-- [Data Parallel Worker](../examples/rust/apps/data_parallel_worker) - Worker actor with catch-all handler
+- [Data Parallel Worker](../examples/rust/apps/data_parallel_worker) - WASM leader/worker, scatter/gather over shard group
 - [Bank Account](../examples/rust/apps/bank_account) - Durable actor with storage
 
 ## Design Philosophy

@@ -637,6 +637,106 @@ pub struct MapShardGroupResponse {
     #[prost(message, optional, tag="2")]
     pub stats: ::core::option::Option<ScatterGatherStats>,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CollectiveTargetField {
+    #[prost(string, tag="1")]
+    pub value_path: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BroadcastShardGroupRequest {
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
+    pub message: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, optional, tag="3")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    #[prost(uint32, tag="4")]
+    pub min_acks: u32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BroadcastShardGroupResponse {
+    #[prost(message, repeated, tag="1")]
+    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
+    #[prost(message, optional, tag="2")]
+    pub stats: ::core::option::Option<ScatterGatherStats>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReduceShardGroupRequest {
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
+    pub map_function: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, optional, tag="3")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    #[prost(uint32, tag="4")]
+    pub min_responses: u32,
+    #[prost(enumeration="CollectiveReduction", tag="5")]
+    pub reduction: i32,
+    #[prost(message, optional, tag="6")]
+    pub target: ::core::option::Option<CollectiveTargetField>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReduceShardGroupResponse {
+    #[prost(message, optional, tag="1")]
+    pub result: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, repeated, tag="2")]
+    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
+    #[prost(message, optional, tag="3")]
+    pub stats: ::core::option::Option<ScatterGatherStats>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AllReduceShardGroupRequest {
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="2")]
+    pub map_function: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, optional, tag="3")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    #[prost(uint32, tag="4")]
+    pub min_responses: u32,
+    #[prost(enumeration="CollectiveReduction", tag="5")]
+    pub reduction: i32,
+    #[prost(message, optional, tag="6")]
+    pub target: ::core::option::Option<CollectiveTargetField>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AllReduceShardGroupResponse {
+    #[prost(message, optional, tag="1")]
+    pub result: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(message, repeated, tag="2")]
+    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
+    #[prost(message, optional, tag="3")]
+    pub stats: ::core::option::Option<ScatterGatherStats>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BarrierShardGroupRequest {
+    #[prost(string, tag="1")]
+    pub group_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub barrier_id: ::prost::alloc::string::String,
+    #[prost(uint64, tag="3")]
+    pub round: u64,
+    #[prost(message, optional, tag="4")]
+    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    #[prost(uint32, tag="5")]
+    pub min_acks: u32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BarrierShardGroupResponse {
+    #[prost(message, repeated, tag="1")]
+    pub shard_responses: ::prost::alloc::vec::Vec<ShardQueryResponse>,
+    #[prost(message, optional, tag="2")]
+    pub stats: ::core::option::Option<ScatterGatherStats>,
+}
 /// Scale shard group (add/remove shards with rebalancing)
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -829,6 +929,13 @@ pub struct SpawnActorRequest {
     /// Examples: "production", "staging", "app-v1", "team-platform"
     #[prost(string, tag="7")]
     pub namespace: ::prost::alloc::string::String,
+    /// Number of identical replicas to spawn (default: 1)
+    /// When > 1, spawns N identical actors of this type with auto-generated IDs.
+    /// The actor_id field is used as a prefix (e.g. "worker" → "worker-0", "worker-1", ...).
+    /// If actor_id is empty, server generates ULID-based IDs for each replica.
+    /// Use case: data-parallel workloads, shard groups, worker pools.
+    #[prost(uint32, tag="8")]
+    pub instances_count: u32,
 }
 /// Response from SpawnActor
 ///
@@ -855,6 +962,28 @@ pub struct SpawnActorResponse {
     /// Useful for inspection and monitoring
     #[prost(message, optional, tag="2")]
     pub actor: ::core::option::Option<Actor>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SpawnActorsRequest {
+    #[prost(message, repeated, tag="1")]
+    pub requests: ::prost::alloc::vec::Vec<SpawnActorRequest>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SpawnActorResult {
+    #[prost(bool, tag="1")]
+    pub success: bool,
+    #[prost(string, tag="2")]
+    pub error: ::prost::alloc::string::String,
+    #[prost(message, optional, tag="3")]
+    pub response: ::core::option::Option<SpawnActorResponse>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SpawnActorsResponse {
+    #[prost(message, repeated, tag="1")]
+    pub results: ::prost::alloc::vec::Vec<SpawnActorResult>,
 }
 /// Request to get an actor
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -2365,6 +2494,50 @@ impl ShardGroupAggregationStrategy {
             "SHARD_GROUP_AGGREGATION_MERGE" => Some(Self::ShardGroupAggregationMerge),
             "SHARD_GROUP_AGGREGATION_FIRST" => Some(Self::ShardGroupAggregationFirst),
             "SHARD_GROUP_AGGREGATION_MAJORITY" => Some(Self::ShardGroupAggregationMajority),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum CollectiveReduction {
+    CollectiveReductionUnspecified = 0,
+    CollectiveReductionSum = 1,
+    CollectiveReductionMin = 2,
+    CollectiveReductionMax = 3,
+    CollectiveReductionProduct = 4,
+    CollectiveReductionConcat = 5,
+    CollectiveReductionBoolAnd = 6,
+    CollectiveReductionBoolOr = 7,
+}
+impl CollectiveReduction {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            CollectiveReduction::CollectiveReductionUnspecified => "COLLECTIVE_REDUCTION_UNSPECIFIED",
+            CollectiveReduction::CollectiveReductionSum => "COLLECTIVE_REDUCTION_SUM",
+            CollectiveReduction::CollectiveReductionMin => "COLLECTIVE_REDUCTION_MIN",
+            CollectiveReduction::CollectiveReductionMax => "COLLECTIVE_REDUCTION_MAX",
+            CollectiveReduction::CollectiveReductionProduct => "COLLECTIVE_REDUCTION_PRODUCT",
+            CollectiveReduction::CollectiveReductionConcat => "COLLECTIVE_REDUCTION_CONCAT",
+            CollectiveReduction::CollectiveReductionBoolAnd => "COLLECTIVE_REDUCTION_BOOL_AND",
+            CollectiveReduction::CollectiveReductionBoolOr => "COLLECTIVE_REDUCTION_BOOL_OR",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "COLLECTIVE_REDUCTION_UNSPECIFIED" => Some(Self::CollectiveReductionUnspecified),
+            "COLLECTIVE_REDUCTION_SUM" => Some(Self::CollectiveReductionSum),
+            "COLLECTIVE_REDUCTION_MIN" => Some(Self::CollectiveReductionMin),
+            "COLLECTIVE_REDUCTION_MAX" => Some(Self::CollectiveReductionMax),
+            "COLLECTIVE_REDUCTION_PRODUCT" => Some(Self::CollectiveReductionProduct),
+            "COLLECTIVE_REDUCTION_CONCAT" => Some(Self::CollectiveReductionConcat),
+            "COLLECTIVE_REDUCTION_BOOL_AND" => Some(Self::CollectiveReductionBoolAnd),
+            "COLLECTIVE_REDUCTION_BOOL_OR" => Some(Self::CollectiveReductionBoolOr),
             _ => None,
         }
     }

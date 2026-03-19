@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 //
-// SkyPilot → PlexSpaces: Multi-cloud ML orchestration (Rust WASM app).
-//
-// GenServer-style ops: submit_task, get_best_resources, get_status.
-// Spot instance management, cost optimization across AWS/GCP.
-// Build: ./build.sh; deploy and run: ./test.sh [HTTP_PORT]
+// SkyPilot → PlexSpaces: multi-cloud ML orchestration (Rust WASM).
+// SDK: `#[gen_server_actor(wasm)]` + `#[plexspaces_handlers(wasm)]` + `host::application_metrics_add`
+// (never merge metrics while holding the scheduler state mutex — wasm32 mutex is non-reentrant).
 
 use serde::{Deserialize, Serialize};
-use std::alloc::{alloc, dealloc, Layout};
 use std::collections::HashMap;
-use std::ptr::write_volatile;
-use std::slice;
+use std::sync::{Mutex, OnceLock};
 
-// ---------------------------------------------------------------------------
-// Data types (match embedded example)
-// ---------------------------------------------------------------------------
+wit_bindgen::generate!({
+    path: "../../../../wit/plexspaces-simple-actor",
+    world: "actor-world",
+});
+
+use exports::plexspaces::simple_actor::actor::Guest;
+use plexspaces::simple_actor::host;
+use plexspaces_sdk::simple_actor::SimpleActorHandlers;
+use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AITask {
@@ -47,23 +49,19 @@ struct CloudInstance {
     availability: f64,
 }
 
-/// Simulated compute ms per op (catalog scan / matching).
 const COMPUTE_MS_SUBMIT: f64 = 2.0;
 const COMPUTE_MS_GET_BEST: f64 = 1.0;
-/// Simulated coordination overhead per op (message handling, state update).
 const COORD_MS_PER_OP: f64 = 0.5;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct SchedulerState {
+    application_id: String,
     task_queue: Vec<AITask>,
     running_tasks: HashMap<String, ResourceAllocation>,
     #[serde(skip_serializing, default)]
     cloud_catalog: HashMap<String, CloudInstance>,
-    /// Total time spent in compute (catalog matching) across all ops.
     total_compute_ms: f64,
-    /// Total coordination overhead (message handling, state).
     total_coord_ms: f64,
-    /// Number of tasks successfully scheduled (for throughput).
     tasks_scheduled: u64,
 }
 
@@ -158,285 +156,371 @@ fn build_cloud_catalog() -> HashMap<String, CloudInstance> {
     m
 }
 
-// ---------------------------------------------------------------------------
-// WASM globals and helpers
-// ---------------------------------------------------------------------------
-
-static mut STATE: Option<SchedulerState> = None;
-static mut RETURN_AREA: [u8; 8] = [0; 8];
-static mut RETURN_BUF: Option<Vec<u8>> = None;
-
-fn ptr_len_to_string(ptr: u32, len: u32) -> String {
-    if len == 0 {
-        return String::new();
-    }
-    let p = ptr as *const u8;
-    unsafe {
-        let s = slice::from_raw_parts(p, len as usize);
-        String::from_utf8_unchecked(s.to_vec())
-    }
+fn state_cell() -> &'static Mutex<SchedulerState> {
+    static STATE: OnceLock<Mutex<SchedulerState>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(SchedulerState::new()))
 }
 
-fn str_to_return(s: &str) -> u32 {
-    let bytes = s.as_bytes();
-    let n = bytes.len();
-    let ret_ptr = if n == 0 {
-        0u32
+fn with_state<T>(f: impl FnOnce(&mut SchedulerState) -> T) -> T {
+    let mut g = state_cell().lock().expect("scheduler state lock poisoned");
+    f(&mut *g)
+}
+
+fn actor_application_id(actor_id: &str) -> String {
+    if let Some(namespace) = actor_id
+        .split_once("//")
+        .and_then(|(_, suffix)| suffix.split_once('@').map(|(qualified, _)| qualified))
+        .and_then(|qualified| qualified.rsplit_once("::").map(|(_, namespace)| namespace))
+    {
+        return namespace.to_string();
+    }
+
+    actor_id
+        .split_once(':')
+        .and_then(|(_, suffix)| suffix.split_once('@').map(|(namespace, _)| namespace))
+        .map(str::to_string)
+        .unwrap_or_default()
+}
+
+fn resolve_application_id() -> String {
+    let id = state_cell()
+        .lock()
+        .expect("scheduler state lock poisoned")
+        .application_id
+        .clone();
+    if !id.is_empty() {
+        return id;
+    }
+    actor_application_id(&host::self_id())
+}
+
+fn merge_application_metrics_for(
+    application_id: &str,
+    metrics: serde_json::Value,
+    context: &str,
+) -> Result<(), String> {
+    let response = host::application_metrics_add(application_id, &metrics.to_string());
+    if response.starts_with("ERROR:") {
+        Err(format!("{}: {}", context, response))
     } else {
-        let layout = Layout::array::<u8>(n).unwrap();
-        let ptr = unsafe { alloc(layout) };
-        if ptr.is_null() {
-            0u32
-        } else {
-            unsafe {
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, n);
-                RETURN_BUF = Some(Vec::from_raw_parts(ptr, n, n));
-            }
-            ptr as u32
-        }
-    };
-    unsafe {
-        let area = &mut RETURN_AREA as *mut [u8; 8] as *mut u8;
-        write_volatile(area as *mut u32, ret_ptr);
-        write_volatile(area.add(4) as *mut u32, n as u32);
-        &RETURN_AREA as *const [u8; 8] as u32
+        Ok(())
     }
 }
 
-fn state_mut() -> &'static mut SchedulerState {
-    unsafe {
-        if STATE.is_none() {
-            let mut s = SchedulerState::new();
-            s.cloud_catalog = build_cloud_catalog();
-            STATE = Some(s);
-        }
-        STATE.as_mut().unwrap()
+fn parse_op(msg_type: &str, payload_json: &str) -> Result<String, String> {
+    let payload: serde_json::Value =
+        serde_json::from_str(payload_json).map_err(|e| format!("invalid payload: {}", e))?;
+    if let Some(op) = payload
+        .get("op")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+    {
+        Ok(op)
+    } else if msg_type == "call" || msg_type == "cast" {
+        Err("missing op".to_string())
+    } else {
+        Ok(msg_type.to_string())
     }
 }
 
-fn ensure_state_has_catalog() {
-    let state = state_mut();
+fn ensure_state_has_catalog(state: &mut SchedulerState) {
     if state.cloud_catalog.is_empty() {
         state.cloud_catalog = build_cloud_catalog();
     }
 }
 
-// ---------------------------------------------------------------------------
-// Handle ops: submit_task, get_best_resources, get_status
-// ---------------------------------------------------------------------------
+fn metrics_submit(compute_ms: u64, coord_ms: u64, scheduled_delta: u64) -> serde_json::Value {
+    serde_json::json!({
+        "message_count": 1,
+        "counter_metrics": {
+            "scheduler_submits": 1,
+            "scheduler_tasks_scheduled_delta": scheduled_delta,
+        },
+        "latency_totals_ms": {
+            "scheduler.compute": compute_ms,
+            "scheduler.coordination": coord_ms,
+        },
+        "latency_max_ms": {
+            "scheduler.compute": compute_ms,
+            "scheduler.coordination": coord_ms,
+        },
+        "latency_samples": {
+            "scheduler.compute": 1,
+            "scheduler.coordination": 1,
+        },
+    })
+}
+
+fn metrics_get_best(compute_ms: u64, coord_ms: u64) -> serde_json::Value {
+    serde_json::json!({
+        "message_count": 1,
+        "counter_metrics": { "scheduler_get_best": 1 },
+        "latency_totals_ms": {
+            "scheduler.compute": compute_ms,
+            "scheduler.coordination": coord_ms,
+        },
+        "latency_max_ms": {
+            "scheduler.compute": compute_ms,
+            "scheduler.coordination": coord_ms,
+        },
+        "latency_samples": {
+            "scheduler.compute": 1,
+            "scheduler.coordination": 1,
+        },
+    })
+}
+
+fn metrics_status_query() -> serde_json::Value {
+    serde_json::json!({
+        "message_count": 1,
+        "counter_metrics": { "scheduler_status_queries": 1 },
+    })
+}
 
 fn handle_submit_task(payload: &serde_json::Value) -> String {
-    ensure_state_has_catalog();
-    let task: AITask = match serde_json::from_value(payload.clone()) {
-        Ok(t) => t,
-        Err(e) => {
-            return serde_json::json!({ "error": format!("invalid task: {}", e) }).to_string();
+    let application_id = resolve_application_id();
+    let phase = with_state(|state| {
+        ensure_state_has_catalog(state);
+        let task: AITask = match serde_json::from_value(payload.clone()) {
+            Ok(t) => t,
+            Err(e) => {
+                return (
+                    serde_json::json!({ "error": format!("invalid task: {}", e) }).to_string(),
+                    None,
+                );
+            }
+        };
+        state.total_compute_ms += COMPUTE_MS_SUBMIT;
+        state.total_coord_ms += COORD_MS_PER_OP;
+        let compute_u = COMPUTE_MS_SUBMIT as u64;
+        let coord_u = COORD_MS_PER_OP as u64;
+        if let Some(allocation) = state.find_best_resources(&task) {
+            state.running_tasks.insert(task.task_id.clone(), allocation.clone());
+            state.tasks_scheduled += 1;
+            let body = serde_json::json!({ "allocation": allocation }).to_string();
+            let m = metrics_submit(compute_u, coord_u, 1);
+            (body, Some(m))
+        } else {
+            state.task_queue.push(task);
+            let body = serde_json::json!({ "error": "No resources available, queued" }).to_string();
+            let m = metrics_submit(compute_u, coord_u, 0);
+            (body, Some(m))
         }
-    };
-    let state = state_mut();
-    state.total_compute_ms += COMPUTE_MS_SUBMIT;
-    state.total_coord_ms += COORD_MS_PER_OP;
-    if let Some(allocation) = state.find_best_resources(&task) {
-        state.running_tasks.insert(task.task_id.clone(), allocation.clone());
-        state.tasks_scheduled += 1;
-        serde_json::json!({ "allocation": allocation }).to_string()
-    } else {
-        state.task_queue.push(task);
-        serde_json::json!({ "error": "No resources available, queued" }).to_string()
+    });
+    let (body, maybe_metrics) = phase;
+    if let Some(metrics) = maybe_metrics {
+        if let Err(err) = merge_application_metrics_for(&application_id, metrics, "submit_task metrics") {
+            return serde_json::json!({ "error": err }).to_string();
+        }
     }
+    body
 }
 
 fn handle_get_best_resources(payload: &serde_json::Value) -> String {
-    ensure_state_has_catalog();
-    let task: AITask = match serde_json::from_value(payload.clone()) {
-        Ok(t) => t,
-        Err(e) => {
-            return serde_json::json!({ "error": format!("invalid task: {}", e) }).to_string();
+    let application_id = resolve_application_id();
+    let phase = with_state(|state| {
+        ensure_state_has_catalog(state);
+        let task: AITask = match serde_json::from_value(payload.clone()) {
+            Ok(t) => t,
+            Err(e) => {
+                return (
+                    serde_json::json!({ "error": format!("invalid task: {}", e) }).to_string(),
+                    None,
+                );
+            }
+        };
+        state.total_compute_ms += COMPUTE_MS_GET_BEST;
+        state.total_coord_ms += COORD_MS_PER_OP;
+        let compute_u = COMPUTE_MS_GET_BEST as u64;
+        let coord_u = COORD_MS_PER_OP as u64;
+        let m = metrics_get_best(compute_u, coord_u);
+        match state.find_best_resources(&task) {
+            Some(allocation) => (
+                serde_json::json!({ "allocation": allocation }).to_string(),
+                Some(m),
+            ),
+            None => (
+                serde_json::json!({ "error": "No suitable resources found" }).to_string(),
+                Some(m),
+            ),
         }
-    };
-    let state = state_mut();
-    state.total_compute_ms += COMPUTE_MS_GET_BEST;
-    state.total_coord_ms += COORD_MS_PER_OP;
-    match state.find_best_resources(&task) {
-        Some(allocation) => serde_json::json!({ "allocation": allocation }).to_string(),
-        None => serde_json::json!({ "error": "No suitable resources found" }).to_string(),
+    });
+    let (body, maybe_metrics) = phase;
+    if let Some(metrics) = maybe_metrics {
+        if let Err(err) =
+            merge_application_metrics_for(&application_id, metrics, "get_best_resources metrics")
+        {
+            return serde_json::json!({ "error": err }).to_string();
+        }
     }
+    body
 }
 
 fn handle_get_status() -> String {
-    let state = state_mut();
-    let total_ms = state.total_compute_ms + state.total_coord_ms;
-    let compute_pct = if total_ms > 0.0 {
-        100.0 * state.total_compute_ms / total_ms
-    } else {
-        0.0
-    };
-    let coord_pct = if total_ms > 0.0 {
-        100.0 * state.total_coord_ms / total_ms
-    } else {
-        0.0
-    };
-    let granularity = if state.total_coord_ms > 0.0 {
-        state.total_compute_ms / state.total_coord_ms
-    } else {
-        0.0
-    };
-    serde_json::json!({
-        "queue_size": state.task_queue.len(),
-        "running": state.running_tasks.len(),
-        "tasks_scheduled": state.tasks_scheduled,
-        "total_compute_ms": state.total_compute_ms,
-        "total_coord_ms": state.total_coord_ms,
-        "compute_pct": compute_pct,
-        "coord_pct": coord_pct,
-        "granularity_ratio": granularity
+    let application_id = resolve_application_id();
+    if let Err(err) = merge_application_metrics_for(
+        &application_id,
+        metrics_status_query(),
+        "get_status metrics",
+    ) {
+        return serde_json::json!({ "error": err }).to_string();
+    }
+    with_state(|state| {
+        let total_ms = state.total_compute_ms + state.total_coord_ms;
+        let compute_pct = if total_ms > 0.0 {
+            100.0 * state.total_compute_ms / total_ms
+        } else {
+            0.0
+        };
+        let coord_pct = if total_ms > 0.0 {
+            100.0 * state.total_coord_ms / total_ms
+        } else {
+            0.0
+        };
+        let granularity = if state.total_coord_ms > 0.0 {
+            state.total_compute_ms / state.total_coord_ms
+        } else {
+            0.0
+        };
+        serde_json::json!({
+            "queue_size": state.task_queue.len(),
+            "running": state.running_tasks.len(),
+            "tasks_scheduled": state.tasks_scheduled,
+            "total_compute_ms": state.total_compute_ms,
+            "total_coord_ms": state.total_coord_ms,
+            "compute_pct": compute_pct,
+            "coord_pct": coord_pct,
+            "granularity_ratio": granularity
+        })
+        .to_string()
     })
-    .to_string()
 }
 
-// ---------------------------------------------------------------------------
-// WASM exports (plexspaces:simple-actor)
-// ---------------------------------------------------------------------------
+#[gen_server_actor(wasm)]
+#[derive(Default)]
+struct SkyPilotActor;
 
-#[export_name = "cabi_realloc"]
-pub extern "C" fn cabi_realloc(old_ptr: u32, old_size: u32, align: u32, new_size: u32) -> u32 {
-    if new_size == 0 {
-        if old_ptr != 0 {
-            unsafe {
-                dealloc(
-                    old_ptr as *mut u8,
-                    Layout::from_size_align(old_size as usize, align as usize).unwrap(),
-                );
+#[plexspaces_handlers(wasm)]
+impl SkyPilotActor {
+    #[init_handler]
+    fn configure(&mut self, config_json: &str) -> Result<(), String> {
+        let v: serde_json::Value =
+            serde_json::from_str(config_json).map_err(|e| format!("invalid init JSON: {}", e))?;
+        with_state(|state| {
+            let actor_id = v.get("actor_id").and_then(|x| x.as_str()).unwrap_or("");
+            state.application_id = if actor_id.is_empty() {
+                actor_application_id(&host::self_id())
+            } else {
+                actor_application_id(actor_id)
+            };
+        });
+        Ok(())
+    }
+
+    #[handler("submit_task")]
+    fn submit_task(
+        &mut self,
+        _from_actor: &str,
+        payload_json: &str,
+    ) -> Result<String, String> {
+        let payload: serde_json::Value =
+            serde_json::from_str(payload_json).map_err(|e| format!("invalid payload: {}", e))?;
+        let task_val = payload.get("task").cloned().unwrap_or(payload);
+        Ok(handle_submit_task(&task_val))
+    }
+
+    #[handler("get_best_resources")]
+    fn get_best_resources(
+        &mut self,
+        _from_actor: &str,
+        payload_json: &str,
+    ) -> Result<String, String> {
+        let payload: serde_json::Value =
+            serde_json::from_str(payload_json).map_err(|e| format!("invalid payload: {}", e))?;
+        let task_val = payload.get("task").cloned().unwrap_or(payload);
+        Ok(handle_get_best_resources(&task_val))
+    }
+
+    #[handler("get_status")]
+    fn get_status_op(
+        &mut self,
+        _from_actor: &str,
+        _payload_json: &str,
+    ) -> Result<String, String> {
+        Ok(handle_get_status())
+    }
+
+    #[handler("status")]
+    fn status_alias(
+        &mut self,
+        _from_actor: &str,
+        _payload_json: &str,
+    ) -> Result<String, String> {
+        Ok(handle_get_status())
+    }
+}
+
+struct SkyPilotBridge;
+
+impl Guest for SkyPilotBridge {
+    fn init(config_json: String) -> String {
+        let mut actor = SkyPilotActor::default();
+        match SimpleActorHandlers::init(&mut actor, &config_json) {
+            Ok(()) => String::new(),
+            Err(err) => err,
+        }
+    }
+
+    fn handle(from_actor: String, msg_type: String, payload_json: String) -> String {
+        let op = match parse_op(&msg_type, &payload_json) {
+            Ok(op) => op,
+            Err(err) => return serde_json::json!({ "error": err }).to_string(),
+        };
+        let mut actor = SkyPilotActor::default();
+        actor
+            .handle_operation(&from_actor, &op, &payload_json)
+            .unwrap_or_else(|err| serde_json::json!({ "error": err }).to_string())
+    }
+
+    fn get_state() -> String {
+        with_state(|state| serde_json::to_string(state).unwrap_or_else(|_| "{}".to_string()))
+    }
+
+    fn set_state(state_json: String) -> String {
+        if state_json.is_empty() {
+            return String::new();
+        }
+        match serde_json::from_str::<SchedulerState>(&state_json) {
+            Ok(mut s) => {
+                s.cloud_catalog = build_cloud_catalog();
+                let mut g = state_cell().lock().expect("set_state lock");
+                *g = s;
+                String::new()
             }
-        }
-        return 0;
-    }
-    let layout = Layout::from_size_align(new_size as usize, align as usize).unwrap();
-    let ptr = unsafe { alloc(layout) };
-    if ptr.is_null() {
-        return 0;
-    }
-    if old_ptr != 0 && old_size > 0 {
-        let copy_len = old_size.min(new_size) as usize;
-        unsafe {
-            std::ptr::copy_nonoverlapping(old_ptr as *const u8, ptr, copy_len);
-        }
-        unsafe {
-            dealloc(
-                old_ptr as *mut u8,
-                Layout::from_size_align(old_size as usize, align as usize).unwrap(),
-            );
+            Err(_) => "ERROR: invalid state JSON".to_string(),
         }
     }
-    ptr as u32
 }
 
-#[export_name = "plexspaces:simple-actor/actor@0.1.0#init"]
-pub extern "C" fn wasm_init(config_ptr: u32, config_len: u32) -> u32 {
-    let _ = ptr_len_to_string(config_ptr, config_len);
-    unsafe {
-        if STATE.is_none() {
-            let mut s = SchedulerState::new();
-            s.cloud_catalog = build_cloud_catalog();
-            STATE = Some(s);
-        }
+export!(SkyPilotBridge);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_op_reads_embedded_op() {
+        assert_eq!(
+            parse_op("call", r#"{"op":"submit_task","task":{}}"#).expect("op"),
+            "submit_task"
+        );
     }
-    str_to_return("")
-}
 
-#[export_name = "plexspaces:simple-actor/actor@0.1.0#handle"]
-pub extern "C" fn wasm_handle(
-    _from_ptr: u32,
-    _from_len: u32,
-    msg_type_ptr: u32,
-    msg_type_len: u32,
-    payload_ptr: u32,
-    payload_len: u32,
-) -> u32 {
-    let msg_type = ptr_len_to_string(msg_type_ptr, msg_type_len);
-    let payload_json = ptr_len_to_string(payload_ptr, payload_len);
-
-    let op = if let Ok(v) = serde_json::from_str::<serde_json::Value>(&payload_json) {
-        v.get("op")
-            .or_else(|| v.get("message_type"))
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .to_string()
-    } else {
-        String::new()
-    };
-
-    let effective_op = if !op.is_empty() { op.as_str() } else { &msg_type };
-
-    let result = match effective_op {
-        "submit_task" => {
-            let payload = serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
-            let task_val = payload.get("task").cloned().unwrap_or(payload);
-            handle_submit_task(&task_val)
-        }
-        "get_best_resources" => {
-            let payload = serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
-            let task_val = payload.get("task").cloned().unwrap_or(payload);
-            handle_get_best_resources(&task_val)
-        }
-        "get_status" | "status" => handle_get_status(),
-        _ => serde_json::json!({ "error": format!("unknown op: {}", effective_op) }).to_string(),
-    };
-
-    str_to_return(&result)
-}
-
-#[export_name = "plexspaces:simple-actor/actor@0.1.0#get-state"]
-pub extern "C" fn wasm_get_state() -> u32 {
-    let state = unsafe { STATE.as_ref() };
-    let json = state
-        .map(|s| serde_json::to_string(s).unwrap_or_else(|_| "{}".to_string()))
-        .unwrap_or_else(|| "{}".to_string());
-    str_to_return(&json)
-}
-
-#[export_name = "plexspaces:simple-actor/actor@0.1.0#set-state"]
-pub extern "C" fn wasm_set_state(state_ptr: u32, state_len: u32) -> u32 {
-    let state_json = ptr_len_to_string(state_ptr, state_len);
-    if state_json.is_empty() {
-        return str_to_return("");
-    }
-    match serde_json::from_str::<SchedulerState>(&state_json) {
-        Ok(mut s) => {
-            s.cloud_catalog = build_cloud_catalog();
-            unsafe {
-                STATE = Some(s);
-            }
-            str_to_return("")
-        }
-        Err(_) => str_to_return("ERROR: invalid state JSON"),
-    }
-}
-
-#[export_name = "cabi_post_plexspaces:simple-actor/actor@0.1.0#init"]
-pub extern "C" fn cabi_post_init(_: u32) {
-    unsafe {
-        RETURN_BUF = None;
-    }
-}
-
-#[export_name = "cabi_post_plexspaces:simple-actor/actor@0.1.0#handle"]
-pub extern "C" fn cabi_post_handle(_: u32) {
-    unsafe {
-        RETURN_BUF = None;
-    }
-}
-
-#[export_name = "cabi_post_plexspaces:simple-actor/actor@0.1.0#get-state"]
-pub extern "C" fn cabi_post_get_state(_: u32) {
-    unsafe {
-        RETURN_BUF = None;
-    }
-}
-
-#[export_name = "cabi_post_plexspaces:simple-actor/actor@0.1.0#set-state"]
-pub extern "C" fn cabi_post_set_state(_: u32) {
-    unsafe {
-        RETURN_BUF = None;
+    #[test]
+    fn actor_application_id_parses_namespace() {
+        assert_eq!(
+            actor_application_id("x//scheduler::migrating-skypilot-scheduler-rust@node"),
+            "migrating-skypilot-scheduler-rust"
+        );
     }
 }

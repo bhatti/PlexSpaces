@@ -24,7 +24,7 @@
 //! - GET / → Home page
 //! - GET /node/{node_id} → Node detail page
 //! - GET /static/* → Static assets (JS, CSS)
-//! - GET /api/v1/dashboard/* → Dashboard API endpoints
+//! - GET /api/v1/dashboard/* → Dashboard API endpoints (UI; not a substitute for ApplicationService HTTP)
 
 use axum::{
     extract::{Path, Query},
@@ -37,6 +37,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use plexspaces_core::ServiceLocator;
+use plexspaces_proto::application::v1::ApplicationMetrics;
 use plexspaces_proto::common::v1::PageRequest;
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService, GetActorsRequest, GetApplicationsRequest,
@@ -509,6 +510,12 @@ async fn api_applications(
                 }),
             );
         }
+        if let Some(ref m) = app.metrics {
+            app_json.insert(
+                "metrics".to_string(),
+                application_metrics_to_json(m),
+            );
+        }
         apps.push(serde_json::Value::Object(app_json));
     }
 
@@ -538,6 +545,21 @@ async fn api_applications(
     }
 
     Ok(Json(serde_json::Value::Object(json)))
+}
+
+/// Serialize [`ApplicationMetrics`] for HTTP JSON (matches WASM host / `application_metrics_add` shape).
+fn application_metrics_to_json(metrics: &ApplicationMetrics) -> serde_json::Value {
+    serde_json::json!({
+        "actor_counts": metrics.actor_counts,
+        "supervisor_count": metrics.supervisor_count,
+        "uptime_seconds": metrics.uptime_seconds,
+        "message_count": metrics.message_count,
+        "error_count": metrics.error_count,
+        "counter_metrics": metrics.counter_metrics,
+        "latency_totals_ms": metrics.latency_totals_ms,
+        "latency_max_ms": metrics.latency_max_ms,
+        "latency_samples": metrics.latency_samples,
+    })
 }
 
 /// API: Get actors

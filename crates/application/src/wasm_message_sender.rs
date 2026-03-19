@@ -20,8 +20,11 @@ use async_trait::async_trait;
 use plexspaces_common::dialable_node_address;
 use plexspaces_core::{ActorService, ServiceLocator};
 use plexspaces_proto::actor::v1::{
+    AllReduceShardGroupRequest, AllReduceShardGroupResponse, BarrierShardGroupRequest,
+    BarrierShardGroupResponse, BroadcastShardGroupRequest, BroadcastShardGroupResponse,
     BulkUpdateShardGroupRequest, BulkUpdateShardGroupResponse, CreateShardGroupRequest,
-    CreateShardGroupResponse, ScatterGatherRequest, ScatterGatherResponse,
+    CreateShardGroupResponse, ReduceShardGroupRequest, ReduceShardGroupResponse,
+    ScatterGatherRequest, ScatterGatherResponse, SpawnActorsRequest, SpawnActorsResponse,
 };
 use plexspaces_proto::application::v1::{
     application_service_client::ApplicationServiceClient, ApplicationInfo, ApplicationMetrics,
@@ -571,6 +574,61 @@ impl MessageSender for ActorServiceMessageSender {
             .scatter_gather(ctx, req)
             .await
             .map_err(|e| format!("ScatterGather failed: {}", e))
+    }
+
+    async fn broadcast_shard_group(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        req: BroadcastShardGroupRequest,
+    ) -> Result<BroadcastShardGroupResponse, String> {
+        self.actor_service
+            .broadcast_shard_group(ctx, req)
+            .await
+            .map_err(|e| format!("BroadcastShardGroup failed: {}", e))
+    }
+
+    async fn reduce_shard_group(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        req: ReduceShardGroupRequest,
+    ) -> Result<ReduceShardGroupResponse, String> {
+        self.actor_service
+            .reduce_shard_group(ctx, req)
+            .await
+            .map_err(|e| format!("ReduceShardGroup failed: {}", e))
+    }
+
+    async fn all_reduce_shard_group(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        req: AllReduceShardGroupRequest,
+    ) -> Result<AllReduceShardGroupResponse, String> {
+        self.actor_service
+            .all_reduce_shard_group(ctx, req)
+            .await
+            .map_err(|e| format!("AllReduceShardGroup failed: {}", e))
+    }
+
+    async fn barrier_shard_group(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        req: BarrierShardGroupRequest,
+    ) -> Result<BarrierShardGroupResponse, String> {
+        self.actor_service
+            .barrier_shard_group(ctx, req)
+            .await
+            .map_err(|e| format!("BarrierShardGroup failed: {}", e))
+    }
+
+    async fn spawn_actors(
+        &self,
+        ctx: &plexspaces_core::RequestContext,
+        req: SpawnActorsRequest,
+    ) -> Result<SpawnActorsResponse, String> {
+        self.actor_service
+            .spawn_actors(ctx, req)
+            .await
+            .map_err(|e| format!("SpawnActors failed: {}", e))
     }
 
     async fn merge_application_metrics(

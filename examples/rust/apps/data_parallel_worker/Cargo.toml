@@ -1,33 +1,30 @@
-# Data Parallel Worker App - Data-Parallel Actors Example
+# Data-parallel worker — Rust WASM (SDK + WIT)
 #
-# Demonstrates data-parallel processing with ShardGroup, worker pools, and coordination metrics.
-# Deployable as WASM app to PlexSpaces nodes.
-# Build: cargo build --target wasm32-wasip2
-# Test: ./scripts/test.sh
+# Data-parallel demo: leader uses host scatter/gather over a shard group (primary DPA pattern).
+# Same SDK/WIT stack as parameter_server; different app id and handler name (process_shard_work).
+# Build: ./build.sh
+# Test: ./test.sh [nodes...]
 
 [workspace]
 
 [package]
-name = "data-parallel-worker"
+name = "data-parallel-worker-wasm"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Data-parallel actors example with worker pools and coordination metrics"
+description = "Data-parallel WASM: shard group + scatter/gather rounds + full metrics"
 
-[[bin]]
-name = "data_parallel_worker"
-path = "src/main.rs"
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
-plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
-plexspaces-core = { path = "../../../../crates/core" }
-plexspaces-proto = { path = "../../../../crates/proto" }
-plexspaces-behavior = { path = "../../../../crates/behavior" }
-
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-anyhow = "1.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+wit-bindgen = "0.51.0"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

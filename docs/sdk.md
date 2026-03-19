@@ -1389,7 +1389,7 @@ impl AuditLogger {
 - **session_manager** — `#[actor]`, `#[plexspaces_handlers(custom)]`, TimerFacet; `examples/rust/apps/session_manager/`
 - **timeseries_forecasting** — uses `spawn_with_behavior_type` for BehaviorRegistry-based actors (pipeline by type name); see its README for when to use BehaviorRegistry vs SDK `spawn`
 
-Going forward, new Rust examples should use these SDK annotations and `spawn` / `spawn_with_facets` where applicable. See [Examples](examples.md) and [Detailed Design - Behaviors](detailed-design.md#behaviors).
+Going forward, new Rust examples should use these SDK annotations and `spawn` / `spawn_with_facets` where applicable. See [Examples](../examples/README.md) and [Detailed Design - Behaviors](detailed-design.md#behaviors).
 
 ---
 
@@ -1562,6 +1562,130 @@ The SDK includes comprehensive tests (`plexspaces_test.go`) that run natively (n
 
 ---
 
+## Collective / Parallel Shard-Group APIs
+
+All SDKs expose five collective operations that map directly to MPI-style
+primitives.  These are high-level wrappers over shard groups; the framework
+handles fan-out, reduction, and broadcast internally.  Business logic stays in
+`crates/actor/src/parallel.rs`; the SDK layers pass through to the actor
+service without duplicating reduction logic.
+
+### MPI → PlexSpaces API Mapping
+
+| MPI Operation | PlexSpaces API | Semantics |
+|---------------|---------------|-----------|
+| `MPI_Bcast` | `BroadcastShardGroup` | Leader → all shards (fan-out) |
+| `MPI_Scatter` + `MPI_Gather` | `ScatterGather` | Per-shard query, aggregate results |
+| `MPI_Reduce` | `ReduceShardGroup` | Map + built-in reduction; result at leader |
+| `MPI_Allreduce` | `AllReduceShardGroup` | Reduce + broadcast result to ALL shards |
+| `MPI_Barrier` | `BarrierShardGroup` | Synchronise all shards at a named point |
+| `MPI_Comm_spawn` | `SpawnActors` | Batch actor creation (N replicas via `instances_count`) |
+
+### Built-in Reductions
+
+`ReduceShardGroup` and `AllReduceShardGroup` accept these `reduction` strings:
+`"sum"`, `"min"`, `"max"`, `"product"`, `"concat"`, `"bool_and"`, `"bool_or"`.
+
+### Cross-SDK Examples
+
+The same benchmark across all four SDKs — see
+`examples/go/apps/mpi_collectives/README.md` for the full architecture and
+sequence diagrams.
+
+**Go (WASM)**
+```go
+// Phase 1: MPI_Bcast
+host.BroadcastShardGroup(map[string]any{
+    "group_id": groupID, "message_type": "apply_broadcast",
+    "message": map[string]any{"round": r, "scale": scale},
+    "min_acks": workerCount, "timeout_ms": 30000,
+})
+
+// Phase 3: MPI_Reduce
+resp, _ := host.ReduceShardGroup(map[string]any{
+    "group_id": groupID, "message_type": "partial_reduce",
+    "map_function": map[string]any{"round": r},
+    "target": "partial_sum", "reduction": "sum",
+    "min_responses": workerCount, "timeout_ms": 30000,
+})
+total := resp["result"].(float64)
+
+// Phase 4: MPI_Allreduce (reduce + broadcast "event" to all workers)
+host.AllReduceShardGroup(map[string]any{
+    "group_id": groupID, "message_type": "partial_reduce",
+    "map_function": map[string]any{"round": r},
+    "target": "partial_sum", "reduction": "sum",
+    "min_responses": workerCount, "timeout_ms": 30000,
+})
+// Workers receive message_type="event" with payload=global_sum
+
+// Phase 5: MPI_Barrier
+host.BarrierShardGroup(map[string]any{
+    "group_id": groupID, "barrier_id": "barrier-round-0",
+    "round": uint64(r), "min_acks": workerCount, "timeout_ms": 30000,
+})
+```
+
+**Python (WASM)**
+```python
+# MPI_Reduce
+resp = host.reduce_shard_group({
+    "group_id": group_id, "message_type": "partial_reduce",
+    "map_function": {"round": r},
+    "target": "partial_sum", "reduction": "sum",
+    "min_responses": worker_count,
+})
+total = resp["result"]
+```
+
+**TypeScript (WASM)**
+```typescript
+const resp = host.reduceShardGroup({
+    groupId: groupId, messageType: "partial_reduce",
+    mapFunction: { round: r },
+    target: "partial_sum", reduction: "sum",
+    minResponses: workerCount,
+});
+const total = resp.result;
+```
+
+**Rust (SDK)**
+```rust
+let resp = shard_client.reduce(
+    &group_id,
+    call_message(json!({ "round": r })),
+    CollectiveReduction::CollectiveReductionSum,
+    Some("partial_sum"),
+    worker_count,
+).await?;
+```
+
+### Worker-side Dispatch
+
+Workers dispatch on `message_type` in their `Handle` method:
+
+```go
+func (w *WorkerActor) Handle(from, msgType, payload string) string {
+    switch msgType {
+    case "apply_broadcast":  // BroadcastShardGroup
+        ...
+    case "process_scatter_chunk": // ScatterGather
+        ...
+    case "partial_reduce":   // ReduceShardGroup / AllReduceShardGroup map phase
+        return marshal(map[string]any{"partial_sum": w.LastPartialSum, ...})
+    case "event":            // AllReduceShardGroup broadcast-back
+        // payload is the JSON-encoded reduced value (e.g. 42.5)
+        w.LastReducedSum = parseFloat(payload)
+        ...
+    }
+}
+```
+
+`AllReduceShardGroup` broadcasts the reduction result back to all workers with
+`message_type="event"` and header `plexspaces-collective-op=all-reduce-result`.
+
+---
+
 ## Future: gRPC Client SDK
 
 The SDK will be extended to support gRPC API clients (not just WASM actors):
@@ -1656,7 +1780,7 @@ sdks/
 - [WASM Deployment Guide](wasm-deployment.md) - Deploying WASM actors (Python, TypeScript, Rust, Go)
 - [Polyglot Development Guide](polyglot.md) - WASM development in multiple languages
 - [Getting Started](getting-started.md) - Quick start guide
-- [Examples](examples.md) - Example gallery (including Rust SDK examples)
+- [Examples](../examples/README.md) - Example gallery (including Rust SDK examples)
 - [Architecture](architecture.md) - System architecture
 - [Detailed Design](detailed-design.md) - Behaviors (crates/behavior), facets (BuiltInFacetType, impl locations)
 - [Behavior crate README](../crates/behavior/README.md) - All behaviors defined in mod.rs; call/cast and GenServer default

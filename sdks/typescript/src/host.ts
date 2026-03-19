@@ -48,6 +48,11 @@ import {
   bulkUpdateShardGroup as hostBulkUpdateShardGroup,
   mapShardGroup as hostMapShardGroup,
   scatterGather as hostScatterGather,
+  broadcastShardGroup as hostBroadcastShardGroup,
+  reduceShardGroup as hostReduceShardGroup,
+  allReduceShardGroup as hostAllReduceShardGroup,
+  barrierShardGroup as hostBarrierShardGroup,
+  spawnActors as hostSpawnActors,
   applicationMetricsAdd as hostApplicationMetricsAdd,
   applicationGetStatus as hostApplicationGetStatus,
   // @ts-expect-error Virtual import
@@ -416,6 +421,46 @@ export class Host {
 
   scatterGather(request: Record<string, unknown>): Record<string, unknown> {
     const result = safeCall(hostScatterGather, JSON.stringify(request)) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  broadcastShardGroup(request: Record<string, unknown>): Record<string, unknown> {
+    const result = safeCall(hostBroadcastShardGroup, JSON.stringify(request)) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  reduceShardGroup(request: Record<string, unknown>): Record<string, unknown> {
+    const result = safeCall(hostReduceShardGroup, JSON.stringify(request)) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  allReduceShardGroup(request: Record<string, unknown>): Record<string, unknown> {
+    const result = safeCall(hostAllReduceShardGroup, JSON.stringify(request)) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  barrierShardGroup(request: Record<string, unknown>): Record<string, unknown> {
+    const result = safeCall(hostBarrierShardGroup, JSON.stringify(request)) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  spawnActors(request: Record<string, unknown>): Record<string, unknown> {
+    const result = safeCall(hostSpawnActors, JSON.stringify(request)) as string;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }

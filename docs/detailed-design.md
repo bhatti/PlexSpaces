@@ -1848,6 +1848,70 @@ Data flow: CreateShardGroup `config.placement` → `shard_config.resource_requir
 
 **Multi-node spawn**: When `placement.node_ids` lists multiple nodes (or `from_registry` returns multiple), `create_shard_group_internal` spawns each shard on the corresponding node: local shards via `ActorFactory.spawn_actor`, remote shards via `get_actor_service_client(node_id)` and gRPC `SpawnActor`. Integration test: `test_create_shard_group_multi_node_scatter_gather` (in-process two nodes, node2 on a local gRPC server, node1’s ObjectRegistry updated so node2 is discoverable) validates that CreateShardGroup with `node_ids: [node1, node2]` yields two shard actor IDs (one per node).
 
+## Collective / Parallel Shard-Group APIs
+
+Five MPI-style collective operations extend shard groups for data-parallel applications. All are handled by `ActorService` (thin gRPC/service controller) delegating pure computation to `crates/actor/src/parallel.rs`.
+
+### Operations
+
+| Operation | Proto RPC | Semantics |
+|-----------|-----------|-----------|
+| `BroadcastShardGroup` | `BroadcastShardGroupRequest/Response` | Fan-out message to all shards; workers respond with per-shard acks |
+| `ReduceShardGroup` | `ReduceShardGroupRequest/Response` | Query all shards, extract `target` field from each response, apply built-in `reduction`; result available at caller only |
+| `AllReduceShardGroup` | `AllReduceShardGroupRequest/Response` | Same as Reduce, then framework broadcasts final result back to all workers as `message_type="event"` |
+| `BarrierShardGroup` | `BarrierShardGroupRequest/Response` | Block until `min_acks` workers acknowledge; tracked by `barrier_id` + `round` |
+| `SpawnActors` | `SpawnActorsRequest/Response` | Batch actor creation; `instances_count > 1` creates N replicas with `{actor_id}-0`, `{actor_id}-1`, ... naming |
+
+### Built-in Reductions (`CollectiveReduction` enum)
+
+| String value | Proto enum | Semantics |
+|---|---|---|
+| `"sum"` | `SUM` | Σ of all numeric values |
+| `"min"` | `MIN` | Minimum numeric value |
+| `"max"` | `MAX` | Maximum numeric value |
+| `"product"` | `PRODUCT` | ∏ of all numeric values |
+| `"concat"` | `CONCAT` | Concatenate arrays (scalars become single-element arrays) |
+| `"bool_and"` | `BOOL_AND` | Logical AND of boolean values |
+| `"bool_or"` | `BOOL_OR` | Logical OR of boolean values |
+
+### `parallel.rs` — Pure Collective Helpers
+
+**Location**: `crates/actor/src/parallel.rs`
+
+All stateless collective logic lives here, not in the service layer. The actor-service imports and delegates; the service itself only orchestrates (shard group lookup, parallel fan-out, temp sender lifecycle).
+
+**Public API**:
+- `reduce_values(values, reduction)` — Apply `CollectiveReduction` to a slice of `serde_json::Value`
+- `select_collective_value(response, target)` — Extract value from message payload via dot-path
+- `build_collective_message(message_type, payload, headers)` — Construct a proto `Message` for collective ops
+- `scatter_stats_from_results(shard_count, results)` — Compute `ScatterGatherStats` from parallel results
+- `shard_query_responses_from_results(results)` — Convert raw result tuples to `ShardQueryResponse` vec
+- `shard_group_config(group)` — Extract `DataParallelConfig` from `ShardGroup`
+- `resolve_timeout(timeout_ms)` — Convert optional `u64` milliseconds to `Duration` (defaults to `DEFAULT_SHARD_TIMEOUT_SECS`)
+- `default_shard_timeout()` — Returns `Duration::from_secs(DEFAULT_SHARD_TIMEOUT_SECS)` (30 s)
+
+**Type alias**:
+```rust
+pub type ParallelResult = (u32, String, Duration, bool, String, Option<Message>);
+// (shard_id, actor_id, latency, success, error, response)
+```
+
+**Design constraint**: No new dependencies added to the actor crate; functions are stateless and unit-tested in `parallel.rs` itself. Integration tests remain in `crates/services/tests/`.
+
+### MPI → PlexSpaces Conceptual Mapping
+
+| MPI Concept | PlexSpaces API |
+|-------------|---------------|
+| `MPI_Bcast` | `BroadcastShardGroup` |
+| `MPI_Reduce` | `ReduceShardGroup` |
+| `MPI_Allreduce` | `AllReduceShardGroup` |
+| `MPI_Barrier` | `BarrierShardGroup` |
+| `MPI_Scatter` + `MPI_Gather` | `ScatterGather` (existing) |
+| `MPI_Comm_spawn` | `SpawnActors` |
+| `MPI_Map` | `MapShardGroup` (existing) |
+
+**See Also**: [Go mpi_collectives example](../examples/go/apps/mpi_collectives/README.md), [SDK: Collective APIs](sdk.md#collective--parallel-shard-group-apis)
+
 ## Workflows
 
 ### Workflow Definition

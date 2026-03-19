@@ -398,6 +398,66 @@ pub trait ActorService: Send + Sync {
     > {
         Err("scatter_gather is not implemented".into())
     }
+
+    /// Broadcast a message to all shards in a group.
+    async fn broadcast_shard_group(
+        &self,
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::BroadcastShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::BroadcastShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Err("broadcast_shard_group is not implemented".into())
+    }
+
+    /// Reduce shard responses using a built-in collective reduction.
+    async fn reduce_shard_group(
+        &self,
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::ReduceShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::ReduceShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Err("reduce_shard_group is not implemented".into())
+    }
+
+    /// All-reduce shard responses and fan the reduced value back out.
+    async fn all_reduce_shard_group(
+        &self,
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::AllReduceShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::AllReduceShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Err("all_reduce_shard_group is not implemented".into())
+    }
+
+    /// Synchronize a shard group at a framework barrier round.
+    async fn barrier_shard_group(
+        &self,
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::BarrierShardGroupRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::BarrierShardGroupResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Err("barrier_shard_group is not implemented".into())
+    }
+
+    /// Spawn multiple actors using the same canonical framework spawn contract.
+    async fn spawn_actors(
+        &self,
+        _ctx: &RequestContext,
+        _req: plexspaces_proto::actor::v1::SpawnActorsRequest,
+    ) -> Result<
+        plexspaces_proto::actor::v1::SpawnActorsResponse,
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        Err("spawn_actors is not implemented".into())
+    }
 }
 
 /// Trait for providing link semantics (bidirectional death propagation)

@@ -890,4 +890,4 @@ See the following examples for complete working demonstrations:
 - [Architecture Overview](architecture.md) - High-level system architecture
 - [Concepts](concepts.md) - Core concepts and abstractions
 - [Detailed Design](detailed-design.md) - Implementation details
-- [Examples](examples.md) - Code examples and tutorials
+- [Examples](../examples/README.md) - Code examples and tutorials

@@ -627,7 +627,7 @@ test-examples:
 	# Update after each example is marked as completed/rewritten in the plan \
 	# Include all Rust embedded examples that should be tested (exclude migrating_* comparison examples) \
 	# From plan: Completed (Verified Working) + Recently Completed sections \
-	EXAMPLES="rust/embedded/byzantine rust/embedded/mpi_collectives rust/embedded/matrix_vector_mpi rust/embedded/matrix_multiply rust/embedded/heat_diffusion rust/embedded/webhook_handler rust/embedded/timers rust/embedded/reminders rust/embedded/durable_actor rust/embedded/chat_room rust/embedded/document_approval rust/embedded/timeseries_forecasting rust/embedded/genomic_workflow_pipeline rust/embedded/genomics_pipeline rust/embedded/order_processing rust/embedded/entity_recognition rust/embedded/supervision_tree rust/embedded/actor_groups_sharding rust/embedded/player_session"; \
+	EXAMPLES="rust/embedded/byzantine rust/embedded/matrix_vector_mpi rust/embedded/matrix_multiply rust/embedded/heat_diffusion rust/embedded/webhook_handler rust/embedded/timers rust/embedded/reminders rust/embedded/durable_actor rust/embedded/chat_room rust/embedded/document_approval rust/embedded/timeseries_forecasting rust/embedded/genomic_workflow_pipeline rust/embedded/genomics_pipeline rust/embedded/order_processing rust/embedded/entity_recognition rust/embedded/supervision_tree rust/embedded/actor_groups_sharding rust/embedded/player_session"; \
 	FAILED=0; \
 	PIDS=(); \
 	EXAMPLE_NAMES=(); \

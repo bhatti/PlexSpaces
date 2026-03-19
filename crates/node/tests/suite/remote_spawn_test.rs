@@ -53,12 +53,8 @@ async fn test_spawn_actor_basic() {
 
     // Create SpawnActorRequest (target node is implicit from gRPC endpoint)
     let request = Request::new(SpawnActorRequest {
-        actor_id: String::new(), // Server will generate
         actor_type: "test_actor".to_string(),
-        initial_state: vec![],
-        config: None,
-        labels: std::collections::HashMap::new(),
-        facets: vec![],
+        ..Default::default()
     });
 
     // Spawn actor via gRPC
@@ -92,12 +88,8 @@ async fn test_spawn_remote_actor_missing_target_node() {
 
     // Missing actor_type (should fail)
     let request = Request::new(SpawnActorRequest {
-        actor_id: String::new(),
         actor_type: "".to_string(), // Empty actor_type should fail
-        initial_state: vec![],
-        config: None,
-        labels: std::collections::HashMap::new(),
-        facets: vec![],
+        ..Default::default()
     });
 
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
@@ -178,12 +170,8 @@ async fn test_spawn_multiple_remote_actors() {
     // Spawn 3 actors
     for i in 0..3 {
         let request = Request::new(SpawnActorRequest {
-            actor_id: String::new(),
             actor_type: format!("test_actor_{}", i),
-            initial_state: vec![],
-            config: None,
-            labels: std::collections::HashMap::new(),
-            facets: vec![],
+            ..Default::default()
         });
 
         let response = ActorServiceTrait::spawn_actor(&service, request).await;

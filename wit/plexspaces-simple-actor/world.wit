@@ -192,10 +192,35 @@ interface host {
     /// Returns JSON object with per-shard results and stats or "ERROR:message".
     map-shard-group: func(request-json: string) -> string;
 
+    /// Broadcast a message to all shards in a shard group.
+    /// request-json uses group_id, message, timeout_ms, min_acks.
+    /// Returns JSON object with shard responses and stats or "ERROR:message".
+    broadcast-shard-group: func(request-json: string) -> string;
+
+    /// Reduce shard responses using a built-in collective reduction.
+    /// request-json uses group_id, map_function, timeout_ms, min_responses, reduction, target.
+    /// Returns JSON object with reduced result, shard responses, and stats or "ERROR:message".
+    reduce-shard-group: func(request-json: string) -> string;
+
+    /// All-reduce shard responses and broadcast the reduced result back to shards.
+    /// request-json uses group_id, map_function, timeout_ms, min_responses, reduction, target.
+    /// Returns JSON object with reduced result, shard responses, and stats or "ERROR:message".
+    all-reduce-shard-group: func(request-json: string) -> string;
+
+    /// Synchronize a shard group at a framework barrier round.
+    /// request-json uses group_id, barrier_id, round, timeout_ms, min_acks.
+    /// Returns JSON object with shard responses and stats or "ERROR:message".
+    barrier-shard-group: func(request-json: string) -> string;
+
     /// Scatter a query to all shards and gather responses.
     /// request-json uses group_id, query, timeout_ms, aggregation, min_responses.
     /// Returns JSON object with aggregate result, shard responses, and stats or "ERROR:message".
     scatter-gather: func(request-json: string) -> string;
+
+    /// Spawn multiple actors with the same semantics as spawn but in one batch.
+    /// request-json uses {"requests":[...spawn specs...]}.
+    /// Returns JSON object with per-request results or "ERROR:message".
+    spawn-actors: func(request-json: string) -> string;
 
     /// Merge a node-local application metrics delta.
     /// metrics-json uses the ApplicationMetrics field names (actor_counts, message_count, counter_metrics, latency_* maps).

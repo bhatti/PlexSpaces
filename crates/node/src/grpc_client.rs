@@ -195,6 +195,7 @@ impl RemoteActorClient {
             labels,
             facets: vec![],           // No facets for basic spawn
             namespace: String::new(), // Use default namespace (from JWT in production)
+            instances_count: 1,
         });
 
         let response = self

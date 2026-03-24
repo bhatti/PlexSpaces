@@ -711,80 +711,450 @@ impl FacetFactory for MetricsFacetFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actor_context::{ObjectRegistry, ProcessGroupService};
-    use crate::{JournalStorage, KeyValueStore, LockManager, ServiceLocator};
-    use plexspaces_journaling::SqliteJournalStorage;
+    use crate::actor_context::{
+        ActorService, ChannelService, ObjectRegistry, ProcessGroupService, TupleSpaceProvider,
+    };
+    use crate::behavior_factory::BehaviorRegistry;
+    use crate::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
+    use crate::monitoring::{NodeConnectionInfo, NodeMetricsAccessor};
+    use crate::{
+        ActorFactory, ActorRegistry, ApplicationManager, BlobServiceTrait, GrpcConnectionManager,
+        KeyValueStore, LockManager, NodeRegistryTrait, ReplyWaiterRegistry, Service,
+        ServiceLocator, VirtualActorManager, WasmRuntimeTrait,
+    };
+    use async_trait::async_trait;
     use plexspaces_keyvalue::SqliteKVStore;
-    use plexspaces_locks::sql::SqliteLockManager;
-    use plexspaces_node::service_locator_helpers::create_default_service_locator;
-    use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
-    use plexspaces_services::ProcessGroupServiceImpl;
+    use plexspaces_locks::MemoryLockManager;
+    use plexspaces_proto::node::v1::{NodeConfig, RuntimeConfig, SecurityConfig};
+    use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::RwLock;
+
+    #[derive(Default)]
+    struct TestObjectRegistry;
+
+    #[async_trait]
+    impl ObjectRegistry for TestObjectRegistry {
+        async fn lookup(
+            &self,
+            _ctx: &RequestContext,
+            _object_id: &str,
+            _object_type: Option<ObjectType>,
+        ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(None)
+        }
+
+        async fn lookup_full(
+            &self,
+            _ctx: &RequestContext,
+            _object_type: ObjectType,
+            _object_id: &str,
+        ) -> Result<Option<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(None)
+        }
+
+        async fn register(
+            &self,
+            _ctx: &RequestContext,
+            _registration: ObjectRegistration,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn discover(
+            &self,
+            _ctx: &RequestContext,
+            _object_type: Option<ObjectType>,
+            _object_category: Option<String>,
+            _capabilities: Option<Vec<String>>,
+            _labels: Option<Vec<String>>,
+            _health_status: Option<HealthStatus>,
+            _offset: usize,
+            _limit: usize,
+        ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(Vec::new())
+        }
+
+        async fn unregister(
+            &self,
+            _ctx: &RequestContext,
+            _object_type: ObjectType,
+            _object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn heartbeat(
+            &self,
+            _ctx: &RequestContext,
+            _object_type: ObjectType,
+            _object_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct TestProcessGroupService;
+
+    #[async_trait]
+    impl ProcessGroupService for TestProcessGroupService {
+        async fn create_group(
+            &self,
+            _ctx: &RequestContext,
+            _group_name: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn delete_group(
+            &self,
+            _ctx: &RequestContext,
+            _group_name: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn join_group(
+            &self,
+            _ctx: &RequestContext,
+            _group_name: &str,
+            _actor_id: &str,
+            _topics: Vec<String>,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn leave_group(
+            &self,
+            _ctx: &RequestContext,
+            _group_name: &str,
+            _actor_id: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
+        async fn get_members(
+            &self,
+            _ctx: &RequestContext,
+            _group_name: &str,
+        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(Vec::new())
+        }
+
+        async fn get_local_members(
+            &self,
+            _ctx: &RequestContext,
+            _group_name: &str,
+        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(Vec::new())
+        }
+
+        async fn list_groups(
+            &self,
+            _ctx: &RequestContext,
+        ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(Vec::new())
+        }
+
+        async fn publish_to_group(
+            &self,
+            _ctx: &RequestContext,
+            _group_name: &str,
+            _topic: Option<&str>,
+            _message: crate::Message,
+        ) -> Result<u32, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(0)
+        }
+    }
+
+    #[derive(Default)]
+    struct TestServiceLocator {
+        lock_manager: RwLock<Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>>>,
+        object_registry: RwLock<Option<Arc<dyn ObjectRegistry>>>,
+        process_group_service: RwLock<Option<Arc<dyn ProcessGroupService>>>,
+        keyvalue_store: RwLock<Option<Arc<dyn KeyValueStore>>>,
+        node_config: RwLock<Option<NodeConfig>>,
+        security_config: RwLock<Option<SecurityConfig>>,
+        runtime_config: RwLock<Option<RuntimeConfig>>,
+        shutdown_requested: AtomicBool,
+    }
+
+    #[async_trait]
+    impl ServiceLocator for TestServiceLocator {
+        async fn register_service<T: Service + 'static>(&self, _service: Arc<T>)
+        where
+            Self: Sized,
+        {
+        }
+
+        async fn get_service<T: Service + 'static>(&self) -> Option<Arc<T>>
+        where
+            Self: Sized,
+        {
+            None
+        }
+
+        async fn register_service_by_name<T: Service + 'static>(
+            &self,
+            _name: &str,
+            _service: Arc<T>,
+        ) where
+            Self: Sized,
+        {
+        }
+
+        async fn get_service_by_name<T: Service + 'static>(&self, _name: &str) -> Option<Arc<T>>
+        where
+            Self: Sized,
+        {
+            None
+        }
+
+        async fn actor_registry(&self) -> Option<Arc<ActorRegistry>> {
+            None
+        }
+        async fn register_actor_registry(&self, _registry: Arc<ActorRegistry>) {}
+        async fn virtual_actor_manager(&self) -> Option<Arc<VirtualActorManager>> {
+            None
+        }
+        async fn reply_waiter_registry(&self) -> Option<Arc<ReplyWaiterRegistry>> {
+            None
+        }
+        async fn get_actor_service(&self) -> Option<Arc<dyn ActorService>> {
+            None
+        }
+        async fn register_actor_service(&self, _service: Arc<dyn ActorService>) {}
+        async fn get_channel_service(&self) -> Option<Arc<dyn ChannelService>> {
+            None
+        }
+        async fn register_channel_service(&self, _service: Arc<dyn ChannelService>) {}
+        async fn get_tuplespace_provider(&self) -> Option<Arc<dyn TupleSpaceProvider>> {
+            None
+        }
+        async fn register_tuplespace_provider(&self, _service: Arc<dyn TupleSpaceProvider>) {}
+
+        async fn get_object_registry(&self) -> Option<Arc<dyn ObjectRegistry>> {
+            self.object_registry.read().await.clone()
+        }
+
+        async fn register_object_registry(&self, service: Arc<dyn ObjectRegistry>) {
+            *self.object_registry.write().await = Some(service);
+        }
+
+        async fn get_journal_storage(
+            &self,
+        ) -> Option<Arc<dyn crate::JournalStorage + Send + Sync>> {
+            None
+        }
+
+        async fn register_journal_storage(
+            &self,
+            _service: Arc<dyn crate::JournalStorage + Send + Sync>,
+        ) {
+        }
+
+        async fn get_lock_manager(
+            &self,
+        ) -> Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>> {
+            self.lock_manager.read().await.clone()
+        }
+
+        async fn register_lock_manager(
+            &self,
+            service: Arc<dyn plexspaces_locks::LockManager + Send + Sync>,
+        ) {
+            *self.lock_manager.write().await = Some(service);
+        }
+
+        async fn get_node_metrics_accessor(
+            &self,
+        ) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>> {
+            None
+        }
+
+        async fn register_node_metrics_accessor(
+            &self,
+            _service: Arc<dyn NodeMetricsAccessor + Send + Sync>,
+        ) {
+        }
+
+        async fn get_facet_manager(&self) -> Option<Arc<FacetManagerServiceWrapper>> {
+            None
+        }
+        async fn register_facet_manager(&self, _service: Arc<FacetManagerServiceWrapper>) {}
+        async fn get_facet_registry(&self) -> Option<Arc<FacetRegistryServiceWrapper>> {
+            None
+        }
+        async fn register_facet_registry(&self, _service: Arc<FacetRegistryServiceWrapper>) {}
+        async fn get_actor_factory(&self) -> Option<Arc<dyn ActorFactory>> {
+            None
+        }
+        async fn register_actor_factory(&self, _factory: Arc<dyn ActorFactory>) {}
+
+        async fn initialize_services(
+            &self,
+            _node_id: Option<String>,
+            _node_config: Option<NodeConfig>,
+            _release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
+        ) {
+        }
+
+        async fn get_node_config(&self) -> Option<NodeConfig> {
+            self.node_config.read().await.clone()
+        }
+
+        async fn register_node_config(&self, config: NodeConfig) {
+            *self.node_config.write().await = Some(config);
+        }
+
+        async fn get_security_config(&self) -> Option<SecurityConfig> {
+            self.security_config.read().await.clone()
+        }
+
+        async fn register_security_config(&self, config: SecurityConfig) {
+            *self.security_config.write().await = Some(config);
+        }
+
+        async fn get_runtime_config(&self) -> Option<RuntimeConfig> {
+            self.runtime_config.read().await.clone()
+        }
+
+        async fn register_runtime_config(&self, config: RuntimeConfig) {
+            *self.runtime_config.write().await = Some(config);
+        }
+
+        async fn is_auth_disabled(&self) -> bool {
+            self.security_config
+                .read()
+                .await
+                .as_ref()
+                .map(|config| config.disable_auth)
+                .unwrap_or(false)
+        }
+
+        async fn get_node_connection_info(
+            &self,
+        ) -> Option<Arc<dyn NodeConnectionInfo + Send + Sync>> {
+            None
+        }
+
+        async fn register_node_connection_info(
+            &self,
+            _accessor: Arc<dyn NodeConnectionInfo + Send + Sync>,
+        ) {
+        }
+
+        fn is_shutdown_requested(&self) -> bool {
+            self.shutdown_requested.load(Ordering::SeqCst)
+        }
+
+        fn request_shutdown(&self) {
+            self.shutdown_requested.store(true, Ordering::SeqCst);
+        }
+
+        async fn application_manager(&self) -> Option<Arc<dyn ApplicationManager>> {
+            None
+        }
+        async fn register_application_manager(&self, _manager: Arc<dyn ApplicationManager>) {}
+        async fn get_behavior_registry(&self) -> Option<Arc<BehaviorRegistry>> {
+            None
+        }
+        async fn register_behavior_registry(&self, _registry: Arc<BehaviorRegistry>) {}
+
+        async fn request_context_for_system_operations(&self) -> RequestContext {
+            RequestContext::new_without_auth("system".to_string(), "default".to_string())
+        }
+
+        async fn request_context_for_system_operations_with_namespace(
+            &self,
+            namespace: String,
+        ) -> RequestContext {
+            RequestContext::new_without_auth("system".to_string(), namespace)
+        }
+
+        async fn get_grpc_connection_manager(&self) -> Option<Arc<GrpcConnectionManager>> {
+            None
+        }
+        async fn register_grpc_connection_manager(&self, _manager: Arc<GrpcConnectionManager>) {}
+
+        async fn get_actor_service_client(
+            &self,
+            _node_id: &str,
+        ) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>> {
+            Err(Box::new(std::io::Error::other(
+                "actor service client not configured in test locator",
+            )))
+        }
+
+        async fn get_application_service_client(
+            &self,
+            _node_id: &str,
+        ) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>> {
+            Err(Box::new(std::io::Error::other(
+                "application service client not configured in test locator",
+            )))
+        }
+
+        async fn get_wasm_runtime(&self) -> Option<Arc<dyn WasmRuntimeTrait>> {
+            None
+        }
+        async fn register_wasm_runtime(&self, _runtime: Arc<dyn WasmRuntimeTrait>) {}
+
+        async fn get_process_group_service(&self) -> Option<Arc<dyn ProcessGroupService>> {
+            self.process_group_service.read().await.clone()
+        }
+
+        async fn register_process_group_service(&self, service: Arc<dyn ProcessGroupService>) {
+            *self.process_group_service.write().await = Some(service);
+        }
+
+        async fn get_blob_service(&self) -> Option<Arc<dyn BlobServiceTrait>> {
+            None
+        }
+        async fn register_blob_service(&self, _service: Arc<dyn BlobServiceTrait>) {}
+        async fn get_node_registry(&self) -> Option<Arc<dyn NodeRegistryTrait>> {
+            None
+        }
+        async fn register_node_registry(&self, _registry: Arc<dyn NodeRegistryTrait>) {}
+
+        async fn get_keyvalue_store(&self) -> Option<Arc<dyn KeyValueStore>> {
+            self.keyvalue_store.read().await.clone()
+        }
+
+        async fn register_keyvalue_store(&self, store: Arc<dyn KeyValueStore>) {
+            *self.keyvalue_store.write().await = Some(store);
+        }
+    }
 
     /// Helper to create a test ServiceLocator with all required services
     async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
-        // Use helper function to create ServiceLocator with default services
-        let service_locator_impl = create_default_service_locator(
-            Some("test-node".to_string()),
-            Some(plexspaces_proto::node::v1::NodeConfig {
+        let service_locator = Arc::new(TestServiceLocator::default());
+        service_locator
+            .register_node_config(NodeConfig {
                 id: "test-node".to_string(),
                 listen_addr: "127.0.0.1:8000".to_string(),
                 ..Default::default()
-            }),
-            None,
-        )
-        .await;
-        // ServiceLocatorImpl implements ServiceLocator trait, so we can use it as trait object
-        let service_locator: Arc<dyn ServiceLocator> = service_locator_impl.clone();
-
-        // Register LockManager (if not already registered)
-        if service_locator.get_lock_manager().await.is_none() {
-            let lock_manager: Arc<dyn LockManager + Send + Sync> =
-                Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
-            service_locator.register_lock_manager(lock_manager).await;
-        }
-
-        // Register ObjectRegistry (if not already registered)
-        if service_locator.get_object_registry().await.is_none() {
-            let object_repo = Arc::new(
-                SqliteObjectRegistryRepository::new(":memory:")
-                    .await
-                    .unwrap(),
-            );
-            let object_registry_impl = Arc::new(ObjectRegistryImpl::new(object_repo));
-            let object_registry: Arc<dyn ObjectRegistry> = object_registry_impl;
-            service_locator
-                .register_object_registry(object_registry)
-                .await;
-        }
-
-        // Register ProcessGroupService (if not already registered)
-        if service_locator.get_process_group_service().await.is_none() {
-            let process_group_service_impl = Arc::new(ProcessGroupServiceImpl::new(
-                service_locator.clone(),
-                "test-node".to_string(),
-            ));
-            let process_group_service: Arc<dyn ProcessGroupService> = process_group_service_impl;
-            service_locator
-                .register_process_group_service(process_group_service)
-                .await;
-        }
-
-        // Register JournalStorage (if not already registered)
-        if service_locator.get_journal_storage().await.is_none() {
-            let journal_storage: Arc<dyn JournalStorage> =
-                Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-            service_locator
-                .register_journal_storage(journal_storage)
-                .await;
-        }
-
-        // Register KeyValueStore (if not already registered)
-        if service_locator.get_keyvalue_store().await.is_none() {
-            let kv_store: Arc<dyn KeyValueStore> =
-                Arc::new(SqliteKVStore::new(":memory:").await.unwrap());
-            service_locator.register_keyvalue_store(kv_store).await;
-        }
-
+            })
+            .await;
+        service_locator
+            .register_security_config(SecurityConfig {
+                disable_auth: false,
+                ..Default::default()
+            })
+            .await;
+        service_locator
+            .register_lock_manager(Arc::new(MemoryLockManager::new()))
+            .await;
+        service_locator
+            .register_object_registry(Arc::new(TestObjectRegistry))
+            .await;
+        service_locator
+            .register_process_group_service(Arc::new(TestProcessGroupService))
+            .await;
+        service_locator
+            .register_keyvalue_store(Arc::new(SqliteKVStore::new(":memory:").await.unwrap()))
+            .await;
         service_locator
     }
 
@@ -808,7 +1178,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lock_facet_factory_no_lock_manager() {
-        let service_locator = Arc::new(ServiceLocatorImpl::new());
+        let service_locator = Arc::new(TestServiceLocator::default());
         let factory = LockFacetFactory::new(service_locator);
 
         let config = serde_json::json!({});
@@ -842,7 +1212,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_registry_facet_factory_no_object_registry() {
-        let service_locator = Arc::new(ServiceLocatorImpl::new());
+        let service_locator = Arc::new(TestServiceLocator::default());
         let factory = RegistryFacetFactory::new(service_locator);
 
         let config = serde_json::json!({});
@@ -876,7 +1246,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_group_facet_factory_no_service() {
-        let service_locator = Arc::new(ServiceLocatorImpl::new());
+        let service_locator = Arc::new(TestServiceLocator::default());
         let factory = ProcessGroupFacetFactory::new(service_locator);
 
         let config = serde_json::json!({});

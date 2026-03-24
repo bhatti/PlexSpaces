@@ -5,9 +5,9 @@
 
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_tests {
-    use plexspaces_journaling::*;
-    use plexspaces_journaling::sql::SqliteJournalStorage;
     use plexspaces_facet::Facet;
+    use plexspaces_journaling::sql::SqliteJournalStorage;
+    use plexspaces_journaling::*;
     use prost::Message;
     use std::sync::Arc;
 
@@ -116,7 +116,10 @@ mod sqlite_tests {
             .unwrap();
 
         // Verify side effect was NOT executed
-        assert_eq!(execution_count, 0, "Side effect should NOT be executed in replay mode");
+        assert_eq!(
+            execution_count, 0,
+            "Side effect should NOT be executed in replay mode"
+        );
 
         // Verify cached result was returned
         let result = TestData::decode(result_bytes.as_slice()).unwrap();
@@ -124,7 +127,11 @@ mod sqlite_tests {
 
         // Verify no new side effect entry was created
         let side_effects = ctx.take_side_effects().await;
-        assert_eq!(side_effects.len(), 0, "Should not create new side effect entries in replay mode");
+        assert_eq!(
+            side_effects.len(),
+            0,
+            "Should not create new side effect entries in replay mode"
+        );
     }
 
     /// Test 3: Missing side effect in replay mode (error)
@@ -149,7 +156,10 @@ mod sqlite_tests {
         // Should fail with error
         assert!(result.is_err(), "Should fail when side effect not in cache");
         assert!(
-            result.unwrap_err().to_string().contains("not found in cache"),
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not found in cache"),
             "Error should mention cache"
         );
     }
@@ -208,7 +218,10 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-actor-side-effect";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Get execution context and record a side effect
         let ctx_arc = facet.get_execution_context();
@@ -246,7 +259,11 @@ mod sqlite_tests {
             .filter(|e| {
                 matches!(
                     e.entry,
-                    Some(plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(_))
+                    Some(
+                        plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(
+                            _
+                        )
+                    )
                 )
             })
             .collect();
@@ -259,36 +276,46 @@ mod sqlite_tests {
         // Restart actor
         facet.on_detach(actor_id).await.unwrap();
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Verify side effect was loaded into cache during replay
         // Note: After replay completes, execution context is switched to NORMAL mode
         // So side effects will execute normally. The cache is only used during REPLAY mode.
         // The important thing is that side effects were journaled and can be replayed.
-        
+
         // Verify that the side effect entry exists in the journal and was loaded during replay
         // by checking that we can process a new message without errors
         let method = "process2";
         let payload = b"test2".to_vec();
         new_facet.before_method(method, &payload).await.unwrap();
-        new_facet.after_method(method, &payload, b"ok2").await.unwrap();
-        
+        new_facet
+            .after_method(method, &payload, b"ok2")
+            .await
+            .unwrap();
+
         storage.flush().await.unwrap();
-        
+
         // Verify all entries are present (original + new)
         let all_entries = storage.replay_from(actor_id, 0).await.unwrap();
         assert!(
             all_entries.len() >= 4,
             "Should have at least 4 entries (2 messages * 2 entries each)"
         );
-        
+
         // Verify side effect entry is still in journal
         let side_effect_entries: Vec<_> = all_entries
             .iter()
             .filter(|e| {
                 matches!(
                     e.entry,
-                    Some(plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(_))
+                    Some(
+                        plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(
+                            _
+                        )
+                    )
                 )
             })
             .collect();
@@ -322,7 +349,10 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-actor-multiple-side-effects";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Get execution context and record multiple side effects
         let ctx_arc = facet.get_execution_context();
@@ -361,7 +391,11 @@ mod sqlite_tests {
             .filter(|e| {
                 matches!(
                     e.entry,
-                    Some(plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(_))
+                    Some(
+                        plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(
+                            _
+                        )
+                    )
                 )
             })
             .collect();
@@ -374,34 +408,44 @@ mod sqlite_tests {
         // Restart actor
         facet.on_detach(actor_id).await.unwrap();
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Verify all side effects were journaled and can be replayed
         // Note: After replay completes, execution context is in NORMAL mode
         // The cache is only used during REPLAY mode to prevent re-execution.
-        
+
         // Verify that we can process a new message without errors
         let method = "process2";
         let payload = b"test2".to_vec();
         new_facet.before_method(method, &payload).await.unwrap();
-        new_facet.after_method(method, &payload, b"ok2").await.unwrap();
-        
+        new_facet
+            .after_method(method, &payload, b"ok2")
+            .await
+            .unwrap();
+
         storage.flush().await.unwrap();
-        
+
         // Verify all entries are present (original + new)
         let all_entries = storage.replay_from(actor_id, 0).await.unwrap();
         assert!(
             all_entries.len() >= 6,
             "Should have at least 6 entries (2 messages * 2 entries each + 3 side effects)"
         );
-        
+
         // Verify all 3 side effect entries are still in journal
         let side_effect_entries: Vec<_> = all_entries
             .iter()
             .filter(|e| {
                 matches!(
                     e.entry,
-                    Some(plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(_))
+                    Some(
+                        plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(
+                            _
+                        )
+                    )
                 )
             })
             .collect();
@@ -412,4 +456,3 @@ mod sqlite_tests {
         );
     }
 }
-

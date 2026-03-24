@@ -90,7 +90,7 @@ pub fn create_default_application_spec(
 
     ApplicationSpec {
         name: name.to_string(),
-        tenant_id: String::new(), // Set by deployment code from JWT
+        tenant_id: String::new(),    // Set by deployment code from JWT
         namespace: name.to_string(), // WASM app namespace defaults to app name
         version: version.to_string(),
         description: format!("WASM application: {}", name),
@@ -184,7 +184,10 @@ impl ApplicationServiceImpl {
             .ok_or_else(|| Status::failed_precondition("NodeMetricsAccessor not registered"))?;
         let node_id = metrics_accessor.get_metrics().await.node_id;
 
-        let ctx = self.service_locator.request_context_for_system_operations().await;
+        let ctx = self
+            .service_locator
+            .request_context_for_system_operations()
+            .await;
         let node_registry = self
             .service_locator
             .get_node_registry()

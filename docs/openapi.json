@@ -15,20 +15,16 @@
       "description": "Event streaming for actor lifecycle observability"
     },
     {
-      "name": "BlobService"
-    },
-    {
       "name": "WasmRuntimeService"
     },
     {
       "name": "ApplicationService"
     },
     {
-      "name": "NodeService"
+      "name": "BlobService"
     },
     {
-      "name": "WorkflowService",
-      "description": "Simple, durable workflow orchestration service"
+      "name": "NodeService"
     },
     {
       "name": "MetricsService",
@@ -37,6 +33,10 @@
     {
       "name": "SystemService",
       "description": "Service for system administration and management"
+    },
+    {
+      "name": "WorkflowService",
+      "description": "Simple, durable workflow orchestration service"
     },
     {
       "name": "DashboardService",
@@ -161,78 +161,17 @@
             "in": "query",
             "required": false,
             "type": "string"
+          },
+          {
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (tenant_id from JWT)\nOnly actors in this namespace will be returned",
+            "in": "query",
+            "required": false,
+            "type": "string"
           }
         ],
         "tags": [
           "Actors"
-        ]
-      },
-      "post": {
-        "summary": "Create Actor",
-        "description": "Create a new durable actor instance",
-        "operationId": "CreateActor",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/CreateActorResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "description": "Request to create a new actor instance on the local node (where this RPC is called)",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/CreateActorRequest"
-            }
-          }
-        ],
-        "tags": [
-          "Actors"
-        ]
-      }
-    },
-    "/api/v1/actors/get-or-activate": {
-      "post": {
-        "summary": "Get Or Activate Actor",
-        "description": "Get existing actor or activate virtual actor (Orleans-style)",
-        "operationId": "GetOrActivateActor",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/GetOrActivateActorResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "description": "Get existing actor or activate virtual actor (Orleans-style)",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/GetOrActivateActorRequest"
-            }
-          }
-        ],
-        "tags": [
-          "Virtual Actors"
         ]
       }
     },
@@ -271,6 +210,40 @@
         ]
       }
     },
+    "/api/v1/actors/spawn-batch": {
+      "post": {
+        "summary": "Spawn Actors",
+        "description": "Spawn multiple actors on the node receiving this request using the same canonical spawn semantics as SpawnActor.",
+        "operationId": "SpawnActors",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/SpawnActorsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SpawnActorsRequest"
+            }
+          }
+        ],
+        "tags": [
+          "Actors"
+        ]
+      }
+    },
     "/api/v1/actors/{actorId}": {
       "get": {
         "summary": "Get Actor",
@@ -295,6 +268,13 @@
             "name": "actorId",
             "in": "path",
             "required": true,
+            "type": "string"
+          },
+          {
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (tenant_id from JWT)",
+            "in": "query",
+            "required": false,
             "type": "string"
           }
         ],
@@ -332,6 +312,13 @@
             "in": "query",
             "required": false,
             "type": "boolean"
+          },
+          {
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (tenant_id from JWT)",
+            "in": "query",
+            "required": false,
+            "type": "string"
           }
         ],
         "tags": [
@@ -653,10 +640,65 @@
         ]
       }
     },
+    "/api/v1/actors/{namespace}/{actorId}": {
+      "delete": {
+        "summary": "Terminate Actor",
+        "description": "Gracefully terminate an actor by ID (permanent termination, pairs with SpawnActor)",
+        "operationId": "TerminateActor",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/TerminateActorResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "namespace",
+            "description": "Namespace of the actor",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "actorId",
+            "description": "Actor ID to terminate",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "force",
+            "description": "Optional: Force termination even if actor has pending messages\nWhen false (default): Actor completes pending messages before terminating\nWhen true: Actor terminates immediately, pending messages may be lost",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "timeoutMs",
+            "description": "Optional: Timeout for graceful shutdown (in milliseconds)\nDefault: 5000ms (5 seconds)\nAfter timeout, actor is forcefully terminated",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          }
+        ],
+        "tags": [
+          "Actors"
+        ]
+      }
+    },
     "/api/v1/actors/{namespace}/{actorType}": {
       "get": {
         "summary": "Invoke Actor",
-        "description": "Invoke an actor via HTTP GET/POST/PUT/DELETE (FaaS-style interface)",
+        "description": "Invoke an actor via HTTP GET/POST/PUT (FaaS-style interface)",
         "operationId": "InvokeActor",
         "responses": {
           "200": {
@@ -729,84 +771,24 @@
             "in": "query",
             "required": false,
             "type": "string"
-          }
-        ],
-        "tags": [
-          "Actors"
-        ]
-      },
-      "delete": {
-        "summary": "Invoke Actor",
-        "description": "Invoke an actor via HTTP GET/POST/PUT/DELETE (FaaS-style interface)",
-        "operationId": "InvokeActor4",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/InvokeActorResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "namespace",
-            "description": "Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})\nCan be empty - defaults to empty string if not provided\nTenant ID comes from gRPC auth (JWT middleware) or default config, not from request",
-            "in": "path",
-            "required": true,
-            "type": "string"
           },
           {
-            "name": "actorType",
-            "description": "Actor type (extracted from path: /api/v1/actors/{namespace}/{actor_type})\nUsed to lookup actors via ActorRegistry discover_actors_by_type",
-            "in": "path",
-            "required": true,
-            "type": "string"
+            "name": "ask",
+            "description": "When true, use request-reply (ask pattern, message_type \"call\") regardless of HTTP method.\nWhen false or unset: only GET uses ask (request-reply); POST/PUT/DELETE use tell (fire-and-forget, message_type \"cast\").\nHTTP gateway sets this when query param invocation=call (e.g. POST ...?invocation=call). \"msg_type\" in query is handler name (payload).\nConsistent with actor message_type: \"call\" = ask, \"cast\" = tell.",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
           },
           {
-            "name": "httpMethod",
-            "description": "HTTP method (GET, POST, PUT, or DELETE)\nGET/DELETE: Uses ask() (request-reply), POST/PUT: Uses tell() (fire-and-forget)",
+            "name": "msgTypeOverride",
+            "description": "Optional message type override from HTTP query param \"invocation\" (not \"msg_type\"; msg_type is handler name in payload).\nWhen set: \"call\" = request-reply (ask), \"cast\" = fire-and-forget (tell). Empty/unset = use method default (GET=call, POST/PUT/DELETE=cast).\nAllowed values (Erlang-style): call, cast, info only. Others not supported at this time.",
             "in": "query",
             "required": false,
             "type": "string"
           },
           {
-            "name": "payload",
-            "description": "Request payload\nFor GET/DELETE: JSON string of query parameters\nFor POST/PUT: Request body bytes",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "byte"
-          },
-          {
-            "name": "headers",
-            "description": "HTTP headers (for POST/PUT requests)\nConverted from HTTP request headers\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "queryParams",
-            "description": "Query parameters (for GET/DELETE requests)\nConverted to JSON and stored in payload\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "path",
-            "description": "Full HTTP path for the request (optional)\nExample: \"/api/v1/actors/default/counter/custom/path\"\nAllows actors to perform custom routing based on the complete URL",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "subpath",
-            "description": "Subpath after the actor_type segment (optional)\nExample: for \"/api/v1/actors/default/counter/metrics/latest\"\n         subpath = \"metrics/latest\"\nThis will be used in future for advanced per-actor routing capabilities.",
+            "name": "timeout",
+            "description": "Optional timeout for request-reply (ask) operations.\nDefaults to 5 seconds if not specified. Use for long-running operations like training.\nHTTP gateway extracts from ?timeout=30 query parameter (in seconds).",
             "in": "query",
             "required": false,
             "type": "string"
@@ -818,7 +800,7 @@
       },
       "post": {
         "summary": "Invoke Actor",
-        "description": "Invoke an actor via HTTP GET/POST/PUT/DELETE (FaaS-style interface)",
+        "description": "Invoke an actor via HTTP GET/POST/PUT (FaaS-style interface)",
         "operationId": "InvokeActor2",
         "responses": {
           "200": {
@@ -864,7 +846,7 @@
       },
       "put": {
         "summary": "Invoke Actor",
-        "description": "Invoke an actor via HTTP GET/POST/PUT/DELETE (FaaS-style interface)",
+        "description": "Invoke an actor via HTTP GET/POST/PUT (FaaS-style interface)",
         "operationId": "InvokeActor3",
         "responses": {
           "200": {
@@ -2263,75 +2245,11 @@
             "type": "string"
           },
           {
-            "name": "context.tenantId",
-            "description": "Tenant ID (REQUIRED for all operations)\n\nAll operations are scoped to this tenant.\nMust be validated at service boundaries.",
-            "in": "query",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "context.namespace",
-            "description": "Namespace within tenant (optional, defaults to \"default\")\n\nCommon values: \"production\", \"staging\", \"dev\", \"test\"",
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request.",
             "in": "query",
             "required": false,
             "type": "string"
-          },
-          {
-            "name": "context.userId",
-            "description": "User ID (from JWT, optional)\n\nExtracted from JWT claims for audit logging and authorization.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.requestId",
-            "description": "Request ID (for tracing)\n\nUnique identifier for this request (ULID).\nUsed for request tracing and correlation.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.correlationId",
-            "description": "Correlation ID (for distributed tracing)\n\nLinks related requests across services.\nPropagated through gRPC metadata.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.timestamp",
-            "description": "Request timestamp",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "name": "context.metadata",
-            "description": "Metadata (extensible key-value pairs)\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.authEnabled",
-            "description": "Auth enabled flag (from SecurityConfig)\n\nWhen true, indicates authentication is enabled.\nIf auth is enabled and tenant_id is empty, RequestContext creation will fail.\nIf auth is disabled, tenant_id can be empty.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
           }
         ],
         "tags": [
@@ -2359,75 +2277,11 @@
         },
         "parameters": [
           {
-            "name": "context.tenantId",
-            "description": "Tenant ID (REQUIRED for all operations)\n\nAll operations are scoped to this tenant.\nMust be validated at service boundaries.",
-            "in": "query",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "context.namespace",
-            "description": "Namespace within tenant (optional, defaults to \"default\")\n\nCommon values: \"production\", \"staging\", \"dev\", \"test\"",
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request.",
             "in": "query",
             "required": false,
             "type": "string"
-          },
-          {
-            "name": "context.userId",
-            "description": "User ID (from JWT, optional)\n\nExtracted from JWT claims for audit logging and authorization.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.requestId",
-            "description": "Request ID (for tracing)\n\nUnique identifier for this request (ULID).\nUsed for request tracing and correlation.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.correlationId",
-            "description": "Correlation ID (for distributed tracing)\n\nLinks related requests across services.\nPropagated through gRPC metadata.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.timestamp",
-            "description": "Request timestamp",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "name": "context.metadata",
-            "description": "Metadata (extensible key-value pairs)\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.authEnabled",
-            "description": "Auth enabled flag (from SecurityConfig)\n\nWhen true, indicates authentication is enabled.\nIf auth is enabled and tenant_id is empty, RequestContext creation will fail.\nIf auth is disabled, tenant_id can be empty.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
           }
         ],
         "tags": [
@@ -2462,75 +2316,11 @@
             "type": "string"
           },
           {
-            "name": "context.tenantId",
-            "description": "Tenant ID (REQUIRED for all operations)\n\nAll operations are scoped to this tenant.\nMust be validated at service boundaries.",
-            "in": "query",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "context.namespace",
-            "description": "Namespace within tenant (optional, defaults to \"default\")\n\nCommon values: \"production\", \"staging\", \"dev\", \"test\"",
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request.",
             "in": "query",
             "required": false,
             "type": "string"
-          },
-          {
-            "name": "context.userId",
-            "description": "User ID (from JWT, optional)\n\nExtracted from JWT claims for audit logging and authorization.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.requestId",
-            "description": "Request ID (for tracing)\n\nUnique identifier for this request (ULID).\nUsed for request tracing and correlation.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.correlationId",
-            "description": "Correlation ID (for distributed tracing)\n\nLinks related requests across services.\nPropagated through gRPC metadata.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.timestamp",
-            "description": "Request timestamp",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "name": "context.metadata",
-            "description": "Metadata (extensible key-value pairs)\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.authEnabled",
-            "description": "Auth enabled flag (from SecurityConfig)\n\nWhen true, indicates authentication is enabled.\nIf auth is enabled and tenant_id is empty, RequestContext creation will fail.\nIf auth is disabled, tenant_id can be empty.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
           }
         ],
         "tags": [
@@ -2563,75 +2353,11 @@
             "type": "string"
           },
           {
-            "name": "context.tenantId",
-            "description": "Tenant ID (REQUIRED for all operations)\n\nAll operations are scoped to this tenant.\nMust be validated at service boundaries.",
-            "in": "query",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "context.namespace",
-            "description": "Namespace within tenant (optional, defaults to \"default\")\n\nCommon values: \"production\", \"staging\", \"dev\", \"test\"",
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request.",
             "in": "query",
             "required": false,
             "type": "string"
-          },
-          {
-            "name": "context.userId",
-            "description": "User ID (from JWT, optional)\n\nExtracted from JWT claims for audit logging and authorization.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.requestId",
-            "description": "Request ID (for tracing)\n\nUnique identifier for this request (ULID).\nUsed for request tracing and correlation.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.correlationId",
-            "description": "Correlation ID (for distributed tracing)\n\nLinks related requests across services.\nPropagated through gRPC metadata.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.timestamp",
-            "description": "Request timestamp",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "name": "context.metadata",
-            "description": "Metadata (extensible key-value pairs)\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.authEnabled",
-            "description": "Auth enabled flag (from SecurityConfig)\n\nWhen true, indicates authentication is enabled.\nIf auth is enabled and tenant_id is empty, RequestContext creation will fail.\nIf auth is disabled, tenant_id can be empty.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
           }
         ],
         "tags": [
@@ -2704,75 +2430,11 @@
             "type": "string"
           },
           {
-            "name": "context.tenantId",
-            "description": "Tenant ID (REQUIRED for all operations)\n\nAll operations are scoped to this tenant.\nMust be validated at service boundaries.",
-            "in": "query",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "context.namespace",
-            "description": "Namespace within tenant (optional, defaults to \"default\")\n\nCommon values: \"production\", \"staging\", \"dev\", \"test\"",
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request.",
             "in": "query",
             "required": false,
             "type": "string"
-          },
-          {
-            "name": "context.userId",
-            "description": "User ID (from JWT, optional)\n\nExtracted from JWT claims for audit logging and authorization.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.requestId",
-            "description": "Request ID (for tracing)\n\nUnique identifier for this request (ULID).\nUsed for request tracing and correlation.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.correlationId",
-            "description": "Correlation ID (for distributed tracing)\n\nLinks related requests across services.\nPropagated through gRPC metadata.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.timestamp",
-            "description": "Request timestamp",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "name": "context.metadata",
-            "description": "Metadata (extensible key-value pairs)\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.authEnabled",
-            "description": "Auth enabled flag (from SecurityConfig)\n\nWhen true, indicates authentication is enabled.\nIf auth is enabled and tenant_id is empty, RequestContext creation will fail.\nIf auth is disabled, tenant_id can be empty.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
           }
         ],
         "tags": [
@@ -2887,75 +2549,11 @@
             "type": "string"
           },
           {
-            "name": "context.tenantId",
-            "description": "Tenant ID (REQUIRED for all operations)\n\nAll operations are scoped to this tenant.\nMust be validated at service boundaries.",
-            "in": "query",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "context.namespace",
-            "description": "Namespace within tenant (optional, defaults to \"default\")\n\nCommon values: \"production\", \"staging\", \"dev\", \"test\"",
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request.",
             "in": "query",
             "required": false,
             "type": "string"
-          },
-          {
-            "name": "context.userId",
-            "description": "User ID (from JWT, optional)\n\nExtracted from JWT claims for audit logging and authorization.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.requestId",
-            "description": "Request ID (for tracing)\n\nUnique identifier for this request (ULID).\nUsed for request tracing and correlation.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.correlationId",
-            "description": "Correlation ID (for distributed tracing)\n\nLinks related requests across services.\nPropagated through gRPC metadata.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.timestamp",
-            "description": "Request timestamp",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "name": "context.metadata",
-            "description": "Metadata (extensible key-value pairs)\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.authEnabled",
-            "description": "Auth enabled flag (from SecurityConfig)\n\nWhen true, indicates authentication is enabled.\nIf auth is enabled and tenant_id is empty, RequestContext creation will fail.\nIf auth is disabled, tenant_id can be empty.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
           }
         ],
         "tags": [
@@ -3110,75 +2708,11 @@
             "type": "string"
           },
           {
-            "name": "context.tenantId",
-            "description": "Tenant ID (REQUIRED for all operations)\n\nAll operations are scoped to this tenant.\nMust be validated at service boundaries.",
-            "in": "query",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "context.namespace",
-            "description": "Namespace within tenant (optional, defaults to \"default\")\n\nCommon values: \"production\", \"staging\", \"dev\", \"test\"",
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request.",
             "in": "query",
             "required": false,
             "type": "string"
-          },
-          {
-            "name": "context.userId",
-            "description": "User ID (from JWT, optional)\n\nExtracted from JWT claims for audit logging and authorization.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.requestId",
-            "description": "Request ID (for tracing)\n\nUnique identifier for this request (ULID).\nUsed for request tracing and correlation.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.correlationId",
-            "description": "Correlation ID (for distributed tracing)\n\nLinks related requests across services.\nPropagated through gRPC metadata.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.timestamp",
-            "description": "Request timestamp",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "name": "context.metadata",
-            "description": "Metadata (extensible key-value pairs)\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.authEnabled",
-            "description": "Auth enabled flag (from SecurityConfig)\n\nWhen true, indicates authentication is enabled.\nIf auth is enabled and tenant_id is empty, RequestContext creation will fail.\nIf auth is disabled, tenant_id can be empty.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
           }
         ],
         "tags": [
@@ -3213,75 +2747,11 @@
             "type": "string"
           },
           {
-            "name": "context.tenantId",
-            "description": "Tenant ID (REQUIRED for all operations)\n\nAll operations are scoped to this tenant.\nMust be validated at service boundaries.",
-            "in": "query",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "context.namespace",
-            "description": "Namespace within tenant (optional, defaults to \"default\")\n\nCommon values: \"production\", \"staging\", \"dev\", \"test\"",
+            "name": "namespace",
+            "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request.",
             "in": "query",
             "required": false,
             "type": "string"
-          },
-          {
-            "name": "context.userId",
-            "description": "User ID (from JWT, optional)\n\nExtracted from JWT claims for audit logging and authorization.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.requestId",
-            "description": "Request ID (for tracing)\n\nUnique identifier for this request (ULID).\nUsed for request tracing and correlation.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.correlationId",
-            "description": "Correlation ID (for distributed tracing)\n\nLinks related requests across services.\nPropagated through gRPC metadata.",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.timestamp",
-            "description": "Request timestamp",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "date-time"
-          },
-          {
-            "name": "context.metadata",
-            "description": "Metadata (extensible key-value pairs)\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
-            "in": "query",
-            "required": false,
-            "type": "string"
-          },
-          {
-            "name": "context.admin",
-            "description": "Admin flag (from JWT, optional)\n\nWhen true, indicates the user has admin privileges.\nAdmin users with empty namespace can bypass namespace filtering for administrative operations (see should_skip_namespace_filter()).\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.internal",
-            "description": "Internal flag (for system operations)\n\nWhen true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nInternal contexts with empty namespace can bypass namespace filtering for system operations (see should_skip_namespace_filter()).\nUsed for system-level operations like heartbeats, node registration, etc.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context.authEnabled",
-            "description": "Auth enabled flag (from SecurityConfig)\n\nWhen true, indicates authentication is enabled.\nIf auth is enabled and tenant_id is empty, RequestContext creation will fail.\nIf auth is disabled, tenant_id can be empty.",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
           }
         ],
         "tags": [
@@ -3780,6 +3250,88 @@
         ],
         "tags": [
           "NodeService"
+        ]
+      }
+    },
+    "/api/v1/nodes:connect": {
+      "post": {
+        "summary": "Connect to remote nodes",
+        "description": "Erlang-style node connection (net_adm:ping). Establishes connections to remote nodes by address, pings each to verify connectivity and retrieve node_id, then registers in SWIM membership for ongoing failure detection. Supports partial success - some connections may succeed while others fail.",
+        "operationId": "ConnectNodes",
+        "responses": {
+          "200": {
+            "description": "Connection results with success/failure details",
+            "schema": {
+              "$ref": "#/definitions/ConnectNodesResponse"
+            }
+          },
+          "400": {
+            "description": "Invalid request - no addresses provided or invalid format",
+            "schema": {}
+          },
+          "408": {
+            "description": "Request timeout - all connection attempts timed out",
+            "schema": {}
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "Request to connect to remote nodes (Erlang-style net_adm:ping)",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConnectNodesRequest"
+            }
+          }
+        ],
+        "tags": [
+          "Node Connectivity"
+        ]
+      }
+    },
+    "/api/v1/nodes:disconnect": {
+      "post": {
+        "summary": "Disconnect from nodes",
+        "description": "Erlang-style node disconnection (erlang:disconnect_node). Removes nodes from SWIM membership - they will no longer be probed or receive gossip. Idempotent: disconnecting from unknown node succeeds. By default, does NOT notify remote node (they detect via SWIM timeout). Set notify_remote=true for graceful disconnect.",
+        "operationId": "DisconnectNodes",
+        "responses": {
+          "200": {
+            "description": "Disconnection results with success/failure details",
+            "schema": {
+              "$ref": "#/definitions/DisconnectNodesResponse"
+            }
+          },
+          "400": {
+            "description": "Invalid request - no node_ids provided",
+            "schema": {}
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "Request to disconnect from nodes (Erlang-style erlang:disconnect_node)",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DisconnectNodesRequest"
+            }
+          }
+        ],
+        "tags": [
+          "Node Connectivity"
         ]
       }
     },
@@ -4353,7 +3905,7 @@
           "200": {
             "description": "A successful response.",
             "schema": {
-              "$ref": "#/definitions/processgroups.v1.ListGroupsResponse"
+              "$ref": "#/definitions/ListGroupsResponse"
             }
           },
           "default": {
@@ -4364,13 +3916,6 @@
           }
         },
         "parameters": [
-          {
-            "name": "tenantId",
-            "description": "Filter by tenant (required - prevents cross-tenant access)",
-            "in": "query",
-            "required": true,
-            "type": "string"
-          },
           {
             "name": "namespace",
             "description": "Filter by namespace (optional)",
@@ -4412,7 +3957,7 @@
           "200": {
             "description": "A successful response.",
             "schema": {
-              "$ref": "#/definitions/processgroups.v1.CreateGroupResponse"
+              "$ref": "#/definitions/CreateGroupResponse"
             }
           },
           "default": {
@@ -4428,7 +3973,7 @@
             "in": "body",
             "required": true,
             "schema": {
-              "$ref": "#/definitions/processgroups.v1.CreateGroupRequest"
+              "$ref": "#/definitions/CreateGroupRequest"
             }
           }
         ],
@@ -4461,13 +4006,6 @@
             "name": "groupName",
             "description": "Group name to delete",
             "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "tenantId",
-            "description": "Tenant ID (for security - prevent cross-tenant deletion)",
-            "in": "query",
             "required": true,
             "type": "string"
           }
@@ -4503,13 +4041,6 @@
             "in": "path",
             "required": true,
             "type": "string"
-          },
-          {
-            "name": "tenantId",
-            "description": "Tenant ID",
-            "in": "query",
-            "required": true,
-            "type": "string"
           }
         ],
         "tags": [
@@ -4541,13 +4072,6 @@
             "name": "groupName",
             "description": "Group name",
             "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "tenantId",
-            "description": "Tenant ID",
-            "in": "query",
             "required": true,
             "type": "string"
           },
@@ -4641,13 +4165,6 @@
             "name": "actorId",
             "description": "Actor ID to remove from group",
             "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "tenantId",
-            "description": "Tenant ID",
-            "in": "query",
             "required": true,
             "type": "string"
           }
@@ -7277,6 +6794,297 @@
         ]
       }
     },
+    "/plexspaces.actor.v1.ActorService/AllReduceShardGroup": {
+      "post": {
+        "operationId": "AllReduceShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/AllReduceShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AllReduceShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/BarrierShardGroup": {
+      "post": {
+        "operationId": "BarrierShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/BarrierShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/BarrierShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/BroadcastShardGroup": {
+      "post": {
+        "operationId": "BroadcastShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/BroadcastShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/BroadcastShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/BulkUpdateShardGroup": {
+      "post": {
+        "summary": "Bulk update: send update messages to multiple shards (DPA UpdateFunction)",
+        "operationId": "BulkUpdateShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/BulkUpdateShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/BulkUpdateShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/CreateShardGroup": {
+      "post": {
+        "summary": "============================================================================\nACTOR GROUPS (data-parallel sharding). See docs/ACTOR_GROUPS_DESIGN.md.\n============================================================================",
+        "operationId": "CreateShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/CreateShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/CreateShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/DeleteShardGroup": {
+      "post": {
+        "operationId": "DeleteShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1.Empty"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DeleteShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/GetShardGroup": {
+      "post": {
+        "operationId": "GetShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/GetShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/GetShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/ListShardGroups": {
+      "post": {
+        "operationId": "ListShardGroups",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/ListShardGroupsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ListShardGroupsRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/MapShardGroup": {
+      "post": {
+        "summary": "Map: apply function to all shards in parallel (DPA Map operator)",
+        "operationId": "MapShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/MapShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/MapShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
     "/plexspaces.actor.v1.ActorService/MonitorActor": {
       "post": {
         "summary": "Monitor Actor",
@@ -7344,6 +7152,134 @@
         ],
         "tags": [
           "Supervision"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/ReduceShardGroup": {
+      "post": {
+        "operationId": "ReduceShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/ReduceShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ReduceShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/ScaleShardGroup": {
+      "post": {
+        "operationId": "ScaleShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/ScaleShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ScaleShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/ScatterGather": {
+      "post": {
+        "operationId": "ScatterGather",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/ScatterGatherResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ScatterGatherRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
+        ]
+      }
+    },
+    "/plexspaces.actor.v1.ActorService/SendToShard": {
+      "post": {
+        "operationId": "SendToShard",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/SendToShardResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SendToShardRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ActorService"
         ]
       }
     },
@@ -7723,6 +7659,17 @@
       "description": "Response with activated actor",
       "title": "Activate Actor Response"
     },
+    "ActivationStrategy": {
+      "type": "string",
+      "enum": [
+        "ACTIVATION_STRATEGY_UNSPECIFIED",
+        "ACTIVATION_STRATEGY_LAZY",
+        "ACTIVATION_STRATEGY_EAGER",
+        "ACTIVATION_STRATEGY_PREWARM"
+      ],
+      "default": "ACTIVATION_STRATEGY_UNSPECIFIED",
+      "description": "Activation strategy for virtual actors (single definition used by actor_runtime and node.release).\n\nUsed by VirtualActorConfig (actor_runtime), DefaultVirtualActorConfig (release), and Rust\nVirtualActorFacet. Define here so it is not duplicated across protos or crates.\n\n - ACTIVATION_STRATEGY_UNSPECIFIED: Treated as LAZY\n - ACTIVATION_STRATEGY_LAZY: Activate on first message (default)\n - ACTIVATION_STRATEGY_EAGER: Activate immediately on creation\n - ACTIVATION_STRATEGY_PREWARM: Pre-activate based on schedule"
+    },
     "Actor": {
       "type": "object",
       "properties": {
@@ -7767,10 +7714,6 @@
           },
           "title": "FACET EXTENSIBILITY: Attached facets provide additional capabilities\nExamples: virtual_actor, otp_genserver, otp_supervisor, durable_execution, workflow"
         },
-        "isolation": {
-          "$ref": "#/definitions/IsolationContext",
-          "title": "MULTI-TENANCY: Isolation context for tenant separation and security\nEnables hosting multiple customers/organizations on shared infrastructure\nwhile maintaining strict resource and security boundaries"
-        },
         "actorStateSchemaVersion": {
           "type": "integer",
           "format": "int64",
@@ -7782,6 +7725,10 @@
           "description": "## Purpose\nProvides error details when actor.state == ACTOR_STATE_FAILED.\nUsed for debugging, logging, and supervisor restart decisions.\n\n## Usage\n- Only populated when state == ACTOR_STATE_FAILED\n- Empty string when state != ACTOR_STATE_FAILED\n- Contains error message from actor crash or failure",
           "title": "Error message when actor is in FAILED state",
           "readOnly": true
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for this actor's data isolation.\nWhen actor is part of an application deployment, namespace must match application namespace.\nSource of truth for namespace is the application (when deploying) or actor creation request."
         }
       },
       "description": "Durable actor instance",
@@ -8019,30 +7966,12 @@
     "ActorResourceRequirements": {
       "type": "object",
       "properties": {
-        "resources": {
-          "$ref": "#/definitions/ResourceSpec",
-          "title": "Required resources (CPU, memory, disk, GPU)"
-        },
-        "requiredLabels": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Required node labels (Kubernetes-inspired label selector)\nAll labels must match for node to be eligible"
-        },
         "placement": {
-          "$ref": "#/definitions/PlacementPreferences",
-          "title": "Placement preferences"
-        },
-        "actorGroups": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "title": "Actor groups (for task routing and co-scheduling)"
+          "$ref": "#/definitions/NodePlacement",
+          "title": "Unified placement (strategy, required_labels, resource_requirements, preferred/avoid node IDs)"
         }
       },
-      "title": "Actor resource requirements for resource-aware scheduling"
+      "description": "Actor placement for resource-aware scheduling. Single source for labels, affinity, and resources.\nScheduler (crates/scheduler) uses placement.required_labels and placement.resource_requirements to select nodes."
     },
     "ActorService.MigrateActorBody": {
       "type": "object",
@@ -8095,6 +8024,48 @@
       "required": [
         "reason"
       ]
+    },
+    "AllReduceShardGroupRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        },
+        "mapFunction": {
+          "$ref": "#/definitions/Message"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "minResponses": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "reduction": {
+          "$ref": "#/definitions/CollectiveReduction"
+        },
+        "target": {
+          "$ref": "#/definitions/CollectiveTargetField"
+        }
+      }
+    },
+    "AllReduceShardGroupResponse": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "$ref": "#/definitions/Message"
+        },
+        "shardResponses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/ShardQueryResponse"
+          }
+        },
+        "stats": {
+          "$ref": "#/definitions/ScatterGatherStats"
+        }
+      }
     },
     "Any": {
       "type": "object",
@@ -8183,10 +8154,13 @@
     "ApplicationMetrics": {
       "type": "object",
       "properties": {
-        "actorCount": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Number of actors in the application"
+        "actorCounts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uint64"
+          },
+          "title": "Actor counts by role/type within the application on this node.\nExamples:\n- leader: 1\n- worker: 8\n- supervisor: 1"
         },
         "supervisorCount": {
           "type": "integer",
@@ -8197,6 +8171,48 @@
           "type": "string",
           "format": "uint64",
           "title": "Uptime in seconds"
+        },
+        "messageCount": {
+          "type": "string",
+          "format": "uint64",
+          "description": "Total messages processed by this application on this node."
+        },
+        "errorCount": {
+          "type": "string",
+          "format": "uint64",
+          "description": "Total errors observed by this application on this node."
+        },
+        "counterMetrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uint64"
+          },
+          "title": "General-purpose counters for application-defined metrics.\nExamples:\n- tuple_operations: 690\n- scatter_gather_rounds: 30\n- ts_write_count: 64\n- ts_read_count: 64"
+        },
+        "latencyTotalsMs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uint64"
+          },
+          "title": "Cumulative latency totals in milliseconds by metric type.\nExamples:\n- compute: 511\n- coordination: 65419\n- worker: 65930"
+        },
+        "latencyMaxMs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uint64"
+          },
+          "description": "Maximum observed latency in milliseconds by metric type."
+        },
+        "latencySamples": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uint64"
+          },
+          "description": "Number of latency samples contributing to latency_totals_ms for each type."
         }
       },
       "title": "Application metrics"
@@ -8237,12 +8253,19 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "e.g., \"byzantine-generals\"",
-          "title": "Application metadata"
+          "title": "Application name (unique identifier within node)\nExamples: \"byzantine-generals\", \"genomics-coordinator\""
+        },
+        "tenantId": {
+          "type": "string",
+          "description": "Tenant ID for multi-tenancy isolation.\nExtracted from JWT token during deployment.\nAll actors spawned by this application will be scoped to this tenant.\nThis is the source of truth for tenant isolation - ActorFactory enforces it."
+        },
+        "namespace": {
+          "type": "string",
+          "title": "Namespace for actor isolation within a tenant.\nAll actors spawned by this application will be registered in this namespace.\nIf empty, defaults to application_id during deployment.\nExamples: \"bank-test\", \"genomics-prod\", \"dev-sandbox\""
         },
         "version": {
           "type": "string",
-          "title": "Semantic version (e.g., \"0.1.0\")"
+          "title": "Application version (semantic versioning)\nExamples: \"0.1.0\", \"1.2.3\""
         },
         "description": {
           "type": "string",
@@ -8250,7 +8273,7 @@
         },
         "type": {
           "$ref": "#/definitions/ApplicationType",
-          "title": "Application type"
+          "title": "Application type (library or active)"
         },
         "dependencies": {
           "type": "array",
@@ -8269,9 +8292,36 @@
         "supervisor": {
           "$ref": "#/definitions/SupervisorSpec",
           "title": "Supervision tree (only for active applications)"
+        },
+        "enabled": {
+          "type": "boolean",
+          "title": "Whether application is enabled (false = skip loading)\nDefault: true"
+        },
+        "autoStart": {
+          "type": "boolean",
+          "title": "Whether to start application automatically on node boot\nDefault: true\nFuture: false allows manual start via ApplicationService API"
+        },
+        "shutdownTimeout": {
+          "type": "string",
+          "title": "Shutdown timeout (force kill if exceeded)\nDefault: 60 seconds"
+        },
+        "shutdownStrategy": {
+          "$ref": "#/definitions/application.v1.ShutdownStrategy",
+          "title": "Shutdown strategy (graceful or immediate)\nDefault: GRACEFUL"
+        },
+        "metadata": {
+          "$ref": "#/definitions/Metadata",
+          "title": "Application metadata (tags, labels, annotations)\nExamples:\n- environment: \"production\"\n- team: \"genomics\"\n- criticality: \"high\""
+        },
+        "seedNodes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Seed nodes (gRPC addresses) to connect to when this application is deployed.\nThe node will connect to these addresses if not already connected, so\nleader-worker and scatter/gather can use workers on other nodes.\nExample: [\"localhost:8091\", \"localhost:8093\"]"
         }
       },
-      "description": "## Purpose\nComplete definition of a PlexSpaces application. Analogous to\nErlang .app files, defines metadata, dependencies, supervision tree.\n\n## Why This Exists\n- Reusable components with clear boundaries\n- Dependency management (start in correct order)\n- Declarative supervision tree\n- Supports both library and active applications",
+      "description": "## Purpose\nComplete definition of a PlexSpaces application. Analogous to\nErlang .app files, defines metadata, dependencies, supervision tree,\nand deployment configuration (enabled, auto_start, shutdown settings).\n\n## Why This Exists\n- Reusable components with clear boundaries\n- Dependency management (start in correct order)\n- Declarative supervision tree\n- Supports both library and active applications\n- Unified configuration (ApplicationConfig has been merged into this message)\n\n## TOML Mapping Example\n```toml\n[[applications]]\nname = \"my-app\"\nversion = \"1.0.0\"\ndescription = \"My application\"\ntype = \"active\"\ndependencies = [\"plexspaces-core\"]\nenabled = true\nauto_start = true\nshutdown_timeout_seconds = 60\nshutdown_strategy = \"graceful\"\n```",
       "title": "Application specification (Erlang/OTP .app file equivalent)"
     },
     "ApplicationStatus": {
@@ -8363,6 +8413,43 @@
         "BACKUP_TYPE_DIFFERENTIAL"
       ],
       "default": "BACKUP_TYPE_UNSPECIFIED"
+    },
+    "BarrierShardGroupRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        },
+        "barrierId": {
+          "type": "string"
+        },
+        "round": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "minAcks": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "BarrierShardGroupResponse": {
+      "type": "object",
+      "properties": {
+        "shardResponses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/ShardQueryResponse"
+          }
+        },
+        "stats": {
+          "$ref": "#/definitions/ScatterGatherStats"
+        }
+      }
     },
     "BatchHeartbeatRequest": {
       "type": "object",
@@ -8637,6 +8724,39 @@
       },
       "title": "BootVm response"
     },
+    "BroadcastShardGroupRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        },
+        "message": {
+          "$ref": "#/definitions/Message"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "minAcks": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "BroadcastShardGroupResponse": {
+      "type": "object",
+      "properties": {
+        "shardResponses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/ShardQueryResponse"
+          }
+        },
+        "stats": {
+          "$ref": "#/definitions/ScatterGatherStats"
+        }
+      }
+    },
     "Bucket": {
       "type": "object",
       "properties": {
@@ -8647,6 +8767,70 @@
         "count": {
           "type": "string",
           "format": "uint64"
+        }
+      }
+    },
+    "BulkUpdateShardGroupRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string",
+          "title": "Group to update"
+        },
+        "updates": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Message"
+          },
+          "title": "Update messages: partition_key -\u003e message\nMessages will be routed to appropriate shards based on partition_key"
+        },
+        "consistencyLevel": {
+          "$ref": "#/definitions/ConsistencyLevel",
+          "title": "Consistency level for updates"
+        },
+        "timeout": {
+          "type": "string",
+          "title": "Timeout for updates"
+        },
+        "waitForResponses": {
+          "type": "boolean",
+          "title": "Wait for responses (true = wait for all, false = fire-and-forget)"
+        }
+      },
+      "title": "Bulk update: send update messages to multiple shards (DPA UpdateFunction)\nInspired by NSDI'22 Data-Parallel Actors paper"
+    },
+    "BulkUpdateShardGroupResponse": {
+      "type": "object",
+      "properties": {
+        "updatesSent": {
+          "type": "integer",
+          "format": "int64",
+          "title": "Number of updates sent"
+        },
+        "updatesSucceeded": {
+          "type": "integer",
+          "format": "int64",
+          "title": "Number of successful updates"
+        },
+        "updatesFailed": {
+          "type": "integer",
+          "format": "int64",
+          "title": "Number of failed updates"
+        },
+        "shardStats": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/ShardUpdateStats"
+          },
+          "title": "Per-shard statistics"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Errors (if any)"
         }
       }
     },
@@ -8672,15 +8856,14 @@
           "format": "byte",
           "title": "New value"
         },
-        "context": {
-          "$ref": "#/definitions/RequestContext",
-          "title": "Request context (contains tenant_id, namespace, user_id)"
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request."
         }
       },
       "title": "Cas request",
       "required": [
-        "newValue",
-        "context"
+        "newValue"
       ]
     },
     "CasResponse": {
@@ -8692,6 +8875,24 @@
         }
       },
       "title": "Cas response"
+    },
+    "ChannelProvider": {
+      "type": "string",
+      "enum": [
+        "CHANNEL_PROVIDER_IN_MEMORY",
+        "CHANNEL_PROVIDER_REDIS",
+        "CHANNEL_PROVIDER_KAFKA",
+        "CHANNEL_PROVIDER_SQLITE",
+        "CHANNEL_PROVIDER_NATS",
+        "CHANNEL_PROVIDER_UDP",
+        "CHANNEL_PROVIDER_SQS",
+        "CHANNEL_PROVIDER_PROCESS_GROUP",
+        "CHANNEL_PROVIDER_POSTGRES",
+        "CHANNEL_PROVIDER_CUSTOM"
+      ],
+      "default": "CHANNEL_PROVIDER_IN_MEMORY",
+      "description": "- CHANNEL_PROVIDER_IN_MEMORY: In-process multi-producer single-consumer channel (Go-like)\n- Fastest for same-node communication\n- No persistence, lost on crash\n- Bounded or unbounded capacity\n - CHANNEL_PROVIDER_REDIS: Redis Streams for distributed messaging\n- Persistent, survives crashes\n- Consumer groups for load balancing\n- Cross-node communication\n - CHANNEL_PROVIDER_KAFKA: Kafka for high-throughput distributed streaming\n- Durable, partitioned, replicated\n- Horizontal scalability\n- Cross-node, cross-datacenter\n - CHANNEL_PROVIDER_SQLITE: SQLite for testing and single-node durability\n- Persistent, survives crashes\n- Good for testing recovery scenarios\n- Single-node only (not distributed)\n - CHANNEL_PROVIDER_NATS: NATS for lightweight distributed messaging\n- High performance, low latency\n- Pub/sub and request/reply patterns\n- JetStream for persistence (optional)\n- Cross-node, cross-datacenter\n - CHANNEL_PROVIDER_UDP: UDP multicast for lightweight pub/sub within a cluster\n- Very low latency, high throughput\n- Multicast pub/sub for cluster-wide messaging\n- Unicast point-to-point messaging\n- No persistence, best-effort delivery\n- Requires nodes to share same cluster_name\n - CHANNEL_PROVIDER_SQS: AWS SQS for managed message queuing\n- Fully managed, serverless\n- Dead Letter Queue (DLQ) support\n- At-least-once delivery with visibility timeout\n- Auto-scaling, no infrastructure management\n - CHANNEL_PROVIDER_PROCESS_GROUP: Process Group for Erlang pg/pg2-style pub/sub\n- Uses ProcessGroupService via ServiceLocator\n- Distributed across cluster nodes\n- Pub/sub with topic filtering\n- No external dependencies\n - CHANNEL_PROVIDER_POSTGRES: PostgreSQL for durable distributed messaging\n- Uses FOR UPDATE SKIP LOCKED for queue semantics\n- LISTEN/NOTIFY for pub/sub notifications\n- Transactional message processing\n- Durable, survives crashes\n- Good for existing Postgres deployments\n - CHANNEL_PROVIDER_CUSTOM: Custom backend (user-provided implementation)",
+      "title": "Channel provider type determines the underlying transport"
     },
     "CheckActorExistsResponse": {
       "type": "object",
@@ -8834,6 +9035,28 @@
       },
       "title": "ClearPrefix response"
     },
+    "CollectiveReduction": {
+      "type": "string",
+      "enum": [
+        "COLLECTIVE_REDUCTION_UNSPECIFIED",
+        "COLLECTIVE_REDUCTION_SUM",
+        "COLLECTIVE_REDUCTION_MIN",
+        "COLLECTIVE_REDUCTION_MAX",
+        "COLLECTIVE_REDUCTION_PRODUCT",
+        "COLLECTIVE_REDUCTION_CONCAT",
+        "COLLECTIVE_REDUCTION_BOOL_AND",
+        "COLLECTIVE_REDUCTION_BOOL_OR"
+      ],
+      "default": "COLLECTIVE_REDUCTION_UNSPECIFIED"
+    },
+    "CollectiveTargetField": {
+      "type": "object",
+      "properties": {
+        "valuePath": {
+          "type": "string"
+        }
+      }
+    },
     "CommitTransactionBody": {
       "type": "object",
       "description": "Request to commit a transaction",
@@ -8924,6 +9147,69 @@
         }
       }
     },
+    "ConnectNodesRequest": {
+      "type": "object",
+      "example": {
+        "node_addresses": [
+          "node2:8000"
+        ],
+        "cluster": "production"
+      },
+      "properties": {
+        "nodeAddresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Node addresses to connect to (e.g., \"node2:8000\", \"192.168.1.10:8000\")\nEach address will be pinged to verify connectivity.\nAt least one address is required, maximum 100 addresses per request."
+        },
+        "cluster": {
+          "type": "string",
+          "description": "Optional: cluster name for grouping connected nodes.\nIf specified, nodes are tagged with this cluster for filtering.\nMust be alphanumeric with hyphens, max 63 characters (DNS label format).\n\nOptional: timeout for each connection attempt."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Default: 5 seconds if not specified.\nRange: 1 second to 60 seconds."
+        }
+      },
+      "description": "Request to connect to remote nodes (Erlang-style net_adm:ping)",
+      "title": "Connect Nodes Request",
+      "required": [
+        "nodeAddresses"
+      ]
+    },
+    "ConnectNodesResponse": {
+      "type": "object",
+      "example": {
+        "connected": {
+          "node2": "node2:8000"
+        },
+        "failed": {},
+        "total_time": "1.5s"
+      },
+      "properties": {
+        "connected": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Successfully connected nodes: node_id -\u003e address.\nThe node_id is retrieved from the remote node via Ping RPC."
+        },
+        "failed": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Failed connections: address -\u003e error message.\nContains addresses that could not be connected with error details."
+        },
+        "totalTime": {
+          "type": "string",
+          "description": "Total time taken for all connection attempts (parallel execution)."
+        }
+      },
+      "description": "Response from node connection attempt with success/failure details",
+      "title": "Connect Nodes Response"
+    },
     "ConsistencyLevel": {
       "type": "string",
       "enum": [
@@ -9008,44 +9294,6 @@
       "description": "## Prometheus Mapping\n- `plexspaces_system_cpu_usage_percent` (gauge)\n- `plexspaces_system_cpu_load_average_1m` (gauge)\n- `plexspaces_system_cpu_load_average_5m` (gauge)\n- `plexspaces_system_cpu_load_average_15m` (gauge)\n- `plexspaces_system_cpu_active_processes` (gauge)",
       "title": "CPU performance metrics"
     },
-    "CreateActorRequest": {
-      "type": "object",
-      "properties": {
-        "actorType": {
-          "type": "string"
-        },
-        "initialState": {
-          "type": "string",
-          "format": "byte"
-        },
-        "config": {
-          "$ref": "#/definitions/actor.v1.ActorConfig"
-        },
-        "labels": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "namespace": {
-          "type": "string",
-          "title": "Optional namespace. If not provided or empty, uses namespace from RequestContext"
-        }
-      },
-      "description": "Request to create a new actor instance on the local node (where this RPC is called)",
-      "title": "Create Actor Request",
-      "required": [
-        "actorType"
-      ]
-    },
-    "CreateActorResponse": {
-      "type": "object",
-      "properties": {
-        "actor": {
-          "$ref": "#/definitions/Actor"
-        }
-      }
-    },
     "CreateBackupRequest": {
       "type": "object",
       "properties": {
@@ -9099,6 +9347,39 @@
         }
       }
     },
+    "CreateGroupRequest": {
+      "type": "object",
+      "properties": {
+        "groupName": {
+          "type": "string",
+          "example": "config-updates",
+          "description": "Unique group name within tenant",
+          "title": "Group name (required)"
+        },
+        "namespace": {
+          "type": "string",
+          "example": "production",
+          "description": "Namespace within tenant",
+          "title": "Namespace (optional hierarchical isolation within tenant)"
+        },
+        "metadata": {
+          "$ref": "#/definitions/Metadata",
+          "title": "Metadata (labels, annotations)"
+        }
+      },
+      "required": [
+        "groupName"
+      ]
+    },
+    "CreateGroupResponse": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "$ref": "#/definitions/ProcessGroup",
+          "title": "Created group"
+        }
+      }
+    },
     "CreatePoolRequest": {
       "type": "object",
       "properties": {
@@ -9116,6 +9397,40 @@
         }
       },
       "title": "CreatePool response"
+    },
+    "CreateShardGroupRequest": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "$ref": "#/definitions/DataParallelConfig",
+          "description": "Group strategy (group_id, shard_count, partition_strategy, rebalance_policy, placement)\nUse config.placement.required_labels for node placement; scheduler matches nodes by placement."
+        },
+        "actorType": {
+          "type": "string"
+        },
+        "shardConfig": {
+          "$ref": "#/definitions/actor.v1.ActorConfig",
+          "title": "Per-shard ActorConfig (optional data_parallel_config here is ignored; use config above)"
+        },
+        "initialState": {
+          "type": "string",
+          "format": "byte"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "CreateShardGroupResponse": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "$ref": "#/definitions/ShardGroup"
+        }
+      }
     },
     "CreateVmRequest": {
       "type": "object",
@@ -9152,17 +9467,12 @@
       "properties": {
         "groupId": {
           "type": "string",
-          "title": "Actor group ID this actor belongs to"
+          "title": "Shard group ID"
         },
         "shardCount": {
           "type": "integer",
           "format": "int64",
-          "title": "Total number of shards in the group"
-        },
-        "shardId": {
-          "type": "integer",
-          "format": "int64",
-          "title": "This actor's shard ID (0 to shard_count-1)"
+          "title": "Number of shards in the group (1 to 1 billion)"
         },
         "partitionStrategy": {
           "$ref": "#/definitions/PartitionStrategy",
@@ -9171,9 +9481,13 @@
         "rebalancePolicy": {
           "$ref": "#/definitions/RebalancePolicy",
           "title": "Rebalancing policy"
+        },
+        "placement": {
+          "$ref": "#/definitions/NodePlacement",
+          "title": "Node placement for multi-node leader-worker (same_node, from_registry, node_ids)"
         }
       },
-      "title": "Data-parallel actor configuration"
+      "description": "Data-parallel (shard group) strategy; same for all shards in the group.\nShard identity is implicit (index in ShardGroup.shard_actor_ids), not stored per-actor."
     },
     "DbBackoffConfig": {
       "type": "object",
@@ -9227,15 +9541,12 @@
           "format": "int64",
           "title": "Delta to subtract"
         },
-        "context": {
-          "$ref": "#/definitions/RequestContext",
-          "title": "Request context (contains tenant_id, namespace, user_id)"
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request."
         }
       },
-      "title": "Decrement request",
-      "required": [
-        "context"
-      ]
+      "title": "Decrement request"
     },
     "DecrementResponse": {
       "type": "object",
@@ -9247,6 +9558,32 @@
         }
       },
       "title": "Decrement response"
+    },
+    "DefaultVirtualActorConfig": {
+      "type": "object",
+      "properties": {
+        "idleTimeout": {
+          "type": "string",
+          "description": "Idle timeout before deactivation (default: 5m / 300s)"
+        },
+        "maxPoolPerActorType": {
+          "type": "integer",
+          "format": "int64",
+          "default": "100",
+          "description": "Max instances per actor type (LRU eviction when exceeded)",
+          "title": "Max instances per actor type (LRU eviction when exceeded). Default: 100",
+          "maximum": 10000,
+          "minimum": 1
+        },
+        "activationStrategy": {
+          "$ref": "#/definitions/ActivationStrategy",
+          "default": "ACTIVATION_STRATEGY_LAZY",
+          "description": "Activation strategy (default: LAZY)",
+          "title": "Activation strategy (from common.proto; default: LAZY when UNSPECIFIED)"
+        }
+      },
+      "description": "Runtime defaults for virtual actor idle timeout, pool size, and activation strategy",
+      "title": "Default Virtual Actor Configuration"
     },
     "DeleteBlobResponse": {
       "type": "object",
@@ -9271,6 +9608,20 @@
         }
       },
       "title": "Delete response"
+    },
+    "DeleteShardGroupRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        },
+        "force": {
+          "type": "boolean"
+        },
+        "shutdownTimeout": {
+          "type": "string"
+        }
+      }
     },
     "DependencyCheck": {
       "type": "object",
@@ -9417,6 +9768,60 @@
       "description": "## Purpose\nExtends HealthCheck to include dependency checks for detailed diagnostics.",
       "title": "Health check result with dependency breakdown"
     },
+    "DisconnectNodesRequest": {
+      "type": "object",
+      "example": {
+        "node_ids": [
+          "node2"
+        ],
+        "notify_remote": false
+      },
+      "properties": {
+        "nodeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Node IDs to disconnect from.\nUse ListConnectedNodes to get current node IDs.\nAt least one node_id is required, maximum 100 per request."
+        },
+        "notifyRemote": {
+          "type": "boolean",
+          "description": "Optional: graceful disconnect with notification.\nIf true, attempts to notify remote node before disconnecting.\nDefault: false (silent disconnect, remote detects via SWIM timeout)."
+        }
+      },
+      "description": "Request to disconnect from nodes (Erlang-style erlang:disconnect_node)",
+      "title": "Disconnect Nodes Request",
+      "required": [
+        "nodeIds"
+      ]
+    },
+    "DisconnectNodesResponse": {
+      "type": "object",
+      "example": {
+        "disconnected": [
+          "node2"
+        ],
+        "failed": {}
+      },
+      "properties": {
+        "disconnected": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Successfully disconnected node IDs."
+        },
+        "failed": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Failed disconnections: node_id -\u003e error message."
+        }
+      },
+      "description": "Response from node disconnection attempt with success/failure details",
+      "title": "Disconnect Nodes Response"
+    },
     "DiscoverResponse": {
       "type": "object",
       "properties": {
@@ -9557,51 +9962,6 @@
       "default": "DROP_POLICY_UNSPECIFIED",
       "description": "- DROP_POLICY_DROP_OLDEST: Drop oldest events, keep newest (good for real-time)\n - DROP_POLICY_DROP_NEWEST: Drop newest events, keep oldest (good for audit)\n - DROP_POLICY_BLOCK: Block publisher until buffer drains (use carefully!)",
       "title": "Drop policy for buffer overflow (JavaNOW-inspired backpressure)"
-    },
-    "DurabilityConfig": {
-      "type": "object",
-      "properties": {
-        "backend": {
-          "$ref": "#/definitions/JournalBackend",
-          "title": "Backend type"
-        },
-        "checkpointInterval": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Checkpoint interval (every N messages, 0 = disabled)"
-        },
-        "checkpointTimeout": {
-          "type": "string",
-          "title": "Checkpoint timeout"
-        },
-        "replayOnActivation": {
-          "type": "boolean",
-          "title": "Enable replay on activation"
-        },
-        "cacheSideEffects": {
-          "type": "boolean",
-          "title": "Cache side effects for replay"
-        },
-        "compression": {
-          "$ref": "#/definitions/v1.CompressionType",
-          "title": "Compression type for checkpoints"
-        },
-        "stateSchemaVersion": {
-          "type": "integer",
-          "format": "int64",
-          "title": "State schema version for checkpoint compatibility checking\nDefault: 1 (initial schema version)\nIncrement when actor state format changes (breaking changes)"
-        },
-        "postgres": {
-          "$ref": "#/definitions/PostgresJournalConfig"
-        },
-        "redis": {
-          "$ref": "#/definitions/RedisJournalConfig"
-        },
-        "sqlite": {
-          "$ref": "#/definitions/SqliteJournalConfig"
-        }
-      },
-      "title": "/ Durability configuration (used by DurabilityFacet)\n/\n/ ## Purpose\n/ Configures the DurabilityFacet for optional actor durability.\n/\n/ ## Why This Exists\n/ - User requirement: \"journaling can be its own crate\" (100% optional)\n/ - Facet-based design: Durability attached dynamically, not in core\n/ - Flexibility: Different actors can have different durability configs\n/ - Testing: Disable durability for fast tests, enable for integration tests\n/\n/ ## Design Notes\n/ - checkpoint_interval = 0 disables checkpointing (pure journal replay)\n/ - cache_side_effects = false disables caching (every replay re-executes)\n/ - replay_on_activation = false skips replay (fresh start)\n/ - backend_config is oneof for type safety (cannot mix configs)\n/\n/ ## Usage\n/ ```rust\n/ let config = DurabilityConfig {\n/     backend: JournalBackend::Postgres,\n/     checkpoint_interval: 100,  // Checkpoint every 100 messages\n/     replay_on_activation: true,  // Replay journal on actor restart\n/     cache_side_effects: true,  // Cache external calls during replay\n/     compression: CompressionType::Zstd,\n/     backend_config: Some(postgres_config),\n/ };\n/ actor.attach_facet(DurabilityFacet::new(config));\n/ ```"
     },
     "DynamoDbBackendConfig": {
       "type": "object",
@@ -9868,6 +10228,14 @@
         "error": {
           "type": "string",
           "title": "Error if application not found"
+        },
+        "nodeId": {
+          "type": "string",
+          "description": "Node ID that served this status response."
+        },
+        "nodeAddress": {
+          "type": "string",
+          "description": "Node address that served this status response."
         }
       },
       "title": "Get application status response"
@@ -10063,59 +10431,6 @@
       },
       "title": "Get nodes response"
     },
-    "GetOrActivateActorRequest": {
-      "type": "object",
-      "properties": {
-        "actorId": {
-          "type": "string",
-          "title": "Actor ID (client-specified, required)\nFormat: \"{actor_type}/{key}\" or \"{actor_type}@{key}\"\nExamples: \"user/123\", \"session/abc-xyz\", \"counter@node1\""
-        },
-        "actorType": {
-          "type": "string",
-          "title": "Actor type (required if actor doesn't exist)\nUsed to create new actor if actor_id doesn't exist"
-        },
-        "initialState": {
-          "type": "string",
-          "format": "byte",
-          "title": "Initial state (used if creating new actor)"
-        },
-        "config": {
-          "$ref": "#/definitions/actor.v1.ActorConfig",
-          "title": "Actor config (used if creating new actor)"
-        },
-        "forceActivation": {
-          "type": "boolean",
-          "title": "Force activation even if already active"
-        }
-      },
-      "description": "Get existing actor or activate virtual actor (Orleans-style)",
-      "title": "Get Or Activate Actor Request",
-      "required": [
-        "actorId"
-      ]
-    },
-    "GetOrActivateActorResponse": {
-      "type": "object",
-      "properties": {
-        "actorRef": {
-          "type": "string",
-          "title": "Actor reference (format: \"actor_id@node_id\")"
-        },
-        "actor": {
-          "$ref": "#/definitions/Actor",
-          "title": "Full actor details"
-        },
-        "wasActivated": {
-          "type": "boolean",
-          "title": "Was actor activated (true) or already active (false)"
-        }
-      },
-      "description": "Response with actor reference",
-      "title": "Get Or Activate Actor Response",
-      "required": [
-        "actorRef"
-      ]
-    },
     "GetReleaseSpecResponse": {
       "type": "object",
       "properties": {
@@ -10149,6 +10464,22 @@
         }
       },
       "title": "Response for get scheduling status"
+    },
+    "GetShardGroupRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        }
+      }
+    },
+    "GetShardGroupResponse": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "$ref": "#/definitions/ShardGroup"
+        }
+      }
     },
     "GetShutdownStatusResponse": {
       "type": "object",
@@ -10429,15 +10760,12 @@
           "format": "int64",
           "title": "Delta to add"
         },
-        "context": {
-          "$ref": "#/definitions/RequestContext",
-          "title": "Request context (contains tenant_id, namespace, user_id)"
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request."
         }
       },
-      "title": "Increment request",
-      "required": [
-        "context"
-      ]
+      "title": "Increment request"
     },
     "IncrementResponse": {
       "type": "object",
@@ -10548,6 +10876,18 @@
         "subpath": {
           "type": "string",
           "description": "Subpath after the actor_type segment (optional)\nExample: for \"/api/v1/actors/default/counter/metrics/latest\"\n         subpath = \"metrics/latest\"\nThis will be used in future for advanced per-actor routing capabilities."
+        },
+        "ask": {
+          "type": "boolean",
+          "description": "When true, use request-reply (ask pattern, message_type \"call\") regardless of HTTP method.\nWhen false or unset: only GET uses ask (request-reply); POST/PUT/DELETE use tell (fire-and-forget, message_type \"cast\").\nHTTP gateway sets this when query param invocation=call (e.g. POST ...?invocation=call). \"msg_type\" in query is handler name (payload).\nConsistent with actor message_type: \"call\" = ask, \"cast\" = tell."
+        },
+        "msgTypeOverride": {
+          "type": "string",
+          "description": "Optional message type override from HTTP query param \"invocation\" (not \"msg_type\"; msg_type is handler name in payload).\nWhen set: \"call\" = request-reply (ask), \"cast\" = fire-and-forget (tell). Empty/unset = use method default (GET=call, POST/PUT/DELETE=cast).\nAllowed values (Erlang-style): call, cast, info only. Others not supported at this time."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Optional timeout for request-reply (ask) operations.\nDefaults to 5 seconds if not specified. Use for long-running operations like training.\nHTTP gateway extracts from ?timeout=30 query parameter (in seconds)."
         }
       },
       "description": "Request to invoke an actor via HTTP-like interface",
@@ -10584,36 +10924,6 @@
       "description": "Response from actor invocation",
       "title": "Invoke Actor Response"
     },
-    "IsolationContext": {
-      "type": "object",
-      "properties": {
-        "tenantId": {
-          "$ref": "#/definitions/TenantId",
-          "title": "Tenant identifier (REQUIRED)"
-        },
-        "namespace": {
-          "type": "string",
-          "title": "Namespace within tenant (OPTIONAL)\nCommon values: \"production\", \"staging\", \"dev\", \"test\"\nFormat: lowercase alphanumeric + hyphens, max 32 chars"
-        },
-        "securityPolicy": {
-          "$ref": "#/definitions/SecurityPolicy",
-          "title": "Security policy for this isolation context"
-        },
-        "resourceQuota": {
-          "$ref": "#/definitions/ResourceQuota",
-          "title": "Resource quota for this isolation context"
-        },
-        "metadata": {
-          "$ref": "#/definitions/Metadata",
-          "title": "Additional metadata (labels, annotations)"
-        }
-      },
-      "description": "Complete isolation metadata for multi-tenant actor execution",
-      "title": "Isolation Context",
-      "required": [
-        "tenantId"
-      ]
-    },
     "IsolationLevel": {
       "type": "string",
       "enum": [
@@ -10629,10 +10939,6 @@
     "JoinGroupBody": {
       "type": "object",
       "properties": {
-        "tenantId": {
-          "type": "string",
-          "title": "Tenant ID"
-        },
         "actorId": {
           "type": "string",
           "title": "Actor ID to add to group"
@@ -10651,22 +10957,8 @@
         }
       },
       "required": [
-        "tenantId",
         "actorId"
       ]
-    },
-    "JournalBackend": {
-      "type": "string",
-      "enum": [
-        "JOURNAL_BACKEND_UNSPECIFIED",
-        "JOURNAL_BACKEND_MEMORY",
-        "JOURNAL_BACKEND_POSTGRES",
-        "JOURNAL_BACKEND_REDIS",
-        "JOURNAL_BACKEND_SQLITE"
-      ],
-      "default": "JOURNAL_BACKEND_UNSPECIFIED",
-      "description": "- JOURNAL_BACKEND_MEMORY: In-memory (testing)\n - JOURNAL_BACKEND_POSTGRES: PostgreSQL (production)\n - JOURNAL_BACKEND_REDIS: Redis (distributed)\n - JOURNAL_BACKEND_SQLITE: SQLite (edge)",
-      "title": "/ Journal backend provider\n/\n/ ## Purpose\n/ Defines which storage backend to use for journal persistence.\n/\n/ ## Why This Exists\n/ - Flexibility: Choose backend based on deployment environment\n/ - Testing: Use Memory backend for unit tests (no external dependencies)\n/ - Production: Use PostgreSQL for durability and ACID guarantees\n/ - Distributed: Use Redis for multi-node journaling\n/ - Edge: Use SQLite for single-node edge deployments\n/\n/ ## Design Notes\n/ - Memory: In-process HashMap, no persistence (testing only)\n/ - PostgreSQL: ACID transactions, auto-migration via sqlx::migrate!\n/ - Redis: Distributed, eventually consistent, TTL support\n/ - SQLite: Embedded, WAL mode, single-node"
     },
     "JwtConfig": {
       "type": "object",
@@ -10713,79 +11005,6 @@
       },
       "description": "Configuration for JWT authentication",
       "title": "JWT Configuration"
-    },
-    "KafkaBackendConfig": {
-      "type": "object",
-      "properties": {
-        "brokers": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "title": "Kafka broker addresses"
-        },
-        "topic": {
-          "type": "string",
-          "title": "Topic name"
-        },
-        "consumerGroup": {
-          "type": "string",
-          "title": "Consumer group ID"
-        },
-        "partitions": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Number of partitions (for topic creation)"
-        },
-        "replicationFactor": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Replication factor"
-        },
-        "compression": {
-          "$ref": "#/definitions/KafkaBackendConfig.CompressionType"
-        },
-        "acks": {
-          "$ref": "#/definitions/KafkaBackendConfig.ProducerAcks"
-        },
-        "batchSize": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Batch size for producers"
-        },
-        "lingerMs": {
-          "type": "string",
-          "title": "Linger time for batching"
-        }
-      },
-      "title": "Kafka backend configuration (for channel)",
-      "required": [
-        "brokers",
-        "topic",
-        "consumerGroup"
-      ]
-    },
-    "KafkaBackendConfig.CompressionType": {
-      "type": "string",
-      "enum": [
-        "COMPRESSION_TYPE_NONE",
-        "COMPRESSION_TYPE_GZIP",
-        "COMPRESSION_TYPE_SNAPPY",
-        "COMPRESSION_TYPE_LZ4",
-        "COMPRESSION_TYPE_ZSTD"
-      ],
-      "default": "COMPRESSION_TYPE_NONE",
-      "title": "Compression type"
-    },
-    "KafkaBackendConfig.ProducerAcks": {
-      "type": "string",
-      "enum": [
-        "PRODUCER_ACKS_NONE",
-        "PRODUCER_ACKS_LEADER",
-        "PRODUCER_ACKS_ALL"
-      ],
-      "default": "PRODUCER_ACKS_NONE",
-      "title": "Producer acks"
     },
     "KeyValueEntry": {
       "type": "object",
@@ -11027,6 +11246,27 @@
         }
       }
     },
+    "ListGroupsResponse": {
+      "type": "object",
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/ProcessGroup"
+          },
+          "title": "Groups matching filter"
+        },
+        "nextPageToken": {
+          "type": "string",
+          "title": "Pagination"
+        },
+        "totalCount": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
     "ListMetricDefinitionsResponse": {
       "type": "object",
       "properties": {
@@ -11127,6 +11367,35 @@
         }
       },
       "title": "List response"
+    },
+    "ListShardGroupsRequest": {
+      "type": "object",
+      "properties": {
+        "actorType": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/ShardGroupState"
+        },
+        "page": {
+          "$ref": "#/definitions/PageRequest"
+        }
+      }
+    },
+    "ListShardGroupsResponse": {
+      "type": "object",
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/ShardGroup"
+          }
+        },
+        "page": {
+          "$ref": "#/definitions/PageResponse"
+        }
+      }
     },
     "ListTimersRequest": {
       "type": "object",
@@ -11236,6 +11505,46 @@
         }
       }
     },
+    "MapShardGroupRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string",
+          "title": "Group to map over"
+        },
+        "mapFunction": {
+          "$ref": "#/definitions/Message",
+          "title": "Map function message (sent to each shard)"
+        },
+        "timeout": {
+          "type": "string",
+          "title": "Timeout for map operation"
+        },
+        "minResponses": {
+          "type": "integer",
+          "format": "int64",
+          "title": "Minimum number of shards that must respond (0 = all required)"
+        }
+      },
+      "title": "Map: apply function to all shards in parallel (DPA Map operator)\nInspired by NSDI'22 Data-Parallel Actors paper"
+    },
+    "MapShardGroupResponse": {
+      "type": "object",
+      "properties": {
+        "shardResults": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/ShardQueryResponse"
+          },
+          "title": "Mapped results from each shard"
+        },
+        "stats": {
+          "$ref": "#/definitions/ScatterGatherStats",
+          "title": "Statistics"
+        }
+      }
+    },
     "MarkStartupCompleteRequest": {
       "type": "object",
       "properties": {
@@ -11302,17 +11611,6 @@
       },
       "title": "Membership update - Piggybacked on protocol messages"
     },
-    "MemoryBackendConfig": {
-      "type": "object",
-      "properties": {
-        "initialCapacity": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Initial capacity (for HashMap pre-allocation)"
-        }
-      },
-      "title": "Memory backend configuration (testing/development only)"
-    },
     "MemoryMetrics": {
       "type": "object",
       "properties": {
@@ -11366,7 +11664,7 @@
         },
         "messageType": {
           "type": "string",
-          "title": "Message type discriminator\nCommon values: \"call\", \"cast\", \"info\", \"signal\", \"event\", \"command\", \"query\"\nExample: \"call\" for request/reply, \"cast\" for fire-and-forget"
+          "description": "Message type discriminator\nCommon values: \"call\", \"cast\", \"info\", \"signal\", \"event\", \"command\", \"query\"\nExample: \"call\" for request/reply, \"cast\" for fire-and-forget\nEmpty = unset. Validated to allowed values only."
         },
         "payload": {
           "type": "string",
@@ -11630,15 +11928,14 @@
           },
           "title": "Keys to get"
         },
-        "context": {
-          "$ref": "#/definitions/RequestContext",
-          "title": "Request context (contains tenant_id, namespace, user_id)"
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request."
         }
       },
       "title": "MultiGet request",
       "required": [
-        "keys",
-        "context"
+        "keys"
       ]
     },
     "MultiGetResponse": {
@@ -11666,15 +11963,14 @@
           },
           "title": "Key-value pairs to put"
         },
-        "context": {
-          "$ref": "#/definitions/RequestContext",
-          "title": "Request context (contains tenant_id, namespace, user_id)"
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request."
         }
       },
       "title": "MultiPut request",
       "required": [
-        "pairs",
-        "context"
+        "pairs"
       ]
     },
     "MultiPutResponse": {
@@ -11686,64 +11982,6 @@
         }
       },
       "title": "MultiPut response"
-    },
-    "NatsBackendConfig": {
-      "type": "object",
-      "properties": {
-        "servers": {
-          "type": "string",
-          "title": "NATS server URLs (comma-separated for clustering)"
-        },
-        "subject": {
-          "type": "string",
-          "title": "Subject/topic name"
-        },
-        "queueGroup": {
-          "type": "string",
-          "title": "Queue group for load-balanced consumption"
-        },
-        "jetstreamEnabled": {
-          "type": "boolean",
-          "title": "Enable JetStream for persistence"
-        },
-        "jetstreamStream": {
-          "type": "string",
-          "title": "JetStream stream name"
-        },
-        "jetstreamConsumer": {
-          "type": "string",
-          "title": "JetStream consumer name"
-        },
-        "connectTimeout": {
-          "type": "string",
-          "title": "Connection timeout"
-        },
-        "reconnectAttempts": {
-          "type": "integer",
-          "format": "int32",
-          "title": "Reconnect attempts (-1 for unlimited)"
-        },
-        "tlsEnabled": {
-          "type": "boolean",
-          "title": "Enable TLS"
-        },
-        "tlsCertPath": {
-          "type": "string",
-          "title": "TLS certificate path"
-        },
-        "tlsKeyPath": {
-          "type": "string",
-          "title": "TLS key path"
-        },
-        "tlsCaPath": {
-          "type": "string",
-          "title": "TLS CA certificate path"
-        }
-      },
-      "title": "NATS backend configuration (for channel)",
-      "required": [
-        "servers"
-      ]
     },
     "NetworkInterface": {
       "type": "object",
@@ -11989,16 +12227,6 @@
           },
           "title": "Cluster seed nodes for discovery\ne.g., [\"node1.cluster.local:8000\", \"node2.cluster.local:8000\"]"
         },
-        "defaultTenantId": {
-          "type": "string",
-          "description": "Default tenant ID for this node. Used when auth is disabled or when creating actors from embedded applications.\nCan be empty string. If not set and auth is disabled, will be empty.\nIf auth is enabled and tenant_id is not provided, will error.",
-          "title": "Default tenant ID for this node"
-        },
-        "defaultNamespace": {
-          "type": "string",
-          "description": "Default namespace for this node. Used when namespace is not specified in requests.\nCan be empty string. If not set, will be empty (no default value).",
-          "title": "Default namespace for this node"
-        },
         "clusterName": {
           "type": "string",
           "description": "Nodes with the same cluster_name can communicate via UDP multicast\nor ZeroMQ channels. Used for service discovery and channel configuration.\nIf empty, node is not part of any cluster.",
@@ -12106,6 +12334,31 @@
           "format": "int64",
           "title": "Connected nodes in cluster"
         },
+        "shardGroupsCreated": {
+          "type": "integer",
+          "format": "int64",
+          "title": "Shard group metrics (data-parallel actors)\nTotal shard groups created on this node"
+        },
+        "shardMessagesSent": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Total shard messages sent (to shard actors)"
+        },
+        "shardMessagesReceived": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Total shard messages received (from shard actors)"
+        },
+        "shardOperationsTotal": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Total shard operations (map, scatter_gather, bulk_update)"
+        },
+        "shardOperationsFailed": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Failed shard operations"
+        },
         "nodeId": {
           "type": "string",
           "title": "Node identity (for components that need node info without depending on Node type)\nNode ID for this metrics instance"
@@ -12117,6 +12370,62 @@
       },
       "description": "## Purpose\nComprehensive metrics for a PlexSpaces node, including both resource usage\n(CPU, memory) and operational metrics (messages, actors, connections).\n\n## Design\nProto-first design: All node metrics are defined in proto for:\n- Wire compatibility (gRPC metrics APIs)\n- Language-agnostic observability\n- Consistent metrics semantics across implementations\n\n## Metrics Categories\n- Resource metrics: CPU, memory, uptime\n- Operational metrics: Messages routed, actors, connections\n- All combined in one message for efficient querying",
       "title": "Node metrics (combined resource usage and operational metrics)"
+    },
+    "NodePlacement": {
+      "type": "object",
+      "properties": {
+        "strategy": {
+          "$ref": "#/definitions/NodePlacementStrategy"
+        },
+        "cluster": {
+          "type": "string",
+          "title": "For FROM_REGISTRY: optional cluster name filter (empty = all connected nodes)"
+        },
+        "nodeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "For NODE_IDS: explicit node IDs to place shards on (round-robin)"
+        },
+        "requiredLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Node must match all labels (Kubernetes-inspired). Used by scheduler for node selection."
+        },
+        "avoidNodeIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Avoid node IDs (anti-affinity; scheduler excludes these)"
+        },
+        "resourceRequirements": {
+          "$ref": "#/definitions/ResourceSpec",
+          "description": "CPU, memory, disk, GPU requirements. Scheduler filters by NodeCapacity.available."
+        },
+        "affinityLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Affinity labels (co-location hint; scheduler may prefer nodes with matching labels)"
+        }
+      },
+      "description": "Unified node placement: strategy, affinity, and resource requirements.\nReplaces PlacementHint, PlacementPreferences, and label/placement fields on ActorResourceRequirements.\nScheduler (crates/scheduler) matches nodes using required_labels and resource_requirements."
+    },
+    "NodePlacementStrategy": {
+      "type": "string",
+      "enum": [
+        "NODE_PLACEMENT_STRATEGY_UNSPECIFIED",
+        "NODE_PLACEMENT_STRATEGY_SAME_NODE",
+        "NODE_PLACEMENT_STRATEGY_FROM_REGISTRY",
+        "NODE_PLACEMENT_STRATEGY_NODE_IDS"
+      ],
+      "default": "NODE_PLACEMENT_STRATEGY_UNSPECIFIED",
+      "description": "Node placement strategy for ShardGroup creation (leader-worker multi-node).\nWhen absent or SAME_NODE, all shards are created on the node that receives the RPC.\nFROM_REGISTRY uses NodeRegistry.list_nodes (optional cluster filter); NODE_IDS uses explicit list.\n\n - NODE_PLACEMENT_STRATEGY_UNSPECIFIED: Same as SAME_NODE: all shards on local node\n - NODE_PLACEMENT_STRATEGY_FROM_REGISTRY: Round-robin shards across nodes from NodeRegistry\n - NODE_PLACEMENT_STRATEGY_NODE_IDS: Round-robin shards across given node_ids"
     },
     "NodeReadinessStatus": {
       "type": "object",
@@ -12258,6 +12567,14 @@
           "title": "Anti-entropy sync interval in seconds",
           "maximum": 600,
           "minimum": 5
+        },
+        "activeNodeWindowSeconds": {
+          "type": "integer",
+          "format": "int64",
+          "default": "86400",
+          "description": "Maximum age for active node registrations in seconds",
+          "maximum": 604800,
+          "minimum": 60
         }
       },
       "description": "Configuration for node discovery and SWIM protocol",
@@ -12677,69 +12994,22 @@
             "$ref": "#/definitions/MembershipUpdate"
           },
           "title": "Piggybacked membership updates"
+        },
+        "clusterName": {
+          "type": "string",
+          "title": "Cluster name (for same-cluster check on ConnectNodes; empty means no cluster)"
+        },
+        "nodeAddress": {
+          "type": "string",
+          "title": "Responding node's gRPC address"
+        },
+        "lastHeartbeat": {
+          "type": "string",
+          "format": "date-time",
+          "title": "Last heartbeat observed by the responding node for itself"
         }
       },
       "title": "Ping response"
-    },
-    "PlacementHint": {
-      "type": "object",
-      "properties": {
-        "strategy": {
-          "$ref": "#/definitions/PlacementStrategy"
-        },
-        "preferredNodeId": {
-          "type": "string"
-        },
-        "affinityLabels": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "requirements": {
-          "$ref": "#/definitions/ResourceRequirements"
-        }
-      },
-      "title": "Placement hint for actor activation"
-    },
-    "PlacementPreferences": {
-      "type": "object",
-      "properties": {
-        "strategy": {
-          "$ref": "#/definitions/PlacementStrategy",
-          "title": "Placement strategy"
-        },
-        "preferredNodeIds": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "title": "Preferred node IDs (hint, not requirement)"
-        },
-        "avoidNodeIds": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "title": "Avoid node IDs (anti-affinity)"
-        }
-      },
-      "title": "Placement preferences for resource-aware scheduling"
-    },
-    "PlacementStrategy": {
-      "type": "string",
-      "enum": [
-        "PLACEMENT_STRATEGY_UNSPECIFIED",
-        "PLACEMENT_STRATEGY_RANDOM",
-        "PLACEMENT_STRATEGY_PREFER_LOCAL",
-        "PLACEMENT_STRATEGY_LOAD_BASED",
-        "PLACEMENT_STRATEGY_RESOURCE_BASED",
-        "PLACEMENT_STRATEGY_AFFINITY",
-        "PLACEMENT_STRATEGY_CUSTOM"
-      ],
-      "default": "PLACEMENT_STRATEGY_UNSPECIFIED",
-      "description": "- PLACEMENT_STRATEGY_RANDOM: Random node selection\n - PLACEMENT_STRATEGY_PREFER_LOCAL: Co-locate with caller\n - PLACEMENT_STRATEGY_LOAD_BASED: Balance by load\n - PLACEMENT_STRATEGY_RESOURCE_BASED: Based on resource availability\n - PLACEMENT_STRATEGY_AFFINITY: Affinity groups\n - PLACEMENT_STRATEGY_CUSTOM: User-defined",
-      "title": "Placement strategy for actor activation (Orleans-inspired)"
     },
     "PoolConfig": {
       "type": "object",
@@ -12914,33 +13184,6 @@
       },
       "title": "Pool metrics (for monitoring and auto-scaling decisions)"
     },
-    "PostgresJournalConfig": {
-      "type": "object",
-      "properties": {
-        "connectionString": {
-          "type": "string"
-        },
-        "poolSize": {
-          "type": "integer",
-          "format": "int64"
-        },
-        "batchSize": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Default: 1000"
-        },
-        "flushIntervalMs": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Default: 1000"
-        },
-        "autoMigrate": {
-          "type": "boolean",
-          "title": "Default: true"
-        }
-      },
-      "title": "/ PostgreSQL journal configuration\n/\n/ ## Purpose\n/ Configures PostgreSQL backend for durable journaling.\n/\n/ ## Why This Exists\n/ User requirements:\n/ - \"we need to make sure db schema doesn't require much changes\"\n/ - \"framework is smart enough to apply migrations\"\n/\n/ ## Design Notes\n/ - auto_migrate: Use sqlx::migrate! for compile-time checked migrations\n/ - batch_size: Buffer N entries before COPY bulk insert (performance)\n/ - flush_interval_ms: Max time to buffer before flush (latency vs throughput)\n/ - pool_size: Connection pool for concurrent actors\n/\n/ ## Schema Stability Strategy\n/ - JSONB columns for extensible data (add fields without ALTER TABLE)\n/ - Immutable entries (append-only, never UPDATE)\n/ - Migrations only for new tables/indexes, not field additions\n/\n/ ## Performance\n/ - Batch writes: 1000 entries/batch or 1s flush = 100K+ writes/sec\n/ - Connection pooling: Reuse connections across actors\n/ - COPY protocol: 10x faster than INSERT for bulk data"
-    },
     "PreWarmStrategy": {
       "type": "string",
       "enum": [
@@ -12965,8 +13208,7 @@
         "tenantId": {
           "type": "string",
           "example": "customer-acme",
-          "description": "Tenant identifier",
-          "title": "Tenant ID for multi-tenancy isolation"
+          "description": "Tenant identifier (from auth when created)"
         },
         "namespace": {
           "type": "string",
@@ -13004,17 +13246,12 @@
       "description": "Named group of actors for pub/sub coordination",
       "title": "ProcessGroup",
       "required": [
-        "groupName",
-        "tenantId"
+        "groupName"
       ]
     },
     "PublishToGroupBody": {
       "type": "object",
       "properties": {
-        "tenantId": {
-          "type": "string",
-          "title": "Tenant ID (for security - prevent cross-tenant publishing)"
-        },
         "topic": {
           "type": "string",
           "example": "config.database",
@@ -13028,7 +13265,6 @@
         }
       },
       "required": [
-        "tenantId",
         "message"
       ]
     },
@@ -13064,15 +13300,14 @@
           "format": "byte",
           "title": "Value to store"
         },
-        "context": {
-          "$ref": "#/definitions/RequestContext",
-          "title": "Request context (contains tenant_id, namespace, user_id)"
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request."
         }
       },
       "title": "Put request",
       "required": [
-        "value",
-        "context"
+        "value"
       ]
     },
     "PutResponse": {
@@ -13097,16 +13332,15 @@
           "type": "string",
           "title": "Time-to-live"
         },
-        "context": {
-          "$ref": "#/definitions/RequestContext",
-          "title": "Request context (contains tenant_id, namespace, user_id)"
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request."
         }
       },
       "title": "PutWithTtl request",
       "required": [
         "value",
-        "ttl",
-        "context"
+        "ttl"
       ]
     },
     "PutWithTtlResponse": {
@@ -13258,6 +13492,41 @@
       "description": "- REBALANCE_POLICY_NONE: No automatic rebalancing\n - REBALANCE_POLICY_ON_SCALE: Rebalance when shards added/removed\n - REBALANCE_POLICY_LOAD_BASED: Rebalance based on load metrics",
       "title": "Rebalancing policy for data-parallel actors"
     },
+    "RebalanceStatus": {
+      "type": "object",
+      "properties": {
+        "isRebalancing": {
+          "type": "boolean",
+          "title": "Is currently rebalancing"
+        },
+        "oldShardCount": {
+          "type": "integer",
+          "format": "int64",
+          "title": "Old shard count (before rebalancing)"
+        },
+        "newShardCount": {
+          "type": "integer",
+          "format": "int64",
+          "title": "New shard count (after rebalancing)"
+        },
+        "progressPercent": {
+          "type": "number",
+          "format": "double",
+          "title": "Progress (0.0 to 100.0)"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "When rebalancing started"
+        },
+        "estimatedCompletion": {
+          "type": "string",
+          "format": "date-time",
+          "title": "Estimated completion time"
+        }
+      },
+      "title": "Rebalancing status for shard groups"
+    },
     "RecordMetricRequest": {
       "type": "object",
       "properties": {
@@ -13302,27 +13571,47 @@
         "url"
       ]
     },
-    "RedisJournalConfig": {
+    "ReduceShardGroupRequest": {
       "type": "object",
       "properties": {
-        "nodes": {
+        "groupId": {
+          "type": "string"
+        },
+        "mapFunction": {
+          "$ref": "#/definitions/Message"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "minResponses": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "reduction": {
+          "$ref": "#/definitions/CollectiveReduction"
+        },
+        "target": {
+          "$ref": "#/definitions/CollectiveTargetField"
+        }
+      }
+    },
+    "ReduceShardGroupResponse": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "$ref": "#/definitions/Message"
+        },
+        "shardResponses": {
           "type": "array",
           "items": {
-            "type": "string"
-          },
-          "title": "Redis nodes"
+            "type": "object",
+            "$ref": "#/definitions/ShardQueryResponse"
+          }
         },
-        "clusterMode": {
-          "type": "boolean"
-        },
-        "keyPrefix": {
-          "type": "string"
-        },
-        "ttl": {
-          "type": "string"
+        "stats": {
+          "$ref": "#/definitions/ScatterGatherStats"
         }
-      },
-      "title": "/ Redis journal configuration\n/\n/ ## Purpose\n/ Configures Redis backend for distributed journaling.\n/\n/ ## Why This Exists\n/ - Distributed systems: Multiple nodes share journal state\n/ - Fast reads: Redis in-memory performance\n/ - TTL support: Automatic cleanup of old journal entries\n/ - Cluster mode: Scale across multiple Redis nodes\n/\n/ ## Design Notes\n/ - cluster_mode: Use Redis Cluster for horizontal scaling\n/ - key_prefix: Namespace journal keys (e.g., \"journal:actor:\")\n/ - ttl: Auto-expire old entries after duration\n/\n/ ## Trade-offs\n/ - ✅ Fast: In-memory, low latency\n/ - ✅ Distributed: Multi-node shared state\n/ - ❌ Not ACID: Eventually consistent\n/ - ❌ Data loss risk: In-memory (use persistence if needed)"
+      }
     },
     "RefreshTtlBody": {
       "type": "object",
@@ -13331,15 +13620,14 @@
           "type": "string",
           "title": "New TTL"
         },
-        "context": {
-          "$ref": "#/definitions/RequestContext",
-          "title": "Request context (contains tenant_id, namespace, user_id)"
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for tenant isolation (optional; empty string = default).\nTenant-id comes from auth (JWT/mTLS), not from this request."
         }
       },
       "title": "RefreshTtl request",
       "required": [
-        "ttl",
-        "context"
+        "ttl"
       ]
     },
     "RefreshTtlResponse": {
@@ -13509,9 +13797,9 @@
           "type": "array",
           "items": {
             "type": "object",
-            "$ref": "#/definitions/node.v1.ApplicationConfig"
+            "$ref": "#/definitions/ApplicationSpec"
           },
-          "title": "User applications (business logic)"
+          "title": "User applications (business logic)\nNOTE: ApplicationConfig has been merged into ApplicationSpec"
         },
         "env": {
           "type": "object",
@@ -13616,146 +13904,6 @@
           "format": "date-time"
         }
       }
-    },
-    "RequestContext": {
-      "type": "object",
-      "properties": {
-        "tenantId": {
-          "type": "string",
-          "description": "All operations are scoped to this tenant.\nMust be validated at service boundaries.",
-          "title": "Tenant ID (REQUIRED for all operations)"
-        },
-        "namespace": {
-          "type": "string",
-          "description": "Namespace within tenant (optional, can be empty). Common values: \"production\", \"staging\", \"dev\", \"test\". For admin/internal contexts with empty namespace, repository lookups bypass namespace filtering to allow cross-namespace queries.",
-          "title": "Namespace within tenant (optional, can be empty)"
-        },
-        "userId": {
-          "type": "string",
-          "description": "Extracted from JWT claims for audit logging and authorization.",
-          "title": "User ID (from JWT, optional)"
-        },
-        "requestId": {
-          "type": "string",
-          "description": "Unique identifier for this request (ULID).\nUsed for request tracing and correlation.",
-          "title": "Request ID (for tracing)"
-        },
-        "correlationId": {
-          "type": "string",
-          "description": "Links related requests across services.\nPropagated through gRPC metadata.",
-          "title": "Correlation ID (for distributed tracing)"
-        },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "title": "Request timestamp"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Additional context for request processing.\nExamples: \"source_ip\", \"user_agent\", \"api_version\"",
-          "title": "Metadata (extensible key-value pairs)"
-        },
-        "admin": {
-          "type": "boolean",
-          "description": "When true, indicates the user has admin privileges.\nAdmin users can bypass tenant filtering for administrative operations.\nExtracted from JWT claims (e.g., \"admin\" role or \"is_admin\" claim).",
-          "title": "Admin flag (from JWT, optional)"
-        },
-        "internal": {
-          "type": "boolean",
-          "description": "When true, indicates this is an internal system operation.\nInternal operations bypass authn/authz and tenant filtering.\nUsed for system-level operations like heartbeats, node registration, etc.",
-          "title": "Internal flag (for system operations)"
-        },
-        "authEnabled": {
-          "type": "boolean",
-          "description": "When true, indicates authentication is enabled.\nIf auth is enabled and tenant_id is empty, RequestContext creation will fail.\nIf auth is disabled, tenant_id can be empty.",
-          "title": "Auth enabled flag (from SecurityConfig)"
-        }
-      },
-      "description": "Request-scoped context for tenant isolation and tracing",
-      "title": "Request Context",
-      "required": [
-        "tenantId"
-      ]
-    },
-    "ResourceQuota": {
-      "type": "object",
-      "properties": {
-        "maxActors": {
-          "type": "integer",
-          "format": "int64",
-          "description": "Max 1 million actors",
-          "title": "Maximum number of actors this tenant can create\n0 = unlimited (use with caution!)"
-        },
-        "maxMemoryMb": {
-          "type": "string",
-          "format": "uint64",
-          "description": "Max 1TB",
-          "title": "Maximum memory this tenant can consume (MB)\nEnforced at actor creation and runtime monitoring"
-        },
-        "maxCpuPercent": {
-          "type": "number",
-          "format": "double",
-          "title": "Maximum CPU percentage this tenant can consume (0-100)\nExample: 50.0 = tenant limited to 50% of node CPU"
-        },
-        "maxDiskMb": {
-          "type": "string",
-          "format": "uint64",
-          "description": "Max 10TB",
-          "title": "Maximum disk space for journals/snapshots (MB)"
-        },
-        "rateLimitMsgPerSec": {
-          "type": "string",
-          "format": "uint64",
-          "description": "Max 1M msgs/sec",
-          "title": "Maximum message throughput (messages per second)\nEnforced via rate limiting at message send"
-        },
-        "maxConcurrentOperations": {
-          "type": "integer",
-          "format": "int64",
-          "description": "Max 100K concurrent",
-          "title": "Maximum concurrent operations\nLimits concurrent handler executions across all actors"
-        },
-        "customQuotas": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Custom quota limits as key-value pairs\nExample: {\"max_tuplespace_entries\": \"10000\"}"
-        }
-      },
-      "description": "Per-tenant resource limits to prevent exhaustion",
-      "title": "Resource Quota"
-    },
-    "ResourceRequirements": {
-      "type": "object",
-      "properties": {
-        "minMemoryMb": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Max 1TB"
-        },
-        "minCpuCores": {
-          "type": "number",
-          "format": "double",
-          "title": "0.1 to 128 cores"
-        },
-        "requiredCapabilities": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "customRequirements": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        }
-      },
-      "title": "Resource requirements for placement"
     },
     "ResourceSpec": {
       "type": "object",
@@ -13863,26 +14011,23 @@
         "maxAttempts": {
           "type": "integer",
           "format": "int64",
-          "description": "1 to 1000 retries",
-          "title": "Maximum retry attempts"
+          "description": "0 or 1–1000",
+          "title": "Maximum retry attempts (1 = single attempt, no retries; unset/0 treated as 1 at runtime)"
         },
         "initialIntervalMs": {
           "type": "integer",
           "format": "int64",
-          "description": "1ms to 5 minutes",
-          "title": "Initial retry interval (milliseconds)"
+          "description": "Initial retry interval (milliseconds). Default 100 when unset.\n\n0 or 1–300000"
         },
         "backoffRate": {
           "type": "number",
           "format": "double",
-          "description": "1x to 10x",
-          "title": "Exponential backoff rate (e.g., 2.0 for doubling)"
+          "description": "Exponential backoff rate (e.g., 2.0 for doubling). Default 2.0 when unset."
         },
         "maxIntervalMs": {
           "type": "integer",
           "format": "int64",
-          "description": "1ms to 1 hour",
-          "title": "Maximum retry interval (milliseconds)"
+          "description": "Maximum retry interval (milliseconds). Default 30000 when unset.\n\n0 or 1–3600000"
         },
         "retryableErrors": {
           "type": "array",
@@ -13892,7 +14037,7 @@
           "title": "Error types to retry (empty = retry all)"
         }
       },
-      "description": "Exponential backoff retry policy",
+      "description": "Exponential backoff retry policy. Unset max_attempts means 1 (no retries).",
       "title": "Retry Configuration"
     },
     "RetryPolicy": {
@@ -13940,39 +14085,49 @@
           "$ref": "#/definitions/BlobConfig",
           "title": "Blob storage configuration (S3-compatible object storage)"
         },
-        "sharedDatabase": {
-          "$ref": "#/definitions/SharedRelationalDbConfig",
-          "description": "Used by components that always use relational database:\n- scheduler (crates/scheduler/migrations)\n- workflow (crates/workflow/migrations)\n- journaling (crates/journaling/migrations)\n- blob (crates/blob/migrations)\n- keyvalue (crates/keyvalue/migrations) - now always SQL\n\nConvention: All these components share the same database by default.\nCan be overridden per-component if needed.",
-          "title": "Shared relational database configuration"
+        "db": {
+          "$ref": "#/definitions/SharedDbConfig",
+          "description": "Used by all components that use relational database:\n- scheduler (crates/scheduler/migrations)\n- workflow (crates/workflow/migrations)\n- journaling (crates/journaling/migrations)\n- blob (crates/blob/migrations)\n- keyvalue (crates/keyvalue/migrations)\n- locks (crates/locks/migrations)\n- channel (crates/channel/migrations)\n- tuplespace (crates/tuplespace/migrations)\n\nConvention: All these components share the same database by default.",
+          "title": "Shared database configuration"
         },
         "locksProvider": {
           "$ref": "#/definitions/StorageProviderConfig",
-          "description": "Supports: postgres, sqlite, redis, dynamodb\nDefault: redis (if available), else postgres",
+          "description": "Supports: postgres, sqlite, redis, dynamodb\nDefault (set by config_manager): redis (if available), else use shared db",
           "title": "Locks storage provider configuration"
         },
         "channelProvider": {
-          "$ref": "#/definitions/StorageProviderConfig",
-          "description": "Supports: redis, kafka, nats, sqlite, memory\nDefault: redis (if available), else memory",
-          "title": "Channel storage provider configuration"
-        },
-        "tuplespaceProvider": {
-          "$ref": "#/definitions/StorageProviderConfig",
-          "description": "Supports: postgres, sqlite, redis, dynamodb\nDefault: postgres (if available), else memory",
-          "title": "TupleSpace storage provider configuration"
+          "$ref": "#/definitions/ChannelProvider",
+          "description": "Supports: IN_MEMORY, REDIS, KAFKA, NATS, SQLITE, SQS, POSTGRES, PROCESS_GROUP\nDefault (set by config_manager): IN_MEMORY",
+          "title": "Channel provider type"
         },
         "mailboxProvider": {
-          "$ref": "#/definitions/StorageProviderConfig",
-          "description": "Supports: memory, redis, sqlite, postgres\nDefault: memory",
-          "title": "Mailbox storage provider configuration"
-        },
-        "journalingProvider": {
-          "$ref": "#/definitions/DurabilityConfig",
-          "description": "Supports: memory, sqlite, postgres, redis\nDefault: sqlite (if available), else memory",
-          "title": "Journaling provider configuration (for actor durability)"
+          "$ref": "#/definitions/ChannelProvider",
+          "description": "Supports: IN_MEMORY, REDIS, SQLITE, POSTGRES\nDefault (set by config_manager): IN_MEMORY",
+          "title": "Mailbox provider type"
         },
         "frameworkInfo": {
           "$ref": "#/definitions/FrameworkInfo",
           "title": "Framework version information (auto-populated at build time)"
+        },
+        "baseDir": {
+          "type": "string",
+          "description": "Default (set by config_manager): $HOME/plexspaces\nUsed for: SQLite databases ({base_dir}/db/), WASM apps, etc.\nEnvironment variable: PLEXSPACES_BASE_DIR",
+          "title": "Base directory for PlexSpaces data"
+        },
+        "wasmAppsDirectory": {
+          "type": "string",
+          "description": "Structure: wasm_apps/\u003capp-name\u003e/app.wasm (required) + app-config.toml (optional)\nEach subdirectory is deployed as a separate application.\nIf empty, no auto-deploy happens (default behavior).\n\nDefault (set by config_manager): {base_dir}/apps\nEnvironment variable: PLEXSPACES_WASM_APPS_DIR",
+          "title": "Directory containing WASM applications to auto-deploy on startup"
+        },
+        "saveWasmApps": {
+          "type": "boolean",
+          "description": "When enabled, WASM modules deployed via API are atomically saved to\nwasm_apps_directory/\u003capp-name\u003e/app.wasm for persistence and auto-deploy\non next node restart. Uses atomic file operations (temp file then move)\nto prevent half-completed files.\n\nSecurity: Only enable for testing/development. Production should use\nproper deployment pipelines and not save arbitrary WASM files to disk.\n\nDefault: false (disabled)\nEnvironment variable: PLEXSPACES_SAVE_WASM_APPS",
+          "title": "Save deployed WASM applications to wasm_apps_directory (default: false)"
+        },
+        "defaultVirtualActorConfig": {
+          "$ref": "#/definitions/DefaultVirtualActorConfig",
+          "description": "When not set, code defaults apply: idle_timeout 5m, max_pool_per_actor_type 100,\nactivation_strategy LAZY. Used when creating VirtualActorFacet or registering\nvirtual actor types (WASM, SDK, gRPC fallback).",
+          "title": "Default virtual actor config (idle_timeout, pool size, activation_strategy)"
         }
       },
       "description": "## Purpose\nDefines runtime services (gRPC, middleware, health monitoring, security, blob storage,\nand unified storage backends).",
@@ -14011,6 +14166,42 @@
         }
       },
       "title": "Scale response"
+    },
+    "ScaleShardGroupRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string",
+          "title": "Group to scale"
+        },
+        "newShardCount": {
+          "type": "integer",
+          "format": "int64",
+          "title": "New shard count"
+        },
+        "rebalancePolicy": {
+          "$ref": "#/definitions/RebalancePolicy",
+          "title": "Rebalancing policy"
+        },
+        "newShardConfig": {
+          "$ref": "#/definitions/actor.v1.ActorConfig",
+          "title": "Configuration for new shards (if scaling up)"
+        }
+      },
+      "title": "Scale shard group (add/remove shards with rebalancing)"
+    },
+    "ScaleShardGroupResponse": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "$ref": "#/definitions/ShardGroup",
+          "title": "Updated shard group"
+        },
+        "rebalanceStatus": {
+          "$ref": "#/definitions/RebalanceStatus",
+          "title": "Rebalancing status"
+        }
+      }
     },
     "ScalingPolicy": {
       "type": "object",
@@ -14052,20 +14243,71 @@
       "description": "- SCALING_STATE_PAUSED: Manual override",
       "title": "Pool scaling state"
     },
+    "ScatterGatherRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        },
+        "query": {
+          "$ref": "#/definitions/Message"
+        },
+        "timeout": {
+          "type": "string"
+        },
+        "aggregation": {
+          "$ref": "#/definitions/ShardGroupAggregationStrategy"
+        },
+        "minResponses": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "ScatterGatherResponse": {
+      "type": "object",
+      "properties": {
+        "result": {
+          "$ref": "#/definitions/Message"
+        },
+        "shardResponses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/ShardQueryResponse"
+          }
+        },
+        "stats": {
+          "$ref": "#/definitions/ScatterGatherStats"
+        }
+      }
+    },
+    "ScatterGatherStats": {
+      "type": "object",
+      "properties": {
+        "shardsQueried": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "shardsResponded": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "shardsFailed": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "maxLatency": {
+          "type": "string"
+        }
+      }
+    },
     "ScheduleActorRequest": {
       "type": "object",
       "properties": {
         "requirements": {
           "$ref": "#/definitions/ActorResourceRequirements",
           "title": "Actor resource requirements (imported from actor_runtime.proto)"
-        },
-        "namespace": {
-          "type": "string",
-          "title": "Namespace (optional)"
-        },
-        "tenantId": {
-          "type": "string",
-          "title": "Tenant ID (optional)"
         },
         "requestId": {
           "type": "string",
@@ -14119,12 +14361,6 @@
           "$ref": "#/definitions/ActorResourceRequirements",
           "title": "Request details (imported from actor_runtime.proto)"
         },
-        "namespace": {
-          "type": "string"
-        },
-        "tenantId": {
-          "type": "string"
-        },
         "status": {
           "$ref": "#/definitions/SchedulingStatus",
           "title": "Status"
@@ -14153,6 +14389,14 @@
         "completedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "tenantId": {
+          "type": "string",
+          "description": "Tenant ID for storage isolation (set from gRPC metadata/auth when request is created)\nNOTE: This is NOT an API input field - tenant comes from auth (JWT/mTLS).\nStored here for tracking, isolation, and state store operations."
+        },
+        "namespace": {
+          "type": "string",
+          "description": "Namespace for storage isolation (set from gRPC metadata when request is created)\nNOTE: This is NOT an API input field - namespace comes from request metadata.\nStored here for tracking, isolation, and state store operations."
         }
       },
       "title": "Scheduling request stored in state store"
@@ -14196,62 +14440,14 @@
           "description": "List of API keys this node can use for authentication.\nKeys are service-scoped (not user-scoped).",
           "title": "API keys for service authentication"
         },
-        "allowDisableAuth": {
-          "type": "boolean",
-          "description": "Security: Only set to true in development/test environments.\nProduction should always have auth enabled.",
-          "title": "Allow disabling auth for local testing (default: false)"
-        },
         "disableAuth": {
           "type": "boolean",
-          "description": "Security: Only for integration tests. Never use in production.",
-          "title": "Disable authentication (only if allow_disable_auth = true)"
+          "description": "Security: Only for integration tests and local development.\nCan be enabled via PLEXSPACES_DISABLE_AUTH env variable or this config.\nNever use in production - always keep auth enabled.",
+          "title": "Disable authentication (default: false)"
         }
       },
       "description": "## Purpose\nDefines authentication and authorization settings for the node.\nEach node can have its own security configuration (secrets/keys).\n\n## Design\n- Service-to-service: mTLS with X.509 certificates\n- Public APIs: JWT authentication\n- Service credentials: API keys\n\n## Security Best Practices\n- Store secrets in environment variables or secret management systems\n- Use file paths for certificates (not inline in config)\n- Rotate certificates regularly\n- Auth enabled by default (can disable for local testing)",
       "title": "Security configuration"
-    },
-    "SecurityPolicy": {
-      "type": "object",
-      "properties": {
-        "allowCrossNamespace": {
-          "type": "boolean",
-          "title": "Can actors in this tenant send messages to actors in different namespaces?\nExample: production=false (strict isolation), staging=true (allow cross-talk)"
-        },
-        "allowTuplespaceRead": {
-          "type": "boolean",
-          "title": "Can actors in this tenant read from TupleSpace?"
-        },
-        "allowTuplespaceWrite": {
-          "type": "boolean",
-          "title": "Can actors in this tenant write to TupleSpace?"
-        },
-        "allowRemoteCalls": {
-          "type": "boolean",
-          "title": "Can actors in this tenant make remote calls to actors on other nodes?"
-        },
-        "maxMessageSizeBytes": {
-          "type": "string",
-          "format": "uint64",
-          "description": "1KB to 100MB",
-          "title": "Maximum message size this tenant can send (bytes)\nPrevents DoS attacks via large messages"
-        },
-        "allowedFacetTypes": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "title": "Allowed facet types this tenant can use\nEmpty = all facets allowed, Non-empty = whitelist only"
-        },
-        "customRules": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Custom security rules as key-value pairs\nExample: {\"allow_wasm\": \"true\", \"encryption_required\": \"true\"}"
-        }
-      },
-      "description": "Per-tenant security rules and permissions",
-      "title": "Security Policy"
     },
     "SendHeartbeatBody": {
       "type": "object",
@@ -14302,7 +14498,7 @@
             },
             "messageType": {
               "type": "string",
-              "title": "Message type discriminator\nCommon values: \"call\", \"cast\", \"info\", \"signal\", \"event\", \"command\", \"query\"\nExample: \"call\" for request/reply, \"cast\" for fire-and-forget"
+              "description": "Message type discriminator\nCommon values: \"call\", \"cast\", \"info\", \"signal\", \"event\", \"command\", \"query\"\nExample: \"call\" for request/reply, \"cast\" for fire-and-forget\nEmpty = unset. Validated to allowed values only."
             },
             "payload": {
               "type": "string",
@@ -14389,6 +14585,42 @@
         "response": {
           "$ref": "#/definitions/Message",
           "title": "Only if wait_for_response = true"
+        }
+      }
+    },
+    "SendToShardRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string"
+        },
+        "partitionKey": {
+          "type": "string",
+          "format": "byte"
+        },
+        "message": {
+          "$ref": "#/definitions/Message"
+        },
+        "waitForResponse": {
+          "type": "boolean"
+        },
+        "timeout": {
+          "type": "string"
+        }
+      }
+    },
+    "SendToShardResponse": {
+      "type": "object",
+      "properties": {
+        "shardId": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "shardActorId": {
+          "type": "string"
+        },
+        "response": {
+          "$ref": "#/definitions/Message"
         }
       }
     },
@@ -14500,7 +14732,117 @@
         }
       }
     },
-    "SharedRelationalDbConfig": {
+    "ShardGroup": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "$ref": "#/definitions/DataParallelConfig",
+          "title": "Strategy for the group (group_id, shard_count, partition_strategy, rebalance_policy, placement)"
+        },
+        "actorType": {
+          "type": "string"
+        },
+        "shardActorIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Indexed by shard index 0 to config.shard_count-1"
+        },
+        "state": {
+          "$ref": "#/definitions/ShardGroupState"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "rebalanceStatus": {
+          "$ref": "#/definitions/RebalanceStatus"
+        }
+      },
+      "description": "Shard group: unified config (DataParallelConfig) plus actor refs and state."
+    },
+    "ShardGroupAggregationStrategy": {
+      "type": "string",
+      "enum": [
+        "SHARD_GROUP_AGGREGATION_UNSPECIFIED",
+        "SHARD_GROUP_AGGREGATION_CONCAT",
+        "SHARD_GROUP_AGGREGATION_MERGE",
+        "SHARD_GROUP_AGGREGATION_FIRST",
+        "SHARD_GROUP_AGGREGATION_MAJORITY"
+      ],
+      "default": "SHARD_GROUP_AGGREGATION_UNSPECIFIED",
+      "title": "Aggregation strategy for scatter-gather results"
+    },
+    "ShardGroupState": {
+      "type": "string",
+      "enum": [
+        "SHARD_GROUP_STATE_UNSPECIFIED",
+        "SHARD_GROUP_STATE_CREATING",
+        "SHARD_GROUP_STATE_ACTIVE",
+        "SHARD_GROUP_STATE_REBALANCING",
+        "SHARD_GROUP_STATE_DRAINING",
+        "SHARD_GROUP_STATE_STOPPING",
+        "SHARD_GROUP_STATE_STOPPED"
+      ],
+      "default": "SHARD_GROUP_STATE_UNSPECIFIED",
+      "title": "- SHARD_GROUP_STATE_CREATING: Shards being created\n - SHARD_GROUP_STATE_ACTIVE: All shards active\n - SHARD_GROUP_STATE_REBALANCING: Shards being rebalanced\n - SHARD_GROUP_STATE_DRAINING: Shards being drained\n - SHARD_GROUP_STATE_STOPPING: Shards being stopped\n - SHARD_GROUP_STATE_STOPPED: All shards stopped"
+    },
+    "ShardQueryResponse": {
+      "type": "object",
+      "properties": {
+        "shardId": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "shardActorId": {
+          "type": "string"
+        },
+        "response": {
+          "$ref": "#/definitions/Message"
+        },
+        "latency": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    },
+    "ShardUpdateStats": {
+      "type": "object",
+      "properties": {
+        "shardId": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "shardActorId": {
+          "type": "string"
+        },
+        "updatesSent": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "updatesSucceeded": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "updatesFailed": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "SharedDbConfig": {
       "type": "object",
       "properties": {
         "connectionString": {
@@ -14525,8 +14867,8 @@
           "title": "Migration paths (default: auto-discover from crates/*/migrations)\nPaths are relative to workspace root or absolute"
         }
       },
-      "description": "## Purpose\nConfiguration for components that always use relational database:\n- scheduler (crates/scheduler/migrations)\n- workflow (crates/workflow/migrations)\n- object-registry (via KeyValueStore SQL backend)\n- journaling (crates/journaling/migrations)\n- blob (crates/blob/migrations)\n\n## Convention\nAll these components share the same database connection by default.\nCan be overridden per-component if needed.\n\n## Environment Variables\n- PLEXSPACES_DATABASE_URL: Connection string (can use ${VAR} syntax)\n- PLEXSPACES_DATABASE_POOL_SIZE: Connection pool size (default: 10)\n- PLEXSPACES_DATABASE_AUTO_MIGRATE: Auto-migrate on startup (default: true)",
-      "title": "Shared relational database configuration",
+      "description": "## Purpose\nConfiguration for components that use a shared relational database:\n- scheduler (crates/scheduler/migrations)\n- workflow (crates/workflow/migrations)\n- object-registry (via KeyValueStore SQL backend)\n- journaling (crates/journaling/migrations)\n- blob (crates/blob/migrations)\n- locks (crates/locks/migrations)\n- channel (crates/channel/migrations)\n- keyvalue (crates/keyvalue/migrations)\n- tuplespace (crates/tuplespace/migrations)\n\n## Convention\nAll these components share the same database connection by default.\nCan be overridden per-component if needed.\n\n## Environment Variables\n- PLEXSPACES_DATABASE_URL: Connection string (can use ${VAR} syntax)\n- PLEXSPACES_DATABASE_POOL_SIZE: Connection pool size (default: 10)\n- PLEXSPACES_DATABASE_AUTO_MIGRATE: Auto-migrate on startup (default: true)",
+      "title": "Shared database configuration",
       "required": [
         "connectionString"
       ]
@@ -14795,6 +15137,15 @@
             "$ref": "#/definitions/Facet"
           },
           "title": "Optional facets to attach during spawn\nFacets are attached in priority order (high priority first) before actor.init() is called\nExamples:\n- VirtualActorFacet: Makes actor virtual (Orleans-style grain)\n- DurabilityFacet: Enables state persistence\n- MetricsFacet: Adds metrics collection"
+        },
+        "namespace": {
+          "type": "string",
+          "title": "Namespace for actor isolation (REQUIRED for multi-tenant deployments)\nTenant ID comes from gRPC auth (JWT middleware), not from request\nNamespace provides sub-isolation within a tenant (e.g., different apps)\nExamples: \"production\", \"staging\", \"app-v1\", \"team-platform\""
+        },
+        "instancesCount": {
+          "type": "integer",
+          "format": "int64",
+          "description": "Number of identical replicas to spawn (default: 1)\nWhen \u003e 1, spawns N identical actors of this type with auto-generated IDs.\nThe actor_id field is used as a prefix (e.g. \"worker\" → \"worker-0\", \"worker-1\", ...).\nIf actor_id is empty, server generates ULID-based IDs for each replica.\nUse case: data-parallel workloads, shard groups, worker pools."
         }
       },
       "description": "Spawn actor on the node receiving this gRPC request (target node is implicit from endpoint)",
@@ -14821,6 +15172,44 @@
         "actorRef"
       ]
     },
+    "SpawnActorResult": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "response": {
+          "$ref": "#/definitions/SpawnActorResponse"
+        }
+      }
+    },
+    "SpawnActorsRequest": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/SpawnActorRequest"
+          }
+        }
+      }
+    },
+    "SpawnActorsResponse": {
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/SpawnActorResult"
+          }
+        }
+      }
+    },
     "SqliteBackendConfig": {
       "type": "object",
       "properties": {
@@ -14842,22 +15231,6 @@
       "required": [
         "databasePath"
       ]
-    },
-    "SqliteJournalConfig": {
-      "type": "object",
-      "properties": {
-        "dbPath": {
-          "type": "string"
-        },
-        "walMode": {
-          "type": "boolean"
-        },
-        "synchronous": {
-          "type": "string",
-          "title": "NORMAL, FULL, OFF"
-        }
-      },
-      "title": "/ SQLite journal configuration\n/\n/ ## Purpose\n/ Configures SQLite backend for edge deployments.\n/\n/ ## Why This Exists\n/ - Edge computing: Single-node deployments (IoT, mobile, edge servers)\n/ - Embedded: No separate database process needed\n/ - Zero config: Single file, no setup\n/ - ACID: Full transaction support despite being embedded\n/\n/ ## Design Notes\n/ - wal_mode: Write-ahead logging for concurrency (recommended: true)\n/ - synchronous: NORMAL (default), FULL (safer), OFF (faster but risky)\n/ - db_path: File path for database (\":memory:\" for in-memory SQLite)\n/\n/ ## Performance\n/ - WAL mode: Concurrent reads + single writer\n/ - NORMAL synchronous: Balance safety vs speed\n/ - Batch transactions: Group 100s of entries in single transaction"
     },
     "StartExecutionRequest": {
       "type": "object",
@@ -15115,16 +15488,29 @@
       },
       "title": "StopVm response"
     },
+    "StorageProvider": {
+      "type": "string",
+      "enum": [
+        "STORAGE_PROVIDER_UNSPECIFIED",
+        "STORAGE_PROVIDER_POSTGRES",
+        "STORAGE_PROVIDER_SQLITE",
+        "STORAGE_PROVIDER_REDIS",
+        "STORAGE_PROVIDER_DYNAMODB"
+      ],
+      "default": "STORAGE_PROVIDER_UNSPECIFIED",
+      "description": "## Purpose\nDefines the storage provider type for database backends.\nFollows Kubernetes-style provider pattern for consistency.\nNote: Message queue providers (Kafka, NATS) are defined in channel.proto.\n\n - STORAGE_PROVIDER_POSTGRES: Relational database providers\n\nPostgreSQL\n - STORAGE_PROVIDER_SQLITE: SQLite (embedded)\n - STORAGE_PROVIDER_REDIS: NoSQL providers\n\nRedis\n - STORAGE_PROVIDER_DYNAMODB: AWS DynamoDB",
+      "title": "Storage provider type"
+    },
     "StorageProviderConfig": {
       "type": "object",
       "properties": {
         "provider": {
-          "$ref": "#/definitions/storage.v1.StorageProvider",
+          "$ref": "#/definitions/StorageProvider",
           "title": "Storage provider type (required)"
         },
         "postgres": {
-          "$ref": "#/definitions/SharedRelationalDbConfig",
-          "title": "PostgreSQL configuration"
+          "$ref": "#/definitions/SharedDbConfig",
+          "title": "PostgreSQL configuration (uses shared db config)"
         },
         "sqlite": {
           "$ref": "#/definitions/SqliteBackendConfig",
@@ -15137,21 +15523,9 @@
         "dynamodb": {
           "$ref": "#/definitions/DynamoDbBackendConfig",
           "title": "DynamoDB configuration"
-        },
-        "kafka": {
-          "$ref": "#/definitions/KafkaBackendConfig",
-          "title": "Kafka configuration (for channel)"
-        },
-        "nats": {
-          "$ref": "#/definitions/NatsBackendConfig",
-          "title": "NATS configuration (for channel)"
-        },
-        "memory": {
-          "$ref": "#/definitions/MemoryBackendConfig",
-          "title": "Memory configuration (no-op, just a marker)"
         }
       },
-      "description": "## Purpose\nConfiguration for components that support multiple storage providers.\nUses provider pattern (similar to Kubernetes StorageClass) for cleaner design.\n\n## Industry Best Practices\n- Provider-based: One provider per config (not oneof with all options)\n- Explicit: Must specify provider (no magic defaults)\n- Extensible: Easy to add new providers without breaking changes\n\n## Backend Selection Logic\n1. Provider must be explicitly specified (no auto-detection)\n2. If provider is UNSPECIFIED, use default based on component:\n   - locks: REDIS (if available), else POSTGRES\n   - channel: REDIS (if available), else MEMORY\n   - tuplespace: POSTGRES (if available), else MEMORY\n3. Validation: Fail if provider not available (feature flags)\n\n## Environment Variables\n- PLEXSPACES_{COMPONENT}_PROVIDER: Provider type (e.g., \"redis\", \"postgres\")\n- Provider-specific env vars follow pattern: PLEXSPACES_{COMPONENT}_{PROVIDER}_{SETTING}",
+      "description": "## Purpose\nConfiguration for components that support multiple storage providers.\nUses provider pattern (similar to Kubernetes StorageClass) for cleaner design.\n\n## Industry Best Practices\n- Provider-based: One provider per config (not oneof with all options)\n- Explicit: Must specify provider (no magic defaults)\n- Extensible: Easy to add new providers without breaking changes\n\n## Backend Selection Logic\n1. Provider must be explicitly specified (no auto-detection)\n2. If provider is UNSPECIFIED, config_manager sets defaults:\n   - locks: REDIS (if available), else use shared db\n3. Validation: Fail if provider not available (feature flags)\n\n## Environment Variables\n- PLEXSPACES_{COMPONENT}_PROVIDER: Provider type (e.g., \"redis\", \"postgres\")\n- Provider-specific env vars follow pattern: PLEXSPACES_{COMPONENT}_{PROVIDER}_{SETTING}",
       "title": "Storage provider configuration"
     },
     "StorageStats": {
@@ -15554,19 +15928,34 @@
       "description": "System performance metrics snapshot",
       "title": "System Metrics"
     },
-    "TenantId": {
+    "TerminateActorResponse": {
       "type": "object",
       "properties": {
-        "tenantId": {
+        "success": {
+          "type": "boolean",
+          "title": "Whether the actor was successfully terminated"
+        },
+        "actorId": {
           "type": "string",
-          "title": "Unique tenant identifier (e.g., \"customer-acme\", \"org-123\", \"team-alpha\")\nFormat: lowercase alphanumeric + hyphens, max 64 chars\nExample: \"customer-acme-corp\", \"internal-dev\", \"client-xyz\""
+          "title": "Actor ID that was terminated"
+        },
+        "messagesProcessed": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Number of pending messages that were processed before termination"
+        },
+        "messagesDropped": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Number of pending messages that were dropped (if force=true)"
+        },
+        "errorMessage": {
+          "type": "string",
+          "title": "Error message if success is false"
         }
       },
-      "description": "Unique identifier for a customer or organization",
-      "title": "Tenant ID",
-      "required": [
-        "tenantId"
-      ]
+      "description": "Response from terminating an actor",
+      "title": "Terminate Actor Response"
     },
     "TimerRegistration": {
       "type": "object",
@@ -16159,6 +16548,19 @@
           "type": "boolean",
           "description": "If true, compile module to native code on deployment.\nTrade-off: Deployment time vs execution speed.",
           "title": "Enable ahead-of-time (AOT) compilation"
+        },
+        "durabilityEnabled": {
+          "type": "boolean",
+          "description": "Enable checkpoint/restore durability (load on init, save on terminate).\n\nOff by default for performance. When true, actor state is loaded from\njournal on init and saved on terminate (Cloudflare Durable Objects pattern)."
+        },
+        "useInstancePool": {
+          "type": "boolean",
+          "description": "Use pre-instantiated instance pool (InstancePool) when spawning actors.\n\nOn by default. When true, runtime may checkout from a per-module pool instead\nof instantiating each time (faster spawn when pool has capacity). Requires\ndeploy-path integration; until then, only engine-level pooling (enable_pooling)\nis active for HTTP/deploy."
+        },
+        "maxConcurrentInstantiations": {
+          "type": "integer",
+          "format": "int64",
+          "description": "Maximum concurrent instantiations (initial + re-instantiation) when pooling is enabled.\n\nLimits total concurrent Wasmtime instantiations to avoid hitting Wasmtime's memory-stripe\nlimit (default 10). Per-actor re-instantiation lock serializes per actor; this global cap\nprevents N actors from re-instantiating at once. Default: 8 (stays under Wasmtime's limit\nwith headroom). Only used when enable_pooling is true.\n\nWhen 0 or not set, uses code default of 8."
         }
       },
       "description": "## Purpose\nCombines resource limits and capabilities into a complete configuration\nfor instantiating a WASM actor. Can be templated per actor type.\n\n## Why This Exists\n- **Reusable Profiles**: Define once, apply to many actors\n- **Security Policies**: Enforce organizational security requirements\n- **Resource Management**: Prevent resource exhaustion\n\n## Design Notes\n- Can create profiles: \"untrusted\" (minimal caps), \"trusted\" (full caps)\n- Immutable after instantiation (cannot escalate privileges)",
@@ -16526,17 +16928,13 @@
             "$ref": "#/definitions/Any"
           }
         },
-        "placementHint": {
-          "$ref": "#/definitions/PlacementHint",
-          "title": "Orleans-inspired placement configuration"
-        },
         "statelessWorkerConfig": {
           "$ref": "#/definitions/StatelessWorkerConfig",
           "title": "Orleans-inspired stateless worker configuration"
         },
         "dataParallelConfig": {
           "$ref": "#/definitions/DataParallelConfig",
-          "title": "Data-parallel actor configuration (if part of actor group)"
+          "title": "Data-parallel configuration (if part of a shard group)"
         },
         "stateManagementMode": {
           "$ref": "#/definitions/StateMgmtMode",
@@ -16555,7 +16953,7 @@
           "items": {
             "type": "string"
           },
-          "title": "Actor groups (for task routing and co-scheduling)"
+          "title": "Shard group IDs (for task routing and co-scheduling)"
         },
         "configSchemaVersion": {
           "type": "integer",
@@ -16675,6 +17073,10 @@
             "$ref": "#/definitions/Facet"
           },
           "title": "Facet configuration (for automatic attachment during actor creation)\nFacets are attached in priority order (high priority first) before actor.init() is called\nAll facets are automatically restored during supervisor restart\nPhase 1: Unified Lifecycle - Multiple facets support"
+        },
+        "behaviorKind": {
+          "type": "string",
+          "description": "OTP-style behavior kind for logging and observability (e.g. \"GenServer\", \"GenEvent\", \"GenStateMachine\", \"Workflow\").\nWhen set, process_message spans and actor registration logs show this instead of the child id."
         }
       },
       "description": "## Purpose\nDefines a child process (worker or supervisor) managed by a supervisor.\n\n## Why This Exists\n- Clear child identity and lifecycle\n- Restart policy per child\n- Shutdown timeout specification\n- Support for nested supervisors",
@@ -16714,10 +17116,6 @@
           "$ref": "#/definitions/ApplicationSpec",
           "description": "Application configuration\nDefines supervision tree, dependencies, environment variables, etc."
         },
-        "releaseConfig": {
-          "$ref": "#/definitions/ReleaseSpec",
-          "description": "Release configuration (optional)\nIf provided, application is deployed with release-level settings.\nSimilar to how applications are loaded from release.toml.\nIf not provided, uses defaults or application-level config only."
-        },
         "initialState": {
           "type": "string",
           "format": "byte",
@@ -16747,6 +17145,16 @@
         }
       },
       "title": "Deploy application response"
+    },
+    "application.v1.ShutdownStrategy": {
+      "type": "string",
+      "enum": [
+        "SHUTDOWN_STRATEGY_UNSPECIFIED",
+        "SHUTDOWN_STRATEGY_GRACEFUL",
+        "SHUTDOWN_STRATEGY_IMMEDIATE"
+      ],
+      "default": "SHUTDOWN_STRATEGY_UNSPECIFIED",
+      "description": "Shutdown strategy for application.\n\n## Purpose\nDetermines how application shutdown is handled.\n\n## Strategies\n- GRACEFUL: Wait for in-flight work to complete (up to timeout)\n- IMMEDIATE: Stop immediately without draining work\n\n## Design Notes\n- Default is GRACEFUL for production safety\n- IMMEDIATE useful for dev/test or when work is not critical\n\n - SHUTDOWN_STRATEGY_UNSPECIFIED: Unspecified (defaults to GRACEFUL)\n - SHUTDOWN_STRATEGY_GRACEFUL: Wait for in-flight work to complete (up to shutdown_timeout)\n\nShutdown sequence:\n1. Stop accepting new work\n2. Drain in-flight messages/tasks\n3. Save durable state (if applicable)\n4. Stop supervision tree and actors\n5. Disconnect from external services\n - SHUTDOWN_STRATEGY_IMMEDIATE: Stop immediately without draining work\n\nShutdown sequence:\n1. Stop supervision tree immediately\n2. Terminate actors (may lose in-flight work)\n3. Exit"
     },
     "application.v1.SupervisionStrategy": {
       "type": "string",
@@ -16988,6 +17396,31 @@
           "type": "string",
           "format": "uint64",
           "title": "Total parent-child relationships unregistered"
+        },
+        "shardGroupsCreatedTotal": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Total shard groups created"
+        },
+        "shardMessagesSentTotal": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Total shard messages sent (to shard actors)"
+        },
+        "shardMessagesReceivedTotal": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Total shard messages received (from shard actors)"
+        },
+        "shardOperationsTotal": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Total shard operations (map, scatter_gather, bulk_update)"
+        },
+        "shardOperationsFailedTotal": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Failed shard operations"
         }
       },
       "description": "## Purpose\nTracks actor lifecycle and message routing/delivery metrics that can be updated by ActorRegistry\nwithout depending on Node. These metrics are also synced to NodeMetrics\nvia NodeMetricsUpdater for backward compatibility.\n\n## Design\nProto-first design: All actor/message metrics are defined in proto for:\n- Wire compatibility (gRPC metrics APIs)\n- Language-agnostic observability\n- Consistent metrics semantics across implementations\n\n## Metrics Categories\n- Actor lifecycle: Spawned, active, errors\n- Message routing: Total messages routed\n- Delivery metrics: Local, remote, and failed deliveries",
@@ -17017,49 +17450,6 @@
       "default": "METRIC_TYPE_UNSPECIFIED",
       "description": "- METRIC_TYPE_COUNTER: Monotonically increasing value\n - METRIC_TYPE_GAUGE: Can go up and down\n - METRIC_TYPE_HISTOGRAM: Distribution of values\n - METRIC_TYPE_SUMMARY: Similar to histogram but with quantiles",
       "title": "Metric type enumeration"
-    },
-    "node.v1.ApplicationConfig": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "title": "Application name (must match .app.toml)"
-        },
-        "version": {
-          "type": "string",
-          "title": "Application version"
-        },
-        "configPath": {
-          "type": "string",
-          "title": "Path to application config file (e.g., \"apps/byzantine/byzantine.app.toml\")"
-        },
-        "enabled": {
-          "type": "boolean",
-          "title": "Enable this application"
-        },
-        "autoStart": {
-          "type": "boolean",
-          "title": "Auto-start on node boot"
-        },
-        "shutdownTimeoutSeconds": {
-          "type": "string",
-          "format": "int64",
-          "title": "Shutdown timeout (seconds)\n0 = immediate (brutal_kill)\n\u003e0 = graceful with timeout\nSpecial value -1 = infinity (wait forever)"
-        },
-        "shutdownStrategy": {
-          "$ref": "#/definitions/node.v1.ShutdownStrategy",
-          "title": "Shutdown strategy"
-        },
-        "dependencies": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Dependencies (other application names)\nThis application will start AFTER all dependencies have started.\nUsed for topological sort during node startup.\n\n## Examples\n- [\"tuplespace-service\"] - Requires TupleSpace to be running first\n- [\"actor-registry\", \"node-registry\"] - Requires both registries"
-        }
-      },
-      "description": "## Purpose\nDefines which applications to load and their startup/shutdown behavior.\n\n## Dependency Resolution\nApplications with dependencies will start AFTER their dependencies.\nUses topological sort (Kahn's algorithm) to determine startup order.",
-      "title": "Application configuration (in release)"
     },
     "node.v1.GetHealthResponse": {
       "type": "object",
@@ -17104,18 +17494,6 @@
       },
       "description": "## Purpose\nDeclarative middleware configuration for gRPC server.\nMiddleware executes in the order specified.\n\n## Supported Middleware Types\n- \"metrics\": Prometheus metrics collection\n- \"tracing\": OpenTelemetry distributed tracing\n- \"mtls\": Mutual TLS authentication\n- \"compression\": gzip/brotli compression\n- \"rate_limiting\": Request rate limiting",
       "title": "Middleware configuration"
-    },
-    "node.v1.ShutdownStrategy": {
-      "type": "string",
-      "enum": [
-        "SHUTDOWN_STRATEGY_UNSPECIFIED",
-        "SHUTDOWN_STRATEGY_GRACEFUL",
-        "SHUTDOWN_STRATEGY_BRUTAL_KILL",
-        "SHUTDOWN_STRATEGY_INFINITY"
-      ],
-      "default": "SHUTDOWN_STRATEGY_UNSPECIFIED",
-      "description": "- SHUTDOWN_STRATEGY_UNSPECIFIED: Unspecified (default to graceful)\n - SHUTDOWN_STRATEGY_GRACEFUL: Graceful shutdown with cleanup\nEquivalent to Erlang's `shutdown: Timeout`\n - SHUTDOWN_STRATEGY_BRUTAL_KILL: Immediate termination (no cleanup)\nEquivalent to Erlang's `shutdown: brutal_kill`\n - SHUTDOWN_STRATEGY_INFINITY: Wait indefinitely for graceful shutdown\nEquivalent to Erlang's `shutdown: infinity`",
-      "title": "Shutdown strategy (Erlang/OTP-inspired)"
     },
     "object_registry.v1.HealthStatus": {
       "type": "string",
@@ -17168,83 +17546,6 @@
         }
       },
       "title": "GetStats response"
-    },
-    "processgroups.v1.CreateGroupRequest": {
-      "type": "object",
-      "properties": {
-        "groupName": {
-          "type": "string",
-          "example": "config-updates",
-          "description": "Unique group name within tenant",
-          "title": "Group name (required)"
-        },
-        "tenantId": {
-          "type": "string",
-          "example": "customer-acme",
-          "description": "Tenant identifier",
-          "title": "Tenant ID (required for multi-tenancy isolation)"
-        },
-        "namespace": {
-          "type": "string",
-          "example": "production",
-          "description": "Namespace within tenant",
-          "title": "Namespace (optional hierarchical isolation)"
-        },
-        "metadata": {
-          "$ref": "#/definitions/Metadata",
-          "title": "Metadata (labels, annotations)"
-        }
-      },
-      "required": [
-        "groupName",
-        "tenantId"
-      ]
-    },
-    "processgroups.v1.CreateGroupResponse": {
-      "type": "object",
-      "properties": {
-        "group": {
-          "$ref": "#/definitions/ProcessGroup",
-          "title": "Created group"
-        }
-      }
-    },
-    "processgroups.v1.ListGroupsResponse": {
-      "type": "object",
-      "properties": {
-        "groups": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/ProcessGroup"
-          },
-          "title": "Groups matching filter"
-        },
-        "nextPageToken": {
-          "type": "string",
-          "title": "Pagination"
-        },
-        "totalCount": {
-          "type": "integer",
-          "format": "int32"
-        }
-      }
-    },
-    "storage.v1.StorageProvider": {
-      "type": "string",
-      "enum": [
-        "STORAGE_PROVIDER_UNSPECIFIED",
-        "STORAGE_PROVIDER_POSTGRES",
-        "STORAGE_PROVIDER_SQLITE",
-        "STORAGE_PROVIDER_REDIS",
-        "STORAGE_PROVIDER_DYNAMODB",
-        "STORAGE_PROVIDER_KAFKA",
-        "STORAGE_PROVIDER_NATS",
-        "STORAGE_PROVIDER_MEMORY"
-      ],
-      "default": "STORAGE_PROVIDER_UNSPECIFIED",
-      "description": "## Purpose\nDefines the storage provider type using industry-standard naming.\nFollows Kubernetes-style provider pattern for consistency.\n\n - STORAGE_PROVIDER_POSTGRES: Relational database providers\n\nPostgreSQL\n - STORAGE_PROVIDER_SQLITE: SQLite (embedded)\n - STORAGE_PROVIDER_REDIS: NoSQL providers\n\nRedis\n - STORAGE_PROVIDER_DYNAMODB: AWS DynamoDB\n - STORAGE_PROVIDER_KAFKA: Message queue providers (for channel)\n\nApache Kafka\n - STORAGE_PROVIDER_NATS: NATS\n - STORAGE_PROVIDER_MEMORY: In-memory (testing/development only)\n\nIn-memory (no persistence)",
-      "title": "Storage provider type"
     },
     "system.v1.GetHealthResponse": {
       "type": "object",
@@ -17381,18 +17682,6 @@
       },
       "title": "Circuit breaker configuration"
     },
-    "v1.CompressionType": {
-      "type": "string",
-      "enum": [
-        "COMPRESSION_TYPE_UNSPECIFIED",
-        "COMPRESSION_TYPE_NONE",
-        "COMPRESSION_TYPE_ZSTD",
-        "COMPRESSION_TYPE_SNAPPY"
-      ],
-      "default": "COMPRESSION_TYPE_UNSPECIFIED",
-      "description": "- COMPRESSION_TYPE_ZSTD: High compression (checkpoints)\n - COMPRESSION_TYPE_SNAPPY: Fast compression (journal)",
-      "title": "/ Compression type\n/\n/ ## Purpose\n/ Defines compression algorithm for checkpoints and journal entries.\n/\n/ ## Why This Exists\n/ - Checkpoints: Large state, compress with zstd (3-5x smaller)\n/ - Journal entries: Many small entries, compress with snappy (fast)\n/ - None: No compression for testing or small payloads\n/\n/ ## Performance\n/ - ZSTD: 3-5x compression, slower (use for checkpoints)\n/ - Snappy: 1.5-2x compression, very fast (use for journal)\n/ - None: No CPU overhead (use for testing)"
-    },
     "v1.Empty": {
       "type": "object",
       "description": "Used for RPC methods that don't return a meaningful value.\nWe define our own instead of using plexspaces.common.v1.Empty because\nprost_types doesn't include it.",
@@ -17475,5 +17764,30 @@
       "description": "## Purpose\nDefines resource constraints for WASM actors to prevent resource exhaustion\nand ensure fair scheduling. Enforced by wasmtime runtime.\n\n## Why This Exists\n- Memory limits prevent OOM crashes (multi-tenant safety)\n- Fuel metering prevents infinite loops (gas-style execution limits)\n- Time limits prevent hung actors\n- Stack limits prevent stack overflow\n\n## Design Notes\n- Limits are per-instance (each actor has own quota)\n- Fuel is like Ethereum gas - metered during execution\n- Defaults chosen for balanced workloads (can override per-actor)",
       "title": "Resource limits for WASM actor instances"
     }
-  }
+  },
+  "securityDefinitions": {
+    "ApiKeyHeader": {
+      "type": "apiKey",
+      "description": "API key authentication via header. Service-scoped keys with configurable scopes.",
+      "name": "X-API-Key",
+      "in": "header"
+    },
+    "ApiKeyQuery": {
+      "type": "apiKey",
+      "description": "API key authentication via query parameter. Use only when headers cannot be set.",
+      "name": "api_key",
+      "in": "query"
+    },
+    "BearerAuth": {
+      "type": "apiKey",
+      "description": "JWT Bearer token. Format: `Bearer \u003ctoken\u003e`. Must contain a `tenant_id` claim for multi-tenant isolation. Create tokens via `plexspaces-cli jwt create`.",
+      "name": "Authorization",
+      "in": "header"
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ]
 }

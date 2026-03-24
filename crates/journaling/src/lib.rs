@@ -334,8 +334,6 @@ pub use timer_facet::{TimerError, TimerFacet};
 // Phase 8.5: Reminder facet for Orleans-style durable reminders
 mod reminder_facet;
 pub use reminder_facet::{ReminderError, ReminderFacet};
-// ActivationProvider moved to plexspaces-core to avoid circular dependencies
-pub use plexspaces_core::ActivationProvider;
 
 // Facet factories for journaling-related facets
 pub mod facet_factories;

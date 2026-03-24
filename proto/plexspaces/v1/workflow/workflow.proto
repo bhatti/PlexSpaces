@@ -48,63 +48,56 @@ package plexspaces.workflow.v1;
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
-import "protoc-gen-openapiv2/options/annotations.proto";
+import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/workflow/workflow;plexspaces_workflow_v1";
-option java_package = "com.bhatti.plexspaces.workflow.v1";
 option java_multiple_files = true;
-
+option java_package = "com.bhatti.plexspaces.workflow.v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpaces Workflow API";
-    version: "1.0";
-    description: "Simple, durable workflow orchestration API";
+    title: "PlexSpaces Workflow API"
+    version: "1.0"
+    description: "Simple, durable workflow orchestration API"
     contact: {
-      name: "PlexSpaces";
-      url: "https://github.com/bhatti/plexspaces";
-    };
-  };
-  schemes: HTTPS;
-  schemes: HTTP;
-  consumes: "application/json";
-  produces: "application/json";
+      name: "PlexSpaces"
+      url: "https://github.com/bhatti/plexspaces"
+    }
+  }
+  schemes: HTTPS
+  schemes: HTTP
+  consumes: "application/json"
+  produces: "application/json"
   responses: {
-    key: "400";
+    key: "400"
     value: {
-      description: "Invalid request";
+      description: "Invalid request"
       schema: {
-        json_schema: {
-          ref: ".plexspaces.common.v1.Error";
-        }
+        json_schema: {ref: ".plexspaces.common.v1.Error"}
       }
     }
-  };
+  }
   responses: {
-    key: "404";
+    key: "404"
     value: {
-      description: "Not found";
+      description: "Not found"
       schema: {
-        json_schema: {
-          ref: ".plexspaces.common.v1.Error";
-        }
+        json_schema: {ref: ".plexspaces.common.v1.Error"}
       }
     }
-  };
+  }
   responses: {
-    key: "500";
+    key: "500"
     value: {
-      description: "Internal server error";
+      description: "Internal server error"
       schema: {
-        json_schema: {
-          ref: ".plexspaces.common.v1.Error";
-        }
+        json_schema: {ref: ".plexspaces.common.v1.Error"}
       }
     }
-  };
+  }
 };
 
 // ==================== Workflow Definition ====================
@@ -117,36 +110,53 @@ message WorkflowDefinition {
     json_schema: {
       title: "Workflow Definition"
       description: "Versioned workflow template defining steps and configuration"
-      required: ["id", "name", "version", "steps"]
+      required: [
+        "id",
+        "name",
+        "version",
+        "steps"
+      ]
     }
   };
 
   // Unique definition ID (e.g., "credit-approval")
   string id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Human-readable name
   string name = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Semantic version (e.g., "1.0.0")
   string version = 3 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 64}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 64
+    }
   ];
 
   // Workflow steps (DAG)
   repeated Step steps = 4 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).repeated = {min_items: 1, max_items: 1000}
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 1000
+    }
   ];
 
   // Default timeout for entire workflow
-  google.protobuf.Duration default_timeout = 5 [(buf.validate.field).duration.lte.seconds = 86400];  // Max 24 hours
+  google.protobuf.Duration default_timeout = 5 [(buf.validate.field).duration.lte.seconds = 86400]; // Max 24 hours
 
   // Default retry policy for steps
   RetryConfig default_retry = 6;
@@ -169,30 +179,40 @@ message Step {
     json_schema: {
       title: "Workflow Step"
       description: "Single step in workflow with type-specific configuration"
-      required: ["id", "name", "type"]
+      required: [
+        "id",
+        "name",
+        "type"
+      ]
     }
   };
 
   // Unique step ID within workflow
   string id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Human-readable name
   string name = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Step type (task, parallel, map, etc.)
   StepType type = 3 [(google.api.field_behavior) = REQUIRED];
 
   // Step IDs this depends on (for DAG ordering)
-  repeated string depends_on = 4 [(buf.validate.field).repeated.max_items = 100];  // Max 100 dependencies
+  repeated string depends_on = 4 [(buf.validate.field).repeated.max_items = 100]; // Max 100 dependencies
 
   // Step-specific timeout
-  google.protobuf.Duration timeout = 5 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+  google.protobuf.Duration timeout = 5 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
 
   // Retry configuration
   RetryConfig retry = 6;
@@ -207,12 +227,12 @@ message Step {
 // Step types (simplified)
 enum StepType {
   STEP_TYPE_UNSPECIFIED = 0;
-  STEP_TYPE_TASK = 1;       // Execute actor method
-  STEP_TYPE_PARALLEL = 2;   // Execute steps in parallel
-  STEP_TYPE_MAP = 3;        // Map over collection (parallel iteration)
-  STEP_TYPE_WAIT = 4;       // Wait for duration
-  STEP_TYPE_CHOICE = 5;     // Conditional branching
-  STEP_TYPE_SIGNAL = 6;     // Wait for external signal
+  STEP_TYPE_TASK = 1; // Execute actor method
+  STEP_TYPE_PARALLEL = 2; // Execute steps in parallel
+  STEP_TYPE_MAP = 3; // Map over collection (parallel iteration)
+  STEP_TYPE_WAIT = 4; // Wait for duration
+  STEP_TYPE_CHOICE = 5; // Conditional branching
+  STEP_TYPE_SIGNAL = 6; // Wait for external signal
 }
 
 // Retry configuration
@@ -233,19 +253,27 @@ message RetryConfig {
   };
 
   // Maximum retry attempts (1 = single attempt, no retries; unset/0 treated as 1 at runtime)
-  uint32 max_attempts = 1 [(buf.validate.field).uint32 = {lte: 1000}];  // 0 or 1–1000
+  uint32 max_attempts = 1 [(buf.validate.field).uint32 = {lte: 1000}]; // 0 or 1–1000
 
   // Initial retry interval (milliseconds). Default 100 when unset.
-  uint32 initial_interval_ms = 2 [(buf.validate.field).uint32 = {lte: 300000}];  // 0 or 1–300000
+  uint32 initial_interval_ms = 2 [(buf.validate.field).uint32 = {lte: 300000}]; // 0 or 1–300000
 
   // Exponential backoff rate (e.g., 2.0 for doubling). Default 2.0 when unset.
-  double backoff_rate = 3 [(buf.validate.field).double = {gte: 1.0, lte: 10.0}];
+  double backoff_rate = 3 [(buf.validate.field).double = {
+    gte: 1.0
+    lte: 10.0
+  }];
 
   // Maximum retry interval (milliseconds). Default 30000 when unset.
-  uint32 max_interval_ms = 4 [(buf.validate.field).uint32 = {lte: 3600000}];  // 0 or 1–3600000
+  uint32 max_interval_ms = 4 [(buf.validate.field).uint32 = {lte: 3600000}]; // 0 or 1–3600000
 
   // Error types to retry (empty = retry all)
-  repeated string retryable_errors = 5 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 256}}}];
+  repeated string retryable_errors = 5 [(buf.validate.field).repeated = {
+    max_items: 100
+    items: {
+      string: {max_len: 256}
+    }
+  }];
 }
 
 // ==================== Workflow Execution ====================
@@ -258,7 +286,12 @@ message WorkflowExecution {
     json_schema: {
       title: "Workflow Execution"
       description: "Running or completed workflow instance"
-      required: ["execution_id", "definition_id", "definition_version", "status"]
+      required: [
+        "execution_id",
+        "definition_id",
+        "definition_version",
+        "status"
+      ]
     }
   };
 
@@ -271,13 +304,19 @@ message WorkflowExecution {
   // Workflow definition ID
   string definition_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Workflow definition version
   string definition_version = 3 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 64}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 64
+    }
   ];
 
   // Current execution status
@@ -367,7 +406,7 @@ message StepExecution {
   string error = 7 [(buf.validate.field).string.max_len = 2048];
 
   // Retry attempt number
-  uint32 attempt = 8 [(buf.validate.field).uint32.lte = 1000];  // Max 1000 attempts
+  uint32 attempt = 8 [(buf.validate.field).uint32.lte = 1000]; // Max 1000 attempts
 
   // Start timestamp
   google.protobuf.Timestamp started_at = 9;
@@ -416,9 +455,7 @@ enum WorkflowError {
 // ==================== gRPC Service with REST API ====================
 
 service WorkflowService {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
-    description: "Simple, durable workflow orchestration service"
-  };
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {description: "Simple, durable workflow orchestration service"};
 
   // Create workflow definition
   rpc CreateDefinition(CreateDefinitionRequest) returns (CreateDefinitionResponse) {
@@ -435,9 +472,7 @@ service WorkflowService {
 
   // Get workflow definition
   rpc GetDefinition(GetDefinitionRequest) returns (GetDefinitionResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/workflows/definitions/{id}/versions/{version}"
-    };
+    option (google.api.http) = {get: "/api/v1/workflows/definitions/{id}/versions/{version}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Workflow Definition"
       description: "Retrieve workflow definition by ID and version (or latest)"
@@ -447,9 +482,7 @@ service WorkflowService {
 
   // List workflow definitions
   rpc ListDefinitions(ListDefinitionsRequest) returns (ListDefinitionsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/workflows/definitions"
-    };
+    option (google.api.http) = {get: "/api/v1/workflows/definitions"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List Workflow Definitions"
       description: "List workflow definitions with filtering and pagination"
@@ -472,9 +505,7 @@ service WorkflowService {
 
   // Delete workflow definition
   rpc DeleteDefinition(DeleteDefinitionRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      delete: "/api/v1/workflows/definitions/{id}/versions/{version}"
-    };
+    option (google.api.http) = {delete: "/api/v1/workflows/definitions/{id}/versions/{version}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Delete Workflow Definition"
       description: "Delete workflow definition version (or all versions if version empty)"
@@ -497,9 +528,7 @@ service WorkflowService {
 
   // Get workflow execution
   rpc GetExecution(GetExecutionRequest) returns (GetExecutionResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/workflows/executions/{execution_id}"
-    };
+    option (google.api.http) = {get: "/api/v1/workflows/executions/{execution_id}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Workflow Execution"
       description: "Retrieve workflow execution by ID"
@@ -509,9 +538,7 @@ service WorkflowService {
 
   // List workflow executions
   rpc ListExecutions(ListExecutionsRequest) returns (ListExecutionsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/workflows/executions"
-    };
+    option (google.api.http) = {get: "/api/v1/workflows/executions"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List Workflow Executions"
       description: "List workflow executions with filtering and pagination"
@@ -560,9 +587,7 @@ service WorkflowService {
 
   // Get step execution history
   rpc GetStepExecutions(GetStepExecutionsRequest) returns (GetStepExecutionsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/workflows/executions/{execution_id}/steps"
-    };
+    option (google.api.http) = {get: "/api/v1/workflows/executions/{execution_id}/steps"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Step Executions"
       description: "Get step execution history for workflow"
@@ -586,9 +611,12 @@ message CreateDefinitionResponse {
 message GetDefinitionRequest {
   string id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
-  string version = 2 [(buf.validate.field).string.max_len = 64];  // Empty = latest version
+  string version = 2 [(buf.validate.field).string.max_len = 64]; // Empty = latest version
 }
 
 message GetDefinitionResponse {
@@ -617,9 +645,12 @@ message UpdateDefinitionResponse {
 message DeleteDefinitionRequest {
   string id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
-  string version = 2 [(buf.validate.field).string.max_len = 64];  // Empty = delete all versions
+  string version = 2 [(buf.validate.field).string.max_len = 64]; // Empty = delete all versions
 }
 
 // Execution management
@@ -627,11 +658,14 @@ message DeleteDefinitionRequest {
 message StartExecutionRequest {
   string definition_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
-  string definition_version = 2 [(buf.validate.field).string.max_len = 64];  // Empty = latest version
+  string definition_version = 2 [(buf.validate.field).string.max_len = 64]; // Empty = latest version
   google.protobuf.Struct input = 3;
-  string execution_id = 4 [(buf.validate.field).string.max_len = 255];  // Optional - auto-generate if empty
+  string execution_id = 4 [(buf.validate.field).string.max_len = 255]; // Optional - auto-generate if empty
   map<string, string> labels = 5;
 }
 
@@ -642,7 +676,10 @@ message StartExecutionResponse {
 message GetExecutionRequest {
   string execution_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -667,7 +704,10 @@ message ListExecutionsResponse {
 message CancelExecutionRequest {
   string execution_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string reason = 2 [(buf.validate.field).string.max_len = 1024];
 }
@@ -675,11 +715,17 @@ message CancelExecutionRequest {
 message SignalExecutionRequest {
   string execution_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string signal_name = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   google.protobuf.Value data = 3;
 }
@@ -687,12 +733,18 @@ message SignalExecutionRequest {
 message QueryExecutionRequest {
   string execution_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string query_name = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 128}
-  ];  // "status", "context", "current_step"
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+    }
+  ]; // "status", "context", "current_step"
 }
 
 message QueryExecutionResponse {
@@ -702,7 +754,10 @@ message QueryExecutionResponse {
 message GetStepExecutionsRequest {
   string execution_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   plexspaces.common.v1.PageRequest page = 2;
 }

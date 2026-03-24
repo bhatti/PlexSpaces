@@ -38,13 +38,13 @@ syntax = "proto3";
 
 package plexspaces.storage.v1;
 
-import "google/protobuf/duration.proto";
 import "buf/validate/validate.proto";
 import "google/api/field_behavior.proto";
+import "google/protobuf/duration.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/storage;plexspaces_storage_v1";
-option java_package = "com.bhatti.plexspaces.storage.v1";
 option java_multiple_files = true;
+option java_package = "com.bhatti.plexspaces.storage.v1";
 
 // Shared database configuration
 //
@@ -159,14 +159,14 @@ message DynamoDbBackendConfig {
 // Note: Message queue providers (Kafka, NATS) are defined in channel.proto.
 enum StorageProvider {
   STORAGE_PROVIDER_UNSPECIFIED = 0;
-  
+
   // Relational database providers
-  STORAGE_PROVIDER_POSTGRES = 1;  // PostgreSQL
-  STORAGE_PROVIDER_SQLITE = 2;    // SQLite (embedded)
-  
+  STORAGE_PROVIDER_POSTGRES = 1; // PostgreSQL
+  STORAGE_PROVIDER_SQLITE = 2; // SQLite (embedded)
+
   // NoSQL providers
-  STORAGE_PROVIDER_REDIS = 3;     // Redis
-  STORAGE_PROVIDER_DYNAMODB = 4;  // AWS DynamoDB
+  STORAGE_PROVIDER_REDIS = 3; // Redis
+  STORAGE_PROVIDER_DYNAMODB = 4; // AWS DynamoDB
 }
 
 // Storage provider configuration
@@ -197,13 +197,13 @@ message StorageProviderConfig {
   oneof config {
     // PostgreSQL configuration (uses shared db config)
     SharedDbConfig postgres = 2;
-    
+
     // SQLite configuration
     SqliteBackendConfig sqlite = 3;
-    
+
     // Redis configuration
     RedisBackendConfig redis = 4;
-    
+
     // DynamoDB configuration
     DynamoDbBackendConfig dynamodb = 5;
   }
@@ -247,4 +247,3 @@ message FrameworkInfo {
   // Build target (e.g., "x86_64-unknown-linux-gnu")
   string build_target = 4;
 }
-

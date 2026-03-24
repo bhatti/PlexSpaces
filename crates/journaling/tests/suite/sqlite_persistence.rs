@@ -6,9 +6,9 @@
 
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_tests {
-    use plexspaces_journaling::*;
-    use plexspaces_journaling::sql::SqliteJournalStorage;
     use plexspaces_facet::Facet;
+    use plexspaces_journaling::sql::SqliteJournalStorage;
+    use plexspaces_journaling::*;
     use plexspaces_proto::prost_types;
     use std::sync::Arc;
     use std::time::SystemTime;
@@ -110,7 +110,7 @@ mod sqlite_tests {
         // Replay all entries
         let entries = storage.replay_from(actor_id, 0).await.unwrap();
         assert_eq!(entries.len(), 5, "Should have 5 entries");
-        
+
         // Verify sequences are correct
         for (i, entry) in entries.iter().enumerate() {
             assert_eq!(entry.sequence, (i + 1) as u64);
@@ -218,7 +218,10 @@ mod sqlite_tests {
         let actor_id = "test-actor-facet-before";
 
         // Attach facet
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Call before_method
         let payload = b"test payload".to_vec();
@@ -230,7 +233,7 @@ mod sqlite_tests {
         // Verify entry was written
         let entries = storage.replay_from(actor_id, 0).await.unwrap();
         assert_eq!(entries.len(), 1, "Should have 1 entry after before_method");
-        
+
         use plexspaces_proto::v1::journaling::journal_entry::Entry;
         if let Some(Entry::MessageReceived(msg)) = &entries[0].entry {
             assert_eq!(msg.message_type, "test_method");
@@ -259,22 +262,32 @@ mod sqlite_tests {
         let actor_id = "test-actor-facet-after";
 
         // Attach facet
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Call before_method first
         facet.before_method("test_method", &[]).await.unwrap();
 
         // Call after_method
         let result = b"result data".to_vec();
-        facet.after_method("test_method", &[], &result).await.unwrap();
+        facet
+            .after_method("test_method", &[], &result)
+            .await
+            .unwrap();
 
         // Flush
         storage.flush().await.unwrap();
 
         // Verify both entries were written
         let entries = storage.replay_from(actor_id, 0).await.unwrap();
-        assert_eq!(entries.len(), 2, "Should have 2 entries (MessageReceived + MessageProcessed)");
-        
+        assert_eq!(
+            entries.len(),
+            2,
+            "Should have 2 entries (MessageReceived + MessageProcessed)"
+        );
+
         use plexspaces_proto::v1::journaling::journal_entry::Entry;
         assert!(matches!(entries[0].entry, Some(Entry::MessageReceived(_))));
         assert!(matches!(entries[1].entry, Some(Entry::MessageProcessed(_))));
@@ -299,14 +312,20 @@ mod sqlite_tests {
         let actor_id = "test-actor-facet-cycles";
 
         // Attach facet
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process 5 messages
         for i in 1..=5 {
             let payload = format!("payload-{}", i).into_bytes();
             facet.before_method("test_method", &payload).await.unwrap();
             let result = format!("result-{}", i).into_bytes();
-            facet.after_method("test_method", &payload, &result).await.unwrap();
+            facet
+                .after_method("test_method", &payload, &result)
+                .await
+                .unwrap();
         }
 
         // Flush
@@ -315,7 +334,7 @@ mod sqlite_tests {
         // Verify all entries
         let entries = storage.replay_from(actor_id, 0).await.unwrap();
         assert_eq!(entries.len(), 10, "Should have 10 entries (5 * 2)");
-        
+
         // Verify sequences are monotonic
         for i in 1..entries.len() {
             assert!(entries[i].sequence > entries[i - 1].sequence);
@@ -367,7 +386,10 @@ mod sqlite_tests {
 
         // Now attach facet (should initialize sequence from existing entries)
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process a new message
         facet.before_method("new_method", &[]).await.unwrap();
@@ -427,7 +449,10 @@ mod sqlite_tests {
 
         // Now attach facet with replay enabled
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process a new message
         facet.before_method("new_method", &[]).await.unwrap();
@@ -461,13 +486,19 @@ mod sqlite_tests {
 
         // First facet: create entries
         let mut facet1 = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet1.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet1
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process 3 messages
         for i in 1..=3 {
             let payload = format!("payload-{}", i).into_bytes();
             facet1.before_method("test_method", &payload).await.unwrap();
-            facet1.after_method("test_method", &payload, &[]).await.unwrap();
+            facet1
+                .after_method("test_method", &payload, &[])
+                .await
+                .unwrap();
         }
 
         storage.flush().await.unwrap();
@@ -481,7 +512,10 @@ mod sqlite_tests {
 
         // Reattach with new facet
         let mut facet2 = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet2.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet2
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process one more message
         facet2.before_method("new_method", &[]).await.unwrap();
@@ -491,7 +525,11 @@ mod sqlite_tests {
 
         // Verify all entries
         let all_entries = storage.replay_from(actor_id, 0).await.unwrap();
-        assert_eq!(all_entries.len(), 8, "Should have 8 entries (6 old + 2 new)");
+        assert_eq!(
+            all_entries.len(),
+            8,
+            "Should have 8 entries (6 old + 2 new)"
+        );
         assert_eq!(all_entries[6].sequence, 7);
         assert_eq!(all_entries[7].sequence, 8);
     }
@@ -516,7 +554,10 @@ mod sqlite_tests {
         let actor_id = "test-actor-replay-scenario";
 
         // Attach with replay enabled
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process 5 messages (exactly like the failing test)
         for i in 1..=5 {

@@ -69,6 +69,8 @@ use lru_cache::LruCache;
 #[path = "message_helpers.rs"]
 mod message_helpers;
 pub use message_helpers::*;
+// Re-export Message so tests using `use super::*` can access it
+pub use plexspaces_proto::common::v1::Message;
 
 // Re-export proto-generated types
 pub use plexspaces_proto::mailbox::v1::{
@@ -1436,11 +1438,11 @@ mod tests {
 
         // Enqueue messages
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(new_message(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(new_message(b"second".to_vec()))
             .await
             .unwrap();
 
@@ -1459,11 +1461,11 @@ mod tests {
         let mailbox = create_test_mailbox(config).await;
 
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(new_message(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(new_message(b"second".to_vec()))
             .await
             .unwrap();
 
@@ -1487,11 +1489,11 @@ mod tests {
         let mailbox = create_test_mailbox(config).await;
 
         mailbox
-            .enqueue(Message::new(b"low".to_vec()).with_priority(MessagePriority::Low))
+            .enqueue(new_message(b"low".to_vec()).with_priority(MessagePriority::Low))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"high".to_vec()).with_priority(MessagePriority::High))
+            .enqueue(new_message(b"high".to_vec()).with_priority(MessagePriority::High))
             .await
             .unwrap();
 
@@ -1521,9 +1523,9 @@ mod tests {
         );
 
         // Verify signal message has Highest priority
-        let signal_msg = Message::signal(b"signal".to_vec());
-        assert_eq!(signal_msg.priority, MessagePriority::Highest);
-        assert_eq!(message_priority_value(&signal_msg.priority), 5);
+        let signal_msg = signal_message(b"signal".to_vec());
+        assert_eq!(signal_msg.priority(), MessagePriority::Highest);
+        assert_eq!(message_priority_value(&signal_msg.priority()), 5);
     }
 
     /// Test 3: Verify background processor moves messages from internal queue to channel
@@ -1535,7 +1537,7 @@ mod tests {
 
         // Enqueue one message
         mailbox
-            .enqueue(Message::new(b"test".to_vec()).with_priority(MessagePriority::Normal))
+            .enqueue(new_message(b"test".to_vec()).with_priority(MessagePriority::Normal))
             .await
             .unwrap();
 
@@ -1569,11 +1571,11 @@ mod tests {
 
         // Enqueue low priority first, then high priority
         mailbox
-            .enqueue(Message::new(b"low".to_vec()).with_priority(MessagePriority::Low))
+            .enqueue(new_message(b"low".to_vec()).with_priority(MessagePriority::Low))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"high".to_vec()).with_priority(MessagePriority::High))
+            .enqueue(new_message(b"high".to_vec()).with_priority(MessagePriority::High))
             .await
             .unwrap();
 
@@ -1601,11 +1603,11 @@ mod tests {
 
         // Enqueue low priority, then signal (Highest)
         mailbox
-            .enqueue(Message::new(b"low".to_vec()).with_priority(MessagePriority::Low))
+            .enqueue(new_message(b"low".to_vec()).with_priority(MessagePriority::Low))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::signal(b"signal".to_vec()))
+            .enqueue(signal_message(b"signal".to_vec()))
             .await
             .unwrap();
 
@@ -1636,19 +1638,19 @@ mod tests {
 
         // Enqueue in random order
         mailbox
-            .enqueue(Message::new(b"low".to_vec()).with_priority(MessagePriority::Low))
+            .enqueue(new_message(b"low".to_vec()).with_priority(MessagePriority::Low))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"high".to_vec()).with_priority(MessagePriority::High))
+            .enqueue(new_message(b"high".to_vec()).with_priority(MessagePriority::High))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"normal".to_vec()).with_priority(MessagePriority::Normal))
+            .enqueue(new_message(b"normal".to_vec()).with_priority(MessagePriority::Normal))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::signal(b"signal".to_vec()))
+            .enqueue(signal_message(b"signal".to_vec()))
             .await
             .unwrap();
 
@@ -1681,15 +1683,15 @@ mod tests {
         let mailbox = create_default_mailbox().await;
 
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(new_message(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(new_message(b"second".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"target".to_vec()))
+            .enqueue(new_message(b"target".to_vec()))
             .await
             .unwrap();
 
@@ -1710,15 +1712,15 @@ mod tests {
         let mailbox = create_test_mailbox(config).await;
 
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(new_message(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(new_message(b"second".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"third".to_vec()))
+            .enqueue(new_message(b"third".to_vec()))
             .await
             .unwrap(); // Should drop "first"
 
@@ -1752,40 +1754,40 @@ mod tests {
 
     #[tokio::test]
     async fn test_message_metadata() {
-        let message = Message::new(b"test".to_vec())
+        let message = new_message(b"test".to_vec())
             .with_correlation_id("corr-123".to_string())
             .with_reply_to("reply-addr".to_string())
             .with_metadata("type".to_string(), "call".to_string());
 
-        assert_eq!(message.correlation_id, Some("corr-123".to_string()));
-        assert_eq!(message.reply_to, Some("reply-addr".to_string()));
+        assert_eq!(message.correlation_id, "corr-123");
+        assert_eq!(message.reply_to, "reply-addr");
         // TODO: Restore when behavior module is migrated
         // assert_eq!(message.message_type(), crate::behavior::MessageType::Call);
-        assert_eq!(message.metadata.get("type"), Some(&"call".to_string()));
+        assert_eq!(message.headers.get("type"), Some(&"call".to_string()));
     }
 
     // ==========================================================================
     // MESSAGE CREATION TESTS (Lines 89-122)
     // ==========================================================================
 
-    /// Test Message::system() creates system priority message
+    /// Test system_message() creates system priority message
     #[tokio::test]
     async fn test_message_system() {
-        let message = Message::system(b"shutdown".to_vec());
+        let message = system_message(b"shutdown".to_vec());
 
-        assert_eq!(message.priority, MessagePriority::System);
+        assert_eq!(message.priority(), MessagePriority::System);
         assert_eq!(message.payload, b"shutdown");
     }
 
-    /// Test Message::timer() creates timer message with metadata
+    /// Test timer_message() creates timer message with metadata
     #[tokio::test]
     async fn test_message_timer() {
-        let message = Message::timer("heartbeat");
+        let message = timer_message("heartbeat");
 
-        // Check metadata
-        assert_eq!(message.metadata.get("type"), Some(&"timer".to_string()));
+        // Check headers (metadata stored in proto headers)
+        assert_eq!(message.headers.get("type"), Some(&"timer".to_string()));
         assert_eq!(
-            message.metadata.get("timer_name"),
+            message.headers.get("timer_name"),
             Some(&"heartbeat".to_string())
         );
 
@@ -1796,7 +1798,7 @@ mod tests {
     /// Test Message::id() and payload() methods
     #[tokio::test]
     async fn test_message_id_and_payload() {
-        let message = Message::new(b"test-payload".to_vec());
+        let message = new_message(b"test-payload".to_vec());
 
         // ID should be non-empty ULID
         assert!(!message.id().is_empty());
@@ -1809,20 +1811,20 @@ mod tests {
     #[tokio::test]
     async fn test_message_type_str() {
         // Test with message_type field set
-        let msg1 = Message::new(b"test".to_vec()).with_message_type("call".to_string());
+        let msg1 = new_message(b"test".to_vec()).with_message_type("call".to_string());
         assert_eq!(msg1.message_type_str(), "call");
 
         // Test with metadata "type" key (fallback)
         let msg2 =
-            Message::new(b"test".to_vec()).with_metadata("type".to_string(), "cast".to_string());
+            new_message(b"test".to_vec()).with_metadata("type".to_string(), "cast".to_string());
         assert_eq!(msg2.message_type_str(), "cast");
 
         // Test with neither (default to "cast")
-        let msg3 = Message::new(b"test".to_vec());
+        let msg3 = new_message(b"test".to_vec());
         assert_eq!(msg3.message_type_str(), "cast");
 
         // Test message_type takes precedence over metadata
-        let msg4 = Message::new(b"test".to_vec())
+        let msg4 = new_message(b"test".to_vec())
             .with_message_type("info".to_string())
             .with_metadata("type".to_string(), "cast".to_string());
         assert_eq!(msg4.message_type_str(), "info");
@@ -1835,20 +1837,20 @@ mod tests {
     /// Test with_sender() and sender_id() methods
     #[tokio::test]
     async fn test_message_with_sender() {
-        let message = Message::new(b"test".to_vec()).with_sender("actor-123".to_string());
+        let message = new_message(b"test".to_vec()).with_sender("actor-123".to_string());
 
-        assert_eq!(message.sender, Some("actor-123".to_string()));
+        assert_eq!(message.sender_id, "actor-123");
         assert_eq!(message.sender_id(), Some("actor-123"));
 
         // Test message without sender
-        let msg2 = Message::new(b"test".to_vec());
+        let msg2 = new_message(b"test".to_vec());
         assert_eq!(msg2.sender_id(), None);
     }
 
     /// Test with_message_type() method
     #[tokio::test]
     async fn test_message_with_message_type() {
-        let message = Message::new(b"test".to_vec()).with_message_type("workflow_run".to_string());
+        let message = new_message(b"test".to_vec()).with_message_type("workflow_run".to_string());
 
         assert_eq!(message.message_type, "workflow_run");
         assert_eq!(message.message_type_str(), "workflow_run");
@@ -1857,7 +1859,7 @@ mod tests {
     /// Test priority() getter method
     #[tokio::test]
     async fn test_message_priority() {
-        let message = Message::new(b"test".to_vec()).with_priority(MessagePriority::High);
+        let message = new_message(b"test".to_vec()).with_priority(MessagePriority::High);
 
         assert_eq!(message.priority(), MessagePriority::High);
     }
@@ -1865,7 +1867,7 @@ mod tests {
     /// Test builder method chaining
     #[tokio::test]
     async fn test_message_builders_chaining() {
-        let message = Message::new(b"payload".to_vec())
+        let message = new_message(b"payload".to_vec())
             .with_sender("sender-1".to_string())
             .with_message_type("call".to_string())
             .with_priority(MessagePriority::High)
@@ -1873,12 +1875,12 @@ mod tests {
             .with_reply_to("reply-addr".to_string())
             .with_metadata("key".to_string(), "value".to_string());
 
-        assert_eq!(message.sender, Some("sender-1".to_string()));
+        assert_eq!(message.sender_id, "sender-1");
         assert_eq!(message.message_type, "call");
-        assert_eq!(message.priority, MessagePriority::High);
-        assert_eq!(message.correlation_id, Some("corr-456".to_string()));
-        assert_eq!(message.reply_to, Some("reply-addr".to_string()));
-        assert_eq!(message.metadata.get("key"), Some(&"value".to_string()));
+        assert_eq!(message.priority(), MessagePriority::High);
+        assert_eq!(message.correlation_id, "corr-456");
+        assert_eq!(message.reply_to, "reply-addr");
+        assert_eq!(message.headers.get("key"), Some(&"value".to_string()));
     }
 
     // ==========================================================================
@@ -1919,44 +1921,44 @@ mod tests {
         let message = Message::from_proto(&proto_msg);
 
         assert_eq!(message.id, "test-id");
-        assert_eq!(message.sender, Some("sender-123".to_string()));
-        assert_eq!(message.receiver, "receiver-456");
+        assert_eq!(message.sender_id, "sender-123");
+        assert_eq!(message.receiver_id, "receiver-456");
         assert_eq!(message.message_type, "call");
         assert_eq!(message.payload, b"test-payload");
-        assert_eq!(message.priority, MessagePriority::High);
-        assert_eq!(message.correlation_id, Some("corr-1".to_string()));
-        assert_eq!(message.reply_to, Some("reply-1".to_string()));
+        assert_eq!(message.priority(), MessagePriority::High); // 60 is in 50-74 range
+        assert_eq!(message.correlation_id, "corr-1");
+        assert_eq!(message.reply_to, "reply-1");
 
-        // Test normal priority (25-49)
+        // Test normal priority (25-49 range)
         let mut proto_msg2 = proto_msg.clone();
         proto_msg2.priority = 30;
         let message2 = Message::from_proto(&proto_msg2);
-        assert_eq!(message2.priority, MessagePriority::Normal);
+        assert_eq!(message2.priority(), MessagePriority::Normal);
 
-        // Test low priority (< 25)
+        // Test low priority (< 25 range)
         let mut proto_msg3 = proto_msg.clone();
         proto_msg3.priority = 10;
         let message3 = Message::from_proto(&proto_msg3);
-        assert_eq!(message3.priority, MessagePriority::Normal); // Low maps to Normal
+        assert_eq!(message3.priority(), MessagePriority::Low); // 10 < 25 maps to Low
 
         // Test empty sender
         let mut proto_msg4 = proto_msg.clone();
         proto_msg4.sender_id = String::new();
         let message4 = Message::from_proto(&proto_msg4);
-        assert_eq!(message4.sender, None);
+        assert_eq!(message4.sender_id(), None);
 
-        // Test empty receiver (should default to "unknown")
+        // Test empty receiver (from_proto is a clone, so receiver_id stays empty)
         let mut proto_msg5 = proto_msg.clone();
         proto_msg5.receiver_id = String::new();
         let message5 = Message::from_proto(&proto_msg5);
-        assert_eq!(message5.receiver, "unknown");
+        assert_eq!(message5.receiver_id, "");
     }
 
     /// Test to_proto() with all priority levels
     #[tokio::test]
     async fn test_message_to_proto() {
         // Test Highest priority (Signal equivalent)
-        let msg1 = Message::new(b"test".to_vec())
+        let msg1 = new_message(b"test".to_vec())
             .with_priority(MessagePriority::Highest)
             .with_sender("sender-1".to_string())
             .with_correlation_id("corr-1".to_string())
@@ -1966,35 +1968,32 @@ mod tests {
         let proto1 = msg1.to_proto();
         assert_eq!(proto1.priority, 100); // Highest = 100
         assert_eq!(proto1.sender_id, "sender-1");
-        assert_eq!(
-            proto1.headers.get("correlation_id"),
-            Some(&"corr-1".to_string())
-        );
-        assert_eq!(proto1.headers.get("reply_to"), Some(&"reply-1".to_string()));
+        assert_eq!(proto1.correlation_id, "corr-1"); // stored as direct field
+        assert_eq!(proto1.reply_to, "reply-1"); // stored as direct field
         assert_eq!(proto1.headers.get("custom"), Some(&"value".to_string()));
 
         // Test System priority
-        let msg2 = Message::system(b"test".to_vec());
+        let msg2 = system_message(b"test".to_vec());
         let proto2 = msg2.to_proto();
         assert_eq!(proto2.priority, 75); // System = 75
 
         // Test High priority
-        let msg3 = Message::new(b"test".to_vec()).with_priority(MessagePriority::High);
+        let msg3 = new_message(b"test".to_vec()).with_priority(MessagePriority::High);
         let proto3 = msg3.to_proto();
         assert_eq!(proto3.priority, 50); // High = 50
 
         // Test Normal priority
-        let msg4 = Message::new(b"test".to_vec()).with_priority(MessagePriority::Normal);
+        let msg4 = new_message(b"test".to_vec()).with_priority(MessagePriority::Normal);
         let proto4 = msg4.to_proto();
         assert_eq!(proto4.priority, 25); // Normal = 25
 
         // Test Low priority
-        let msg5 = Message::new(b"test".to_vec()).with_priority(MessagePriority::Low);
+        let msg5 = new_message(b"test".to_vec()).with_priority(MessagePriority::Low);
         let proto5 = msg5.to_proto();
         assert_eq!(proto5.priority, 0); // Low = 0
 
         // Test message without sender
-        let msg6 = Message::new(b"test".to_vec());
+        let msg6 = new_message(b"test".to_vec());
         let proto6 = msg6.to_proto();
         assert_eq!(proto6.sender_id, ""); // Empty if no sender
     }
@@ -2012,17 +2011,17 @@ mod tests {
         let mailbox = create_test_mailbox(config).await;
 
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(new_message(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(new_message(b"second".to_vec()))
             .await
             .unwrap();
 
         // Third message should be dropped (DropNewest)
         mailbox
-            .enqueue(Message::new(b"third".to_vec()))
+            .enqueue(new_message(b"third".to_vec()))
             .await
             .unwrap();
 
@@ -2063,16 +2062,16 @@ mod tests {
         let mailbox = create_test_mailbox(config).await;
 
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(new_message(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(new_message(b"second".to_vec()))
             .await
             .unwrap();
 
         // Third message should be rejected
-        let result = mailbox.enqueue(Message::new(b"third".to_vec())).await;
+        let result = mailbox.enqueue(new_message(b"third".to_vec())).await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), MailboxError::Full));
 
@@ -2089,16 +2088,16 @@ mod tests {
         let mailbox = create_test_mailbox(config).await;
 
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(new_message(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(new_message(b"second".to_vec()))
             .await
             .unwrap();
 
         // Third message should return error (Block not yet implemented)
-        let result = mailbox.enqueue(Message::new(b"third".to_vec())).await;
+        let result = mailbox.enqueue(new_message(b"third".to_vec())).await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), MailboxError::Full));
     }
@@ -2119,7 +2118,7 @@ mod tests {
         // Enqueue multiple messages
         for i in 0..10 {
             let payload = format!("msg-{}", i).into_bytes();
-            mailbox.enqueue(Message::new(payload)).await.unwrap();
+            mailbox.enqueue(new_message(payload)).await.unwrap();
         }
 
         // All messages should be in mailbox (random order doesn't drop)
@@ -2164,7 +2163,7 @@ mod tests {
     async fn test_mailbox_send_alias() {
         let mailbox = create_default_mailbox().await;
 
-        mailbox.send(Message::new(b"test".to_vec())).await.unwrap();
+        mailbox.send(new_message(b"test".to_vec())).await.unwrap();
 
         assert_eq!(mailbox.size().await, 1);
 
@@ -2209,7 +2208,7 @@ mod tests {
         // Test message arrives before timeout
         let mailbox2 = create_default_mailbox().await;
         mailbox2
-            .enqueue(Message::new(b"test".to_vec()))
+            .enqueue(new_message(b"test".to_vec()))
             .await
             .unwrap();
 
@@ -2236,11 +2235,11 @@ mod tests {
         let mailbox = create_default_mailbox().await;
 
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(new_message(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(new_message(b"second".to_vec()))
             .await
             .unwrap();
 
@@ -2260,15 +2259,15 @@ mod tests {
         let mailbox = create_default_mailbox().await;
 
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(new_message(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(new_message(b"second".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"third".to_vec()))
+            .enqueue(new_message(b"third".to_vec()))
             .await
             .unwrap();
 
@@ -2297,15 +2296,15 @@ mod tests {
 
         // Add messages
         mailbox
-            .enqueue(Message::new(b"first".to_vec()))
+            .enqueue(new_message(b"first".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"second".to_vec()))
+            .enqueue(new_message(b"second".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"third".to_vec()))
+            .enqueue(new_message(b"third".to_vec()))
             .await
             .unwrap();
 
@@ -2332,7 +2331,7 @@ mod tests {
     /// Test Message to ProtoMessage conversion
     #[test]
     fn test_message_to_channel_message() {
-        let msg = Message::new(b"test payload".to_vec())
+        let msg = new_message(b"test payload".to_vec())
             .with_priority(MessagePriority::High)
             .with_correlation_id("corr-123".to_string())
             .with_reply_to("reply-addr".to_string())
@@ -2398,13 +2397,13 @@ mod tests {
 
         assert_eq!(msg.id, "msg-123");
         assert_eq!(msg.payload, b"test payload");
-        assert_eq!(msg.priority, MessagePriority::High);
-        assert_eq!(msg.correlation_id, Some("corr-123".to_string()));
-        assert_eq!(msg.reply_to, Some("reply-addr".to_string()));
-        assert_eq!(msg.sender, Some("sender-actor".to_string()));
-        assert_eq!(msg.receiver, "receiver-actor");
+        assert_eq!(msg.priority(), MessagePriority::High); // 60 is in 50-74 range
+        assert_eq!(msg.correlation_id, "corr-123");
+        assert_eq!(msg.reply_to, "reply-addr");
+        assert_eq!(msg.sender_id, "sender-actor");
+        assert_eq!(msg.receiver_id, "receiver-actor");
         assert_eq!(msg.message_type, "test_type");
-        assert_eq!(msg.metadata.get("key1"), Some(&"value1".to_string()));
+        assert_eq!(msg.headers.get("key1"), Some(&"value1".to_string()));
     }
 
     /// Test mailbox creation with InMemory backend (default)
@@ -2418,7 +2417,7 @@ mod tests {
             .unwrap();
 
         // Test basic send/receive
-        let msg = Message::new(b"test".to_vec());
+        let msg = new_message(b"test".to_vec());
         mailbox.enqueue(msg.clone()).await.unwrap();
 
         // Wait for processor to move message
@@ -2468,7 +2467,7 @@ mod tests {
             .unwrap();
 
         // Test basic send/receive
-        let msg = Message::new(b"test-sqlite".to_vec());
+        let msg = new_message(b"test-sqlite".to_vec());
         mailbox.enqueue(msg.clone()).await.unwrap();
 
         // Wait for processor to move message
@@ -2507,7 +2506,7 @@ mod tests {
             .unwrap();
 
         // Should work with InMemory backend
-        let msg = Message::new(b"test".to_vec());
+        let msg = new_message(b"test".to_vec());
         mailbox.enqueue(msg).await.unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -2540,7 +2539,7 @@ mod tests {
             .unwrap();
 
         // Should work with custom config
-        let msg = Message::new(b"test".to_vec());
+        let msg = new_message(b"test".to_vec());
         mailbox.enqueue(msg).await.unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -2614,11 +2613,11 @@ mod tests {
 
             // Send messages but don't dequeue (simulating crash)
             mailbox
-                .enqueue(Message::new(b"msg1".to_vec()))
+                .enqueue(new_message(b"msg1".to_vec()))
                 .await
                 .unwrap();
             mailbox
-                .enqueue(Message::new(b"msg2".to_vec()))
+                .enqueue(new_message(b"msg2".to_vec()))
                 .await
                 .unwrap();
 
@@ -2665,7 +2664,7 @@ mod tests {
             // Should be able to receive messages that were sent before crash
             // Note: This depends on SQLite channel recovery implementation
             // For now, we just verify the mailbox can be created and used
-            let msg = Message::new(b"new-msg".to_vec());
+            let msg = new_message(b"new-msg".to_vec());
             mailbox.enqueue(msg).await.unwrap();
 
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -2744,15 +2743,15 @@ mod tests {
 
             // Send messages
             mailbox
-                .enqueue(Message::new(b"msg1".to_vec()))
+                .enqueue(new_message(b"msg1".to_vec()))
                 .await
                 .unwrap();
             mailbox
-                .enqueue(Message::new(b"msg2".to_vec()))
+                .enqueue(new_message(b"msg2".to_vec()))
                 .await
                 .unwrap();
             mailbox
-                .enqueue(Message::new(b"msg3".to_vec()))
+                .enqueue(new_message(b"msg3".to_vec()))
                 .await
                 .unwrap();
 
@@ -2800,7 +2799,7 @@ mod tests {
             // Should be able to receive messages that were sent before crash
             // Note: This depends on SQLite channel recovery implementation
             // For now, verify mailbox can be created and used after "restart"
-            let msg = Message::new(b"new-msg".to_vec());
+            let msg = new_message(b"new-msg".to_vec());
             mailbox.enqueue(msg).await.unwrap();
 
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -2819,11 +2818,11 @@ mod tests {
 
         // Send some messages
         mailbox
-            .enqueue(Message::new(b"msg1".to_vec()))
+            .enqueue(new_message(b"msg1".to_vec()))
             .await
             .unwrap();
         mailbox
-            .enqueue(Message::new(b"msg2".to_vec()))
+            .enqueue(new_message(b"msg2".to_vec()))
             .await
             .unwrap();
 
@@ -2882,7 +2881,7 @@ mod tests {
         // Send multiple messages
         for i in 1..=10 {
             mailbox
-                .enqueue(Message::new(format!("msg{}", i).into_bytes()))
+                .enqueue(new_message(format!("msg{}", i).into_bytes()))
                 .await
                 .unwrap();
         }

@@ -471,15 +471,16 @@ async fn test_lazy_virtual_actors_registration() {
             .await
             .expect("ActorRegistry not found");
 
-        let routing = registry
-            .lookup_routing(
-                &RequestContext::new_without_auth("default".to_string(), "default".to_string()),
-                &actor_id,
-            )
-            .await;
-        assert!(routing.is_ok(), "Lazy virtual actor should be routable");
+        assert!(
+            registry
+                .registered_actor_ids()
+                .read()
+                .await
+                .contains(&actor_id),
+            "Lazy virtual actor should remain registered"
+        );
 
-        // Actor should be accessible via lookup_actor_ref (returns VirtualActorWrapper for lazy)
+        // Actor should be accessible via lookup_actor_ref even before first activation.
         let actor_ref = lookup_actor_ref(&node, &actor_id).await;
         assert!(
             actor_ref.is_ok() && actor_ref.unwrap().is_some(),
@@ -578,14 +579,12 @@ async fn test_mixed_eager_lazy_virtual_actors() {
         assert!(eager_active, "Eager virtual actor should be active");
 
         // Lazy actor should be registered but not active
-        let lazy_routing = registry
-            .lookup_routing(
-                &RequestContext::new_without_auth("default".to_string(), "default".to_string()),
-                &lazy_id,
-            )
-            .await;
         assert!(
-            lazy_routing.is_ok(),
+            registry
+                .registered_actor_ids()
+                .read()
+                .await
+                .contains(&lazy_id),
             "Lazy virtual actor should be registered"
         );
 

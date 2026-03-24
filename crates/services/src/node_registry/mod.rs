@@ -897,7 +897,8 @@ impl NodeRegistry {
         self.evict_expired().await;
         let cache_entries: Vec<NodeRegistration> = {
             let cache = self.cache.read().await;
-            cache.values()
+            cache
+                .values()
                 .filter(|entry| !entry.is_expired())
                 .map(|entry| entry.registration.clone())
                 .collect()
@@ -1873,7 +1874,11 @@ mod tests {
         assert_eq!(by_id.node_address, "http://0.0.0.0:8116");
 
         assert!(
-            registry.lookup_node(&ctx, "_unknown_seed").await.unwrap().is_none(),
+            registry
+                .lookup_node(&ctx, "_unknown_seed")
+                .await
+                .unwrap()
+                .is_none(),
             "placeholder identity should be removed once a concrete node claims the address"
         );
 
@@ -1884,7 +1889,10 @@ mod tests {
             .expect("address lookup should resolve to the concrete node");
         assert_eq!(by_address.node_id, "node-concrete");
 
-        let (nodes, _) = registry.list_nodes(&ctx, Some("heat"), 100, "").await.unwrap();
+        let (nodes, _) = registry
+            .list_nodes(&ctx, Some("heat"), 100, "")
+            .await
+            .unwrap();
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].node_id, "node-concrete");
     }
@@ -2080,8 +2088,14 @@ mod tests {
         };
 
         for (object_id, address) in [
-            ("_unknown_loopback".to_string(), "http://localhost:8114".to_string()),
-            ("db-node-concrete".to_string(), "http://0.0.0.0:8114".to_string()),
+            (
+                "_unknown_loopback".to_string(),
+                "http://localhost:8114".to_string(),
+            ),
+            (
+                "db-node-concrete".to_string(),
+                "http://0.0.0.0:8114".to_string(),
+            ),
         ] {
             registry
                 .object_registry

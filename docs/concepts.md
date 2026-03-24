@@ -632,7 +632,6 @@ For advanced routing, actors receive:
 
 - **URI Path**: Available in `message.uri_path` (full HTTP path)
 - **URI Method**: Available in `message.uri_method` (GET, POST, PUT, DELETE)
-- **Full HTTP Path**: Also available in `message.metadata["http_path"]` (for backward compatibility)
 - **Subpath**: Available in `message.metadata["http_subpath"]` (everything after actor_type)
 
 This enables custom routing within actors (e.g., `/metrics`, `/health`, `/actions/{name}`).
@@ -764,7 +763,7 @@ PlexSpaces implements **two-level isolation** for multi-tenancy:
 actor_registry.register_actor(
     actor_id.clone(),
     sender,
-    Some("counter".to_string()),  // actor_type
+    "counter".to_string(),        // actor_type
     Some("tenant-1".to_string()),  // tenant_id (from RequestContext or node config)
     Some("ns-1".to_string()),     // namespace (from RequestContext or node config, can be empty)
 ).await;
@@ -789,7 +788,6 @@ async fn handle_request(&mut self, ctx: &ActorContext, msg: Message) -> Result<(
         }
     }
     
-    // Also available in metadata for backward compatibility
     if let Some(subpath) = msg.metadata.get("http_subpath") {
         // Custom routing based on subpath
     }

@@ -826,9 +826,9 @@ impl ActorBuilder {
                 ctx,
                 actor_id.clone(),
                 actor_ref.clone(),
-                Some(actor_type),
+                actor_type,
                 actor.context().config.clone(),
-                Some(std::sync::Arc::new(actor) as std::sync::Arc<dyn std::any::Any + Send + Sync>),
+                Some(std::sync::Arc::new(actor) as std::sync::Arc<dyn plexspaces_core::ActorHandle>),
                 None, // behavior_kind not available from builder (actor registers with kind in start())
             )
             .await;

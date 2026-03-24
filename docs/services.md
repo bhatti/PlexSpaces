@@ -36,12 +36,13 @@ This document provides detailed documentation for all PlexSpaces gRPC services a
 
 ## Overview
 
-PlexSpaces exposes all functionality through gRPC services, with optional REST/HTTP gateway support via grpc-gateway annotations. All services follow these principles:
+PlexSpaces exposes remote functionality through gRPC services, with optional REST/HTTP gateway support via grpc-gateway annotations. The service layer is intentionally thin: framework behavior lives in the core crates and services translate HTTP/gRPC requests into calls on those shared implementations. All services follow these principles:
 
 - **Proto-First Design**: All contracts defined in Protocol Buffers
 - **Tenant Isolation**: All operations require `RequestContext` with tenant/namespace
 - **Observability**: Built-in metrics, tracing, and health checks
 - **Security**: mTLS support with configurable authentication
+- **Thin Controllers**: gRPC/HTTP layers orchestrate request handling and delegate business behavior to the framework crates and ServiceLocator-registered services
 
 ### Service Architecture
 
@@ -50,7 +51,7 @@ graph TB
     subgraph Clients["Clients"]
         CLI["CLI"]
         Dashboard["Dashboard"]
-        SDK["SDK/gRPC"]
+        SDK["SDK / Local Decorators"]
         REST["REST/HTTP"]
     end
     
@@ -85,7 +86,7 @@ graph TB
     
     CLI --> gRPC
     Dashboard --> HTTP
-    SDK --> gRPC
+    SDK --> Core
     REST --> HTTP
     
     HTTP --> gRPC
@@ -121,7 +122,6 @@ The ActorService provides comprehensive actor lifecycle management, messaging, a
 | `DeleteActor` | Delete/stop an actor | `DeleteActorRequest` | `DeleteActorResponse` |
 | `SendMessage` | Send message to actor (fire-and-forget) | `SendMessageRequest` | `SendMessageResponse` |
 | `InvokeActor` | HTTP-style actor invocation (FaaS) | `InvokeActorRequest` | `InvokeActorResponse` |
-| `GetOrActivateActor` | Virtual actor activation | `GetOrActivateActorRequest` | `GetOrActivateActorResponse` |
 | `LinkActor` | Create Erlang-style link | `LinkActorRequest` | `LinkActorResponse` |
 | `UnlinkActor` | Remove link | `UnlinkActorRequest` | `UnlinkActorResponse` |
 | `MonitorActor` | Monitor actor lifecycle | `MonitorActorRequest` | `MonitorActorResponse` |

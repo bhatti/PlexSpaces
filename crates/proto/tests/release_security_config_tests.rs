@@ -125,6 +125,8 @@ mod tests {
             framework_info: None,
             base_dir: String::new(),
             wasm_apps_directory: String::new(),
+            default_virtual_actor_config: None,
+            save_wasm_apps: false,
         };
 
         assert!(runtime_config.security.is_some());
@@ -164,6 +166,8 @@ mod tests {
             framework_info: None,
             base_dir: String::new(),
             wasm_apps_directory: String::new(),
+            default_virtual_actor_config: None,
+            save_wasm_apps: false,
         };
 
         let release_spec = ReleaseSpec {

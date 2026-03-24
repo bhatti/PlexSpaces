@@ -835,13 +835,13 @@ actor_ref.tell(event).await?;
 
 ### Unified ShardGroup Client (Data-Parallel Actors)
 
-The Rust SDK provides unified abstractions for ShardGroup (data-parallel actors) inspired by the [Data-Parallel Actors (DPA) paper](https://www.micahlerner.com/2022/06/04/data-parallel-actors-a-programming-model-for-scalable-query-serving-systems.html). The client works for both WASM/internal apps (ServiceLocator) and remote gRPC clients (optional feature).
+The Rust SDK provides unified abstractions for ShardGroup (data-parallel actors) inspired by the [Data-Parallel Actors (DPA) paper](https://www.micahlerner.com/2022/06/04/data-parallel-actors-a-programming-model-for-scalable-query-serving-systems.html). The primary SDK path is in-process and ServiceLocator-backed so embedded and WASM usage stays on the framework-owned implementation instead of making remote calls.
 
 **Key Features**:
-- **Unified API**: Same interface for WASM and gRPC (via `UnifiedShardGroupClient`)
+- **Unified API**: Same high-level API for embedded and WASM/local usage
 - **Boilerplate Removal**: Auto RequestContext, JSON conversion, error handling
 - **Resource-Based Routing**: Labels flow to DataParallelConfig.placement.required_labels (NodePlacement) for scheduler node matching
-- **Canonical API**: `ShardGroupClient` and `UnifiedShardGroupClient` provide map, scatter-gather, and bulk update operations
+- **Canonical API**: `ShardGroupClient` and `UnifiedShardGroupClient` provide map, scatter-gather, and bulk update operations over the same core service traits
 
 **Example: Unified ShardGroup Client**
 
@@ -850,12 +850,8 @@ use plexspaces_sdk::{UnifiedShardGroupClient, PartitionStrategy};
 use std::collections::HashMap;
 use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
 
-// Option 1: WASM/internal (uses ServiceLocator directly)
+// In-process / WASM-local path (uses ServiceLocator directly)
 let mut client = UnifiedShardGroupClient::from_service_locator(service_locator).await?;
-
-// Option 2: Remote gRPC (requires grpc feature, enabled by default)
-#[cfg(feature = "grpc")]
-let mut client = UnifiedShardGroupClient::from_node_addr("http://localhost:8000").await?;
 
 // Create ShardGroup (worker pool)
 let mut labels = HashMap::new();
@@ -914,7 +910,7 @@ use plexspaces_proto::actor::v1::{
     ConsistencyLevel, PartitionStrategy, ShardGroupAggregationStrategy,
 };
 
-let mut client = ShardGroupClient::connect_grpc("http://localhost:8000").await?;
+let mut client = ShardGroupClient::from_service_locator(service_locator.clone()).await?;
 
 let group = client.create_shard_group(
     "pool-1".to_string(),
@@ -950,7 +946,7 @@ let stats = client.bulk_update(
 **Architecture**:
 - **Core Functionality**: Lives in `crates/services/src/actor_service/mod.rs` (ActorService trait)
 - **SDK Decorators**: `UnifiedShardGroupClient` wraps ActorService and removes boilerplate
-- **Feature Flags**: `grpc` feature (enabled by default) for remote clients; WASM builds can disable it
+- **Transport Boundary**: Local SDK usage stays in-process via ServiceLocator; remote gRPC APIs are built separately on top of the same proto/service contracts
 - **Labels Flow**: ShardGroup config.placement.required_labels (NodePlacement) → ActorResourceRequirements.placement → NodeSelector → Node placement
 
 For WASM apps using the simple-actor WIT world, node-local benchmark counters should be recorded
@@ -977,7 +973,7 @@ See [Firecracker Multi-Tenant Example](../examples/rust/embedded/firecracker_mul
 
 Multi-node parallelization is **one logical run** with work **split across nodes**. The **first node** that receives the run is the **leader**; it distributes work to workers on the same or other nodes.
 
-**Rust SDK** (host-side, feature `grpc`): `plexspaces_sdk::leader_worker` provides:
+**Rust SDK** (host-side, in-process): `plexspaces_sdk::leader_worker` provides:
 
 | API | Purpose |
 |-----|---------|
@@ -986,7 +982,7 @@ Multi-node parallelization is **one logical run** with work **split across nodes
 
 **Virtual actors are lazy**: They are created on first message receive. The leader does not call any “ensure” or pre-create step. Deploy the worker type as virtual on all nodes, then send directly to `worker/chunk-1@node-B`, etc.; the target node creates the actor when it receives the first message. This is consistent across all runtimes (Rust, Python, TypeScript, Go).
 
-Core lives in main crates: NodeRegistry, get_actor_service_client, ActorService SpawnActor. The SDK is a thin wrapper over these.
+Core lives in main crates: NodeRegistry, ActorService, scheduling/placement, and the node registry. The SDK is a thin wrapper over these framework-owned services.
 
 **Cross-SDK parity**: All four SDKs expose the same leader-worker API. **Rust** (in-process): `list_worker_node_ids(ctx, service_locator, cluster, page_size)`, `spawn_actor_on_node(ctx, service_locator, node_id, ...)`. **Python**: `LeaderWorkerClient(entry_http_url)`, `client.list_worker_node_ids(cluster=..., page_size=...)`, `client.spawn_actor_on_node(node_id, actor_type, ...)`, plus `list_worker_node_ids(entry_http_url, ...)`. **TypeScript**: `LeaderWorkerClient`, `listWorkerNodeIds()`, `spawnActorOnNode()`. **Go**: `NewLeaderWorkerClient(entryHTTPURL)`, `ListWorkerNodeIds()`, `SpawnActorOnNode()` (and `ListWorkerNodeIds` convenience). Virtual actors are lazy in all; no ensure step.
 
@@ -1686,33 +1682,15 @@ func (w *WorkerActor) Handle(from, msgType, payload string) string {
 
 ---
 
-## Future: gRPC Client SDK
+## Remote API Boundary
 
-The SDK will be extended to support gRPC API clients (not just WASM actors):
+Remote access is provided by the framework's proto-first HTTP/gRPC APIs, not by reimplementing framework behavior inside the SDKs. The intended layering is:
 
-**Why gRPC?**
-- Proto-first design means we already have message definitions
-- Can auto-generate clients for Python, TypeScript, Go, etc.
-- Same API for both WASM actors and external clients
+- **Core crates** own business logic, actor lifecycle, routing, durability, placement, and coordination.
+- **SDKs** are local decorators that remove boilerplate for embedded and WASM usage through ServiceLocator and WIT.
+- **Remote clients** are generated or hand-authored against the proto contracts and call the thin HTTP/gRPC service layer when out-of-process access is required.
 
-**Planned Features**:
-```python
-# Future: gRPC client mode
-from plexspaces import Client
-
-async def main():
-    client = Client("localhost:8094")
-    
-    # Invoke actor (GET = request-reply; POST/PUT/DELETE = fire-and-forget unless invocation=call). Valid invocation: call, cast, info.
-    result = await client.actors.invoke(
-        namespace="default",
-        actor_type="bank_account", 
-        msg_type="deposit",
-        payload={"amount": 100}
-    )
-    
-    # Use TupleSpace
-    await client.tuplespace.write("orders", {"id": "123", "status": "pending"})
+This keeps local SDK use fast and consistent, preserves one implementation of the framework semantics, and lets Python, TypeScript, Go, and Rust share the same proto-first data model for remote interoperability.
     order = await client.tuplespace.read("orders", {"id": "123"})
 ```
 

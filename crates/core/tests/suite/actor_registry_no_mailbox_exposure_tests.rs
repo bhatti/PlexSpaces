@@ -232,7 +232,15 @@ async fn test_register_actor_with_message_sender() {
     // Register actor with MessageSender
     let ctx = create_test_context();
     registry
-        .register_actor(&ctx, actor_id.clone(), sender, None, None, None, None)
+        .register_actor(
+            &ctx,
+            actor_id.clone(),
+            sender,
+            "TestActor".to_string(),
+            None,
+            None,
+            None,
+        )
         .await;
 
     // Verify actor is registered
@@ -259,7 +267,15 @@ async fn test_register_actor_mailbox_not_exposed() {
     // Register actor
     let ctx = create_test_context();
     registry
-        .register_actor(&ctx, actor_id.clone(), sender, None, None, None, None)
+        .register_actor(
+            &ctx,
+            actor_id.clone(),
+            sender,
+            "TestActor".to_string(),
+            None,
+            None,
+            None,
+        )
         .await;
 
     // Verify we can send messages via MessageSender
@@ -289,7 +305,15 @@ async fn test_unregister_actor_removes_message_sender() {
     let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
     let ctx = create_test_context();
     registry
-        .register_actor(&ctx, actor_id.clone(), sender, None, None, None, None)
+        .register_actor(
+            &ctx,
+            actor_id.clone(),
+            sender,
+            "TestActor".to_string(),
+            None,
+            None,
+            None,
+        )
         .await;
 
     // Verify registered
@@ -315,7 +339,15 @@ async fn test_is_actor_activated_checks_message_sender() {
     let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
     let ctx = create_test_context();
     registry
-        .register_actor(&ctx, actor_id.clone(), sender, None, None, None, None)
+        .register_actor(
+            &ctx,
+            actor_id.clone(),
+            sender,
+            "TestActor".to_string(),
+            None,
+            None,
+            None,
+        )
         .await;
 
     // Now activated
@@ -332,7 +364,15 @@ async fn test_multiple_actors_registration() {
         let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
         let ctx = create_test_context();
         registry
-            .register_actor(&ctx, actor_id.clone(), sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id.clone(),
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
     }
 
@@ -370,7 +410,7 @@ async fn test_leader_election_discover_actors_by_namespace() {
             &ctx1,
             actor_id1.clone(),
             Arc::new(TestMessageSender::new(actor_id1.clone())),
-            Some(actor_type.clone()),
+            actor_type.clone(),
             None,
             None,
             None,
@@ -381,7 +421,7 @@ async fn test_leader_election_discover_actors_by_namespace() {
             &ctx2,
             actor_id2.clone(),
             Arc::new(TestMessageSender::new(actor_id2.clone())),
-            Some(actor_type.clone()),
+            actor_type.clone(),
             None,
             None,
             None,
@@ -422,7 +462,7 @@ async fn test_register_actor_deduplicates_actor_type_index_entries() {
             &ctx,
             actor_id.clone(),
             sender.clone(),
-            Some(actor_type.clone()),
+            actor_type.clone(),
             None,
             None,
             None,
@@ -433,7 +473,7 @@ async fn test_register_actor_deduplicates_actor_type_index_entries() {
             &ctx,
             actor_id.clone(),
             sender,
-            Some(actor_type.clone()),
+            actor_type.clone(),
             None,
             None,
             None,

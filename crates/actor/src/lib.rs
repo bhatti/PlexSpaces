@@ -72,12 +72,8 @@ pub mod actor_factory;
 pub mod actor_factory_impl;
 // regular_actor_wrapper removed - ActorRef now implements MessageSender directly
 pub mod service_locator_helpers;
-pub mod virtual_actor_wrapper;
 pub use actor_factory::ActorFactory;
 pub use actor_factory_impl::ActorFactoryImpl;
-pub use virtual_actor_wrapper::VirtualActorWrapper;
-// Re-export register_state_fetcher_callback for tests
-pub use r#mod::register_state_fetcher_callback;
 
 // Actor registry
 // pub mod registry; // TEMPORARILY DISABLED - awaiting migration to object_registry proto

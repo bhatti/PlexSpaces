@@ -310,37 +310,17 @@ async fn test_rust_actor_lock_facet_try_acquire() {
         .actor_registry()
         .await
         .expect("ActorRegistry should be available");
-    let routing1 = actor_registry1
-        .lookup_routing(&ctx1, &actor_id1_typed)
+    assert!(actor_registry1
+        .lookup_actor(&actor_id1_typed)
         .await
-        .expect("Failed to lookup routing");
-    let actor_ref1 = if let Some(routing_info) = routing1 {
-        if routing_info.is_local {
-            let actor_instance = actor_registry1
-                .get_actor_instance(&actor_id1_typed)
-                .await
-                .expect("Actor instance should exist");
-            use plexspaces_actor::Actor;
-            let actor = actor_instance
-                .downcast_ref::<plexspaces_actor::Actor>()
-                .expect("Should be Actor instance");
-            ActorRef::local(
-                actor_id1_typed.clone(),
-                String::new(), // Test namespace
-                actor.mailbox().clone(),
-                node_clone1.service_locator().clone(),
-            )
-        } else {
-            ActorRef::remote(
-                actor_id1_typed.clone(),
-                String::new(), // Test namespace
-                routing_info.node_id,
-                node_clone1.service_locator().clone(),
-            )
-        }
-    } else {
-        panic!("Actor routing not found");
-    };
+        .is_some());
+    let actor_ref1 = ActorRef::remote(
+        actor_id1_typed.clone(),
+        String::new(),
+        String::new(),
+        node_clone1.id().as_str().to_string(),
+        node_clone1.service_locator().clone(),
+    );
 
     // ACT: First actor acquires lock
     let acquire_msg = Message::json(&json!({
@@ -394,37 +374,17 @@ async fn test_rust_actor_lock_facet_try_acquire() {
         .actor_registry()
         .await
         .expect("ActorRegistry should be available");
-    let routing2 = actor_registry2
-        .lookup_routing(&ctx2, &actor_id2_typed)
+    assert!(actor_registry2
+        .lookup_actor(&actor_id2_typed)
         .await
-        .expect("Failed to lookup routing");
-    let actor_ref2 = if let Some(routing_info) = routing2 {
-        if routing_info.is_local {
-            let actor_instance = actor_registry2
-                .get_actor_instance(&actor_id2_typed)
-                .await
-                .expect("Actor instance should exist");
-            use plexspaces_actor::Actor;
-            let actor = actor_instance
-                .downcast_ref::<plexspaces_actor::Actor>()
-                .expect("Should be Actor instance");
-            ActorRef::local(
-                actor_id2_typed.clone(),
-                String::new(), // Test namespace
-                actor.mailbox().clone(),
-                node_clone2.service_locator().clone(),
-            )
-        } else {
-            ActorRef::remote(
-                actor_id2_typed.clone(),
-                String::new(), // Test namespace
-                routing_info.node_id,
-                node_clone2.service_locator().clone(),
-            )
-        }
-    } else {
-        panic!("Actor routing not found");
-    };
+        .is_some());
+    let actor_ref2 = ActorRef::remote(
+        actor_id2_typed.clone(),
+        String::new(),
+        String::new(),
+        node_clone2.id().as_str().to_string(),
+        node_clone2.service_locator().clone(),
+    );
 
     let try_acquire_msg = Message::json(&json!({
         "lock_key": "test-resource-2",

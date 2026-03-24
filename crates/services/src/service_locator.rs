@@ -1770,7 +1770,8 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         &self,
         node_id: &str,
     ) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>> {
-        let (connection_key, node_address) = self.resolve_application_service_target(node_id).await?;
+        let (connection_key, node_address) =
+            self.resolve_application_service_target(node_id).await?;
 
         let connection_manager = self
             .get_grpc_connection_manager()
@@ -2324,6 +2325,12 @@ async fn initialize_services_impl(
     let reply_waiter_registry = Arc::new(ReplyWaiterRegistry::new());
     let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
     let facet_manager = actor_registry.facet_manager().clone();
+    actor_registry
+        .set_reply_waiter_registry(reply_waiter_registry.clone())
+        .await;
+    actor_registry
+        .set_virtual_actor_manager(virtual_actor_manager.clone())
+        .await;
 
     // Phase 1: Unified Lifecycle - Create and register FacetRegistry with default factories
     // FacetRegistry allows applications to create facets from proto configurations
@@ -2465,8 +2472,8 @@ async fn initialize_services_impl(
         .register_actor_factory(factory_trait.clone())
         .await;
 
-    // Set ActorFactory on ActorRegistry for ActivationProvider.activate_actor
-    // This enables ReminderFacet and other facets to activate virtual actors via ActorRegistry
+    // Set ActorFactory on ActorRegistry so local ask/tell can activate virtual actors and
+    // create temporary senders without routing through node-specific wrapper logic.
     actor_registry.set_actor_factory(factory_trait).await;
 
     if tracing::enabled!(tracing::Level::TRACE) {

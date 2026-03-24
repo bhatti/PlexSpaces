@@ -9,28 +9,28 @@
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 mod actor_integration_tests {
 
-/// Helper to create a test message
-fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
-    plexspaces_core::Message {
-        id: ulid::Ulid::new().to_string(),
-        payload,
-        ..Default::default()
+    /// Helper to create a test message
+    fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
+        plexspaces_core::Message {
+            id: ulid::Ulid::new().to_string(),
+            payload,
+            ..Default::default()
+        }
     }
-}
 
-    use plexspaces_journaling::*;
-    #[cfg(feature = "sqlite-backend")]
-    use plexspaces_journaling::sql::SqliteJournalStorage;
-    #[cfg(feature = "postgres-backend")]
-    use plexspaces_journaling::sql::PostgresJournalStorage;
-    use plexspaces_core::{ActorContext, BehaviorError, BehaviorType, Actor as ActorTrait};
+    use async_trait::async_trait;
     use plexspaces_actor::Actor as ActorStruct;
     use plexspaces_core::Message;
-    use plexspaces_mailbox::{Mailbox, MailboxConfig, mailbox_config_default};
-    use async_trait::async_trait;
+    use plexspaces_core::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType};
+    #[cfg(feature = "postgres-backend")]
+    use plexspaces_journaling::sql::PostgresJournalStorage;
+    #[cfg(feature = "sqlite-backend")]
+    use plexspaces_journaling::sql::SqliteJournalStorage;
+    use plexspaces_journaling::*;
+    use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
+    use serde_json::Value as JsonValue;
     use std::sync::Arc;
     use tokio::sync::RwLock;
-    use serde_json::Value as JsonValue;
 
     /// Test actor: Counter with state
     struct CounterActor {
@@ -81,12 +81,13 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
     /// 4. Verify state is restored through replay
     #[tokio::test]
     async fn test_actor_replay_with_handler() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         #[cfg(feature = "sqlite-backend")]
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
         let backend = JournalBackend::JournalBackendPostgres as i32;
-        
+
         let config = DurabilityConfig {
             backend,
             checkpoint_interval: 1000, // No checkpointing for this test
@@ -99,7 +100,9 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         };
 
         let behavior = Box::new(CounterActor::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor".to_string())
+            .await
+            .unwrap();
         let actor_id = "counter-actor".to_string();
 
         // Create actor
@@ -134,7 +137,7 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
             let mut msg = create_test_message(format!("increment-{}", i).into_bytes());
             msg.message_type = "increment".to_string();
             msg.receiver_id = actor_id.clone();
-            
+
             // Send message to actor (this will be journaled by DurabilityFacet)
             actor.send(msg).await.unwrap();
         }
@@ -154,7 +157,9 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
 
         // Restart actor (simulate crash recovery)
         let behavior2 = Box::new(CounterActor::new());
-        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone()).await.unwrap();
+        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone())
+            .await
+            .unwrap();
         let mut actor2 = ActorStruct::new(
             actor_id.clone(),
             behavior2,
@@ -183,7 +188,10 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
 
         // Verify entries still exist
         let entries_after = storage.replay_from(&actor_id, 0).await.unwrap();
-        assert!(entries_after.len() >= 5, "Entries should persist after restart");
+        assert!(
+            entries_after.len() >= 5,
+            "Entries should persist after restart"
+        );
     }
 
     /// Test: Actor replay with checkpoint
@@ -196,12 +204,13 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
     /// 5. Verify checkpoint + delta replay works
     #[tokio::test]
     async fn test_actor_replay_with_checkpoint() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         #[cfg(feature = "sqlite-backend")]
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
         let backend = JournalBackend::JournalBackendPostgres as i32;
-        
+
         let config = DurabilityConfig {
             backend,
             checkpoint_interval: 10, // Checkpoint every 10 messages
@@ -214,7 +223,9 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         };
 
         let behavior = Box::new(CounterActor::new());
-        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor-2".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor-2".to_string())
+            .await
+            .unwrap();
         let actor_id = "counter-actor-2".to_string();
 
         let mut actor = ActorStruct::new(
@@ -255,7 +266,9 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         let checkpoint = Checkpoint {
             actor_id: actor_id.clone(),
             sequence: 20, // 10 messages * 2 entries
-            timestamp: Some(plexspaces_proto::prost_types::Timestamp::from(std::time::SystemTime::now())),
+            timestamp: Some(plexspaces_proto::prost_types::Timestamp::from(
+                std::time::SystemTime::now(),
+            )),
             state_data: 10u64.to_le_bytes().to_vec(), // count = 10
             compression: CompressionType::CompressionTypeNone as i32,
             metadata: Default::default(),
@@ -278,7 +291,9 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
 
         // Restart actor
         let behavior2 = Box::new(CounterActor::new());
-        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone()).await.unwrap();
+        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone())
+            .await
+            .unwrap();
         let mut actor2 = ActorStruct::new(
             actor_id.clone(),
             behavior2,
@@ -304,7 +319,11 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
 
         // Verify checkpoint exists (may be higher due to automatic checkpointing)
         let checkpoint_after = storage.get_latest_checkpoint(&actor_id).await.unwrap();
-        assert!(checkpoint_after.sequence >= 20, "Checkpoint should be at sequence >= 20 (got {})", checkpoint_after.sequence);
+        assert!(
+            checkpoint_after.sequence >= 20,
+            "Checkpoint should be at sequence >= 20 (got {})",
+            checkpoint_after.sequence
+        );
     }
 
     /// Test: Actor replay with StateLoader (automatic state loading)
@@ -316,12 +335,13 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
     /// 4. Verify state is automatically restored
     #[tokio::test]
     async fn test_actor_replay_with_state_loader() {
-        let storage: Arc<dyn JournalStorage> = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
+        let storage: Arc<dyn JournalStorage> =
+            Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         #[cfg(feature = "sqlite-backend")]
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
         let backend = JournalBackend::JournalBackendPostgres as i32;
-        
+
         let config = DurabilityConfig {
             backend,
             checkpoint_interval: 1000,
@@ -337,7 +357,9 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         let behavior = Box::new(CounterActorWrapper {
             counter: Arc::clone(&counter),
         });
-        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor-3".to_string()).await.unwrap();
+        let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor-3".to_string())
+            .await
+            .unwrap();
         let actor_id = "counter-actor-3".to_string();
 
         let mut actor = ActorStruct::new(
@@ -360,7 +382,7 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         // checkpoint_timeout is Option<Duration> which doesn't implement Serialize
         // Skip it - DurabilityFacet will use default if not provided
         let mut facet = DurabilityFacet::new(storage.clone(), config_value, 50);
-        
+
         // Set StateLoader for automatic state loading
         let state_loader = CounterStateLoader {
             counter: Arc::clone(&counter),
@@ -385,7 +407,9 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         let checkpoint = Checkpoint {
             actor_id: actor_id.clone(),
             sequence: 10,
-            timestamp: Some(plexspaces_proto::prost_types::Timestamp::from(std::time::SystemTime::now())),
+            timestamp: Some(plexspaces_proto::prost_types::Timestamp::from(
+                std::time::SystemTime::now(),
+            )),
             state_data: 5u64.to_le_bytes().to_vec(), // count = 5
             compression: CompressionType::CompressionTypeNone as i32,
             metadata: Default::default(),
@@ -400,7 +424,9 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
         let behavior2 = Box::new(CounterActorWrapper {
             counter: Arc::clone(&counter2),
         });
-        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone()).await.unwrap();
+        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone())
+            .await
+            .unwrap();
         let mut actor2 = ActorStruct::new(
             actor_id.clone(),
             behavior2,
@@ -469,11 +495,9 @@ fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
             if state_data.len() < 8 {
                 return Ok(serde_json::json!({ "count": 0 }));
             }
-            let count = u64::from_le_bytes(
-                state_data[0..8].try_into().map_err(|_| {
-                    JournalError::Serialization("Invalid state data length".to_string())
-                })?,
-            );
+            let count = u64::from_le_bytes(state_data[0..8].try_into().map_err(|_| {
+                JournalError::Serialization("Invalid state data length".to_string())
+            })?);
             Ok(serde_json::json!({ "count": count }))
         }
 

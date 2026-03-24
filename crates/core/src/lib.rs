@@ -36,7 +36,7 @@ pub mod behavior_factory;
 pub use behavior_factory::{BehaviorFactory, BehaviorFactoryError, BehaviorRegistry};
 // registry module removed - replaced by object-registry
 pub mod actor_context;
-pub use actor_context::{ActivationProvider, LinkProvider};
+pub use actor_context::LinkProvider;
 pub mod actor_registry;
 pub mod service_trait;
 pub mod service_wrappers;
@@ -70,7 +70,7 @@ pub mod virtual_actor_manager;
 pub mod virtual_actor_registration;
 pub use virtual_actor_lifecycle_facet::{VirtualActorLifecycleFacet, VirtualActorLifecycleState};
 pub mod actor_state_checker;
-pub use actor_state_checker::ActorStateFetcher;
+pub use actor_state_checker::ActorHandle;
 pub mod facet_service_wrapper;
 pub use facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 pub mod message_metrics;
@@ -126,9 +126,7 @@ pub use exit_reason::{ExitAction, ExitReason};
 // ObjectRegistration is re-exported from proto via actor_context module
 pub use actor_context::ObjectRegistration;
 // Re-export ActorRegistry and related types
-pub use actor_registry::{
-    ActorRegistry, ActorRegistryError, ActorRoutingInfo, MonitorLink, TemporarySenderEntry,
-};
+pub use actor_registry::{ActorRegistry, ActorRegistryError, MonitorLink, TemporarySenderEntry};
 // Re-export VirtualActorManager and VirtualActorMetadata (source of truth for virtual actors)
 pub use virtual_actor_manager::{VirtualActorError, VirtualActorManager, VirtualActorMetadata};
 // Re-export virtual actor registration helper

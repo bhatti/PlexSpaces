@@ -821,36 +821,6 @@ impl ActorRef {
         );
         let _guard = span.enter();
 
-        // VIRTUAL ACTOR CHECK: For lazy virtual actors, ensure they're activated before sending
-        // This handles the case where lookup_actor_ref() creates an ActorRef from a lazy virtual actor's mailbox
-        // but the actor isn't active yet. We need to trigger activation via VirtualActorWrapper.
-        // CRITICAL: This check MUST happen BEFORE sending to mailbox to ensure lazy activation works
-
-        // COMMENTED OUT: Testing if this virtual actor check is redundant
-        // if let Some(manager) = self.service_locator().virtual_actor_manager().await {
-        //     let is_virtual = manager.is_virtual(&actor_id).await;
-        //     let is_active = manager.is_active(&actor_id).await;
-        //     if is_virtual && !is_active {
-        //         // Lazy virtual actor that isn't active - use VirtualActorWrapper to trigger activation
-        //         // Get VirtualActorWrapper from registry (it should be there for lazy virtual actors)
-        //
-        //         if let Some(registry) = self.service_locator().actor_registry().await {
-        //             if let Some(virtual_wrapper) = registry.lookup_actor(&actor_id).await {
-        //                 // VirtualActorWrapper will handle activation and message delivery
-        //                 return virtual_wrapper.tell(message).await
-        //                     .map_err(|e| ActorRefError::SendFailed(format!("VirtualActorWrapper.tell() failed: {}", e)));
-        //             } else {
-        //                 tracing::warn!("[TELL] VirtualActorWrapper not found in registry: actor_id={}", actor_id);
-        //             }
-        //         } else {
-        //             tracing::warn!("[TELL] ActorRegistry not found: actor_id={}", actor_id);
-        //         }
-        //     } else if is_virtual && is_active {
-        //         // Active virtual actor - update last_access for LRU tracking
-        //         manager.update_last_access(&actor_id).await;
-        //     }
-        // }
-
         // Get ReplyWaiterRegistry once for all reply routing checks
         let waiter_registry: Option<Arc<plexspaces_core::ReplyWaiterRegistry>> =
             self.service_locator().reply_waiter_registry().await;
@@ -1374,7 +1344,6 @@ impl ActorRef {
             .map(|_| ()) // Ignore message_id return value
             .map_err(|e| ActorRefError::SendFailed(format!("ActorService::send() failed: {}", e)))
     }
-
 }
 
 impl std::fmt::Debug for ActorRef {
@@ -1533,7 +1502,7 @@ mod tests {
                     &ctx,
                     "test-actor@node1".to_string(),
                     sender,
-                    None,
+                    "TestActor".to_string(),
                     None,
                     None,
                     None,
@@ -1704,7 +1673,7 @@ mod tests {
                     &ctx,
                     "test-actor@node1".to_string(),
                     sender,
-                    None,
+                    "TestActor".to_string(),
                     None,
                     None,
                     None,
@@ -1859,7 +1828,7 @@ mod tests {
                     &ctx,
                     "target-actor@node1".to_string(),
                     sender,
-                    None,
+                    "TestActor".to_string(),
                     None,
                     None,
                     None,
@@ -2034,7 +2003,7 @@ mod tests {
                     &ctx,
                     "target@node1".to_string(),
                     sender,
-                    None,
+                    "TestActor".to_string(),
                     None,
                     None,
                     None,
@@ -2279,7 +2248,7 @@ mod tests {
                     &ctx,
                     "actor@node1".to_string(),
                     sender,
-                    None,
+                    "TestActor".to_string(),
                     None,
                     None,
                     None,

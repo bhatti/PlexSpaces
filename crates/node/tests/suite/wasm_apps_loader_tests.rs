@@ -436,8 +436,8 @@ async fn test_node_startup_is_not_blocked_by_auto_deploy() {
     let original_value = std::env::var(env_var_name).ok();
     std::env::set_var(env_var_name, webapps_path.to_str().unwrap());
 
-    let reserved_port = std::net::TcpListener::bind("127.0.0.1:0")
-        .expect("Failed to reserve test port");
+    let reserved_port =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("Failed to reserve test port");
     let grpc_port = reserved_port.local_addr().unwrap().port();
     drop(reserved_port);
 

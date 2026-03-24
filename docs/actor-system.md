@@ -1232,14 +1232,14 @@ let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 
 Used by WASM host functions to provide JSON-in/JSON-out ask semantics. When a WASM actor calls the `ask` host function, this implementation:
 1. Accepts a JSON request from the WASM guest
-2. Looks up the target actor via `ActorRegistry::lookup_actor()`
-3. Delegates to the target's `ActorRef` (which uses `core::MessageSender::ask()`)
+2. Routes the local request through `ActorRegistry::ask()`
+3. Lets the registry activate virtual actors on demand before delivering to the target runtime
 4. Returns the JSON response back to the WASM guest
 
 ```rust
 // WASM guest calls host function: ask(target_actor_id, json_payload)
-// Internally, wasm_runtime::MessageSender::ask() resolves the ActorRef
-// via ActorRegistry and delegates to core::MessageSender::ask()
+// Internally, the host routes local delivery through ActorRegistry::ask()
+// so activation and reply handling stay centralized.
 ```
 
 This two-layer design keeps the core ask pattern clean while allowing WASM actors to use a simplified JSON-based interface without needing direct `ActorRef` handles.
@@ -1271,26 +1271,23 @@ Messages are routed automatically based on actor location:
 ```mermaid
 graph TB
     Sender[ActorRef]
+    Route[Routing Layer]
     AR[ActorRegistry]
+    RS["Remote Service"]
     
-    Sender -->|tell/ask| AR
-    AR -->|lookup_routing| Local{Local Node?}
+    Sender -->|tell/ask| Route
+    Route --> Local{Local Node?}
     
-    Local -->|Yes| MB[Mailbox]
-    Local -->|No| NodeLookup[Node Lookup]
-    
-    NodeLookup --> Cache{Cached?}
-    Cache -->|Yes| GRPC[gRPC Client]
-    Cache -->|No| OR[ObjectRegistry]
-    
-    OR -->|discover| NodeInfo[Node Address]
-    NodeInfo -->|create| GRPC
-    
+    Local -->|Yes| AR
+    Local -->|No| RS
+    AR -->|activate if needed| MB[Mailbox]
+    RS -->|node registry lookup| GRPC[gRPC Client]
     MB --> Actor[Actor]
     GRPC --> Remote[Remote Node]
     Remote --> RemoteActor[Remote Actor]
     
     style Sender fill:#AA96DA,stroke:#C44569,stroke-width:2px,color:#fff
+    style Route fill:#74B9FF,stroke:#0984E3,stroke-width:2px,color:#000
     style AR fill:#6C5CE7,stroke:#4834D4,stroke-width:2px,color:#fff
     style MB fill:#95E1D3,stroke:#2D9CDB,stroke-width:2px,color:#000
     style GRPC fill:#FCE38A,stroke:#F38181,stroke-width:2px,color:#000
@@ -1309,17 +1306,17 @@ graph TB
 
 ### Registration During Supervision
 
-Actors are registered in the `ActorRegistry` during `supervisor.add_child()`. When a supervisor adds a child actor, the namespace is extracted from the actor ID (using the canonical `name:namespace@node_id` format) and stored as part of the registry metadata. This registration is what enables `lookup_actor()` to resolve actor references for the ask pattern (particularly important for `wasm_runtime::MessageSender::ask()`, which relies on registry lookups to find the target `ActorRef`).
+Actors are registered in the `ActorRegistry` during `supervisor.add_child()`. When a supervisor adds a child actor, the namespace is extracted from the actor ID (using the canonical `name:namespace@node_id` format) and stored as part of the registry metadata. This registration is what enables `ActorRegistry::tell()` and `ActorRegistry::ask()` to resolve local delivery and virtual activation consistently.
 
 ```rust
 // During supervisor.add_child(), the actor is registered:
 // 1. Actor ID "worker:my-app@node1" is parsed
 // 2. Namespace "my-app" is extracted from the ID
 // 3. Actor is registered in ActorRegistry with namespace metadata
-// 4. lookup_actor("worker:my-app@node1") now resolves to the ActorRef
+// 4. ActorRegistry::tell()/ask() can now route to "worker:my-app@node1"
 
 supervisor.add_child(child_spec).await?;
-// Actor is now registered and discoverable via ActorRegistry
+// Actor is now registered and routable via ActorRegistry
 ```
 
 ### Namespace Isolation
@@ -1770,32 +1767,35 @@ Each facet can:
 
 ## Virtual Actor Activation Details
 
-### Get or Activate Actor API
+### Invoke Actor API
 
-The `get_or_activate_actor` API provides a convenient way to get an existing actor or create and activate it if it doesn't exist. This is particularly useful for virtual actors that are activated on-demand.
+Virtual actors are activated on demand through `invoke_actor`. The public API stays actor-type based, and the framework performs actor lookup first, then internally activates or reinstantiates the virtual actor from stored metadata when no active instance is found.
 
 ```rust
-use plexspaces_proto::v1::actor_service::{ActorServiceClient, GetOrActivateActorRequest};
+use plexspaces_proto::v1::actor_service::{ActorServiceClient, InvokeActorRequest};
 use tonic::Request;
 
 let mut client = ActorServiceClient::connect("http://localhost:9000").await?;
 
-let request = GetOrActivateActorRequest {
-    actor_id: "user-123@node1".to_string(),
-    actor_type: "UserSession".to_string(),
-    initial_state: vec![],  // Optional initial state
-    config: None,            // Optional actor configuration
-    force_activation: false, // Force activation even if actor exists
+let request = InvokeActorRequest {
+    namespace: "default".to_string(),
+    actor_type: "user-session:user-123".to_string(),
+    http_method: "GET".to_string(),
+    payload: vec![],
+    headers: Default::default(),
+    query_params: Default::default(),
+    path: String::new(),
+    subpath: String::new(),
+    ask: true,
+    msg_type_override: String::new(),
+    timeout: None,
 };
 
-let response = client.get_or_activate_actor(Request::new(request)).await?;
+let response = client.invoke_actor(Request::new(request)).await?;
 let response_inner = response.into_inner();
 
-println!("Actor ID: {}", response_inner.actor_ref);
-println!("Was activated: {}", response_inner.was_activated);
-if let Some(actor) = response_inner.actor {
-    println!("Actor state: {:?}", actor.state);
-}
+println!("Actor ID: {}", response_inner.actor_id);
+println!("Success: {}", response_inner.success);
 ```
 
 **Behavior:**
@@ -1858,26 +1858,23 @@ sequenceDiagram
 ```mermaid
 graph TB
     Sender[ActorRef]
+    Route[Routing Layer]
     AR[ActorRegistry]
+    RS["Remote Service"]
     
-    Sender -->|tell/ask| AR
-    AR -->|lookup_routing| Local{Local Node?}
+    Sender -->|tell/ask| Route
+    Route --> Local{Local Node?}
     
-    Local -->|Yes| MB[Mailbox]
-    Local -->|No| NodeLookup[Node Lookup]
-    
-    NodeLookup --> Cache{Cached?}
-    Cache -->|Yes| GRPC[gRPC Client]
-    Cache -->|No| OR[ObjectRegistry]
-    
-    OR -->|discover| NodeInfo[Node Address]
-    NodeInfo -->|create| GRPC
-    
+    Local -->|Yes| AR
+    Local -->|No| RS
+    AR -->|activate if needed| MB[Mailbox]
+    RS -->|node registry lookup| GRPC[gRPC Client]
     MB --> Actor[Actor]
     GRPC --> Remote[Remote Node]
     Remote --> RemoteActor[Remote Actor]
     
     style Sender fill:#AA96DA,stroke:#C44569,stroke-width:2px,color:#fff
+    style Route fill:#74B9FF,stroke:#0984E3,stroke-width:2px,color:#000
     style AR fill:#6C5CE7,stroke:#4834D4,stroke-width:2px,color:#fff
     style MB fill:#95E1D3,stroke:#2D9CDB,stroke-width:2px,color:#000
     style GRPC fill:#FCE38A,stroke:#F38181,stroke-width:2px,color:#000
@@ -1976,4 +1973,3 @@ The PlexSpaces unified actor system provides:
 - [Examples](../examples/README.md) - More examples
 - [Durability](durability.md) - Durability and journaling
 - [Security](security.md) - Security features
-

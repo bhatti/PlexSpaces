@@ -908,7 +908,7 @@ message ConnectNodesRequest {
   // Optional: cluster name for grouping connected nodes.
   // If specified, nodes are tagged with this cluster for filtering.
   // Must be alphanumeric with hyphens, max 63 characters (DNS label format).
-  string cluster = 2 [(buf.validate.field).string.max_len = 63];  // Optional: timeout for each connection attempt.
+  string cluster = 2 [(buf.validate.field).string.max_len = 63]; // Optional: timeout for each connection attempt.
   // Default: 5 seconds if not specified.
   // Range: 1 second to 60 seconds.
   google.protobuf.Duration timeout = 3 [(buf.validate.field).duration = {

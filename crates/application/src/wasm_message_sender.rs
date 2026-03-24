@@ -277,7 +277,11 @@ impl MessageSender for ActorServiceMessageSender {
             "WASM ask: sending request via ActorService"
         );
 
-        match self.actor_service.send_and_wait(to, msg, Some(timeout)).await {
+        match self
+            .actor_service
+            .send_and_wait(to, msg, Some(timeout))
+            .await
+        {
             Ok(reply) => {
                 debug!(
                     request_id = %request_id,
@@ -660,9 +664,12 @@ impl MessageSender for ActorServiceMessageSender {
         let local_node_id = self.local_node_id().await?;
         let resolved = self.resolve_node_endpoint(target_node).await.ok();
         let target_is_address = Self::looks_like_node_address(target_node);
-        let (resolved_node_id, resolved_node_address) = resolved
-            .clone()
-            .unwrap_or_else(|| (target_node.to_string(), Self::normalize_node_address(target_node)));
+        let (resolved_node_id, resolved_node_address) = resolved.clone().unwrap_or_else(|| {
+            (
+                target_node.to_string(),
+                Self::normalize_node_address(target_node),
+            )
+        });
 
         if resolved_node_id == local_node_id {
             let manager = self
@@ -726,10 +733,7 @@ mod tests {
             _actor_id: &str,
             _actor_type: &str,
             _initial_state: Vec<u8>,
-        ) -> Result<
-            plexspaces_core::ActorRef,
-            Box<dyn std::error::Error + Send + Sync>,
-        > {
+        ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
             Err("not needed for this test".into())
         }
 
@@ -751,7 +755,10 @@ mod tests {
                 actor_id,
                 "heat-diffusion-1//worker::heat-diffusion-rust@test-node-8093"
             );
-            assert_eq!(message.sender_id, "leader::heat-diffusion-rust@test-node-8091");
+            assert_eq!(
+                message.sender_id,
+                "leader::heat-diffusion-rust@test-node-8091"
+            );
             assert_eq!(message.message_type, "init");
             Ok(Message {
                 id: "res-1".to_string(),
@@ -778,11 +785,9 @@ mod tests {
             },
         ];
 
-        let by_id = ActorServiceMessageSender::matching_node_registration(
-            "test-node-8093",
-            &registrations,
-        )
-        .expect("node id should resolve");
+        let by_id =
+            ActorServiceMessageSender::matching_node_registration("test-node-8093", &registrations)
+                .expect("node id should resolve");
         assert_eq!(by_id.node_address, "http://0.0.0.0:8093");
 
         let by_address = ActorServiceMessageSender::matching_node_registration(

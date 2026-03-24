@@ -62,21 +62,29 @@ impl ActorTrait for TestBehavior {
 }
 
 async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
+    use plexspaces_core::BehaviorRegistry;
     use plexspaces_node::create_default_service_locator;
-    // create_default_service_locator already initializes all services including:
-    // - ActorRegistry
-    // - VirtualActorManager
-    // - ReplyWaiterRegistry
-    // - FacetManager
-    // - FacetRegistry
-    // - ProcessGroupRegistry
-    create_default_service_locator(Some("test-node".to_string()), None, None).await
+    let sl = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    // Register a BehaviorRegistry with test actor types so spawn_actor can create behaviors
+    let registry = Arc::new(BehaviorRegistry::new());
+    registry
+        .register("test", |_args| {
+            Box::pin(async move { Ok(Box::new(TestBehavior) as Box<dyn plexspaces_core::Actor>) })
+        })
+        .await;
+    registry
+        .register("GenServer", |_args| {
+            Box::pin(async move { Ok(Box::new(TestBehavior) as Box<dyn plexspaces_core::Actor>) })
+        })
+        .await;
+    sl.register_behavior_registry(registry).await;
+    sl
 }
 
 #[tokio::test]
 async fn test_spawn_built_actor_registers_message_sender_only() {
     let service_locator = create_test_service_locator().await;
-    let factory = ActorFactoryImpl::new(service_locator.clone());
+    let factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
 
     // Get ActorRegistry to verify registration
     let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
@@ -120,7 +128,7 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
 #[tokio::test]
 async fn test_spawn_actor_registers_message_sender_only() {
     let service_locator = create_test_service_locator().await;
-    let factory = ActorFactoryImpl::new(service_locator.clone());
+    let factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
 
     // Get ActorRegistry to verify registration
     let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
@@ -156,7 +164,7 @@ async fn test_spawn_actor_registers_message_sender_only() {
 #[tokio::test]
 async fn test_multiple_actors_spawned_via_factory() {
     let service_locator = create_test_service_locator().await;
-    let factory = ActorFactoryImpl::new(service_locator.clone());
+    let factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
     let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
 
     // Spawn multiple actors using spawn_actor

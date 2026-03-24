@@ -272,7 +272,9 @@ fn application_info_to_json(info: &ApplicationInfo) -> serde_json::Value {
     })
 }
 
-fn value_to_string_map(value: Option<&serde_json::Value>) -> Result<HashMap<String, String>, String> {
+fn value_to_string_map(
+    value: Option<&serde_json::Value>,
+) -> Result<HashMap<String, String>, String> {
     let Some(value) = value else {
         return Ok(HashMap::new());
     };
@@ -416,7 +418,10 @@ fn make_call_message(payload: &serde_json::Value) -> Result<Message, String> {
     })
 }
 
-fn make_message_with_type(payload: &serde_json::Value, message_type: &str) -> Result<Message, String> {
+fn make_message_with_type(
+    payload: &serde_json::Value,
+    message_type: &str,
+) -> Result<Message, String> {
     let mut message = make_call_message(payload)?;
     message.message_type = message_type.to_string();
     Ok(message)
@@ -486,7 +491,9 @@ fn parse_collective_reduction(value: Option<&str>) -> CollectiveReduction {
     }
 }
 
-fn shard_query_response_to_json(shard: plexspaces_proto::actor::v1::ShardQueryResponse) -> serde_json::Value {
+fn shard_query_response_to_json(
+    shard: plexspaces_proto::actor::v1::ShardQueryResponse,
+) -> serde_json::Value {
     let payload = shard
         .response
         .and_then(|message| serde_json::from_slice::<serde_json::Value>(&message.payload).ok())
@@ -1583,7 +1590,9 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Err(err) => return format!("ERROR: invalid placement: {}", err),
         };
         let initial_state = match serde_json::to_vec(
-            request.get("initial_state").unwrap_or(&serde_json::Value::Null),
+            request
+                .get("initial_state")
+                .unwrap_or(&serde_json::Value::Null),
         ) {
             Ok(bytes) => bytes,
             Err(err) => return format!("ERROR: invalid initial_state: {}", err),
@@ -1597,10 +1606,14 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
                 group_id: group_id.clone(),
                 shard_count,
                 partition_strategy: parse_partition_strategy(
-                    request.get("partition_strategy").and_then(|value| value.as_str()),
+                    request
+                        .get("partition_strategy")
+                        .and_then(|value| value.as_str()),
                 ) as i32,
                 rebalance_policy: parse_rebalance_policy(
-                    request.get("rebalance_policy").and_then(|value| value.as_str()),
+                    request
+                        .get("rebalance_policy")
+                        .and_then(|value| value.as_str()),
                 ) as i32,
                 placement,
             }),
@@ -1654,7 +1667,9 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
                 .to_string(),
             updates,
             consistency_level: parse_consistency_level(
-                request.get("consistency_level").and_then(|value| value.as_str()),
+                request
+                    .get("consistency_level")
+                    .and_then(|value| value.as_str()),
             ) as i32,
             timeout: parse_timeout_duration(request.get("timeout_ms")),
             wait_for_responses: request
@@ -1908,7 +1923,9 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Ok(response) => {
                 let result = response
                     .result
-                    .and_then(|message| serde_json::from_slice::<serde_json::Value>(&message.payload).ok())
+                    .and_then(|message| {
+                        serde_json::from_slice::<serde_json::Value>(&message.payload).ok()
+                    })
                     .unwrap_or(serde_json::Value::Null);
                 let shard_responses: Vec<serde_json::Value> = response
                     .shard_responses
@@ -1972,7 +1989,9 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Ok(response) => {
                 let result = response
                     .result
-                    .and_then(|message| serde_json::from_slice::<serde_json::Value>(&message.payload).ok())
+                    .and_then(|message| {
+                        serde_json::from_slice::<serde_json::Value>(&message.payload).ok()
+                    })
                     .unwrap_or(serde_json::Value::Null);
                 let shard_responses: Vec<serde_json::Value> = response
                     .shard_responses
@@ -2065,7 +2084,8 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         let mut requests = Vec::with_capacity(items.len());
         for item in items {
             let Some(map) = item.as_object() else {
-                return "ERROR: invalid spawn-actors request: each request must be an object".to_string();
+                return "ERROR: invalid spawn-actors request: each request must be an object"
+                    .to_string();
             };
             let labels = match value_to_string_map(map.get("labels")) {
                 Ok(labels) => labels,
@@ -2160,11 +2180,7 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
         }
     }
 
-    async fn application_get_status(
-        &mut self,
-        application_id: String,
-        node_id: String,
-    ) -> String {
+    async fn application_get_status(&mut self, application_id: String, node_id: String) -> String {
         let ctx = self.pg_context();
         match self
             .host_functions
@@ -2203,14 +2219,14 @@ pub fn is_simple_actor_component(component: &wasmtime::component::Component) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::simple_component_host::plexspaces::simple_actor::host::Host;
     use async_trait::async_trait;
     use plexspaces_proto::actor::v1::{
         CreateShardGroupRequest, CreateShardGroupResponse, MapShardGroupRequest,
-        MapShardGroupResponse, ScatterGatherRequest, ScatterGatherResponse,
-        ScatterGatherStats, ShardGroup, ShardQueryResponse,
+        MapShardGroupResponse, ScatterGatherRequest, ScatterGatherResponse, ScatterGatherStats,
+        ShardGroup, ShardQueryResponse,
     };
     use std::sync::Arc;
-    use crate::simple_component_host::plexspaces::simple_actor::host::Host;
 
     #[test]
     fn test_simple_actor_module_compiles() {

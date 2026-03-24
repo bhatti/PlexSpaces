@@ -29,8 +29,6 @@
 
 // Export the mailbox module
 mod builder;
-mod lru_cache;
-mod message_helpers;
 mod messages;
 mod r#mod;
 
@@ -38,6 +36,8 @@ mod r#mod;
 pub use builder::MailboxBuilder;
 pub use messages::*;
 pub use r#mod::*;
+// Re-export Message for convenience (mailbox tests use plexspaces_mailbox::Message)
+pub use plexspaces_core::Message;
 // message_helpers are re-exported from r#mod::* above, no need to re-export again
 
 // TTL tests

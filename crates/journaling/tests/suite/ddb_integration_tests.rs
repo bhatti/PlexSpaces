@@ -47,7 +47,7 @@ mod ddb_tests {
         let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
             .or_else(|_| std::env::var("PLEXSPACES_DDB_ENDPOINT_URL"))
             .unwrap_or_else(|_| "http://localhost:8000".to_string());
-        
+
         DynamoDBJournalStorage::new(
             "us-east-1".to_string(),
             "plexspaces-journaling-test".to_string(),
@@ -416,4 +416,3 @@ mod ddb_tests {
         storage.flush().await.unwrap();
     }
 }
-

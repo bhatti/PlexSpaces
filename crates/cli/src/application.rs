@@ -472,7 +472,9 @@ pub async fn list(node_addr: &str, json_output: bool) -> Result<()> {
     Ok(())
 }
 
-fn list_applications_response_to_json_string(resp: &ListApplicationsResponse) -> serde_json::Result<String> {
+fn list_applications_response_to_json_string(
+    resp: &ListApplicationsResponse,
+) -> serde_json::Result<String> {
     let apps: Vec<serde_json::Value> = resp
         .applications
         .iter()
@@ -557,7 +559,10 @@ mod list_json_tests {
         let v: serde_json::Value =
             serde_json::from_str(&list_applications_response_to_json_string(&r).unwrap()).unwrap();
         assert_eq!(v["applications"][0]["application_id"], "app-1");
-        assert_eq!(v["applications"][0]["metrics"]["counter_metrics"]["tuple_operations"], 42);
+        assert_eq!(
+            v["applications"][0]["metrics"]["counter_metrics"]["tuple_operations"],
+            42
+        );
     }
 
     #[test]
@@ -577,7 +582,9 @@ mod list_json_tests {
         };
         let v: serde_json::Value =
             serde_json::from_str(&list_applications_response_to_json_string(&r).unwrap()).unwrap();
-        let s = v["applications"][0]["deployed_at"].as_str().expect("deployed_at string");
+        let s = v["applications"][0]["deployed_at"]
+            .as_str()
+            .expect("deployed_at string");
         assert!(s.contains('T'), "RFC 3339 shape: {s}");
     }
 }

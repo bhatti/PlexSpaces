@@ -50,11 +50,11 @@ syntax = "proto3";
 
 package plexspaces.firecracker.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
-import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/firecracker/firecracker;plexspaces_firecracker_v1";
@@ -122,16 +122,12 @@ service FirecrackerVmService {
 
   // Get VM state and metadata
   rpc GetVmState(GetVmStateRequest) returns (GetVmStateResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/firecracker/vms/{vm_id}"
-    };
+    option (google.api.http) = {get: "/api/v1/firecracker/vms/{vm_id}"};
   }
 
   // List all VMs on this node
   rpc ListVms(ListVmsRequest) returns (ListVmsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/firecracker/vms"
-    };
+    option (google.api.http) = {get: "/api/v1/firecracker/vms"};
   }
 
   // Deploy application to VM (entire application, not individual actors)
@@ -156,9 +152,7 @@ service FirecrackerVmService {
   // ## Purpose
   // Removes application from VM, stopping all actors and cleaning up resources.
   rpc UndeployApplication(UndeployApplicationRequest) returns (UndeployApplicationResponse) {
-    option (google.api.http) = {
-      delete: "/api/v1/firecracker/vms/{vm_id}/applications/{application_id}"
-    };
+    option (google.api.http) = {delete: "/api/v1/firecracker/vms/{vm_id}/applications/{application_id}"};
   }
 }
 
@@ -186,18 +180,23 @@ message VmConfig {
   // VM identifier (ULID format)
   string vm_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Number of vCPUs (1-32)
-  uint32 vcpu_count = 2 [
-    (buf.validate.field).uint32 = {gte: 1, lte: 32}
-  ];
+  uint32 vcpu_count = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 32
+  }];
 
   // Memory size in MiB (128-32768)
-  uint32 mem_size_mib = 3 [
-    (buf.validate.field).uint32 = {gte: 128, lte: 32768}
-  ];
+  uint32 mem_size_mib = 3 [(buf.validate.field).uint32 = {
+    gte: 128
+    lte: 32768
+  }];
 
   // Kernel configuration
   BootSource boot_source = 4;
@@ -372,13 +371,13 @@ message ResourceLimits {
 //                                -> [Failed]
 enum VmState {
   VM_STATE_UNSPECIFIED = 0;
-  VM_STATE_CREATED = 1;      // VM created, not yet booted
-  VM_STATE_BOOTING = 2;      // Kernel loading
-  VM_STATE_RUNNING = 3;      // Fully operational
-  VM_STATE_PAUSED = 4;       // Execution paused (can resume)
-  VM_STATE_STOPPING = 5;     // Shutdown in progress
-  VM_STATE_STOPPED = 6;      // Fully stopped
-  VM_STATE_FAILED = 7;       // Failed to boot or crashed
+  VM_STATE_CREATED = 1; // VM created, not yet booted
+  VM_STATE_BOOTING = 2; // Kernel loading
+  VM_STATE_RUNNING = 3; // Fully operational
+  VM_STATE_PAUSED = 4; // Execution paused (can resume)
+  VM_STATE_STOPPING = 5; // Shutdown in progress
+  VM_STATE_STOPPED = 6; // Fully stopped
+  VM_STATE_FAILED = 7; // Failed to boot or crashed
 }
 
 // VM instance metadata
@@ -484,7 +483,10 @@ message CreateVmResponse {
 message BootVmRequest {
   string vm_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -499,7 +501,10 @@ message BootVmResponse {
 message PauseVmRequest {
   string vm_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -514,7 +519,10 @@ message PauseVmResponse {
 message ResumeVmRequest {
   string vm_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -529,9 +537,12 @@ message ResumeVmResponse {
 message StopVmRequest {
   string vm_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
-  bool force = 2;  // Force kill if graceful shutdown fails
+  bool force = 2; // Force kill if graceful shutdown fails
 }
 
 // StopVm response
@@ -544,7 +555,10 @@ message StopVmResponse {
 message GetVmStateRequest {
   string vm_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -584,13 +598,19 @@ message DeployApplicationRequest {
   // VM identifier
   string vm_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Application identifier
   string application_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Application bundle (framework + actors + config)
@@ -603,7 +623,7 @@ message DeployApplicationRequest {
   bytes application_bundle = 3 [(google.api.field_behavior) = REQUIRED];
 
   // Application configuration (optional, can be in bundle)
-  string application_config_json = 4 [(buf.validate.field).string.max_len = 1048576];  // Max 1MB
+  string application_config_json = 4 [(buf.validate.field).string.max_len = 1048576]; // Max 1MB
 }
 
 // DeployApplication response
@@ -618,13 +638,19 @@ message DeployApplicationResponse {
 message UndeployApplicationRequest {
   string vm_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string application_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
-  bool force = 3;  // Force undeploy even if actors are running
+  bool force = 3; // Force undeploy even if actors are running
 }
 
 // UndeployApplication response

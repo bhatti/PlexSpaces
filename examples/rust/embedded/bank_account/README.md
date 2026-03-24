@@ -26,7 +26,7 @@ This example demonstrates durable actors with journaling and deterministic repla
    - `#[gen_server_actor(facets = ["durability"])]` - Declares durable GenServer behavior
    - `#[plexspaces_handlers(gen_server)]` - Auto-generated message dispatch
    - `#[handler("deposit")]` / `#[handler("withdraw")]` - Transaction handlers
-   - `spawn_with_storage()` - SDK helper (delegates to ActorFactoryImpl with DurabilityFacet)
+   - `spawn_with_storage()` - SDK helper over the framework-owned durability spawn path
    - `GenServerRef.call()` - Request-reply messaging (wraps ActorRef.ask())
 
 ## SDK Features Demonstrated
@@ -34,7 +34,7 @@ This example demonstrates durable actors with journaling and deterministic repla
 - `#[gen_server_actor(facets = ["durability"])]` - Declares durable GenServer behavior
 - `#[plexspaces_handlers(gen_server)]` - Auto-generated message dispatch
 - `#[handler("deposit")]` / `#[handler("withdraw")]` - Transaction handlers
-- `spawn_with_storage()` - SDK helper (delegates to ActorFactoryImpl with DurabilityFacet)
+- `spawn_with_storage()` - SDK helper over the framework-owned durability spawn path
 - `GenServerRef.call()` - Request-reply messaging (wraps ActorRef.ask())
 
 ## Durability Features

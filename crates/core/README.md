@@ -144,9 +144,8 @@ async fn handle_message(&mut self, ctx: &ActorContext, msg: Message) -> Result<(
     let child_id = "child@node1".to_string();
     ctx.actor_service().spawn_actor(child_id.clone(), behavior).await?;
     
-    // Send message to another actor
-    let target_ref = ctx.object_registry().lookup_actor(&"target@node1".to_string()).await?;
-    target_ref.tell(msg).await?;
+    // Send message to another local actor through the registry-owned delivery path
+    ctx.actor_registry().tell(&"target@node1".to_string(), msg).await?;
     
     // Write to TupleSpace
     let tuple = Tuple::new(vec![/* fields */]);
@@ -219,4 +218,3 @@ This crate is used by:
 - Implementation: `crates/core/src/`
 - Tests: `crates/core/src/` (unit tests)
 - Proto definitions: `proto/plexspaces/v1/application/application.proto`
-

@@ -509,37 +509,6 @@ pub trait LinkProvider: Send + Sync {
     ) -> Result<(), String>;
 }
 
-/// Trait for activating virtual actors (used by ReminderFacet)
-///
-/// ## Purpose
-/// Allows components to trigger actor activation when needed (e.g., when reminders fire).
-/// This enables reminders to wake up deactivated virtual actors.
-///
-/// ## Design
-/// - Supports local actors (actors registered in ActorRegistry)
-/// - Decouples ReminderFacet from Node
-/// - ActorRegistry implements this trait for local actor activation
-#[async_trait]
-pub trait ActivationProvider: Send + Sync {
-    /// Check if actor is currently active
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Actor to check
-    ///
-    /// ## Returns
-    /// true if actor is active, false if deactivated
-    async fn is_actor_active(&self, actor_id: &ActorId) -> bool;
-
-    /// Activate a virtual actor
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Actor to activate
-    ///
-    /// ## Returns
-    /// ActorRef if activation successful, error otherwise
-    async fn activate_actor(&self, actor_id: &ActorId) -> Result<ActorRef, String>;
-}
-
 /// Trait for facet service operations (accessing facets from actors)
 ///
 /// ## Purpose

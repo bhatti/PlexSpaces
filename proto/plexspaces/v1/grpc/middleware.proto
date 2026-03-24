@@ -51,11 +51,12 @@
 syntax = "proto3";
 
 package plexspaces.grpc.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/grpc/middleware;plexspaces_grpc_v1";
 
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/grpc/middleware;plexspaces_grpc_v1";
 
 // Middleware configuration for gRPC interceptor chain
 //
@@ -112,15 +113,15 @@ message MiddlewareSpec {
 // Middleware types
 enum MiddlewareType {
   MIDDLEWARE_TYPE_UNSPECIFIED = 0;
-  MIDDLEWARE_TYPE_METRICS = 1;        // Prometheus/StatsD metrics
-  MIDDLEWARE_TYPE_TRACING = 2;        // OpenTelemetry distributed tracing
-  MIDDLEWARE_TYPE_MTLS = 3;           // Mutual TLS authentication
-  MIDDLEWARE_TYPE_COMPRESSION = 4;    // gzip/brotli compression
-  MIDDLEWARE_TYPE_RATE_LIMIT = 5;     // Token bucket rate limiting
-  MIDDLEWARE_TYPE_AUTH = 6;           // Authentication/authorization
+  MIDDLEWARE_TYPE_METRICS = 1; // Prometheus/StatsD metrics
+  MIDDLEWARE_TYPE_TRACING = 2; // OpenTelemetry distributed tracing
+  MIDDLEWARE_TYPE_MTLS = 3; // Mutual TLS authentication
+  MIDDLEWARE_TYPE_COMPRESSION = 4; // gzip/brotli compression
+  MIDDLEWARE_TYPE_RATE_LIMIT = 5; // Token bucket rate limiting
+  MIDDLEWARE_TYPE_AUTH = 6; // Authentication/authorization
   MIDDLEWARE_TYPE_CIRCUIT_BREAKER = 7; // Circuit breaker pattern
-  MIDDLEWARE_TYPE_RETRY = 8;          // Exponential backoff retries
-  MIDDLEWARE_TYPE_LOGGING = 9;        // Structured logging
+  MIDDLEWARE_TYPE_RETRY = 8; // Exponential backoff retries
+  MIDDLEWARE_TYPE_LOGGING = 9; // Structured logging
 }
 
 // Metrics middleware configuration
@@ -158,8 +159,8 @@ message MetricsMiddlewareConfig {
 // Metrics backend type
 enum MetricsBackend {
   METRICS_BACKEND_UNSPECIFIED = 0;
-  METRICS_BACKEND_PROMETHEUS = 1;   // Prometheus pull model
-  METRICS_BACKEND_STATSD = 2;       // StatsD push model
+  METRICS_BACKEND_PROMETHEUS = 1; // Prometheus pull model
+  METRICS_BACKEND_STATSD = 2; // StatsD push model
   METRICS_BACKEND_OPENTELEMETRY = 3; // OpenTelemetry protocol
 }
 
@@ -336,7 +337,7 @@ message AuthMiddlewareConfig {
 
   // mTLS configuration (for AUTH_METHOD_MTLS)
   // References security.proto MtlsConfig for service-to-service authentication
-  string mtls_ca_certificate = 5;  // CA certificate path or PEM content for validation
+  string mtls_ca_certificate = 5; // CA certificate path or PEM content for validation
 
   // Trusted services for mTLS (service IDs allowed to connect)
   // If empty, all services with valid certificates are allowed
@@ -346,10 +347,10 @@ message AuthMiddlewareConfig {
 // Authentication method
 enum AuthMethod {
   AUTH_METHOD_UNSPECIFIED = 0;
-  AUTH_METHOD_JWT = 1;          // JSON Web Token
-  AUTH_METHOD_MTLS = 2;         // Mutual TLS (use MtlsMiddleware)
-  AUTH_METHOD_RBAC = 3;         // Role-Based Access Control
-  AUTH_METHOD_TOKEN = 4;        // Bearer token
+  AUTH_METHOD_JWT = 1; // JSON Web Token
+  AUTH_METHOD_MTLS = 2; // Mutual TLS (use MtlsMiddleware)
+  AUTH_METHOD_RBAC = 3; // Role-Based Access Control
+  AUTH_METHOD_TOKEN = 4; // Bearer token
 }
 
 // RBAC configuration
@@ -544,9 +545,9 @@ message InterceptorResponse {
 // - MODIFY: Continue with modified request
 enum InterceptorDecision {
   INTERCEPTOR_DECISION_UNSPECIFIED = 0;
-  INTERCEPTOR_DECISION_ALLOW = 1;   // Allow request to proceed
-  INTERCEPTOR_DECISION_DENY = 2;    // Reject request (short-circuit chain)
-  INTERCEPTOR_DECISION_MODIFY = 3;  // Modify request and proceed
+  INTERCEPTOR_DECISION_ALLOW = 1; // Allow request to proceed
+  INTERCEPTOR_DECISION_DENY = 2; // Reject request (short-circuit chain)
+  INTERCEPTOR_DECISION_MODIFY = 3; // Modify request and proceed
 }
 
 // Interceptor result

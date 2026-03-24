@@ -131,62 +131,55 @@ package plexspaces.supervision.v1;
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
-import "protoc-gen-openapiv2/options/annotations.proto";
+import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/supervision/supervision;plexspaces_supervision_v1";
-option java_package = "com.bhatti.plexspaces.supervision.v1";
 option java_multiple_files = true;
-
+option java_package = "com.bhatti.plexspaces.supervision.v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpaces Supervision API";
-    version: "1.0";
-    description: "Erlang/OTP-style supervision trees for fault-tolerant actor systems";
+    title: "PlexSpaces Supervision API"
+    version: "1.0"
+    description: "Erlang/OTP-style supervision trees for fault-tolerant actor systems"
     contact: {
-      name: "PlexSpaces";
-      url: "https://github.com/bhatti/plexspaces";
-    };
-  };
-  schemes: HTTPS;
-  schemes: HTTP;
-  consumes: "application/json";
-  produces: "application/json";
+      name: "PlexSpaces"
+      url: "https://github.com/bhatti/plexspaces"
+    }
+  }
+  schemes: HTTPS
+  schemes: HTTP
+  consumes: "application/json"
+  produces: "application/json"
   responses: {
-    key: "400";
+    key: "400"
     value: {
-      description: "Invalid request";
+      description: "Invalid request"
       schema: {
-        json_schema: {
-          ref: ".plexspaces.common.v1.Error";
-        }
+        json_schema: {ref: ".plexspaces.common.v1.Error"}
       }
     }
-  };
+  }
   responses: {
-    key: "404";
+    key: "404"
     value: {
-      description: "Not found";
+      description: "Not found"
       schema: {
-        json_schema: {
-          ref: ".plexspaces.common.v1.Error";
-        }
+        json_schema: {ref: ".plexspaces.common.v1.Error"}
       }
     }
-  };
+  }
   responses: {
-    key: "500";
+    key: "500"
     value: {
-      description: "Internal server error";
+      description: "Internal server error"
       schema: {
-        json_schema: {
-          ref: ".plexspaces.common.v1.Error";
-        }
+        json_schema: {ref: ".plexspaces.common.v1.Error"}
       }
     }
-  };
+  }
 };
 
 // Supervision strategy determines how supervisor handles child failures
@@ -258,7 +251,7 @@ message ChildSpec {
   // - None/0 = brutal_kill (immediate)
   // - Some(ms) = graceful shutdown with timeout
   // - For supervisors: typically set high or infinity to allow children to shutdown
-  google.protobuf.Duration shutdown_timeout = 4 [(buf.validate.field).duration.lte.seconds = 300];  // Max 5 minutes
+  google.protobuf.Duration shutdown_timeout = 4 [(buf.validate.field).duration.lte.seconds = 300]; // Max 5 minutes
 
   // Child type: actor (worker) or supervisor
   ChildType child_type = 5;
@@ -289,13 +282,19 @@ message SupervisorConfig {
   SupervisionStrategy strategy = 1;
 
   // Maximum restart intensity (max restarts in period)
-  uint32 max_restarts = 2 [(buf.validate.field).uint32 = {gte: 1, lte: 1000}];  // 1 to 1000 restarts
+  uint32 max_restarts = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 1000
+  }]; // 1 to 1000 restarts
 
   // Time period for max_restarts
-  google.protobuf.Duration within_period = 3 [(buf.validate.field).duration = {gte: {seconds: 1}, lte: {seconds: 3600}}];  // 1 second to 1 hour
+  google.protobuf.Duration within_period = 3 [(buf.validate.field).duration = {
+    gte: {seconds: 1}
+    lte: {seconds: 3600}
+  }]; // 1 second to 1 hour
 
   // Child specifications
-  repeated ChildSpec children = 4 [(buf.validate.field).repeated.max_items = 1000];  // Max 1000 children
+  repeated ChildSpec children = 4 [(buf.validate.field).repeated.max_items = 1000]; // Max 1000 children
 
   // Supervisor metadata
   map<string, string> metadata = 5;
@@ -310,10 +309,10 @@ message SupervisorState {
   SupervisorConfig config = 2;
 
   // Current children
-  repeated ChildState children = 3 [(buf.validate.field).repeated.max_items = 1000];  // Max 1000 children
+  repeated ChildState children = 3 [(buf.validate.field).repeated.max_items = 1000]; // Max 1000 children
 
   // Restart history
-  repeated RestartEvent restart_history = 4 [(buf.validate.field).repeated.max_items = 10000];  // Max 10K events
+  repeated RestartEvent restart_history = 4 [(buf.validate.field).repeated.max_items = 10000]; // Max 10K events
 
   // Is supervisor active
   bool is_active = 5;
@@ -331,7 +330,7 @@ message ChildState {
   google.protobuf.Timestamp started_at = 3;
 
   // Number of restarts
-  uint32 restart_count = 4 [(buf.validate.field).uint32.lte = 10000];  // Max 10K restarts
+  uint32 restart_count = 4 [(buf.validate.field).uint32.lte = 10000]; // Max 10K restarts
 
   // Last restart time
   google.protobuf.Timestamp last_restart = 5;
@@ -402,7 +401,7 @@ message RestartEvent {
   google.protobuf.Timestamp timestamp = 2;
 
   // Reason for restart
-  string reason = 3 [(buf.validate.field).string.max_len = 1024];  // Error messages can be long
+  string reason = 3 [(buf.validate.field).string.max_len = 1024]; // Error messages can be long
 
   // Which strategy was applied
   SupervisionStrategy strategy = 4;
@@ -509,7 +508,7 @@ message SupervisorStats {
   // Tracks how many times the Adaptive supervision strategy learned
   // from failure patterns and switched strategies. Only increments
   // for Adaptive strategy; always 0 for static strategies.
-  uint32 strategy_adaptations = 4 [(buf.validate.field).uint32.lte = 10000];  // Max 10K adaptations
+  uint32 strategy_adaptations = 4 [(buf.validate.field).uint32.lte = 10000]; // Max 10K adaptations
 
   // Failure pattern histogram: error reason → count
   //
@@ -555,7 +554,7 @@ message StartSupervisorRequest {
 
 message StopSupervisorRequest {
   string supervisor_id = 1 [(buf.validate.field).string.max_len = 255];
-  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 300];  // Max 5 minutes
+  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 300]; // Max 5 minutes
 }
 
 message GetSupervisorStateRequest {
@@ -572,7 +571,7 @@ message ListSupervisorsRequest {
 }
 
 message ListSupervisorsResponse {
-  repeated SupervisorState supervisors = 1 [(buf.validate.field).repeated.max_items = 10000];  // Max 10K supervisors
+  repeated SupervisorState supervisors = 1 [(buf.validate.field).repeated.max_items = 10000]; // Max 10K supervisors
 }
 
 message RestartChildRequest {

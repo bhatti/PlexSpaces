@@ -242,9 +242,7 @@ fn serialize_application_spec_to_toml(spec: &ApplicationSpec) -> Result<String, 
                     let args = child
                         .args
                         .iter()
-                        .map(|(key, value)| {
-                            format!("{} = \"{}\"", key, value.replace('"', "\\\""))
-                        })
+                        .map(|(key, value)| format!("{} = \"{}\"", key, value.replace('"', "\\\"")))
                         .collect::<Vec<_>>()
                         .join(", ");
                     toml_lines.push(format!("args = {{ {} }}", args));

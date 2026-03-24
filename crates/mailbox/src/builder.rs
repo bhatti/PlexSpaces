@@ -304,7 +304,7 @@ mod tests {
             .unwrap();
 
         // Test basic send/receive
-        let msg = crate::Message::new(b"test".to_vec());
+        let msg = crate::new_message(b"test".to_vec());
         mailbox.enqueue(msg.clone()).await.unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

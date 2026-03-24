@@ -139,7 +139,15 @@ async fn test_actor_ref_tell_with_ttl_message() {
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
         registry
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
     }
 
@@ -154,7 +162,8 @@ async fn test_actor_ref_tell_with_ttl_message() {
     let received = mailbox.dequeue().await;
     assert!(received.is_some());
     let received_msg = received.unwrap();
-    assert_eq!(received_msg.id, message_id);
+    // ActorRef::tell adds "req-" prefix to message IDs for request tracking
+    assert_eq!(received_msg.id, format!("req-{}", message_id));
 
     // TTL should be preserved (ttl is an Option field in proto Message)
     assert!(received_msg.ttl.is_some());

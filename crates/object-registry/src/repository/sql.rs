@@ -31,7 +31,7 @@
 use super::{DiscoverFilter, ObjectRegistryRepository, RepositoryError, RepositoryResult};
 use async_trait::async_trait;
 use plexspaces_common::RequestContext;
-use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration};
+use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 use prost::Message;
 use sqlx::{Pool, Postgres, Row, Sqlite};
 use std::time::{SystemTime, UNIX_EPOCH};

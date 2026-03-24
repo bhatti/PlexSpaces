@@ -18,9 +18,9 @@
 
 //! Tests for VirtualActorManager LRU eviction
 
+use plexspaces_actor::actor_ref::ActorRef;
 use plexspaces_common::virtual_actor_config::DEFAULT_MAX_POOL_PER_ACTOR_TYPE;
 use plexspaces_common::ActivationStrategy;
-use plexspaces_core::actor_ref::ActorRef;
 use plexspaces_core::virtual_actor_lifecycle_facet::{
     VirtualActorLifecycleFacet, VirtualActorLifecycleState,
 };
@@ -41,7 +41,7 @@ struct MockVirtualActorLifecycleFacet {
 #[async_trait::async_trait]
 impl VirtualActorLifecycleFacet for MockVirtualActorLifecycleFacet {
     async fn get_activation_strategy(&self) -> ActivationStrategy {
-        ActivationStrategy::Lazy
+        ActivationStrategy::ActivationStrategyLazy
     }
 
     async fn get_lifecycle_state(&self) -> VirtualActorLifecycleState {
@@ -119,7 +119,7 @@ async fn test_lru_eviction_basic() {
 
     // Register actors and mark them as active
     // For tests, we register them in ActorRegistry to make is_actor_state_active() return true
-    use plexspaces_core::actor_ref::ActorRef;
+    use plexspaces_actor::actor_ref::ActorRef;
     use plexspaces_core::{MessageSender, RequestContext};
     use plexspaces_mailbox::Mailbox;
     use plexspaces_node::create_default_service_locator;
@@ -142,13 +142,23 @@ async fn test_lru_eviction_basic() {
                 None,
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                std::collections::HashMap::new(),
+                plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
             )
             .await
             .unwrap();
 
         // Register actor in ActorRegistry as active (simulate active state)
         let ctx = RequestContext::new_without_auth("tenant".to_string(), "namespace".to_string());
-        let mailbox = Arc::new(Mailbox::new());
+        let mailbox = Arc::new(
+            Mailbox::new(
+                plexspaces_mailbox::mailbox_config_default(),
+                actor_id.clone(),
+            )
+            .await
+            .unwrap(),
+        );
         let actor_ref = ActorRef::local(
             actor_id.clone(),
             "tenant".to_string(),
@@ -162,7 +172,7 @@ async fn test_lru_eviction_basic() {
                 &ctx,
                 actor_id.clone(),
                 Arc::new(actor_ref) as Arc<dyn MessageSender>,
-                Some(actor_type.clone()),
+                actor_type.clone(),
                 None,
                 None, // No instance for test
                 None,
@@ -194,6 +204,9 @@ async fn test_lru_eviction_basic() {
             None,
             "tenant".to_string(),
             "namespace".to_string(),
+            vec![],
+            std::collections::HashMap::new(),
+            ActivationStrategy::ActivationStrategyLazy,
         )
         .await
         .unwrap();
@@ -253,6 +266,9 @@ async fn test_lru_eviction_ordering() {
             None,
             "tenant".to_string(),
             "namespace".to_string(),
+            vec![],
+            std::collections::HashMap::new(),
+            ActivationStrategy::ActivationStrategyLazy,
         )
         .await
         .unwrap();
@@ -270,6 +286,9 @@ async fn test_lru_eviction_ordering() {
             None,
             "tenant".to_string(),
             "namespace".to_string(),
+            vec![],
+            std::collections::HashMap::new(),
+            ActivationStrategy::ActivationStrategyLazy,
         )
         .await
         .unwrap();
@@ -290,6 +309,9 @@ async fn test_lru_eviction_ordering() {
             None,
             "tenant".to_string(),
             "namespace".to_string(),
+            vec![],
+            std::collections::HashMap::new(),
+            ActivationStrategy::ActivationStrategyLazy,
         )
         .await
         .unwrap();
@@ -330,6 +352,9 @@ async fn test_lru_eviction_multiple_types() {
                 None,
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                std::collections::HashMap::new(),
+                ActivationStrategy::ActivationStrategyLazy,
             )
             .await
             .unwrap();
@@ -348,6 +373,9 @@ async fn test_lru_eviction_multiple_types() {
                 None,
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                std::collections::HashMap::new(),
+                ActivationStrategy::ActivationStrategyLazy,
             )
             .await
             .unwrap();
@@ -374,6 +402,107 @@ async fn test_lru_eviction_multiple_types() {
 }
 
 #[tokio::test]
+async fn test_lru_eviction_skips_eager_virtual_actors() {
+    let actor_registry = create_test_actor_registry().await;
+    let manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
+    manager.set_max_pool_per_actor_type(2).await;
+
+    let actor_type = "TestActor".to_string();
+    let service_locator =
+        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    service_locator
+        .register_service(actor_registry.clone())
+        .await;
+    service_locator.register_service(manager.clone()).await;
+
+    let ctx = RequestContext::new_without_auth("tenant".to_string(), "namespace".to_string());
+
+    for (actor_id, strategy) in [
+        (
+            "eager-actor@test-node".to_string(),
+            ActivationStrategy::ActivationStrategyEager,
+        ),
+        (
+            "lazy-actor-1@test-node".to_string(),
+            ActivationStrategy::ActivationStrategyLazy,
+        ),
+        (
+            "lazy-actor-2@test-node".to_string(),
+            ActivationStrategy::ActivationStrategyLazy,
+        ),
+    ] {
+        manager
+            .register(
+                actor_id.clone(),
+                create_mock_facet(actor_id.clone()),
+                actor_type.clone(),
+                None,
+                "tenant".to_string(),
+                "namespace".to_string(),
+                vec![],
+                std::collections::HashMap::new(),
+                strategy,
+            )
+            .await
+            .unwrap();
+
+        let mailbox = Arc::new(
+            Mailbox::new(
+                plexspaces_mailbox::mailbox_config_default(),
+                actor_id.clone(),
+            )
+            .await
+            .unwrap(),
+        );
+        let actor_ref = ActorRef::local(
+            actor_id.clone(),
+            "tenant".to_string(),
+            "namespace".to_string(),
+            mailbox,
+            service_locator.clone(),
+        );
+
+        actor_registry
+            .register_actor(
+                &ctx,
+                actor_id.clone(),
+                Arc::new(actor_ref) as Arc<dyn MessageSender>,
+                actor_type.clone(),
+                None,
+                None,
+                None,
+            )
+            .await;
+        manager.mark_activated(&actor_id).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    let actor_id_4 = "lazy-actor-3@test-node".to_string();
+    manager
+        .register(
+            actor_id_4.clone(),
+            create_mock_facet(actor_id_4.clone()),
+            actor_type.clone(),
+            None,
+            "tenant".to_string(),
+            "namespace".to_string(),
+            vec![],
+            std::collections::HashMap::new(),
+            ActivationStrategy::ActivationStrategyLazy,
+        )
+        .await
+        .unwrap();
+
+    let evicted = manager.evict_lru_if_needed(&actor_type, None).await;
+    assert_eq!(evicted.len(), 1, "should evict exactly one lazy actor");
+    assert!(
+        !evicted.contains(&"eager-actor@test-node".to_string()),
+        "eager actors must not be evicted"
+    );
+    assert_eq!(evicted[0], "lazy-actor-1@test-node".to_string());
+}
+
+#[tokio::test]
 async fn test_update_last_access() {
     // Create ActorRegistry and VirtualActorManager
     let actor_registry = create_test_actor_registry().await;
@@ -391,6 +520,9 @@ async fn test_update_last_access() {
             None,
             "tenant".to_string(),
             "namespace".to_string(),
+            vec![],
+            std::collections::HashMap::new(),
+            ActivationStrategy::ActivationStrategyLazy,
         )
         .await
         .unwrap();
@@ -443,6 +575,9 @@ async fn test_remove_from_active_tracking() {
             None,
             "tenant".to_string(),
             "namespace".to_string(),
+            vec![],
+            std::collections::HashMap::new(),
+            ActivationStrategy::ActivationStrategyLazy,
         )
         .await
         .unwrap();
@@ -469,7 +604,7 @@ async fn test_remove_from_active_tracking() {
 #[tokio::test]
 async fn test_max_pool_per_actor_type_config() {
     // Create ActorRegistry and VirtualActorManager
-    let actor_registry = create_test_actor_registry();
+    let actor_registry = create_test_actor_registry().await;
     let manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
 
     // Verify default

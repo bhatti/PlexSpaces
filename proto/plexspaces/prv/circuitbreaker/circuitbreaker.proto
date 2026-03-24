@@ -44,11 +44,12 @@
 syntax = "proto3";
 
 package plexspaces.circuitbreaker.prv;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/prv/circuitbreaker/circuitbreaker;plexspaces_circuitbreaker_prv";
 
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/prv/circuitbreaker/circuitbreaker;plexspaces_circuitbreaker_prv";
 
 // Circuit breaker state
 enum CircuitState {
@@ -123,8 +124,8 @@ message HalfOpenConfig {
 
   // Strategy for selecting requests in half-open
   enum SelectionStrategy {
-    SELECTION_STRATEGY_FIRST_N = 0;    // First N requests
-    SELECTION_STRATEGY_SAMPLE = 1;     // Random sampling
+    SELECTION_STRATEGY_FIRST_N = 0; // First N requests
+    SELECTION_STRATEGY_SAMPLE = 1; // Random sampling
     SELECTION_STRATEGY_PERCENTAGE = 2; // Allow X% of requests
   }
 

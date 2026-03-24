@@ -85,19 +85,6 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tracing;
 
-/// Trait for activating virtual actors (used by ReminderFacet)
-///
-/// ## Purpose
-/// Allows ReminderFacet to trigger actor activation when reminders fire.
-/// This enables reminders to wake up deactivated virtual actors.
-///
-/// ## Design
-/// Similar to LinkProvider pattern - decouples ReminderFacet from Node.
-///
-/// NOTE: ActivationProvider trait moved to plexspaces-core to avoid circular dependencies.
-/// Re-export for backward compatibility.
-pub use plexspaces_core::ActivationProvider;
-
 // Re-export ReminderFired from proto
 pub use plexspaces_proto::timer::v1::ReminderFired;
 
@@ -154,9 +141,6 @@ pub struct ReminderFacet {
 
     /// Shutdown signal for background task
     shutdown_tx: Arc<RwLock<Option<tokio::sync::oneshot::Sender<()>>>>,
-
-    /// Optional activation provider for virtual actor integration
-    activation_provider: Option<Arc<dyn ActivationProvider>>,
 }
 
 /// Default priority for ReminderFacet
@@ -202,7 +186,6 @@ impl ReminderFacet {
             reminders: Arc::new(RwLock::new(HashMap::new())),
             background_task: Arc::new(RwLock::new(None)),
             shutdown_tx: Arc::new(RwLock::new(None)),
-            activation_provider: None,
         }
     }
 
@@ -224,41 +207,6 @@ impl ReminderFacet {
             REMINDER_FACET_DEFAULT_PRIORITY,
             service_locator,
         )
-    }
-
-    /// Create a new reminder facet with activation provider
-    ///
-    /// ## Arguments
-    /// * `storage` - Journal storage backend as trait object
-    /// * `activation_provider` - Provider for activating virtual actors
-    /// * `config` - Facet configuration
-    /// * `priority` - Facet priority
-    /// * `service_locator` - ServiceLocator for looking up ActorService when sending messages
-    ///
-    /// ## Returns
-    /// New ReminderFacet ready to attach to an actor
-    ///
-    /// ## Design Notes
-    /// When activation_provider is provided, reminders will trigger
-    /// actor activation if the actor is deactivated (VirtualActorFacet integration).
-    pub fn with_activation_provider(
-        storage: Arc<dyn JournalStorage>,
-        activation_provider: Arc<dyn ActivationProvider>,
-        config: Value,
-        priority: i32,
-        service_locator: Arc<dyn ServiceLocator>,
-    ) -> Self {
-        ReminderFacet {
-            config,
-            priority,
-            actor_id: Arc::new(RwLock::new(None)),
-            service_locator,
-            storage,
-            reminders: Arc::new(RwLock::new(HashMap::new())),
-            background_task: Arc::new(RwLock::new(None)),
-            shutdown_tx: Arc::new(RwLock::new(None)),
-            activation_provider: Some(activation_provider),
-        }
     }
 
     /// Register a reminder
@@ -399,8 +347,6 @@ impl ReminderFacet {
         let storage = self.storage.clone();
         let service_locator = self.service_locator.clone();
         let shutdown_tx = self.shutdown_tx.clone();
-        let activation_provider_clone = self.activation_provider.clone();
-
         let (tx, mut rx) = tokio::sync::oneshot::channel::<()>();
         *shutdown_tx.write().await = Some(tx);
 
@@ -437,17 +383,12 @@ impl ReminderFacet {
                     let actor_id_str = reg.actor_id.clone();
                     let actor_id = ActorId::from(actor_id_str.clone());
 
-                    // Check if actor is active (VirtualActorFacet integration)
-                    let should_activate = if let Some(provider) = &activation_provider_clone {
-                        !provider.is_actor_active(&actor_id).await
-                    } else {
-                        false
-                    };
-
-                    // If actor is deactivated and we have an activation provider, activate it
-                    if should_activate {
-                        if let Some(provider) = &activation_provider_clone {
-                            let _ = provider.activate_actor(&actor_id).await;
+                    if let Some(actor_registry) = service_locator.actor_registry().await {
+                        let is_active = actor_registry.is_actor_state_active(&actor_id).await;
+                        if !is_active {
+                            if let Some(factory) = service_locator.get_actor_factory().await {
+                                let _ = factory.activate_virtual_actor(&actor_id).await;
+                            }
                         }
                     }
 

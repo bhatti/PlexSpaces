@@ -52,6 +52,8 @@ plexspaces-process-groups = { workspace = true }  # For facet factory tests
 chrono = { workspace = true }  # For timestamp in integration tests
 prost-types = "0.12"  # For proto types in integration tests
 async-trait = { workspace = true }  # For trait implementations in tests
+plexspaces-mailbox = { workspace = true }  # For Mailbox in virtual actor LRU eviction tests
+plexspaces-actor = { workspace = true }  # For ActorRef in virtual actor LRU eviction tests
 
 [features]
 default = []

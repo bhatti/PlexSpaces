@@ -375,7 +375,15 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     eprintln!("🟢 [TEST] Created checkpoint with count=1 before suspension (state restoration not yet implemented)");
 
     // Suspend/passivate the actor
-    node.deactivate_virtual_actor(&actor_id, false)
+    let stop_ctx = node
+        .service_locator()
+        .request_context_for_system_operations()
+        .await;
+    node.service_locator()
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&stop_ctx, &actor_id)
         .await
         .unwrap();
 
@@ -393,7 +401,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     );
 
     // Call ask() on suspended actor - should reactivate automatically
-    // VirtualActorWrapper.tell() should detect actor is not active and reactivate it
+    // Registry-owned local tell() should detect the actor is inactive and reactivate it
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
 
     let ask_msg =
@@ -484,11 +492,19 @@ async fn test_suspend_active_virtual_actor_then_tell() {
 
     // Suspend the actor
     eprintln!("🔵 [TEST] Suspending actor: actor_id={}", actor_id);
-    node.deactivate_virtual_actor(&actor_id, false)
+    let stop_ctx = node
+        .service_locator()
+        .request_context_for_system_operations()
+        .await;
+    node.service_locator()
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&stop_ctx, &actor_id)
         .await
         .unwrap();
 
-    // Verify actor is suspended (synchronous - deactivate_virtual_actor waits for stop)
+    // Verify actor is suspended after stop_actor passivates the virtual actor.
     let (exists_after, is_active_after, is_virtual_after) =
         node.check_virtual_actor_exists(&actor_id).await;
     eprintln!(
@@ -509,7 +525,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
     );
 
     // Call tell() on suspended actor - should reactivate automatically
-    // VirtualActorWrapper.tell() will activate the actor synchronously
+    // Registry-owned local tell() activates the actor synchronously
     eprintln!(
         "🔵 [TEST] Calling tell() on suspended actor - should activate: actor_id={}",
         actor_id
@@ -525,7 +541,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
         actor_id
     );
 
-    // Verify actor is active again (activation is synchronous via VirtualActorWrapper)
+    // Verify actor is active again after registry-owned reactivation
     let (exists_final, is_active_final, is_virtual_final) =
         node.check_virtual_actor_exists(&actor_id).await;
     eprintln!(

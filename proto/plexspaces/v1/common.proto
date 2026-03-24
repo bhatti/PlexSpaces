@@ -134,60 +134,59 @@ package plexspaces.common.v1;
 
 import "buf/validate/validate.proto";
 import "google/api/field_behavior.proto";
-import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
-import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1;plexspacesv1";
-option java_package = "com.bhatti.plexspaces.common.v1";
 option java_multiple_files = true;
-
+option java_package = "com.bhatti.plexspaces.common.v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpace Common Types";
-    version: "1.0";
-    description: "Common data types and utilities for the PlexSpace framework";
-  };
-  schemes: HTTPS;
-  consumes: "application/json";
-  produces: "application/json";
+    title: "PlexSpace Common Types"
+    version: "1.0"
+    description: "Common data types and utilities for the PlexSpace framework"
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
   security_definitions: {
     security: {
-      key: "BearerAuth";
+      key: "BearerAuth"
       value: {
-        type: TYPE_API_KEY;
-        in: IN_HEADER;
-        name: "Authorization";
-        description: "JWT Bearer token. Format: `Bearer <token>`. Must contain a `tenant_id` claim for multi-tenant isolation. Create tokens via `plexspaces-cli jwt create`.";
-      };
-    };
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "Authorization"
+        description: "JWT Bearer token. Format: `Bearer <token>`. Must contain a `tenant_id` claim for multi-tenant isolation. Create tokens via `plexspaces-cli jwt create`."
+      }
+    }
     security: {
-      key: "ApiKeyHeader";
+      key: "ApiKeyHeader"
       value: {
-        type: TYPE_API_KEY;
-        in: IN_HEADER;
-        name: "X-API-Key";
-        description: "API key authentication via header. Service-scoped keys with configurable scopes.";
-      };
-    };
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "X-API-Key"
+        description: "API key authentication via header. Service-scoped keys with configurable scopes."
+      }
+    }
     security: {
-      key: "ApiKeyQuery";
+      key: "ApiKeyQuery"
       value: {
-        type: TYPE_API_KEY;
-        in: IN_QUERY;
-        name: "api_key";
-        description: "API key authentication via query parameter. Use only when headers cannot be set.";
-      };
-    };
-  };
+        type: TYPE_API_KEY
+        in: IN_QUERY
+        name: "api_key"
+        description: "API key authentication via query parameter. Use only when headers cannot be set."
+      }
+    }
+  }
   security: {
     security_requirement: {
-      key: "BearerAuth";
-      value: {};
-    };
-  };
+      key: "BearerAuth"
+      value: {}
+    }
+  }
 };
 
 // NOTE: Actor IDs are represented as plain strings throughout PlexSpaces.
@@ -209,10 +208,10 @@ message Empty {}
 // Used by VirtualActorConfig (actor_runtime), DefaultVirtualActorConfig (release), and Rust
 // VirtualActorFacet. Define here so it is not duplicated across protos or crates.
 enum ActivationStrategy {
-  ACTIVATION_STRATEGY_UNSPECIFIED = 0;  // Treated as LAZY
-  ACTIVATION_STRATEGY_LAZY = 1;         // Activate on first message (default)
-  ACTIVATION_STRATEGY_EAGER = 2;        // Activate immediately on creation
-  ACTIVATION_STRATEGY_PREWARM = 3;      // Pre-activate based on schedule
+  ACTIVATION_STRATEGY_UNSPECIFIED = 0; // Treated as LAZY
+  ACTIVATION_STRATEGY_LAZY = 1; // Activate on first message (default)
+  ACTIVATION_STRATEGY_EAGER = 2; // Activate immediately on creation
+  ACTIVATION_STRATEGY_PREWARM = 3; // Pre-activate based on schedule
 }
 
 // Standard metadata for resources
@@ -234,8 +233,15 @@ message Metadata {
 
 // Standard error details
 message ErrorDetail {
-  string code = 1 [(buf.validate.field).string = {min_len: 1, max_len: 64, pattern: "^[A-Z_]+$"}];
-  string message = 2 [(buf.validate.field).string = {min_len: 1, max_len: 1024}];
+  string code = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+    pattern: "^[A-Z_]+$"
+  }];
+  string message = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 1024
+  }];
   map<string, google.protobuf.Any> details = 3;
 }
 
@@ -250,9 +256,15 @@ message RetryPolicy {
 
   uint32 max_attempts = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).uint32 = {gte: 1, lte: 100}
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 100
+    }
   ];
-  double backoff_multiplier = 2 [(buf.validate.field).double = {gte: 1.0, lte: 10.0}];
+  double backoff_multiplier = 2 [(buf.validate.field).double = {
+    gte: 1.0
+    lte: 10.0
+  }];
   google.protobuf.Duration initial_delay = 3 [(buf.validate.field).duration.gte.nanos = 1000000]; // >= 1ms
   google.protobuf.Duration max_delay = 4 [(buf.validate.field).duration.lte.seconds = 3600]; // <= 1 hour
 }
@@ -289,7 +301,10 @@ message PageRequest {
   // Offset for pagination (0-based, default: 0)
   int32 offset = 1 [(buf.validate.field).int32 = {gte: 0}];
   // Limit/Page size (default: 50, max: 1000)
-  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 1000}];
+  int32 limit = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 1000
+  }];
   // Filter string (optional)
   string filter = 3 [(buf.validate.field).string.max_len = 2048];
   // Order by field (optional)
@@ -333,7 +348,11 @@ message Facet {
   // Facet type identifier (e.g., "virtual_actor", "otp_genserver", "durable_execution")
   string type = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255, pattern: "^[a-z][a-z0-9_]*$"}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-z][a-z0-9_]*$"
+    }
   ];
 
   // Configuration as key-value pairs (all values are strings for simplicity)
@@ -346,7 +365,10 @@ message Facet {
   //   800-899: Metrics facets
   //   100-500: Domain logic facets
   //   1-99: Persistence facets
-  int32 priority = 3 [(buf.validate.field).int32 = {gte: 0, lte: 10000}];
+  int32 priority = 3 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 10000
+  }];
 
   // Facet state (for stateful facets)
   map<string, google.protobuf.Any> state = 4;
@@ -364,20 +386,35 @@ message FacetDescriptor {
     }
   };
 
-  string type = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255, pattern: "^[a-z][a-z0-9_]*$"}];
+  string type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^[a-z][a-z0-9_]*$"
+  }];
   string description = 2 [(buf.validate.field).string.max_len = 2048];
   string category = 3 [(buf.validate.field).string.max_len = 128]; // e.g., "infrastructure", "virtual_actor", "otp", "workflow"
   repeated ConfigOption config_options = 4;
-  repeated string dependencies = 5 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255, pattern: "^[a-z][a-z0-9_]*$"}]; // Other facets this depends on
+  repeated string dependencies = 5 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^[a-z][a-z0-9_]*$"
+  }]; // Other facets this depends on
 }
 
 // Configuration option for a facet
 message ConfigOption {
-  string key = 1 [(buf.validate.field).string = {min_len: 1, max_len: 128, pattern: "^[a-z][a-z0-9_]*$"}];
+  string key = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+    pattern: "^[a-z][a-z0-9_]*$"
+  }];
   string description = 2 [(buf.validate.field).string.max_len = 1024];
   string default_value = 3 [(buf.validate.field).string.max_len = 1024];
   bool required = 4;
-  string value_type = 5 [(buf.validate.field).string = {min_len: 1, max_len: 64}]; // "string", "int", "bool", "duration", etc.
+  string value_type = 5 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+  }]; // "string", "int", "bool", "duration", etc.
 }
 
 // ============================================================================
@@ -435,11 +472,18 @@ message SecurityPolicy {
 
   // Maximum message size this tenant can send (bytes)
   // Prevents DoS attacks via large messages
-  uint64 max_message_size_bytes = 5 [(buf.validate.field).uint64 = {gte: 1024, lte: 104857600}]; // 1KB to 100MB
+  uint64 max_message_size_bytes = 5 [(buf.validate.field).uint64 = {
+    gte: 1024
+    lte: 104857600
+  }]; // 1KB to 100MB
 
   // Allowed facet types this tenant can use
   // Empty = all facets allowed, Non-empty = whitelist only
-  repeated string allowed_facet_types = 6 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255, pattern: "^[a-z][a-z0-9_]*$"}];
+  repeated string allowed_facet_types = 6 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 255
+    pattern: "^[a-z][a-z0-9_]*$"
+  }];
 
   // Custom security rules as key-value pairs
   // Example: {"allow_wasm": "true", "encryption_required": "true"}
@@ -465,7 +509,10 @@ message ResourceQuota {
 
   // Maximum CPU percentage this tenant can consume (0-100)
   // Example: 50.0 = tenant limited to 50% of node CPU
-  double max_cpu_percent = 3 [(buf.validate.field).double = {gte: 0.0, lte: 100.0}];
+  double max_cpu_percent = 3 [(buf.validate.field).double = {
+    gte: 0.0
+    lte: 100.0
+  }];
 
   // Maximum disk space for journals/snapshots (MB)
   uint64 max_disk_mb = 4 [(buf.validate.field).uint64.lte = 10485760]; // Max 10TB
@@ -574,7 +621,10 @@ message RequestContext {
   // Must be validated at service boundaries.
   string tenant_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 64}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 64
+    }
   ];
 
   // Namespace within tenant (optional, can be empty)
@@ -583,32 +633,27 @@ message RequestContext {
   // Common values: "production", "staging", "dev", "test"
   // For admin/internal contexts with empty namespace, repository lookups
   // bypass namespace filtering to allow cross-namespace queries.
-  string namespace = 2 [
-    (buf.validate.field).string = {max_len: 32}
-  ];
+  string namespace = 2 [(buf.validate.field).string = {max_len: 32}];
 
   // User ID (from JWT, optional)
   //
   // Extracted from JWT claims for audit logging and authorization.
-  string user_id = 3 [
-    (buf.validate.field).string = {max_len: 128}
-  ];
+  string user_id = 3 [(buf.validate.field).string = {max_len: 128}];
 
   // Request ID (for tracing)
   //
   // Unique identifier for this request (ULID).
   // Used for request tracing and correlation.
-  string request_id = 4 [
-    (buf.validate.field).string = {min_len: 1, max_len: 64}
-  ];
+  string request_id = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 64
+  }];
 
   // Correlation ID (for distributed tracing)
   //
   // Links related requests across services.
   // Propagated through gRPC metadata.
-  string correlation_id = 5 [
-    (buf.validate.field).string = {max_len: 64}
-  ];
+  string correlation_id = 5 [(buf.validate.field).string = {max_len: 64}];
 
   // Request timestamp
   google.protobuf.Timestamp timestamp = 6;
@@ -702,7 +747,10 @@ message Message {
     json_schema: {
       title: "Message"
       description: "Universal message envelope for actor, channel, and pub/sub communication"
-      required: ["id", "payload"]
+      required: [
+        "id",
+        "payload"
+      ]
     }
   };
 
@@ -713,7 +761,10 @@ message Message {
   // Example: "01HN9QV1W6EZGQC0P9XYZMR4M1"
   string id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Sender actor/producer ID (optional for anonymous messages)
@@ -736,9 +787,18 @@ message Message {
   // Common values: "call", "cast", "info", "signal", "event", "command", "query"
   // Example: "call" for request/reply, "cast" for fire-and-forget
   // Empty = unset. Validated to allowed values only.
-  string message_type = 5 [
-    (buf.validate.field).string = {in: ["", "call", "cast", "info", "signal", "event", "command", "query"]}
-  ];
+  string message_type = 5 [(buf.validate.field).string = {
+    in: [
+      "",
+      "call",
+      "cast",
+      "info",
+      "signal",
+      "event",
+      "command",
+      "query"
+    ]
+  }];
 
   // Message payload (opaque bytes)
   // Encoding is application-specific (JSON, protobuf, msgpack, etc.)
@@ -758,7 +818,10 @@ message Message {
 
   // Message priority (0=Low, 25=Normal, 50=High, 75=System, 100=Signal)
   // Higher priority messages are delivered first
-  int32 priority = 9 [(buf.validate.field).int32 = {gte: 0, lte: 100}];
+  int32 priority = 9 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 100
+  }];
 
   // Time-to-live for message expiration
   // Message is discarded if not delivered within TTL (max 24 hours)

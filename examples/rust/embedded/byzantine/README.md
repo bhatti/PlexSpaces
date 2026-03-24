@@ -9,7 +9,7 @@
 | **Application** | `ByzantineApplication` implements `Application` trait |
 | **ConfigBootstrap** | Load config from `release.toml` |
 | **BehaviorRegistry** | Register `ByzantineGeneral` behavior |
-| **ActorFactory** | Spawn general actors dynamically |
+| **SDK Spawn Helper** | Spawn general actors from registered behavior types |
 | **ActorContext** | Message passing between generals |
 | **ActorRef::ask()** | Request-reply pattern for results |
 | **GenServer** | General actors implement GenServer behavior |
@@ -52,7 +52,7 @@ tuplespace_backend = "memory"
 │  - Implements Application trait                                 │
 │  - Loads config via ConfigBootstrap                             │
 │  - Registers behaviors via BehaviorRegistry                     │
-│  - Spawns actors via ActorFactory                               │
+│  - Spawns actors via SDK helper on top of Node services         │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -95,8 +95,8 @@ impl Application for ByzantineApplication {
         register_byzantine_behaviors(&mut behavior_registry, journal, tuplespace).await;
         service_locator.register_service(Arc::new(behavior_registry)).await;
         
-        // Spawn actors via factory
-        actor_factory.spawn_actor(&ctx, &actor_id, "ByzantineGeneral", initial_state, ...).await?;
+        // Spawn actors via SDK helper using registered behavior type
+        spawn_with_behavior_type(&ctx, service_locator.clone(), actor_id, "consensus", "ByzantineGeneral", initial_state, vec![]).await?;
         
         // Run algorithm
         algorithm.run(&ctx).await?;

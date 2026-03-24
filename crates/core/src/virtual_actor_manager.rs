@@ -44,6 +44,7 @@ use crate::actor_id::parse_actor_id;
 use crate::virtual_actor_lifecycle_facet::VirtualActorLifecycleFacet;
 use crate::Service;
 use crate::{ActorId, ActorRegistry};
+use plexspaces_common::{from_config_str, ActivationStrategy};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::v1::actor::ActorConfig;
 
@@ -106,12 +107,30 @@ pub struct VirtualActorMetadata {
     /// **Usage**: When activating a virtual actor, parse this template, replace `actor_id`
     /// with the actual actor_id, and pass as `initial_state` to `spawn_actor()`.
     pub init_config_template: Option<Vec<u8>>,
+
+    /// Initial state bytes captured at registration.
+    ///
+    /// **Purpose**: Enables type-primary rebuild — activate_virtual_actor always calls
+    /// spawn_actor with these bytes instead of storing and unwrapping an actor Arc.
+    pub initial_state: Vec<u8>,
+
+    /// Actor labels captured at registration.
+    ///
+    /// **Purpose**: Preserved alongside initial_state so spawn_actor can fully
+    /// reconstruct the actor with the same parameters on reactivation.
+    pub labels: HashMap<String, String>,
+
+    /// Activation strategy for this actor instance.
+    ///
+    /// **Purpose**: Used by evict_lru_if_needed to skip eager/prewarm actors.
+    /// Only lazy actors (Unspecified or Lazy) are subject to LRU eviction.
+    pub activation_strategy: ActivationStrategy,
 }
 
 /// Active instance tracking for LRU eviction
 /// Tracks active instances per actor_type with last_access time
 #[derive(Clone)]
-pub(crate) struct ActiveInstance {
+pub struct ActiveInstance {
     pub actor_id: ActorId,
     pub last_access: std::time::SystemTime,
 }
@@ -181,6 +200,17 @@ pub struct VirtualActorManager {
 }
 
 impl VirtualActorManager {
+    fn activation_strategy_from_facet_config(
+        facet_config: &serde_json::Value,
+    ) -> ActivationStrategy {
+        facet_config
+            .get("virtual_actor")
+            .and_then(|config| config.get("activation_strategy"))
+            .and_then(serde_json::Value::as_str)
+            .map(from_config_str)
+            .unwrap_or(ActivationStrategy::ActivationStrategyLazy)
+    }
+
     pub fn new(actor_registry: Arc<ActorRegistry>) -> Self {
         use plexspaces_common::virtual_actor_config::DEFAULT_MAX_POOL_PER_ACTOR_TYPE;
         Self {
@@ -241,7 +271,7 @@ impl VirtualActorManager {
     /// ## State After Registration
     /// - Actor is registered (always addressable)
     /// - Metadata stored in VirtualActorManager (persists across suspension)
-    /// - For lazy actors: Not active (VirtualActorWrapper in registry)
+    /// - For lazy actors: Not active until first local invocation
     /// - For eager actors: Active immediately (ActorRef in registry, message loop running)
     pub async fn register(
         &self,
@@ -251,6 +281,9 @@ impl VirtualActorManager {
         config: Option<ActorConfig>,
         tenant_id: String,
         namespace: String,
+        initial_state: Vec<u8>,
+        labels: HashMap<String, String>,
+        activation_strategy: ActivationStrategy,
     ) -> Result<(), VirtualActorError> {
         if actor_type.is_empty() {
             return Err(VirtualActorError::ActivationFailed(
@@ -270,6 +303,9 @@ impl VirtualActorManager {
                 tenant_id,
                 namespace,
                 facet_config: None,
+                initial_state,
+                labels,
+                activation_strategy,
             },
         );
         Ok(())
@@ -286,14 +322,12 @@ impl VirtualActorManager {
     pub async fn update_metadata(
         &self,
         actor_id: &ActorId,
-        actor_type: Option<String>,
+        actor_type: String,
         config: Option<ActorConfig>,
     ) -> Result<(), VirtualActorError> {
         let mut virtual_actors = self.registry.virtual_actors().write().await;
         if let Some(metadata) = virtual_actors.get_mut(actor_id) {
-            if let Some(actor_type) = actor_type {
-                metadata.actor_type = actor_type;
-            }
+            metadata.actor_type = actor_type;
             if let Some(config) = config {
                 metadata.config = Some(config);
             }
@@ -362,6 +396,8 @@ impl VirtualActorManager {
             ));
         }
 
+        let activation_strategy = Self::activation_strategy_from_facet_config(&facet_config);
+
         let mut virtual_types = self.registry.virtual_actor_types().write().await;
 
         // Log facet_config for debugging (show which facets are being registered)
@@ -381,6 +417,9 @@ impl VirtualActorManager {
                 namespace,
                 facet_config: Some(facet_config),
                 init_config_template,
+                initial_state: Vec::new(),
+                labels: HashMap::new(),
+                activation_strategy,
             },
         );
         tracing::info!(
@@ -471,7 +510,7 @@ impl VirtualActorManager {
     ///
     /// ## Returns
     /// - `true`: Actor is active (ActorRef in registry, message loop running)
-    /// - `false`: Actor is not active (VirtualActorWrapper in registry, or actor is passivated)
+    /// - `false`: Actor is passivated or has not been activated yet
     ///
     /// ## Design Note (Orleans-Inspired)
     /// Virtual actors can be registered but not active. This method checks the actual
@@ -567,9 +606,28 @@ impl VirtualActorManager {
             None => return Vec::new(), // No active instances, no eviction needed
         };
 
-        // Filter to only currently active instances (check ActorRegistry)
+        // Filter to only currently active lazy instances (check ActorRegistry).
+        // Eager and prewarm actors are never subject to LRU eviction.
         let mut active_only: Vec<ActiveInstance> = Vec::new();
         for instance in instances.iter() {
+            // Skip eager/prewarm actors — they run until explicitly stopped.
+            // Only Unspecified and Lazy strategies are subject to LRU eviction.
+            let is_lazy = {
+                let virtual_actors = self.registry.virtual_actors().read().await;
+                virtual_actors
+                    .get(&instance.actor_id)
+                    .map(|m| {
+                        matches!(
+                            m.activation_strategy,
+                            ActivationStrategy::ActivationStrategyLazy
+                                | ActivationStrategy::ActivationStrategyUnspecified
+                        )
+                    })
+                    .unwrap_or(true) // default to evictable if no metadata
+            };
+            if !is_lazy {
+                continue;
+            }
             if self
                 .actor_registry
                 .is_actor_state_active(&instance.actor_id)
@@ -599,38 +657,20 @@ impl VirtualActorManager {
         // Remove evicted actors from tracking
         instances.retain(|i| !evicted.contains(&i.actor_id));
 
-        // Deactivate evicted actors (non-blocking, log errors)
-        // For virtual actors, we use suspend_virtual_actor() to preserve metadata while freeing resources
-        // Note: We can't import Actor here (circular dependency), so we rely on ActorRegistry
-        // to handle graceful shutdown when the instance Arc is dropped
+        // Deactivate evicted actors while preserving metadata for later reactivation.
         if let Some(service_locator) = service_locator {
             for actor_id in &evicted {
-                if let Some(actor_registry) = service_locator.actor_registry().await {
-                    // Suspend virtual actor (preserves metadata, removes instance)
-                    // When instance Arc is dropped, actor will stop gracefully
-                    // This is better than unregister_with_cleanup() which removes everything
-                    actor_registry.suspend_virtual_actor(actor_id).await;
-
-                    // Re-register VirtualActorWrapper to keep actor addressable (Orleans design)
-                    // Get tenant/namespace from metadata if available
-                    let (tenant_id, namespace) = {
-                        let virtual_actors = self.registry.virtual_actors().read().await;
-                        if let Some(metadata) = virtual_actors.get(actor_id) {
-                            (metadata.tenant_id.clone(), metadata.namespace.clone())
-                        } else {
-                            (String::new(), String::new())
-                        }
-                    };
-
-                    // Note: VirtualActorWrapper should be re-registered to keep actor addressable
-                    // This is handled by the caller (ActorFactory) which has access to ActorFactory
-                    // to create VirtualActorWrapper. We just suspend here to free resources.
-
-                    tracing::debug!(
-                        actor_id = %actor_id,
-                        actor_type = %actor_type,
-                        "LRU-evicted virtual actor suspended (metadata preserved)"
-                    );
+                if let Some(actor_factory) = service_locator.get_actor_factory().await {
+                    let ctx = service_locator
+                        .request_context_for_system_operations()
+                        .await;
+                    if actor_factory.stop_actor(&ctx, actor_id).await.is_ok() {
+                        tracing::debug!(
+                            actor_id = %actor_id,
+                            actor_type = %actor_type,
+                            "LRU-evicted virtual actor suspended (metadata preserved)"
+                        );
+                    }
                 }
             }
         }
@@ -736,7 +776,10 @@ mod tests {
             Option<plexspaces_proto::object_registry::v1::ObjectRegistration>,
             Box<dyn std::error::Error + Send + Sync>,
         > {
-            self.inner.lookup(ctx, object_id, object_type).await
+            self.inner
+                .lookup(ctx, object_type.unwrap_or_default(), object_id)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
 
         async fn lookup_full(
@@ -756,7 +799,10 @@ mod tests {
             ctx: &crate::RequestContext,
             registration: plexspaces_proto::object_registry::v1::ObjectRegistration,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            self.inner.register(ctx, registration).await
+            self.inner
+                .register(ctx, registration)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
 
         async fn unregister(
@@ -765,7 +811,10 @@ mod tests {
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            self.inner.unregister(ctx, object_type, object_id).await
+            self.inner
+                .unregister(ctx, object_type, object_id)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
 
         async fn heartbeat(
@@ -774,7 +823,10 @@ mod tests {
             object_type: plexspaces_proto::object_registry::v1::ObjectType,
             object_id: &str,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-            self.inner.heartbeat(ctx, object_type, object_id).await
+            self.inner
+                .heartbeat(ctx, object_type, object_id)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
 
         async fn discover(
@@ -803,6 +855,7 @@ mod tests {
                     limit,
                 )
                 .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
     }
 
@@ -827,8 +880,10 @@ mod tests {
         let actor_type = "read-state-tracker".to_string();
         let namespace = "orbit-read-state-ts".to_string();
         let facet_config = serde_json::json!({
-            "idle_timeout": "5m",
-            "activation_strategy": "lazy"
+            "virtual_actor": {
+                "idle_timeout": "5m",
+                "activation_strategy": "lazy"
+            }
         });
 
         // Register virtual actor type
@@ -856,6 +911,10 @@ mod tests {
         assert_eq!(metadata.namespace, namespace);
         assert_eq!(metadata.facet_config, Some(facet_config));
         assert_eq!(metadata.tenant_id, ""); // Default for type-level registration
+        assert_eq!(
+            metadata.activation_strategy,
+            ActivationStrategy::ActivationStrategyLazy
+        );
     }
 
     #[tokio::test]
@@ -864,9 +923,14 @@ mod tests {
 
         let actor_type = "configured-type".to_string();
         let namespace = "namespace".to_string();
-        let facet_config = serde_json::json!({});
+        let facet_config = serde_json::json!({
+            "virtual_actor": {
+                "idle_timeout": "5m",
+                "activation_strategy": "lazy"
+            }
+        });
         let config = Some(ActorConfig {
-            max_mailbox_size: Some(1000),
+            max_mailbox_size: 1000,
             ..Default::default()
         });
 
@@ -876,6 +940,7 @@ mod tests {
                 config.clone(),
                 namespace.clone(),
                 facet_config.clone(),
+                None,
                 None,
             )
             .await;
@@ -894,7 +959,12 @@ mod tests {
 
         let actor_type = "tenant-type".to_string();
         let namespace = "namespace".to_string();
-        let facet_config = serde_json::json!({});
+        let facet_config = serde_json::json!({
+            "virtual_actor": {
+                "idle_timeout": "5m",
+                "activation_strategy": "lazy"
+            }
+        });
         let tenant_id = Some("tenant-123".to_string());
 
         let result = manager
@@ -904,6 +974,7 @@ mod tests {
                 namespace.clone(),
                 facet_config.clone(),
                 tenant_id.clone(),
+                None,
             )
             .await;
 
@@ -926,6 +997,7 @@ mod tests {
                 "namespace".to_string(),
                 serde_json::Value::Null,
                 None,
+                None,
             )
             .await;
 
@@ -936,19 +1008,44 @@ mod tests {
         }
     }
 
-    /// Helper to create a test VirtualActorFacet
+    /// Minimal mock lifecycle facet for unit tests (no dependency on plexspaces_journaling)
+    #[derive(Debug)]
+    struct MockLifecycleFacet;
+
+    #[async_trait::async_trait]
+    impl VirtualActorLifecycleFacet for MockLifecycleFacet {
+        async fn get_activation_strategy(&self) -> plexspaces_common::ActivationStrategy {
+            plexspaces_common::ActivationStrategy::ActivationStrategyLazy
+        }
+        async fn get_lifecycle_state(&self) -> crate::VirtualActorLifecycleState {
+            crate::VirtualActorLifecycleState {
+                last_activated: None,
+                last_accessed: Some(std::time::SystemTime::now()),
+                activation_count: 0,
+                is_activating: false,
+                idle_timeout: std::time::Duration::from_secs(300),
+            }
+        }
+        async fn should_activate(&self) -> bool {
+            false
+        }
+        async fn start_activation(&self) -> bool {
+            true
+        }
+        async fn mark_activated(&self) {}
+        async fn mark_deactivated(&self) {}
+        async fn should_deactivate(&self) -> bool {
+            false
+        }
+        async fn update_access_time(&self) {}
+    }
+
+    /// Helper to create a test VirtualActorFacet (uses inline mock to avoid crate version conflicts)
     fn create_test_virtual_actor_facet(
     ) -> Arc<tokio::sync::RwLock<Box<dyn VirtualActorLifecycleFacet>>> {
-        use plexspaces_journaling::{virtual_actor_facet_to_lifecycle_facet, VirtualActorFacet};
-        let facet = VirtualActorFacet::new(
-            serde_json::json!({
-                "idle_timeout": "5m",
-                "activation_strategy": "lazy"
-            }),
-            100,
-        );
-        let lifecycle_facet = virtual_actor_facet_to_lifecycle_facet(facet);
-        Arc::new(tokio::sync::RwLock::new(lifecycle_facet))
+        Arc::new(tokio::sync::RwLock::new(
+            Box::new(MockLifecycleFacet) as Box<dyn VirtualActorLifecycleFacet>
+        ))
     }
 
     #[tokio::test]
@@ -968,6 +1065,9 @@ mod tests {
                 None,
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                HashMap::new(),
+                ActivationStrategy::ActivationStrategyLazy,
             )
             .await;
 
@@ -983,9 +1083,9 @@ mod tests {
 
         let actor_id = "configured-actor@node-1".to_string();
         let actor_type = "GenServer".to_string();
-        let facet = Arc::new(tokio::sync::RwLock::new(create_test_virtual_actor_facet()));
+        let facet = create_test_virtual_actor_facet();
         let config = Some(ActorConfig {
-            max_mailbox_size: Some(500),
+            max_mailbox_size: 500,
             ..Default::default()
         });
 
@@ -997,6 +1097,9 @@ mod tests {
                 config.clone(),
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                HashMap::new(),
+                ActivationStrategy::ActivationStrategyLazy,
             )
             .await;
 
@@ -1014,11 +1117,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_register_virtual_actor_preserves_reactivation_metadata() {
+        let manager = create_test_manager().await;
+
+        let actor_id = "configured-actor@node-1".to_string();
+        let actor_type = "GenServer".to_string();
+        let facet = create_test_virtual_actor_facet();
+        let mut labels = HashMap::new();
+        labels.insert("role".to_string(), "primary".to_string());
+        let initial_state = vec![1, 2, 3, 4];
+
+        manager
+            .register(
+                actor_id.clone(),
+                facet,
+                actor_type.clone(),
+                None,
+                "tenant".to_string(),
+                "namespace".to_string(),
+                initial_state.clone(),
+                labels.clone(),
+                ActivationStrategy::ActivationStrategyEager,
+            )
+            .await
+            .unwrap();
+
+        let metadata = manager.get_metadata(&actor_id).await.unwrap();
+        assert_eq!(metadata.actor_type, actor_type);
+        assert_eq!(metadata.initial_state, initial_state);
+        assert_eq!(metadata.labels, labels);
+        assert_eq!(
+            metadata.activation_strategy,
+            ActivationStrategy::ActivationStrategyEager
+        );
+    }
+
+    #[tokio::test]
     async fn test_register_virtual_actor_empty_actor_type() {
         let manager = create_test_manager().await;
 
         let actor_id = "test-actor@node-1".to_string();
-        let facet = Arc::new(tokio::sync::RwLock::new(create_test_virtual_actor_facet()));
+        let facet = create_test_virtual_actor_facet();
 
         // Try to register with empty actor_type - should fail
         let result = manager
@@ -1029,6 +1168,9 @@ mod tests {
                 None,
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                HashMap::new(),
+                ActivationStrategy::ActivationStrategyLazy,
             )
             .await;
 
@@ -1049,7 +1191,13 @@ mod tests {
                 "read-state-tracker".to_string(),
                 None,
                 "namespace".to_string(),
-                serde_json::Value::Null,
+                serde_json::json!({
+                    "virtual_actor": {
+                        "idle_timeout": "5m",
+                        "activation_strategy": "lazy"
+                    }
+                }),
+                None,
                 None,
             )
             .await
@@ -1074,7 +1222,7 @@ mod tests {
 
         let actor_id = "individual-actor@node-1".to_string();
         let actor_type = "GenServer".to_string();
-        let facet = Arc::new(tokio::sync::RwLock::new(create_test_virtual_actor_facet()));
+        let facet = create_test_virtual_actor_facet();
 
         manager
             .register(
@@ -1084,6 +1232,9 @@ mod tests {
                 None,
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                HashMap::new(),
+                ActivationStrategy::ActivationStrategyLazy,
             )
             .await
             .unwrap();
@@ -1119,7 +1270,13 @@ mod tests {
                 "test-type".to_string(),
                 None,
                 "namespace".to_string(),
-                serde_json::Value::Null,
+                serde_json::json!({
+                    "virtual_actor": {
+                        "idle_timeout": "5m",
+                        "activation_strategy": "lazy"
+                    }
+                }),
+                None,
                 None,
             )
             .await
@@ -1135,7 +1292,7 @@ mod tests {
 
         let actor_id = "test-actor@node-1".to_string();
         let actor_type = "GenServer".to_string();
-        let facet = Arc::new(tokio::sync::RwLock::new(create_test_virtual_actor_facet()));
+        let facet = create_test_virtual_actor_facet();
 
         manager
             .register(
@@ -1145,6 +1302,9 @@ mod tests {
                 None,
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                std::collections::HashMap::new(),
+                plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
             )
             .await
             .unwrap();
@@ -1152,12 +1312,12 @@ mod tests {
         // Update metadata
         let new_type = "UpdatedType".to_string();
         let new_config = Some(ActorConfig {
-            max_mailbox_size: Some(2000),
+            max_mailbox_size: 2000,
             ..Default::default()
         });
 
         let result = manager
-            .update_metadata(&actor_id, Some(new_type.clone()), new_config.clone())
+            .update_metadata(&actor_id, new_type.clone(), new_config.clone())
             .await;
 
         assert!(result.is_ok());
@@ -1176,7 +1336,7 @@ mod tests {
         let result = manager
             .update_metadata(
                 &"nonexistent@node-1".to_string(),
-                Some("NewType".to_string()),
+                "NewType".to_string(),
                 None,
             )
             .await;
@@ -1249,7 +1409,7 @@ mod tests {
 
         let actor_id = "test-actor@node-1".to_string();
         let actor_type = "GenServer".to_string();
-        let facet = Arc::new(tokio::sync::RwLock::new(create_test_virtual_actor_facet()));
+        let facet = create_test_virtual_actor_facet();
 
         manager
             .register(
@@ -1259,6 +1419,9 @@ mod tests {
                 None,
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                HashMap::new(),
+                ActivationStrategy::ActivationStrategyLazy,
             )
             .await
             .unwrap();
@@ -1290,7 +1453,13 @@ mod tests {
                 "test-type".to_string(),
                 None,
                 "namespace".to_string(),
-                serde_json::json!({}),
+                serde_json::json!({
+                    "virtual_actor": {
+                        "idle_timeout": "5m",
+                        "activation_strategy": "lazy"
+                    }
+                }),
+                None,
                 None,
             )
             .await
@@ -1319,7 +1488,7 @@ mod tests {
 
         let actor_id = "test-actor@node-1".to_string();
         let actor_type = "GenServer".to_string();
-        let facet = Arc::new(tokio::sync::RwLock::new(create_test_virtual_actor_facet()));
+        let facet = create_test_virtual_actor_facet();
 
         manager
             .register(
@@ -1329,6 +1498,9 @@ mod tests {
                 None,
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                HashMap::new(),
+                ActivationStrategy::ActivationStrategyLazy,
             )
             .await
             .unwrap();
@@ -1336,6 +1508,34 @@ mod tests {
         // Mark as activated
         let result = manager.mark_activated(&actor_id).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_register_virtual_actor_type_preserves_eager_strategy() {
+        let manager = create_test_manager().await;
+
+        manager
+            .register_virtual_actor_type(
+                "eager-type".to_string(),
+                None,
+                "namespace".to_string(),
+                serde_json::json!({
+                    "virtual_actor": {
+                        "idle_timeout": "5m",
+                        "activation_strategy": "eager"
+                    }
+                }),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let metadata = manager.get_virtual_actor_type("eager-type").await.unwrap();
+        assert_eq!(
+            metadata.activation_strategy,
+            ActivationStrategy::ActivationStrategyEager
+        );
     }
 
     #[tokio::test]
@@ -1363,7 +1563,7 @@ mod tests {
 
         // Register as virtual
         let actor_type = "GenServer".to_string();
-        let facet = Arc::new(tokio::sync::RwLock::new(create_test_virtual_actor_facet()));
+        let facet = create_test_virtual_actor_facet();
 
         manager
             .register(
@@ -1373,6 +1573,9 @@ mod tests {
                 None,
                 "tenant".to_string(),
                 "namespace".to_string(),
+                vec![],
+                HashMap::new(),
+                ActivationStrategy::ActivationStrategyLazy,
             )
             .await
             .unwrap();

@@ -20,9 +20,7 @@
 use async_trait::async_trait;
 use plexspaces_actor::Actor;
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, Message, RequestContext,
-};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, Message};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::NodeBuilder;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -63,9 +61,9 @@ impl GenServer for TestActor {
         &mut self,
         _ctx: &ActorContext,
         _msg: Message,
-    ) -> Result<serde_json::Value, BehaviorError> {
+    ) -> Result<(), BehaviorError> {
         self.processed.store(true, Ordering::SeqCst);
-        Ok(serde_json::json!({ "status": "ok" }))
+        Ok(())
     }
 }
 
@@ -115,17 +113,15 @@ async fn test_span_cloning_panic_reproduction() {
     // Start actor (this spawns a tokio task that inherits the tracing context)
     let handle = actor.start().await.expect("Actor should start");
 
-    // Send a message to the actor
-    let ctx =
-        RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
-    let actor_ref = node.get_actor_ref(&actor.id().clone(), &ctx).await.unwrap();
-
-    let message = Message::new(
-        serde_json::json!({ "action": "test" })
+    // Send a message directly to the actor's mailbox
+    let message = Message {
+        id: Ulid::new().to_string(),
+        payload: serde_json::json!({ "action": "test" })
             .to_string()
             .into_bytes(),
-    );
-    actor_ref.tell(message).await.unwrap();
+        ..Default::default()
+    };
+    actor.send(message).await.unwrap();
 
     // Wait for message to be processed
     for _ in 0..100 {
@@ -213,18 +209,15 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
 
         let handle = actor.start().await.expect("Actor should start");
 
-        // Send a message
-        let ctx = RequestContext::new_without_auth(
-            "test-tenant".to_string(),
-            "test-namespace".to_string(),
-        );
-        let actor_ref = node.get_actor_ref(&actor.id().clone(), &ctx).await.unwrap();
-        let message = Message::new(
-            serde_json::json!({ "action": "test" })
+        // Send a message directly to the actor's mailbox
+        let message = Message {
+            id: Ulid::new().to_string(),
+            payload: serde_json::json!({ "action": "test" })
                 .to_string()
                 .into_bytes(),
-        );
-        actor_ref.tell(message).await.unwrap();
+            ..Default::default()
+        };
+        actor.send(message).await.unwrap();
 
         handles.push((handle, actor));
     }

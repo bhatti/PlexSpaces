@@ -141,12 +141,13 @@
 syntax = "proto3";
 
 package plexspaces.mailbox.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/mailbox/mailbox;plexspaces_mailbox_v1";
 
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
-import "plexspaces/v1/common.proto";
+import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/channel/channel.proto";
+import "plexspaces/v1/common.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/mailbox/mailbox;plexspaces_mailbox_v1";
 
 // Mailbox type
 enum MailboxType {
@@ -173,7 +174,7 @@ enum MessagePriority {
   NORMAL = 3;
   HIGH = 4;
   HIGHEST = 5;
-  SYSTEM = 10;  // System messages always processed first
+  SYSTEM = 10; // System messages always processed first
 }
 
 // Mailbox configuration

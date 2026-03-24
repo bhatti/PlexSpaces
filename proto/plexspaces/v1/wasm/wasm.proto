@@ -65,14 +65,15 @@
 
 syntax = "proto3";
 package plexspaces.wasm.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/wasm/wasm;plexspaces_wasm_v1";
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
-import "buf/validate/validate.proto";
 import "plexspaces/v1/common.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/wasm/wasm;plexspaces_wasm_v1";
 
 // WebAssembly module definition
 //
@@ -385,7 +386,12 @@ message DeployWasmModuleRequest {
   PreWarmStrategy pre_warm = 2;
 
   // Node tags for PUSH_TAGGED strategy (e.g., ["us-east-1", "production"])
-  repeated string target_node_tags = 3 [(buf.validate.field).repeated = {max_items: 100, items: {string: {max_len: 128}}}];
+  repeated string target_node_tags = 3 [(buf.validate.field).repeated = {
+    max_items: 100
+    items: {
+      string: {max_len: 128}
+    }
+  }];
 }
 
 // Deploy WASM module response
@@ -429,7 +435,10 @@ message InstantiateActorRequest {
   // - Hash: "a1b2c3d4..." (direct cache lookup)
   string module_ref = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Actor ID to assign to this instance
@@ -437,7 +446,10 @@ message InstantiateActorRequest {
   // Format: ULID for sortability (see CLAUDE.md Core Principle 0)
   string actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Initial state bytes (opaque to runtime)
@@ -500,19 +512,28 @@ message MigrateActorRequest {
   // Actor ID to migrate
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Source node ID (current location)
   string source_node_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Destination node ID (target location)
   string target_node_id = 3 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Include journal entries (for durable actors)

@@ -60,7 +60,7 @@ fn test_extract_node_id_only_at_sign() {
 #[tokio::test]
 async fn test_is_actor_local_with_matching_node_id() {
     let node = NodeBuilder::new("test-node-1").build().await;
-    let service_locator = node.service_locator();
+    let service_locator: Arc<dyn ServiceLocator> = node.service_locator();
 
     // Actor ID with matching node_id
     let is_local = is_actor_local("actor@test-node-1", &service_locator).await;
@@ -70,7 +70,7 @@ async fn test_is_actor_local_with_matching_node_id() {
 #[tokio::test]
 async fn test_is_actor_local_with_different_node_id() {
     let node = NodeBuilder::new("test-node-1").build().await;
-    let service_locator = node.service_locator();
+    let service_locator: Arc<dyn ServiceLocator> = node.service_locator();
 
     // Actor ID with different node_id
     let is_local = is_actor_local("actor@test-node-2", &service_locator).await;
@@ -80,7 +80,7 @@ async fn test_is_actor_local_with_different_node_id() {
 #[tokio::test]
 async fn test_is_actor_local_without_node_suffix() {
     let node = NodeBuilder::new("test-node-1").build().await;
-    let service_locator = node.service_locator();
+    let service_locator: Arc<dyn ServiceLocator> = node.service_locator();
 
     // Actor ID without @node suffix
     let is_local = is_actor_local("actor", &service_locator).await;
@@ -92,7 +92,7 @@ async fn test_is_actor_local_without_node_suffix() {
 #[tokio::test]
 async fn test_is_actor_local_registered_locally() {
     let node = NodeBuilder::new("test-node-1").build().await;
-    let service_locator = node.service_locator();
+    let service_locator: Arc<dyn ServiceLocator> = node.service_locator();
     let registry = service_locator.actor_registry().await.unwrap();
 
     // Register actor locally (without @node suffix)
@@ -150,7 +150,7 @@ async fn test_is_actor_local_registered_locally() {
             &ctx,
             actor_id.clone(),
             Arc::new(actor_ref),
-            None,
+            "TestActor".to_string(),
             None,
             None,
             None,
@@ -169,7 +169,7 @@ async fn test_is_actor_local_registered_locally() {
 async fn test_is_actor_local_no_node_config() {
     // Create service locator without NodeConfig (testing fallback)
     let node = NodeBuilder::new("test-node-1").build().await;
-    let service_locator = node.service_locator();
+    let service_locator: Arc<dyn ServiceLocator> = node.service_locator();
 
     // Actor ID with matching node_id (should use ActorRegistry fallback)
     let is_local = is_actor_local("actor@test-node-1", &service_locator).await;
@@ -187,7 +187,7 @@ async fn test_is_actor_local_no_node_config() {
 #[tokio::test]
 async fn test_is_actor_local_empty_actor_id() {
     let node = NodeBuilder::new("test-node-1").build().await;
-    let service_locator = node.service_locator();
+    let service_locator: Arc<dyn ServiceLocator> = node.service_locator();
 
     let is_local = is_actor_local("", &service_locator).await;
     assert!(!is_local, "Empty actor ID should not be local");
@@ -196,7 +196,7 @@ async fn test_is_actor_local_empty_actor_id() {
 #[tokio::test]
 async fn test_is_actor_local_special_characters() {
     let node = NodeBuilder::new("test-node-1").build().await;
-    let service_locator = node.service_locator();
+    let service_locator: Arc<dyn ServiceLocator> = node.service_locator();
 
     // Test with special characters
     let is_local = is_actor_local("actor-name@test-node-1", &service_locator).await;
@@ -209,7 +209,7 @@ async fn test_is_actor_local_special_characters() {
 #[tokio::test]
 async fn test_is_actor_local_case_sensitivity() {
     let node = NodeBuilder::new("test-node-1").build().await;
-    let service_locator = node.service_locator();
+    let service_locator: Arc<dyn ServiceLocator> = node.service_locator();
 
     // Node IDs are case-sensitive
     let is_local = is_actor_local("actor@TEST-NODE-1", &service_locator).await;

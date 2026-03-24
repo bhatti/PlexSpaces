@@ -377,13 +377,6 @@ impl NodeBuilder {
     /// // Node is ready to use - services are initialized
     /// ```
     pub async fn build(self) -> Node {
-        // Register actor state checker callback
-        // This allows plexspaces_core to check actor state without importing Actor directly
-        // The callback uses ActorStateChecker trait to check state
-        // This must be called before using VirtualActorManager::is_active() which checks actor state
-        use plexspaces_actor::register_state_fetcher_callback;
-        register_state_fetcher_callback();
-
         let node = Node::new(self.node_id, self.config);
 
         // Set release_spec if provided

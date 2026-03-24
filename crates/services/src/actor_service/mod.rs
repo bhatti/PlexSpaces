@@ -148,13 +148,13 @@ use ulid::Ulid;
 
 // Import proto types and gRPC service trait
 use plexspaces_proto::actor::v1::{
-    AllReduceShardGroupRequest,
-    AllReduceShardGroupResponse,
     // gRPC service trait and server
     actor_service_server::ActorService as ActorServiceTrait,
     ActivateActorRequest,
     ActivateActorResponse,
     ActorDownNotification,
+    AllReduceShardGroupRequest,
+    AllReduceShardGroupResponse,
     BarrierShardGroupRequest,
     BarrierShardGroupResponse,
     BroadcastShardGroupRequest,
@@ -172,8 +172,6 @@ use plexspaces_proto::actor::v1::{
     DeleteShardGroupRequest,
     GetActorRequest,
     GetActorResponse,
-    GetOrActivateActorRequest,
-    GetOrActivateActorResponse,
     GetShardGroupRequest,
     GetShardGroupResponse,
     InvokeActorRequest,
@@ -190,6 +188,8 @@ use plexspaces_proto::actor::v1::{
     MigrateActorResponse,
     MonitorActorRequest,
     MonitorActorResponse,
+    ReduceShardGroupRequest,
+    ReduceShardGroupResponse,
     ScaleShardGroupRequest,
     ScaleShardGroupResponse,
     ScatterGatherRequest,
@@ -216,8 +216,6 @@ use plexspaces_proto::actor::v1::{
     StreamMessageResponse,
     TerminateActorRequest,
     TerminateActorResponse,
-    ReduceShardGroupRequest,
-    ReduceShardGroupResponse,
     UnlinkActorRequest,
     UnlinkActorResponse,
 };
@@ -276,6 +274,78 @@ impl ActorServiceImpl {
             .actor_registry()
             .await
             .expect("ActorRegistry must be registered in ServiceLocator")
+    }
+
+    /// Resolve an actor id for `invoke_actor` when no active local instance is found.
+    ///
+    /// `invoke_actor` is actor-type based, so this helper resolves the canonical target actor id.
+    /// Local activation is owned by `ActorRegistry::ask()` / `ActorRegistry::tell()`, while
+    /// remote delivery continues to use the existing routing path.
+    async fn resolve_target_actor_id_for_invoke(
+        &self,
+        ctx: &RequestContext,
+        requested_actor_type: &str,
+        discovered_actor_ids: &[String],
+    ) -> Result<String, Status> {
+        let virtual_actor_manager = self
+            .service_locator
+            .virtual_actor_manager()
+            .await
+            .ok_or_else(|| Status::internal("VirtualActorManager not found in ServiceLocator"))?;
+
+        for actor_id in discovered_actor_ids {
+            if virtual_actor_manager.is_virtual(actor_id).await {
+                return Ok(actor_id.clone());
+            }
+        }
+
+        let requested_namespace = ctx.namespace().to_string();
+        let (instance_id, simple_actor_type) = if let Some((actor_type_part, instance_id_part)) =
+            requested_actor_type.split_once(':')
+        {
+            (instance_id_part.to_string(), actor_type_part.to_string())
+        } else {
+            (
+                ulid::Ulid::new().to_string(),
+                requested_actor_type.to_string(),
+            )
+        };
+
+        let requested_actor_id = build_actor_id(
+            &instance_id,
+            &simple_actor_type,
+            Some(&requested_namespace),
+            &self.local_node_id,
+        );
+
+        if virtual_actor_manager
+            .get_metadata(&requested_actor_id)
+            .await
+            .is_some()
+        {
+            return Ok(requested_actor_id);
+        }
+
+        let type_metadata = virtual_actor_manager
+            .get_virtual_actor_type(&simple_actor_type)
+            .await
+            .ok_or_else(|| {
+                Status::not_found(format!(
+                    "No actors found for type '{}' in tenant '{}', namespace '{}'",
+                    requested_actor_type,
+                    ctx.tenant_id(),
+                    ctx.namespace()
+                ))
+            })?;
+
+        let target_actor_id = build_actor_id(
+            &instance_id,
+            &simple_actor_type,
+            Some(&type_metadata.namespace),
+            &self.local_node_id,
+        );
+
+        Ok(target_actor_id)
     }
 
     /// Check if service should accept requests (not shutting down)
@@ -587,43 +657,28 @@ impl ActorServiceImpl {
         };
 
         if node_id == self.local_node_id {
-            // LOCAL: Get ActorRef and use ask()
+            // LOCAL: use ActorRegistry ask() so virtual activation stays inside the registry.
             let actor_id_str = actor_id.to_string();
             let registry = self.get_actor_registry().await;
-
-            // Check if actor exists
-            if registry.lookup_actor(&actor_id_str).await.is_none()
-                && !registry.is_actor_activated(&actor_id_str).await
-            {
-                // Actor doesn't exist - return error
-                return Err("Actor not found".into());
-            }
-
-            // Create ActorRef - try local first (with mailbox), fallback to remote
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
-            let actor_ref = Self::create_actor_ref_for_local_actor(
-                &ctx,
-                &registry,
-                &actor_id_str,
-                &self.local_node_id,
-                self.service_locator.clone(),
-            )
-            .await;
-
             let timeout_duration = timeout.unwrap_or(std::time::Duration::from_secs(5));
             if tracing::enabled!(tracing::Level::TRACE) {
                 tracing::trace!(
-                    "🟪 [ACTOR_SERVICE::send_message_and_wait] LOCAL: message_id={}, actor_id={}, calling ActorRef::ask()",
+                    "🟪 [ACTOR_SERVICE::send_message_and_wait] LOCAL: message_id={}, actor_id={}, calling ActorRegistry::ask()",
                     message.id, actor_id_str
                 );
             }
-            let result = actor_ref.ask(message, timeout_duration).await.map_err(|e| {
-                use plexspaces_actor::ActorRefError;
-                match e {
-                    ActorRefError::ActorNotFound(_) => "Actor not found".into(),
-                    _ => format!("Failed to send ask request: {}", e).into(),
-                }
-            });
+            let result = registry
+                .ask(&ctx, &actor_id_str, message, timeout_duration)
+                .await
+                .map_err(|e| {
+                    use plexspaces_core::ActorRegistryError;
+                    match e {
+                        ActorRegistryError::ActorNotFound(_) => "Actor not found".into(),
+                        ActorRegistryError::Timeout => "Request timed out".into(),
+                        _ => format!("Failed to send ask request: {}", e).into(),
+                    }
+                });
             if tracing::enabled!(tracing::Level::TRACE) {
                 tracing::trace!(
                     "🟪 [ACTOR_SERVICE::send_message_and_wait] LOCAL COMPLETED: actor_id={}, result={:?}",
@@ -661,31 +716,14 @@ impl ActorServiceImpl {
     /// Tries to get mailbox from actor instance and create local ActorRef, falls back to remote if unavailable
     async fn create_actor_ref_for_local_actor(
         ctx: &RequestContext,
-        registry: &Arc<ActorRegistry>,
+        _registry: &Arc<ActorRegistry>,
         actor_id: &str,
         local_node_id: &str,
         service_locator: Arc<dyn ServiceLocatorTrait>,
     ) -> ActorRefImpl {
-        // Try to get mailbox from actor instance
-        let actor_id_typed = ActorId::from(actor_id);
-        if let Some(instance) = registry.get_actor_instance(&actor_id_typed).await {
-            if let Some(actor) = instance.downcast_ref::<Actor>() {
-                let mailbox = actor.mailbox().clone();
-                // CRITICAL: Pass tenant_id from RequestContext to ActorRef
-                return ActorRefImpl::local(
-                    actor_id,
-                    ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
-                    ctx.namespace().to_string(),
-                    mailbox,
-                    service_locator,
-                );
-            }
-        }
-        // Fallback to remote pointing to local node (for virtual actors or when mailbox unavailable)
-        // CRITICAL: Pass tenant_id from RequestContext to ActorRef
         ActorRefImpl::remote(
             actor_id,
-            ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
+            ctx.tenant_id().to_string(),
             ctx.namespace().to_string(),
             local_node_id.to_string(),
             service_locator,
@@ -1514,64 +1552,6 @@ impl ActorServiceTrait for ActorServiceImpl {
         ))
     }
 
-    async fn get_or_activate_actor(
-        &self,
-        request: Request<GetOrActivateActorRequest>,
-    ) -> Result<Response<GetOrActivateActorResponse>, Status> {
-        // Create RequestContext from gRPC request (before consuming request)
-        // GetOrActivateActorRequest doesn't have labels field, use empty map
-        let labels_for_ctx = std::collections::HashMap::new();
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-            self.service_locator.clone();
-        let ctx = crate::request_context_from_grpc_request(
-            request.metadata(),
-            &labels_for_ctx,
-            &service_locator_trait,
-        )
-        .await
-        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
-
-        // Now consume request
-        let req = request.into_inner();
-
-        // Use unified implementation
-        let (was_activated, final_actor_id) =
-            get_or_activate_actor_impl(&self.service_locator, &self.local_node_id, &ctx, &req)
-                .await?;
-
-        // Build response
-        use plexspaces_proto::v1::actor::{Actor as ProtoActor, ActorState};
-        let proto_actor = ProtoActor {
-            actor_id: final_actor_id.clone(),
-            actor_type: if req.actor_type.is_empty() {
-                "unknown".to_string()
-            } else {
-                req.actor_type.clone()
-            },
-            state: ActorState::ActorStateActive as i32,
-            node_id: self.local_node_id.clone(),
-            vm_id: String::new(),
-            actor_state: req.initial_state.clone(),
-            metadata: None,
-            config: req.config,
-            metrics: None,
-            facets: vec![],
-            actor_state_schema_version: 0,
-            error_message: String::new(),
-            namespace: String::new(), // Namespace from application/actor context
-        };
-
-        // Build actor_ref (format: "actor_id@node_id")
-        // Use final_actor_id from unified implementation
-        let actor_ref = final_actor_id;
-
-        Ok(Response::new(GetOrActivateActorResponse {
-            actor_ref,
-            actor: Some(proto_actor),
-            was_activated,
-        }))
-    }
-
     async fn invoke_actor(
         &self,
         request: Request<InvokeActorRequest>,
@@ -1665,13 +1645,13 @@ impl ActorServiceTrait for ActorServiceImpl {
         let lookup_start = std::time::Instant::now();
 
         // Discover actors by type using efficient hashmap lookup (O(1))
-        let actor_ids = actor_registry
+        let discovered_actor_ids = actor_registry
             .discover_actors_by_type(&lookup_ctx, &actor_type)
             .await;
-        let mut active_actor_ids = Vec::with_capacity(actor_ids.len());
-        for actor_id in actor_ids {
+        let mut active_actor_ids = Vec::with_capacity(discovered_actor_ids.len());
+        for actor_id in &discovered_actor_ids {
             if actor_registry.lookup_actor(&actor_id).await.is_some() {
-                active_actor_ids.push(actor_id);
+                active_actor_ids.push(actor_id.clone());
             }
         }
 
@@ -1687,124 +1667,24 @@ impl ActorServiceTrait for ActorServiceImpl {
             );
         }
 
-        // CRITICAL: Handle virtual actor auto-activation when no actors found
-        // Delegate to get_or_activate_actor_impl which handles virtual actor type detection and facet creation
         let mut actor_ids = active_actor_ids;
         if actor_ids.is_empty() {
-            // Extract instance_id from actor_type if it's in HTTP format (actor_type:instance_id)
-            // Format: "read-state-tracker:user-1" -> instance_id="user-1", simple_actor_type="read-state-tracker"
-            // Format: "read-state-tracker" -> instance_id=ULID, simple_actor_type="read-state-tracker"
-            let (instance_id, simple_actor_type) =
-                if let Some((actor_type_part, instance_id_part)) = actor_type.split_once(':') {
-                    (instance_id_part.to_string(), actor_type_part.to_string())
-                } else {
-                    (ulid::Ulid::new().to_string(), actor_type.clone())
-                };
-            // Check if actor type is virtual - use simple_actor_type directly (no base type extraction)
-            let virtual_actor_manager = self.service_locator.virtual_actor_manager().await;
-            if let Some(manager) = virtual_actor_manager {
-                let is_virtual = manager.is_virtual_actor_type(&simple_actor_type).await;
-                if is_virtual {
-                    // Virtual actor type - build actor_id and delegate to get_or_activate_actor_impl
+            match self
+                .resolve_target_actor_id_for_invoke(&lookup_ctx, &actor_type, &discovered_actor_ids)
+                .await
+            {
+                Ok(final_actor_id) => {
                     tracing::info!(
                         actor_type = %actor_type,
-                        simple_actor_type = %simple_actor_type,
-                        instance_id = %instance_id,
-                        "🟦 [INVOKE_ACTOR] Virtual actor type detected - activating via get_or_activate_actor_impl"
+                        final_actor_id = %final_actor_id,
+                        namespace = %namespace,
+                        tenant_id = %tenant_id,
+                        "🟦 [INVOKE_ACTOR] Resolved virtual actor target for invoke"
                     );
 
-                    // Get virtual actor type metadata to extract namespace for actor_id construction
-                    if let Some(type_metadata) =
-                        manager.get_virtual_actor_type(&simple_actor_type).await
-                    {
-                        // Build actor_id using factory: {instance_id}//{actor_type}::{namespace}@{node_id}
-                        use plexspaces_core::actor_id::build_actor_id;
-                        let target_actor_id = build_actor_id(
-                            &instance_id,
-                            &simple_actor_type,
-                            Some(&type_metadata.namespace),
-                            &self.local_node_id,
-                        );
-
-                        // Delegate to get_or_activate_actor_impl - it handles virtual actor type detection,
-                        // facet creation from VirtualActorMetadata, and actor spawning
-                        // NOTE: For WASM actors, init config should be built in get_or_activate_actor_impl
-                        // using ApplicationController to get ChildSpec and merge instance_id as user_id
-                        use plexspaces_proto::actor::v1::GetOrActivateActorRequest;
-                        let get_or_activate_req = GetOrActivateActorRequest {
-                            actor_id: target_actor_id.clone(),
-                            actor_type: simple_actor_type.clone(),
-                            initial_state: vec![], // Will be built in get_or_activate_actor_impl for WASM actors
-                            config: type_metadata.config.clone(),
-                            force_activation: false,
-                        };
-
-                        // Use namespace from type_metadata (from deployment) for proper actor creation
-                        let get_or_activate_ctx = plexspaces_core::RequestContext::new_without_auth(
-                            tenant_id.clone(),
-                            type_metadata.namespace.clone(),
-                        );
-                        match crate::actor_service::get_or_activate_impl::get_or_activate_actor_impl(
-                            &self.service_locator,
-                            &self.local_node_id,
-                            &get_or_activate_ctx,
-                            &get_or_activate_req,
-                        ).await {
-                            Ok((_was_activated, final_actor_id)) => {
-                                // Actor activated/created - use the final_actor_id directly instead of retrying type lookup
-                                // Log payload info here (combine with activation log) - payload_str will be set below for POST/PUT
-                                tracing::info!(
-                                    actor_type = %actor_type,
-                                    final_actor_id = %final_actor_id,
-                                    namespace = %namespace,
-                                    tenant_id = %tenant_id,
-                                    "🟦 [INVOKE_ACTOR] Virtual actor auto-activated successfully - using final_actor_id"
-                                );
-
-                                // Verify actor is actually registered and active before routing message
-                                // This ensures the actor is ready to receive messages
-                                if actor_registry.lookup_actor(&final_actor_id).await.is_none() {
-                                    tracing::warn!(
-                                        actor_id = %final_actor_id,
-                                        "Actor not found in registry immediately after activation - retrying lookup"
-                                    );
-                                    // Retry lookup after a brief delay to allow registration to complete
-                                    tokio::time::sleep(Duration::from_millis(50)).await;
-                                    if actor_registry.lookup_actor(&final_actor_id).await.is_none() {
-                                        return Err(Status::internal(format!(
-                                            "Actor {} not found in registry after activation",
-                                            final_actor_id
-                                        )));
-                                    }
-                                }
-
-                                // Use the actor ID returned from activation (not type lookup)
-                                actor_ids = vec![final_actor_id];
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    actor_type = %simple_actor_type,
-                                    error = %e,
-                                    "Failed to activate virtual actor"
-                                );
-                                return Err(Status::internal(format!(
-                                    "Failed to activate virtual actor type '{}': {}",
-                                    simple_actor_type, e
-                                )));
-                            }
-                        }
-                    } else {
-                        tracing::error!(
-                            actor_type = %simple_actor_type,
-                            "Virtual actor type metadata not found"
-                        );
-                        return Err(Status::internal(format!(
-                            "Virtual actor type '{}' metadata not found",
-                            simple_actor_type
-                        )));
-                    }
-                } else {
-                    // Not a virtual actor type - return error
+                    actor_ids = vec![final_actor_id];
+                }
+                Err(status) if status.code() == tonic::Code::NotFound => {
                     metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
                         "error_type" => "actor_not_found",
                         "tenant_id" => tenant_id.clone(),
@@ -1822,24 +1702,14 @@ impl ActorServiceTrait for ActorServiceImpl {
                         actor_type, &tenant_id, &namespace
                     )));
                 }
-            } else {
-                // VirtualActorManager not available - return error
-                metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                    "error_type" => "actor_not_found",
-                    "tenant_id" => tenant_id.clone(),
-                    "namespace" => namespace.clone(),
-                    "actor_type" => actor_type.clone()
-                )
-                .increment(1);
-                tracing::warn!(
-                    actor_type = %actor_type,
-                    "🟦 [INVOKE_ACTOR] No actors found: type='{}', tenant='{}', namespace='{}'",
-                    actor_type, &tenant_id, &namespace
-                );
-                return Err(Status::not_found(format!(
-                    "No actors found for type '{}' in tenant '{}', namespace '{}'",
-                    actor_type, &tenant_id, &namespace
-                )));
+                Err(e) => {
+                    tracing::error!(
+                        actor_type = %actor_type,
+                        error = %e,
+                        "Failed to activate virtual actor"
+                    );
+                    return Err(e);
+                }
             }
         }
 
@@ -2765,7 +2635,6 @@ impl ActorServiceTrait for ActorServiceImpl {
 }
 
 impl ActorServiceImpl {
-
     /// Resolve the target node IDs for shard placement.
     ///
     /// Strategy controls resolution semantics:
@@ -3229,8 +3098,9 @@ impl ActorServiceImpl {
     /// Unified parallel operation helper (Erlang pmap pattern)
     ///
     /// ## Design
-    /// Uses routing::ask_helper() for each shard: one temp sender (via ActorFactory::create_temporary_sender),
-    /// spawn one task per shard that calls ask_helper(), join all, then cleanup temp sender.
+    /// Uses `routing::ask_helper()` for each shard with one shared temporary sender created by
+    /// `ActorFactory::create_temporary_sender`. Each shard still gets its own correlation id and
+    /// waiter entry, while local delivery continues to flow through `ActorRegistry::tell()`.
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext with tenant_id and namespace (CRITICAL: flows from API → ActorBuilder → ActorRef)
@@ -3444,7 +3314,8 @@ impl ActorServiceImpl {
             );
         }
 
-        // Cleanup: Remove the single temporary sender (all correlation_ids are cleaned up by ask_helper)
+        // Cleanup: Remove the single shared temporary sender after all per-correlation waiters
+        // created by ask_helper() have been cleaned up.
         if let Some(registry) = self.service_locator.actor_registry().await {
             registry.remove_temporary_sender(&temp_sender_id).await;
         }
@@ -3889,7 +3760,9 @@ impl ActorServiceImpl {
         let mut values = Vec::new();
         for (_shard_id, _actor_id, _latency, success, _error, response) in &results {
             if *success {
-                let response = response.as_ref().ok_or("Missing shard response for successful reduction")?;
+                let response = response
+                    .as_ref()
+                    .ok_or("Missing shard response for successful reduction")?;
                 values.push(select_collective_value(response, req.target.as_ref())?);
             }
         }
@@ -4310,14 +4183,9 @@ impl ActorServiceImpl {
                             let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> =
                                 service_locator.actor_registry().await;
                             if let Some(registry) = actor_registry {
-                                if let Some(actor_ref) =
-                                    registry.lookup_actor(&message.receiver_id).await
-                                {
-                                    if actor_ref.tell(message).await.is_ok() {
-                                        succeeded += 1;
-                                    } else {
-                                        failed += 1;
-                                    }
+                                let receiver_id = message.receiver_id.clone();
+                                if registry.tell(&receiver_id, message).await.is_ok() {
+                                    succeeded += 1;
                                 } else {
                                     failed += 1;
                                 }
@@ -4333,28 +4201,32 @@ impl ActorServiceImpl {
                             let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> =
                                 service_locator.actor_registry().await;
                             if let Some(registry) = actor_registry {
-                                if let Some(actor_ref) =
-                                    registry.lookup_actor(&message.receiver_id).await
-                                {
-                                    if wait_for_responses {
-                                        // Wait for response (stronger consistency)
-                                        // Use route_message via ActorService (simplified - actual implementation would use proper routing)
-                                        // For now, just send and mark as succeeded (proper ask pattern would require ReplyWaiter)
-                                        if actor_ref.tell(message).await.is_ok() {
-                                            succeeded += 1;
-                                        } else {
-                                            failed += 1;
-                                        }
+                                let receiver_id = message.receiver_id.clone();
+                                if wait_for_responses {
+                                    let ask_ctx = RequestContext::new_without_auth(
+                                        String::new(),
+                                        String::new(),
+                                    );
+                                    if registry
+                                        .ask(
+                                            &ask_ctx,
+                                            &receiver_id,
+                                            message,
+                                            Duration::from_secs(5),
+                                        )
+                                        .await
+                                        .is_ok()
+                                    {
+                                        succeeded += 1;
                                     } else {
-                                        // Fire-and-forget
-                                        if actor_ref.tell(message).await.is_ok() {
-                                            succeeded += 1;
-                                        } else {
-                                            failed += 1;
-                                        }
+                                        failed += 1;
                                     }
                                 } else {
-                                    failed += 1;
+                                    if registry.tell(&receiver_id, message).await.is_ok() {
+                                        succeeded += 1;
+                                    } else {
+                                        failed += 1;
+                                    }
                                 }
                             } else {
                                 failed += 1;
@@ -4576,13 +4448,6 @@ impl ActorServiceTrait for ActorServiceWrapper {
         self.0.check_actor_exists(request).await
     }
 
-    async fn get_or_activate_actor(
-        &self,
-        request: Request<GetOrActivateActorRequest>,
-    ) -> Result<Response<GetOrActivateActorResponse>, Status> {
-        self.0.get_or_activate_actor(request).await
-    }
-
     async fn invoke_actor(
         &self,
         request: Request<InvokeActorRequest>,
@@ -4696,9 +4561,7 @@ impl ActorServiceTrait for ActorServiceWrapper {
     }
 }
 
-pub mod get_or_activate_impl;
 pub mod partition;
-pub use get_or_activate_impl::get_or_activate_actor_impl;
 
 #[cfg(test)]
 mod tests {
@@ -4997,7 +4860,15 @@ mod tests {
         use plexspaces_core::RequestContext;
         let ctx = RequestContext::new_without_auth(String::new(), String::new());
         actor_registry
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
     }
 

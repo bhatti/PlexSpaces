@@ -8,23 +8,24 @@
 
 #[cfg(feature = "postgres-backend")]
 mod postgres_integration_tests {
+    use async_trait::async_trait;
     use plexspaces_common::skip_if_unavailable;
     use plexspaces_common::test_helpers::postgres_available;
-    use plexspaces_journaling::*;
-    use plexspaces_journaling::sql::PostgresJournalStorage;
-    use plexspaces_facet::Facet;
-    use plexspaces_proto::prost_types;
     use plexspaces_core::{ActorContext, Message, ServiceLocator};
+    use plexspaces_facet::Facet;
+    use plexspaces_journaling::sql::PostgresJournalStorage;
+    use plexspaces_journaling::*;
+    use plexspaces_proto::prost_types;
+    use serde_json::Value as JsonValue;
     use std::sync::Arc;
     use tokio::sync::RwLock;
-    use async_trait::async_trait;
-    use serde_json::Value as JsonValue;
 
     /// Helper to create a test PostgreSQL storage
     /// Uses test database URL from environment or defaults to local test DB
     async fn create_test_storage() -> Arc<dyn JournalStorage> {
-        let db_url = std::env::var("TEST_POSTGRES_URL")
-            .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost/plexspaces_test".to_string());
+        let db_url = std::env::var("TEST_POSTGRES_URL").unwrap_or_else(|_| {
+            "postgresql://postgres:postgres@localhost/plexspaces_test".to_string()
+        });
         Arc::new(PostgresJournalStorage::new(&db_url).await.unwrap())
     }
 
@@ -110,11 +111,9 @@ mod postgres_integration_tests {
             if state_data.len() < 8 {
                 return Ok(serde_json::json!({ "count": 0 }));
             }
-            let count = u64::from_le_bytes(
-                state_data[0..8].try_into().map_err(|_| {
-                    JournalError::Serialization("Invalid state data length".to_string())
-                })?,
-            );
+            let count = u64::from_le_bytes(state_data[0..8].try_into().map_err(|_| {
+                JournalError::Serialization("Invalid state data length".to_string())
+            })?);
             Ok(serde_json::json!({ "count": count }))
         }
 
@@ -141,7 +140,10 @@ mod postgres_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-1";
 
-        facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        facet
+            .on_attach(actor_id, JsonValue::Object(serde_json::Map::new()))
+            .await
+            .unwrap();
 
         for i in 1..=5 {
             let method = "increment";
@@ -174,11 +176,20 @@ mod postgres_integration_tests {
             service_locator,
             None,
         ));
-        new_facet.set_replay_handler(Box::new(handler), test_context).await;
-        new_facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        new_facet
+            .set_replay_handler(Box::new(handler), test_context)
+            .await;
+        new_facet
+            .on_attach(actor_id, JsonValue::Object(serde_json::Map::new()))
+            .await
+            .unwrap();
 
         let entries_after = storage.replay_from(actor_id, 0).await.unwrap();
-        assert_eq!(entries_after.len(), 10, "Entries should persist after restart");
+        assert_eq!(
+            entries_after.len(),
+            10,
+            "Entries should persist after restart"
+        );
     }
 
     /// Test 2: Checkpoint + Delta Replay
@@ -190,7 +201,10 @@ mod postgres_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-2";
 
-        facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        facet
+            .on_attach(actor_id, JsonValue::Object(serde_json::Map::new()))
+            .await
+            .unwrap();
 
         for i in 1..=100 {
             let method = "increment";
@@ -217,7 +231,10 @@ mod postgres_integration_tests {
         storage.flush().await.unwrap();
 
         let checkpoint = storage.get_latest_checkpoint(actor_id).await.unwrap();
-        assert!(checkpoint.sequence >= 100, "Checkpoint should be at sequence >= 100");
+        assert!(
+            checkpoint.sequence >= 100,
+            "Checkpoint should be at sequence >= 100"
+        );
 
         facet.on_detach(actor_id).await.unwrap();
 
@@ -228,10 +245,16 @@ mod postgres_integration_tests {
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.set_state_loader(Box::new(state_loader)).await;
-        new_facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        new_facet
+            .on_attach(actor_id, JsonValue::Object(serde_json::Map::new()))
+            .await
+            .unwrap();
 
         let loaded_checkpoint = new_facet.get_latest_checkpoint().await.unwrap();
-        assert!(loaded_checkpoint.is_some(), "Checkpoint should be available");
+        assert!(
+            loaded_checkpoint.is_some(),
+            "Checkpoint should be available"
+        );
     }
 
     /// Test 3: Schema Version Validation
@@ -245,7 +268,10 @@ mod postgres_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-3";
 
-        facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        facet
+            .on_attach(actor_id, JsonValue::Object(serde_json::Map::new()))
+            .await
+            .unwrap();
 
         let checkpoint = Checkpoint {
             actor_id: actor_id.to_string(),
@@ -261,7 +287,9 @@ mod postgres_integration_tests {
         facet.on_detach(actor_id).await.unwrap();
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        let result = new_facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await;
+        let result = new_facet
+            .on_attach(actor_id, JsonValue::Object(serde_json::Map::new()))
+            .await;
 
         assert!(result.is_err(), "Should fail with schema version mismatch");
         let error_msg = format!("{}", result.unwrap_err());
@@ -280,7 +308,10 @@ mod postgres_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-4";
 
-        facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        facet
+            .on_attach(actor_id, JsonValue::Object(serde_json::Map::new()))
+            .await
+            .unwrap();
 
         let checkpoint = Checkpoint {
             actor_id: actor_id.to_string(),
@@ -302,7 +333,10 @@ mod postgres_integration_tests {
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.set_state_loader(Box::new(state_loader)).await;
-        new_facet.on_attach(actor_id, JsonValue::Object(serde_json::Map::new())).await.unwrap();
+        new_facet
+            .on_attach(actor_id, JsonValue::Object(serde_json::Map::new()))
+            .await
+            .unwrap();
 
         let count = counter.read().await.get_count();
         assert_eq!(count, 42, "State should be automatically restored to 42");

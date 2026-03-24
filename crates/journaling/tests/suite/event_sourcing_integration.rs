@@ -3,8 +3,8 @@
 //
 // Integration tests for event sourcing functionality
 
-use plexspaces_journaling::*;
 use plexspaces_facet::Facet;
+use plexspaces_journaling::*;
 use plexspaces_proto::common::v1::PageRequest;
 use plexspaces_proto::prost_types;
 use std::collections::HashMap;
@@ -31,7 +31,10 @@ async fn test_event_sourcing_full_workflow() {
         "time_travel_enabled": config.time_travel_enabled,
     });
     let mut facet = EventSourcingFacet::new(storage.clone(), config_value, 50);
-    facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+    facet
+        .on_attach("actor-1", serde_json::json!({}))
+        .await
+        .unwrap();
 
     // Process multiple state changes
     for i in 1..=5 {
@@ -94,7 +97,10 @@ async fn test_event_sourcing_replay_on_activation() {
     let mut facet = EventSourcingFacet::new(storage.clone(), config_value, 50);
 
     // On attach, should replay events
-    facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+    facet
+        .on_attach("actor-1", serde_json::json!({}))
+        .await
+        .unwrap();
 
     // Verify sequence was updated by checking events
     // (event_sequence is private, so we verify via storage)
@@ -142,9 +148,7 @@ async fn test_event_sourcing_paginated_history() {
 
         total_events += history.events.len();
 
-        if history.page_response.is_none()
-            || !history.page_response.as_ref().unwrap().has_next
-        {
+        if history.page_response.is_none() || !history.page_response.as_ref().unwrap().has_next {
             break;
         }
 
@@ -202,7 +206,7 @@ async fn test_event_sourcing_with_durability_facet() {
         cache_side_effects: true,
         compression: CompressionType::CompressionTypeNone as i32,
         backend_config: None,
-            state_schema_version: 1,
+        state_schema_version: 1,
     };
 
     // Create event sourcing config
@@ -233,7 +237,8 @@ async fn test_event_sourcing_with_durability_facet() {
         "snapshot_interval": event_sourcing_config.snapshot_interval,
         "time_travel_enabled": event_sourcing_config.time_travel_enabled,
     });
-    let event_sourcing_facet = EventSourcingFacet::new(storage.clone(), event_sourcing_config_value, 50);
+    let event_sourcing_facet =
+        EventSourcingFacet::new(storage.clone(), event_sourcing_config_value, 50);
 
     // Both facets can work together
     // DurabilityFacet journals messages
@@ -336,4 +341,3 @@ async fn test_event_sourcing_causal_tracking() {
     assert_eq!(events[1].caused_by, "corr-2");
     assert_eq!(events[2].caused_by, "corr-3");
 }
-

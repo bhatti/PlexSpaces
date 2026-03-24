@@ -25,15 +25,15 @@
 
 #[cfg(feature = "locks")]
 mod distributed_lock_tests {
+    use async_trait::async_trait;
     use plexspaces_core::{ActorId, ActorRef, ActorService, Message, ServiceLocator};
-    use plexspaces_journaling::{TimerFacet, TimerRegistration};
-    use plexspaces_locks::{LockManager, sql::SqliteLockManager};
-    use plexspaces_mailbox::{Mailbox, MailboxConfig};
     use plexspaces_facet::Facet;
+    use plexspaces_journaling::{TimerFacet, TimerRegistration};
+    use plexspaces_locks::{sql::SqliteLockManager, LockManager};
+    use plexspaces_mailbox::{Mailbox, MailboxConfig};
     use plexspaces_proto::prost_types;
     use plexspaces_services::ServiceLocatorImpl;
     use std::sync::Arc;
-    use async_trait::async_trait;
 
     /// Mock ActorService that sends messages to a mailbox
     struct MockActorService {
@@ -56,8 +56,12 @@ mod distributed_lock_tests {
             _actor_id: &str,
             message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            self.mailbox.send(message.into()).await
-                .map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) as Box<dyn std::error::Error + Send + Sync>)?;
+            self.mailbox.send(message.into()).await.map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })?;
             Ok("message-id".to_string())
         }
     }
@@ -77,7 +81,13 @@ mod distributed_lock_tests {
         mailbox: Arc<Mailbox>,
     ) -> TimerFacet {
         let service_locator = create_test_service_locator(mailbox).await;
-        TimerFacet::with_lock_manager(lock_manager, node_id, serde_json::json!({}), 50, service_locator)
+        TimerFacet::with_lock_manager(
+            lock_manager,
+            node_id,
+            serde_json::json!({}),
+            50,
+            service_locator,
+        )
     }
 
     /// Helper to create TimerFacet without locks
@@ -87,26 +97,37 @@ mod distributed_lock_tests {
     }
 
     /// Helper to setup a timer facet with all required services
-    async fn setup_facet(
-        facet: TimerFacet,
-        actor_id: &str,
-    ) -> (TimerFacet, Arc<Mailbox>) {
-        let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), format!("{}@node-1", actor_id)).await.expect("Failed to create mailbox"));
-        
+    async fn setup_facet(facet: TimerFacet, actor_id: &str) -> (TimerFacet, Arc<Mailbox>) {
+        let mailbox = Arc::new(
+            Mailbox::new(MailboxConfig::default(), format!("{}@node-1", actor_id))
+                .await
+                .expect("Failed to create mailbox"),
+        );
+
         let mut facet_mut = facet;
-        facet_mut.on_attach(actor_id, serde_json::json!({})).await.unwrap();
-        
+        facet_mut
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
+
         (facet_mut, mailbox)
     }
 
     #[tokio::test]
     async fn test_timer_registration_with_locks() {
         // Test that timers can be registered with lock manager
-        let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "test-actor@node-1".to_string()).await.expect("Failed to create mailbox"));
-        let lock_manager: Arc<dyn LockManager + Send + Sync> = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
-        let facet = create_timer_facet_with_locks(lock_manager, "node-1".to_string(), mailbox.clone()).await;
+        let mailbox = Arc::new(
+            Mailbox::new(MailboxConfig::default(), "test-actor@node-1".to_string())
+                .await
+                .expect("Failed to create mailbox"),
+        );
+        let lock_manager: Arc<dyn LockManager + Send + Sync> =
+            Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
+        let facet =
+            create_timer_facet_with_locks(lock_manager, "node-1".to_string(), mailbox.clone())
+                .await;
         let (mut facet_mut, _mailbox) = setup_facet(facet, "test-actor").await;
-        
+
         let registration = TimerRegistration {
             actor_id: "test-actor@node-1".to_string(),
             timer_name: "locked-timer".to_string(),
@@ -121,14 +142,17 @@ mod distributed_lock_tests {
             callback_data: vec![],
             periodic: true,
         };
-        
+
         let result = facet_mut.register_timer(registration).await;
-        assert!(result.is_ok(), "Timer registration with lock should succeed");
-        
+        assert!(
+            result.is_ok(),
+            "Timer registration with lock should succeed"
+        );
+
         // Verify timer is registered
         let timers = facet_mut.list_timers().await;
         assert_eq!(timers.len(), 1, "Should have one registered timer");
-        
+
         // Clean up
         facet_mut.on_detach("test-actor").await.unwrap();
     }
@@ -136,10 +160,14 @@ mod distributed_lock_tests {
     #[tokio::test]
     async fn test_timer_registration_without_locks() {
         // Test that timers can be registered without lock manager
-        let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "test-actor@node-1".to_string()).await.expect("Failed to create mailbox"));
+        let mailbox = Arc::new(
+            Mailbox::new(MailboxConfig::default(), "test-actor@node-1".to_string())
+                .await
+                .expect("Failed to create mailbox"),
+        );
         let facet = create_timer_facet_without_locks(mailbox.clone()).await;
         let (mut facet_mut, _mailbox) = setup_facet(facet, "test-actor").await;
-        
+
         let registration = TimerRegistration {
             actor_id: "test-actor@node-1".to_string(),
             timer_name: "unlocked-timer".to_string(),
@@ -154,14 +182,17 @@ mod distributed_lock_tests {
             callback_data: vec![],
             periodic: false,
         };
-        
+
         let result = facet_mut.register_timer(registration).await;
-        assert!(result.is_ok(), "Timer registration without lock should succeed");
-        
+        assert!(
+            result.is_ok(),
+            "Timer registration without lock should succeed"
+        );
+
         // Verify timer is registered
         let timers = facet_mut.list_timers().await;
         assert_eq!(timers.len(), 1, "Should have one registered timer");
-        
+
         // Clean up
         facet_mut.on_detach("test-actor").await.unwrap();
     }
@@ -170,18 +201,37 @@ mod distributed_lock_tests {
     async fn test_timer_multi_node_lock_isolation() {
         // Test that multiple nodes with same actor_id compete for lock
         // Only the node that holds the lock should have its timer fire
-        let lock_manager: Arc<dyn LockManager + Send + Sync> = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
-        
+        let lock_manager: Arc<dyn LockManager + Send + Sync> =
+            Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
+
         // Node 1: Register timer with lock
-        let mailbox1 = Arc::new(Mailbox::new(MailboxConfig::default(), "test-actor-1@node-1".to_string()).await.expect("Failed to create mailbox"));
-        let facet1 = create_timer_facet_with_locks(lock_manager.clone(), "node-1".to_string(), mailbox1.clone()).await;
+        let mailbox1 = Arc::new(
+            Mailbox::new(MailboxConfig::default(), "test-actor-1@node-1".to_string())
+                .await
+                .expect("Failed to create mailbox"),
+        );
+        let facet1 = create_timer_facet_with_locks(
+            lock_manager.clone(),
+            "node-1".to_string(),
+            mailbox1.clone(),
+        )
+        .await;
         let (mut facet1_mut, _mailbox1) = setup_facet(facet1, "test-actor-1").await;
-        
+
         // Node 2: Try to register timer with same actor_id (same lock key)
-        let mailbox2 = Arc::new(Mailbox::new(MailboxConfig::default(), "test-actor-1@node-2".to_string()).await.expect("Failed to create mailbox"));
-        let facet2 = create_timer_facet_with_locks(lock_manager.clone(), "node-2".to_string(), mailbox2.clone()).await;
+        let mailbox2 = Arc::new(
+            Mailbox::new(MailboxConfig::default(), "test-actor-1@node-2".to_string())
+                .await
+                .expect("Failed to create mailbox"),
+        );
+        let facet2 = create_timer_facet_with_locks(
+            lock_manager.clone(),
+            "node-2".to_string(),
+            mailbox2.clone(),
+        )
+        .await;
         let (mut facet2_mut, _mailbox2) = setup_facet(facet2, "test-actor-1").await; // Same actor_id!
-        
+
         // Register timer on node 1 - should acquire lock
         let registration1 = TimerRegistration {
             actor_id: "test-actor-1@node-1".to_string(),
@@ -199,7 +249,7 @@ mod distributed_lock_tests {
         };
         let result1 = facet1_mut.register_timer(registration1).await;
         assert!(result1.is_ok(), "Node 1 timer registration should succeed");
-        
+
         // Register timer on node 2 - should register but lock acquisition will fail
         let registration2 = TimerRegistration {
             actor_id: "test-actor-1@node-2".to_string(),
@@ -217,14 +267,17 @@ mod distributed_lock_tests {
         };
         // Registration succeeds (timer is registered), but lock acquisition will fail
         let result2 = facet2_mut.register_timer(registration2).await;
-        assert!(result2.is_ok(), "Node 2 timer registration should succeed (but won't fire)");
-        
+        assert!(
+            result2.is_ok(),
+            "Node 2 timer registration should succeed (but won't fire)"
+        );
+
         // Both timers should be registered
         let timers1 = facet1_mut.list_timers().await;
         let timers2 = facet2_mut.list_timers().await;
         assert_eq!(timers1.len(), 1, "Node 1 should have one timer");
         assert_eq!(timers2.len(), 1, "Node 2 should have one timer");
-        
+
         // Clean up
         facet1_mut.on_detach("test-actor-1").await.unwrap();
         facet2_mut.on_detach("test-actor-1").await.unwrap();
@@ -233,11 +286,18 @@ mod distributed_lock_tests {
     #[tokio::test]
     async fn test_timer_cleanup_on_detach() {
         // Test that all timers are properly cleaned up on detach
-        let mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), "test-actor@node-1".to_string()).await.expect("Failed to create mailbox"));
-        let lock_manager: Arc<dyn LockManager + Send + Sync> = Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
-        let facet = create_timer_facet_with_locks(lock_manager, "node-1".to_string(), mailbox.clone()).await;
+        let mailbox = Arc::new(
+            Mailbox::new(MailboxConfig::default(), "test-actor@node-1".to_string())
+                .await
+                .expect("Failed to create mailbox"),
+        );
+        let lock_manager: Arc<dyn LockManager + Send + Sync> =
+            Arc::new(SqliteLockManager::new(":memory:").await.unwrap());
+        let facet =
+            create_timer_facet_with_locks(lock_manager, "node-1".to_string(), mailbox.clone())
+                .await;
         let (mut facet_mut, _mailbox) = setup_facet(facet, "test-actor").await;
-        
+
         // Register multiple timers
         for i in 0..3 {
             let registration = TimerRegistration {
@@ -256,14 +316,14 @@ mod distributed_lock_tests {
             };
             facet_mut.register_timer(registration).await.unwrap();
         }
-        
+
         // Verify all timers are registered
         let timers = facet_mut.list_timers().await;
         assert_eq!(timers.len(), 3, "Should have three registered timers");
-        
+
         // Detach should clean up all timers
         facet_mut.on_detach("test-actor").await.unwrap();
-        
+
         // Verify timers are cleaned up (can't list after detach, but verify no panic)
         // The timers map should be empty after on_detach
     }

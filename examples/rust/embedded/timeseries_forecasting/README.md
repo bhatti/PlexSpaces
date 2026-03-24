@@ -68,12 +68,13 @@ This example showcases:
 - Handles concurrent prediction requests
 - Maintains model state for fast inference
 
-## Spawning pattern: ActorFactory vs SDK
+## Spawning pattern
 
-This example uses **ActorFactory::spawn_actor** with **type names** (e.g. `"DataLoader"`, `"Preprocessor"`) so that a pipeline of actors can be spawned from config or code without holding concrete behavior instances. For **single-actor apps** or when you have a concrete behavior instance and optional facets, use the **Rust SDK** instead:
+This example uses the **Rust SDK spawn helper** with concrete actor instances:
 
-- **SDK**: `plexspaces_sdk::spawn_actor(ctx, service_locator, actor_id, namespace, behavior_instance, facets)` — see `webhook_handler` and `session_manager` under `examples/rust/`.
-- **Factory**: `actor_factory.spawn_actor(ctx, &actor_id, "TypeName", ...)` — used here for pipeline-style multi-actor setup.
+- `plexspaces_sdk::spawn_actor(ctx, service_locator, actor_id, namespace, behavior_instance, facets)`
+- Node creation and lifecycle stay in `NodeBuilder` / `Node`
+- The SDK helper delegates to the framework-owned spawn path without exposing mailbox or actor-factory internals
 
 ## Usage
 
@@ -144,4 +145,3 @@ This example demonstrates similar capabilities to Ray's time-series forecasting:
 - [Ray Time-Series Forecasting Example](https://docs.ray.io/en/latest/ray-overview/examples/e2e-timeseries/README.html)
 - [DLinear Paper](https://arxiv.org/abs/2205.13504)
 - [PlexSpaces Actor Model](../README.md)
-

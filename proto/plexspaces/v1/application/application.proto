@@ -48,13 +48,14 @@
 syntax = "proto3";
 
 package plexspaces.application.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/application/application;plexspaces_application_v1";
 
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
 import "plexspaces/v1/wasm/wasm.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/application/application;plexspaces_application_v1";
 
 // NOTE: ApplicationConfig has been merged into ApplicationSpec.
 // All configuration fields are now in ApplicationSpec (fields 8-12: enabled, auto_start,
@@ -552,9 +553,7 @@ service ApplicationService {
   // Uses graceful shutdown timeout from application config (default: 30s).
   // If exceeded, may force kill the application.
   rpc UndeployApplication(UndeployApplicationRequest) returns (UndeployApplicationResponse) {
-    option (google.api.http) = {
-      delete: "/api/v1/applications/{application_id}"
-    };
+    option (google.api.http) = {delete: "/api/v1/applications/{application_id}"};
   }
 
   // List deployed applications
@@ -562,9 +561,7 @@ service ApplicationService {
   // ## Purpose
   // Get list of all applications deployed on this node.
   rpc ListApplications(ListApplicationsRequest) returns (ListApplicationsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/applications"
-    };
+    option (google.api.http) = {get: "/api/v1/applications"};
   }
 
   // Get application status
@@ -572,11 +569,8 @@ service ApplicationService {
   // ## Purpose
   // Get detailed status of a specific application.
   rpc GetApplicationStatus(GetApplicationStatusRequest) returns (GetApplicationStatusResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/applications/{application_id}/status"
-    };
+    option (google.api.http) = {get: "/api/v1/applications/{application_id}/status"};
   }
-
 }
 
 // Deploy application request

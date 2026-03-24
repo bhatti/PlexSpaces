@@ -42,13 +42,14 @@
 syntax = "proto3";
 
 package plexspaces.channel.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/channel/channel;plexspaces_channel_v1";
 
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/channel/channel;plexspaces_channel_v1";
 
 // Channel provider type determines the underlying transport
 enum ChannelProvider {
@@ -447,9 +448,12 @@ message CreateChannelResponse {
 
 // Send request
 message SendRequest {
-  string channel = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string channel = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
   plexspaces.common.v1.Message message = 2 [(buf.validate.field).required = true];
-  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
 }
 
 // Send response
@@ -460,9 +464,12 @@ message SendResponse {
 
 // Receive request
 message ReceiveRequest {
-  string channel = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
-  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
-  uint32 max_messages = 3 [(buf.validate.field).uint32 = {lte: 10000}];  // Max 10K messages per batch
+  string channel = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
+  uint32 max_messages = 3 [(buf.validate.field).uint32 = {lte: 10000}]; // Max 10K messages per batch
 }
 
 // Receive response
@@ -472,14 +479,20 @@ message ReceiveResponse {
 
 // Subscribe request (streaming)
 message SubscribeRequest {
-  string channel = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
-  string consumer_group = 2 [(buf.validate.field).string.max_len = 255];  // For load-balanced consumption
-  map<string, string> filters = 3;  // Header-based filtering
+  string channel = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+  string consumer_group = 2 [(buf.validate.field).string.max_len = 255]; // For load-balanced consumption
+  map<string, string> filters = 3; // Header-based filtering
 }
 
 // Publish request (pub/sub)
 message PublishRequest {
-  string channel = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string channel = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
   plexspaces.common.v1.Message message = 2 [(buf.validate.field).required = true];
 }
 
@@ -491,8 +504,14 @@ message PublishResponse {
 
 // Ack request
 message AckRequest {
-  string channel = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
-  string message_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string channel = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+  string message_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
 }
 
 // Ack response
@@ -502,8 +521,14 @@ message AckResponse {
 
 // Nack request
 message NackRequest {
-  string channel = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
-  string message_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string channel = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+  string message_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
   bool requeue = 3;
 }
 
@@ -514,7 +539,10 @@ message NackResponse {
 
 // GetStats request
 message GetStatsRequest {
-  string channel = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string channel = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
 }
 
 // GetStats response
@@ -524,7 +552,10 @@ message GetStatsResponse {
 
 // DeleteChannel request
 message DeleteChannelRequest {
-  string channel = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string channel = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
 }
 
 // DeleteChannel response

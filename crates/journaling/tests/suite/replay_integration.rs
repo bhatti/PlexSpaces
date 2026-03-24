@@ -8,19 +8,19 @@
 
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 mod sqlite_integration_tests {
-    use plexspaces_journaling::*;
-    #[cfg(feature = "sqlite-backend")]
-    use plexspaces_journaling::sql::SqliteJournalStorage;
-    #[cfg(feature = "postgres-backend")]
-    use plexspaces_journaling::sql::PostgresJournalStorage;
-    use plexspaces_facet::Facet;
-    use plexspaces_proto::prost_types;
+    use async_trait::async_trait;
     use plexspaces_core::Message;
     use plexspaces_core::{ActorContext, ServiceLocator};
+    use plexspaces_facet::Facet;
+    #[cfg(feature = "postgres-backend")]
+    use plexspaces_journaling::sql::PostgresJournalStorage;
+    #[cfg(feature = "sqlite-backend")]
+    use plexspaces_journaling::sql::SqliteJournalStorage;
+    use plexspaces_journaling::*;
+    use plexspaces_proto::prost_types;
+    use serde_json::Value;
     use std::sync::Arc;
     use tokio::sync::RwLock;
-    use async_trait::async_trait;
-    use serde_json::Value;
 
     /// Helper to create a test storage (SQLite or PostgreSQL)
     #[cfg(feature = "sqlite-backend")]
@@ -30,8 +30,9 @@ mod sqlite_integration_tests {
 
     #[cfg(all(feature = "postgres-backend", not(feature = "sqlite-backend")))]
     async fn create_test_storage() -> Arc<dyn JournalStorage> {
-        let db_url = std::env::var("TEST_POSTGRES_URL")
-            .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost/plexspaces_test".to_string());
+        let db_url = std::env::var("TEST_POSTGRES_URL").unwrap_or_else(|_| {
+            "postgresql://postgres:postgres@localhost/plexspaces_test".to_string()
+        });
         Arc::new(PostgresJournalStorage::new(&db_url).await.unwrap())
     }
 
@@ -44,7 +45,7 @@ mod sqlite_integration_tests {
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
         let backend = JournalBackend::JournalBackendPostgres as i32;
-        
+
         DurabilityConfig {
             backend,
             checkpoint_interval,
@@ -111,13 +112,15 @@ mod sqlite_integration_tests {
 
         fn deposit(&mut self, amount: i64, description: String) {
             self.balance += amount;
-            self.transactions.push(format!("deposit: {} ({})", amount, description));
+            self.transactions
+                .push(format!("deposit: {} ({})", amount, description));
         }
 
         fn withdraw(&mut self, amount: i64, description: String) -> Result<(), String> {
             if self.balance >= amount {
                 self.balance -= amount;
-                self.transactions.push(format!("withdraw: {} ({})", amount, description));
+                self.transactions
+                    .push(format!("withdraw: {} ({})", amount, description));
                 Ok(())
             } else {
                 Err("Insufficient funds".to_string())
@@ -162,11 +165,9 @@ mod sqlite_integration_tests {
                 // Empty or invalid state - default to 0
                 return Ok(serde_json::json!({ "count": 0 }));
             }
-            let count = u64::from_le_bytes(
-                state_data[0..8].try_into().map_err(|_| {
-                    JournalError::Serialization("Invalid state data length".to_string())
-                })?,
-            );
+            let count = u64::from_le_bytes(state_data[0..8].try_into().map_err(|_| {
+                JournalError::Serialization("Invalid state data length".to_string())
+            })?);
             Ok(serde_json::json!({ "count": count }))
         }
 
@@ -199,7 +200,10 @@ mod sqlite_integration_tests {
         let actor_id = "counter-1";
 
         // Phase 1: Normal execution
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process 5 messages
         for i in 1..=5 {
@@ -235,15 +239,24 @@ mod sqlite_integration_tests {
             service_locator,
             None,
         ));
-        new_facet.set_replay_handler(Box::new(handler), test_context).await;
+        new_facet
+            .set_replay_handler(Box::new(handler), test_context)
+            .await;
 
         // Note: Replay happens in on_attach, but we need ActorContext for replay_journal_with_handler
         // For now, test that replay handler is set correctly
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Verify entries still exist
         let entries_after = storage.replay_from(actor_id, 0).await.unwrap();
-        assert_eq!(entries_after.len(), 10, "Entries should persist after restart");
+        assert_eq!(
+            entries_after.len(),
+            10,
+            "Entries should persist after restart"
+        );
     }
 
     /// Test 2: Checkpoint + Delta Replay - Happy path
@@ -261,7 +274,10 @@ mod sqlite_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-2";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process 100 messages
         for i in 1..=100 {
@@ -293,14 +309,20 @@ mod sqlite_integration_tests {
         // Verify checkpoint exists
         // Note: CheckpointManager may create automatic checkpoints, so we check >= 100
         let checkpoint = storage.get_latest_checkpoint(actor_id).await.unwrap();
-        assert!(checkpoint.sequence >= 100, "Checkpoint should be at sequence >= 100 (got {})", checkpoint.sequence);
-        
+        assert!(
+            checkpoint.sequence >= 100,
+            "Checkpoint should be at sequence >= 100 (got {})",
+            checkpoint.sequence
+        );
+
         // If checkpoint has state_data, verify it's correct
         if !checkpoint.state_data.is_empty() && checkpoint.state_data.len() >= 8 {
-            let count = u64::from_le_bytes(
-                checkpoint.state_data[0..8].try_into().unwrap()
+            let count = u64::from_le_bytes(checkpoint.state_data[0..8].try_into().unwrap());
+            assert!(
+                count >= 50,
+                "Checkpoint state should have count >= 50 (got {})",
+                count
             );
-            assert!(count >= 50, "Checkpoint state should have count >= 50 (got {})", count);
         }
 
         // Restart
@@ -313,11 +335,17 @@ mod sqlite_integration_tests {
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.set_state_loader(Box::new(state_loader)).await;
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Verify checkpoint was loaded (automatic state loading)
         let loaded_checkpoint = new_facet.get_latest_checkpoint().await.unwrap();
-        assert!(loaded_checkpoint.is_some(), "Checkpoint should be available");
+        assert!(
+            loaded_checkpoint.is_some(),
+            "Checkpoint should be available"
+        );
     }
 
     /// Test 3: Schema Version Validation - Edge case
@@ -335,7 +363,10 @@ mod sqlite_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-3";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Create checkpoint with version 2 (newer than actor)
         let checkpoint = Checkpoint {
@@ -400,7 +431,10 @@ mod sqlite_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-4";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Create checkpoint with state (count = 42)
         let checkpoint = Checkpoint {
@@ -424,7 +458,10 @@ mod sqlite_integration_tests {
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         new_facet.set_state_loader(Box::new(state_loader)).await;
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Verify state was automatically restored
         let count = counter.read().await.get_count();
@@ -444,7 +481,10 @@ mod sqlite_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-5";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Create checkpoint
         let checkpoint = Checkpoint {
@@ -462,11 +502,17 @@ mod sqlite_integration_tests {
         facet.on_detach(actor_id).await.unwrap();
 
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Checkpoint should be available for manual loading
         let loaded_checkpoint = new_facet.get_latest_checkpoint().await.unwrap();
-        assert!(loaded_checkpoint.is_some(), "Checkpoint should be available");
+        assert!(
+            loaded_checkpoint.is_some(),
+            "Checkpoint should be available"
+        );
         assert_eq!(
             loaded_checkpoint.unwrap().state_data,
             100u64.to_le_bytes().to_vec(),
@@ -488,7 +534,10 @@ mod sqlite_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "actor-with-side-effects";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Journal a side effect entry
         let side_effect_entry = JournalEntry {
@@ -519,7 +568,11 @@ mod sqlite_integration_tests {
             .filter(|e| {
                 matches!(
                     e.entry,
-                    Some(plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(_))
+                    Some(
+                        plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(
+                            _
+                        )
+                    )
                 )
             })
             .count();
@@ -528,7 +581,10 @@ mod sqlite_integration_tests {
         // Restart
         facet.on_detach(actor_id).await.unwrap();
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Verify side effect is still in journal (cached, not re-executed)
         let entries_after = storage.replay_from(actor_id, 0).await.unwrap();
@@ -537,7 +593,11 @@ mod sqlite_integration_tests {
             .filter(|e| {
                 matches!(
                     e.entry,
-                    Some(plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(_))
+                    Some(
+                        plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(
+                            _
+                        )
+                    )
                 )
             })
             .count();
@@ -560,7 +620,10 @@ mod sqlite_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-6";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process some messages (no checkpoint created)
         for i in 1..=10 {
@@ -575,10 +638,7 @@ mod sqlite_integration_tests {
 
         // Verify no checkpoint exists
         let checkpoint_result = storage.get_latest_checkpoint(actor_id).await;
-        assert!(
-            checkpoint_result.is_err(),
-            "Should have no checkpoint"
-        );
+        assert!(checkpoint_result.is_err(), "Should have no checkpoint");
 
         // Restart - should replay from beginning
         facet.on_detach(actor_id).await.unwrap();
@@ -588,7 +648,11 @@ mod sqlite_integration_tests {
 
         // Verify entries still exist
         let entries = storage.replay_from(actor_id, 0).await.unwrap();
-        assert_eq!(entries.len(), 20, "Should have all 20 entries (10 messages * 2)");
+        assert_eq!(
+            entries.len(),
+            20,
+            "Should have all 20 entries (10 messages * 2)"
+        );
     }
 
     /// Test 9: Multiple Checkpoints (Latest Used) - Edge case
@@ -604,7 +668,10 @@ mod sqlite_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-7";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Create multiple checkpoints
         for seq in [20, 40, 60] {
@@ -623,13 +690,17 @@ mod sqlite_integration_tests {
         // Restart
         facet.on_detach(actor_id).await.unwrap();
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Should use latest checkpoint (sequence 60)
         let checkpoint = new_facet.get_latest_checkpoint().await.unwrap();
         assert!(checkpoint.is_some(), "Should have checkpoint");
         assert_eq!(
-            checkpoint.unwrap().sequence, 60,
+            checkpoint.unwrap().sequence,
+            60,
             "Should use latest checkpoint"
         );
     }
@@ -647,7 +718,10 @@ mod sqlite_integration_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "counter-8";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process messages
         for i in 1..=5 {

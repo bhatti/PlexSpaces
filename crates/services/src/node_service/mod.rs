@@ -63,8 +63,8 @@ use plexspaces_proto::node::v1::{
     UnregisterNodeResponse,
 };
 
-use crate::request_context_from_grpc_request;
 use crate::node_address::{canonical_node_address_key, node_addresses_equivalent};
+use crate::request_context_from_grpc_request;
 
 /// Metrics tracking for NodeService
 struct NodeServiceMetrics {
@@ -1621,7 +1621,8 @@ mod tests {
         let ctx = RequestContext::new_without_auth(String::new(), String::new());
         let (nodes, _) = node_registry.list_nodes(&ctx, None, 100, "").await.unwrap();
         assert!(
-            nodes.iter()
+            nodes
+                .iter()
                 .all(|node| !node_addresses_equivalent(&node.node_address, "localhost:8090")),
             "self address alias should not be registered as a remote seed node"
         );

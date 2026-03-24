@@ -337,7 +337,15 @@ async fn register_test_actor(
         "system".to_string(),
     );
     actor_registry
-        .register_actor(&ctx, actor_id, sender, None, None, None, None)
+        .register_actor(
+            &ctx,
+            actor_id,
+            sender,
+            "TestActor".to_string(),
+            None,
+            None,
+            None,
+        )
         .await;
 }
 
@@ -608,7 +616,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
             &ctx,
             counter_id.clone(),
             sender_counter,
-            None,
+            "TestActor".to_string(),
             None,
             None,
             None,
@@ -751,7 +759,7 @@ async fn test_chained_asks_multi_node() {
             &ctx,
             counter_id.clone(),
             sender_counter,
-            None,
+            "TestActor".to_string(),
             None,
             None,
             None,
@@ -890,7 +898,7 @@ async fn test_concurrent_asks_multi_node() {
             &ctx,
             counter_id.clone(),
             sender_counter,
-            None,
+            "TestActor".to_string(),
             None,
             None,
             None,

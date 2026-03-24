@@ -1647,61 +1647,6 @@ pub struct CheckActorExistsResponse {
     #[prost(bool, tag="3")]
     pub is_virtual: bool,
 }
-/// Request to get or activate a virtual actor (Orleans-style)
-///
-/// ## Purpose
-/// Gets existing actor if active, or activates virtual actor if inactive.
-/// This is the primary API for virtual actors (Orleans grains pattern).
-///
-/// ## Orleans Comparison
-/// Orleans: `IGrainFactory.GetGrain<T>(key)` - always returns grain reference
-/// PlexSpaces: `GetOrActivateActor(actor_id, factory)` - activates if needed
-///
-/// ## Behavior
-/// 1. If actor exists and is active → Return existing ActorRef
-/// 2. If actor exists but is inactive (virtual) → Activate and return ActorRef
-/// 3. If actor doesn't exist → Create new actor (if factory provided) and return ActorRef
-///
-/// ## Virtual Actor Pattern
-/// - Actor ID must be client-specified (e.g., "user/123", "session/abc")
-/// - Actor must have VirtualActorFacet attached (enables lazy activation)
-/// - First message triggers activation automatically
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetOrActivateActorRequest {
-    /// Actor ID (client-specified, required)
-    /// Format: "{actor_type}/{key}" or "{actor_type}@{key}"
-    /// Examples: "user/123", "session/abc-xyz", "counter@node1"
-    #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
-    /// Actor type (required if actor doesn't exist)
-    /// Used to create new actor if actor_id doesn't exist
-    #[prost(string, tag="2")]
-    pub actor_type: ::prost::alloc::string::String,
-    /// Initial state (used if creating new actor)
-    #[prost(bytes="vec", tag="3")]
-    pub initial_state: ::prost::alloc::vec::Vec<u8>,
-    /// Actor config (used if creating new actor)
-    #[prost(message, optional, tag="4")]
-    pub config: ::core::option::Option<ActorConfig>,
-    /// Force activation even if already active
-    #[prost(bool, tag="5")]
-    pub force_activation: bool,
-}
-/// Response to get or activate actor request
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetOrActivateActorResponse {
-    /// Actor reference (format: "actor_id@node_id")
-    #[prost(string, tag="1")]
-    pub actor_ref: ::prost::alloc::string::String,
-    /// Full actor details
-    #[prost(message, optional, tag="2")]
-    pub actor: ::core::option::Option<Actor>,
-    /// Was actor activated (true) or already active (false)
-    #[prost(bool, tag="3")]
-    pub was_activated: bool,
-}
 /// Request to invoke an actor via HTTP-like interface (FaaS-style)
 ///
 /// ## Purpose

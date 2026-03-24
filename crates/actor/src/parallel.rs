@@ -144,12 +144,9 @@ pub fn select_collective_value(
     }
     let mut current = &value;
     for segment in target.value_path.split('.') {
-        current = current.get(segment).ok_or_else(|| {
-            format!(
-                "Collective target path '{}' not found",
-                target.value_path
-            )
-        })?;
+        current = current
+            .get(segment)
+            .ok_or_else(|| format!("Collective target path '{}' not found", target.value_path))?;
     }
     Ok(current.clone())
 }
@@ -258,64 +255,79 @@ mod tests {
     #[test]
     fn reduce_sum() {
         let values = vec![json!(1.0), json!(2.0), json!(3.0)];
-        let result = reduce_values(values, CollectiveReduction::CollectiveReductionSum as i32)
-            .unwrap();
+        let result =
+            reduce_values(values, CollectiveReduction::CollectiveReductionSum as i32).unwrap();
         assert_eq!(result.as_f64().unwrap(), 6.0);
     }
 
     #[test]
     fn reduce_product() {
         let values = vec![json!(2.0), json!(3.0), json!(4.0)];
-        let result =
-            reduce_values(values, CollectiveReduction::CollectiveReductionProduct as i32).unwrap();
+        let result = reduce_values(
+            values,
+            CollectiveReduction::CollectiveReductionProduct as i32,
+        )
+        .unwrap();
         assert_eq!(result.as_f64().unwrap(), 24.0);
     }
 
     #[test]
     fn reduce_min() {
         let values = vec![json!(5.0), json!(2.0), json!(8.0)];
-        let result = reduce_values(values, CollectiveReduction::CollectiveReductionMin as i32)
-            .unwrap();
+        let result =
+            reduce_values(values, CollectiveReduction::CollectiveReductionMin as i32).unwrap();
         assert_eq!(result.as_f64().unwrap(), 2.0);
     }
 
     #[test]
     fn reduce_max() {
         let values = vec![json!(5.0), json!(2.0), json!(8.0)];
-        let result = reduce_values(values, CollectiveReduction::CollectiveReductionMax as i32)
-            .unwrap();
+        let result =
+            reduce_values(values, CollectiveReduction::CollectiveReductionMax as i32).unwrap();
         assert_eq!(result.as_f64().unwrap(), 8.0);
     }
 
     #[test]
     fn reduce_concat_arrays() {
         let values = vec![json!([1, 2]), json!([3, 4])];
-        let result =
-            reduce_values(values, CollectiveReduction::CollectiveReductionConcat as i32).unwrap();
+        let result = reduce_values(
+            values,
+            CollectiveReduction::CollectiveReductionConcat as i32,
+        )
+        .unwrap();
         assert_eq!(result, json!([1, 2, 3, 4]));
     }
 
     #[test]
     fn reduce_concat_scalars() {
         let values = vec![json!("a"), json!("b")];
-        let result =
-            reduce_values(values, CollectiveReduction::CollectiveReductionConcat as i32).unwrap();
+        let result = reduce_values(
+            values,
+            CollectiveReduction::CollectiveReductionConcat as i32,
+        )
+        .unwrap();
         assert_eq!(result, json!(["a", "b"]));
     }
 
     #[test]
     fn reduce_bool_and() {
         let values = vec![json!(true), json!(true), json!(false)];
-        let result =
-            reduce_values(values, CollectiveReduction::CollectiveReductionBoolAnd as i32).unwrap();
+        let result = reduce_values(
+            values,
+            CollectiveReduction::CollectiveReductionBoolAnd as i32,
+        )
+        .unwrap();
         assert_eq!(result, json!(false));
     }
 
     #[test]
     fn reduce_bool_or() {
         let values = vec![json!(false), json!(false), json!(true)];
-        let result =
-            reduce_values(values, CollectiveReduction::CollectiveReductionBoolOr as i32).unwrap();
+        let result = reduce_values(
+            values,
+            CollectiveReduction::CollectiveReductionBoolOr as i32,
+        )
+        .unwrap();
         assert_eq!(result, json!(true));
     }
 
@@ -412,9 +424,30 @@ mod tests {
     #[test]
     fn stats_counts_successes_and_failures() {
         let results: Vec<ParallelShardResult> = vec![
-            (0, "a".into(), Duration::from_millis(10), true, String::new(), None),
-            (1, "b".into(), Duration::from_millis(20), false, "err".into(), None),
-            (2, "c".into(), Duration::from_millis(5), true, String::new(), None),
+            (
+                0,
+                "a".into(),
+                Duration::from_millis(10),
+                true,
+                String::new(),
+                None,
+            ),
+            (
+                1,
+                "b".into(),
+                Duration::from_millis(20),
+                false,
+                "err".into(),
+                None,
+            ),
+            (
+                2,
+                "c".into(),
+                Duration::from_millis(5),
+                true,
+                String::new(),
+                None,
+            ),
         ];
         let stats = scatter_stats_from_results(3, &results);
         assert_eq!(stats.shards_queried, 3);
@@ -437,8 +470,22 @@ mod tests {
     #[test]
     fn converts_results_to_responses() {
         let results: Vec<ParallelShardResult> = vec![
-            (0, "actor-0".into(), Duration::from_secs(1), true, String::new(), None),
-            (1, "actor-1".into(), Duration::from_millis(500), false, "timeout".into(), None),
+            (
+                0,
+                "actor-0".into(),
+                Duration::from_secs(1),
+                true,
+                String::new(),
+                None,
+            ),
+            (
+                1,
+                "actor-1".into(),
+                Duration::from_millis(500),
+                false,
+                "timeout".into(),
+                None,
+            ),
         ];
         let responses = shard_query_responses_from_results(results);
         assert_eq!(responses.len(), 2);
@@ -493,6 +540,9 @@ mod tests {
             nanos: 500_000_000,
         };
         let timeout = resolve_timeout(Some(&proto_dur));
-        assert_eq!(timeout, Duration::from_secs(10) + Duration::from_nanos(500_000_000));
+        assert_eq!(
+            timeout,
+            Duration::from_secs(10) + Duration::from_nanos(500_000_000)
+        );
     }
 }

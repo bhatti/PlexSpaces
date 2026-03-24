@@ -112,10 +112,6 @@ name = "invoke_actor_tests"
 path = "tests/actor_service/invoke_actor_tests.rs"
 
 [[test]]
-name = "get_or_activate_actor_tests"
-path = "tests/actor_service/get_or_activate_actor_tests.rs"
-
-[[test]]
 name = "spawn_with_facets_tests"
 path = "tests/actor_service/spawn_with_facets_tests.rs"
 

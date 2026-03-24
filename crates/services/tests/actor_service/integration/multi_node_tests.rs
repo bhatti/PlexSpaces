@@ -268,7 +268,15 @@ async fn create_test_registry_with_remote_actors(
         // Clone sender before moving it, as we may need it again for the second registration
         let sender_clone = sender.clone();
         actor_registry
-            .register_actor(&ctx, local_actor_id.clone(), sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                local_actor_id.clone(),
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
 
         // Also register with the original "remote-looking" ID for lookup
@@ -280,7 +288,7 @@ async fn create_test_registry_with_remote_actors(
                     &ctx,
                     actor_id_with_node.to_string(),
                     sender_clone,
-                    None,
+                    "".to_string(), // actor_type unknown at this point
                     None,
                     None,
                     None,

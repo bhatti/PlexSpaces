@@ -379,7 +379,15 @@ async fn test_actor_ref_local_unchanged() {
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
         registry
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
     }
 

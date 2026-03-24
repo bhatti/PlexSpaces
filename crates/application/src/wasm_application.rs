@@ -1540,9 +1540,9 @@ impl WasmApplication {
                     &ctx,
                     actor_id.clone(),
                     actor_ref_for_registry,
-                    Some(child_spec.id.clone()),
+                    child_spec.id.clone(),
                     actor.context().config.clone(),
-                    Some(Arc::new(actor) as Arc<dyn std::any::Any + Send + Sync>),
+                    Some(Arc::new(actor) as Arc<dyn plexspaces_core::ActorHandle>),
                     None, // behavior_kind not available from application spawn path
                 )
                 .await;

@@ -5,9 +5,9 @@
 
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_tests {
-    use plexspaces_journaling::*;
-    use plexspaces_journaling::sql::SqliteJournalStorage;
     use plexspaces_facet::Facet;
+    use plexspaces_journaling::sql::SqliteJournalStorage;
+    use plexspaces_journaling::*;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -46,15 +46,15 @@ mod sqlite_tests {
 
         let actor_id = "test-actor-1";
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Create a promise
         let promise_id = "promise-1";
         let timeout = Some(Duration::from_secs(30));
-        facet
-            .create_promise(promise_id, timeout)
-            .await
-            .unwrap();
+        facet.create_promise(promise_id, timeout).await.unwrap();
 
         // Flush to ensure entry is written
         storage.flush().await.unwrap();
@@ -71,8 +71,12 @@ mod sqlite_tests {
             })
             .collect();
 
-        assert_eq!(promise_entries.len(), 1, "Should have one PromiseCreated entry");
-        
+        assert_eq!(
+            promise_entries.len(),
+            1,
+            "Should have one PromiseCreated entry"
+        );
+
         if let Some(plexspaces_proto::v1::journaling::journal_entry::Entry::PromiseCreated(
             promise_created,
         )) = &promise_entries[0].entry
@@ -100,7 +104,10 @@ mod sqlite_tests {
 
         let actor_id = "test-actor-2";
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Create a promise
         let promise_id = "promise-2";
@@ -135,13 +142,23 @@ mod sqlite_tests {
             .filter(|e| {
                 matches!(
                     e.entry,
-                    Some(plexspaces_proto::v1::journaling::journal_entry::Entry::PromiseResolved(_))
+                    Some(
+                        plexspaces_proto::v1::journaling::journal_entry::Entry::PromiseResolved(_)
+                    )
                 )
             })
             .collect();
 
-        assert_eq!(promise_created.len(), 1, "Should have one PromiseCreated entry");
-        assert_eq!(promise_resolved.len(), 1, "Should have one PromiseResolved entry");
+        assert_eq!(
+            promise_created.len(),
+            1,
+            "Should have one PromiseCreated entry"
+        );
+        assert_eq!(
+            promise_resolved.len(),
+            1,
+            "Should have one PromiseResolved entry"
+        );
 
         // Verify resolution details
         if let Some(plexspaces_proto::v1::journaling::journal_entry::Entry::PromiseResolved(
@@ -150,7 +167,10 @@ mod sqlite_tests {
         {
             assert_eq!(promise_resolved_entry.promise_id, promise_id);
             assert_eq!(promise_resolved_entry.result, result);
-            assert!(promise_resolved_entry.error.is_empty(), "Error should be empty for success");
+            assert!(
+                promise_resolved_entry.error.is_empty(),
+                "Error should be empty for success"
+            );
         } else {
             panic!("Entry should be PromiseResolved");
         }
@@ -174,7 +194,10 @@ mod sqlite_tests {
 
         // Phase 1: Create promise and detach
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         let promise_id = "promise-3";
         facet
@@ -187,7 +210,10 @@ mod sqlite_tests {
 
         // Phase 2: Restart and verify promise can be queried
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Query for pending promises (should find the one we created)
         let pending_promises = new_facet.get_pending_promises().await.unwrap();
@@ -213,7 +239,10 @@ mod sqlite_tests {
 
         // Phase 1: Create and resolve promise, then detach
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         let promise_id = "promise-4";
         facet
@@ -232,7 +261,10 @@ mod sqlite_tests {
 
         // Phase 2: Restart and verify promise is marked as resolved
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // After replay, completed promises should not be in pending list
         let pending_promises = new_facet.get_pending_promises().await.unwrap();
@@ -243,7 +275,10 @@ mod sqlite_tests {
 
         // Verify we can query the promise result
         let promise_result = new_facet.get_promise_result(promise_id).await.unwrap();
-        assert!(promise_result.is_some(), "Promise result should be available");
+        assert!(
+            promise_result.is_some(),
+            "Promise result should be available"
+        );
         if let Some((Ok(resolved_result), _)) = promise_result {
             assert_eq!(resolved_result, result);
         } else {
@@ -267,7 +302,10 @@ mod sqlite_tests {
 
         let actor_id = "test-actor-5";
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Create a promise with timeout
         let promise_id = "promise-5";
@@ -291,12 +329,18 @@ mod sqlite_tests {
             .filter(|e| {
                 matches!(
                     e.entry,
-                    Some(plexspaces_proto::v1::journaling::journal_entry::Entry::PromiseResolved(_))
+                    Some(
+                        plexspaces_proto::v1::journaling::journal_entry::Entry::PromiseResolved(_)
+                    )
                 )
             })
             .collect();
 
-        assert_eq!(promise_resolved.len(), 1, "Should have one PromiseResolved entry");
+        assert_eq!(
+            promise_resolved.len(),
+            1,
+            "Should have one PromiseResolved entry"
+        );
 
         if let Some(plexspaces_proto::v1::journaling::journal_entry::Entry::PromiseResolved(
             promise_resolved_entry,
@@ -304,7 +348,10 @@ mod sqlite_tests {
         {
             assert_eq!(promise_resolved_entry.promise_id, promise_id);
             assert_eq!(promise_resolved_entry.error, "timeout");
-            assert!(promise_resolved_entry.result.is_empty(), "Result should be empty for error");
+            assert!(
+                promise_resolved_entry.result.is_empty(),
+                "Result should be empty for error"
+            );
         } else {
             panic!("Entry should be PromiseResolved");
         }
@@ -326,7 +373,10 @@ mod sqlite_tests {
 
         let actor_id = "test-actor-6";
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Create multiple promises
         let promise1 = "promise-1";
@@ -357,17 +407,22 @@ mod sqlite_tests {
 
         // Restart and verify state
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         let pending_promises = new_facet.get_pending_promises().await.unwrap();
         assert_eq!(pending_promises.len(), 2, "Should have 2 pending promises");
         assert!(pending_promises.contains(&promise1.to_string()));
         assert!(pending_promises.contains(&promise3.to_string()));
-        assert!(!pending_promises.contains(&promise2.to_string()), "Resolved promise should not be pending");
+        assert!(
+            !pending_promises.contains(&promise2.to_string()),
+            "Resolved promise should not be pending"
+        );
 
         // Verify resolved promise result
         let result = new_facet.get_promise_result(promise2).await.unwrap();
         assert!(result.is_some(), "Resolved promise should have result");
     }
 }
-

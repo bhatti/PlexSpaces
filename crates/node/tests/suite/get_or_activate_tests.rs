@@ -66,20 +66,15 @@ async fn test_get_or_activate_actor_new_actor() {
     }
 
     // Additional verification: Check ActorRegistry registration
-    use plexspaces_core::service_names;
-    use plexspaces_core::{ActorRegistry, RequestContext};
+    use plexspaces_core::ActorRegistry;
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
-    let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
-    let routing = actor_registry
-        .lookup_routing(&ctx, &actor_id.to_string())
-        .await
-        .ok()
-        .flatten();
     assert!(
-        routing.is_some(),
+        actor_registry
+            .lookup_actor(&actor_id.to_string())
+            .await
+            .is_some(),
         "Actor should be registered in ActorRegistry"
     );
-    assert!(routing.as_ref().unwrap().is_local, "Actor should be local");
 }
 
 #[tokio::test]

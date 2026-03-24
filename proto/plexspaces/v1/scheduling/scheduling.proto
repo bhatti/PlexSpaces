@@ -50,17 +50,17 @@ syntax = "proto3";
 
 package plexspaces.scheduling.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
-import "buf/validate/validate.proto";
-import "plexspaces/v1/common.proto";
 import "plexspaces/v1/actors/actor_runtime.proto";
+import "plexspaces/v1/common.proto";
 import "plexspaces/v1/node/node.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/scheduling/scheduling;plexspaces_scheduling_v1";
-option java_package = "com.bhatti.plexspaces.scheduling.v1";
 option java_multiple_files = true;
+option java_package = "com.bhatti.plexspaces.scheduling.v1";
 
 // Task routing uses ShardGroup from actor_runtime.proto
 // For Layer 2 task routing, use group_id to reference a ShardGroup
@@ -70,19 +70,19 @@ option java_multiple_files = true;
 message SchedulingDecision {
   // Request ID
   string request_id = 1;
-  
+
   // Selected node ID (if scheduled)
   string selected_node_id = 2;
-  
+
   // Selected node gRPC address
   string selected_node_address = 3;
-  
+
   // Decision timestamp
   google.protobuf.Timestamp decided_at = 4;
-  
+
   // Decision reason (for debugging/monitoring)
   string reason = 5;
-  
+
   // Score/priority of selected node (for comparison)
   double score = 6;
 }
@@ -90,21 +90,24 @@ message SchedulingDecision {
 // Scheduling request stored in state store
 message SchedulingRequest {
   // Request ID (unique)
-  string request_id = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
-  
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
+
   // Request details (imported from actor_runtime.proto)
   plexspaces.actor.v1.ActorResourceRequirements requirements = 2;
 
   // Status
   SchedulingStatus status = 5;
-  
+
   // Result (if scheduled)
   string selected_node_id = 6;
   string actor_id = 7; // Created actor ID
-  
+
   // Error (if failed)
   string error_message = 8;
-  
+
   // Timestamps
   google.protobuf.Timestamp created_at = 9;
   google.protobuf.Timestamp scheduled_at = 10;
@@ -141,26 +144,20 @@ service SchedulingService {
       body: "*"
     };
   }
-  
+
   // Get scheduling request status (for polling)
   rpc GetSchedulingStatus(GetSchedulingStatusRequest) returns (GetSchedulingStatusResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/scheduling/requests/{request_id}"
-    };
+    option (google.api.http) = {get: "/api/v1/scheduling/requests/{request_id}"};
   }
-  
+
   // Get node capacity (for monitoring)
   rpc GetNodeCapacity(GetNodeCapacityRequest) returns (GetNodeCapacityResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/scheduling/nodes/{node_id}/capacity"
-    };
+    option (google.api.http) = {get: "/api/v1/scheduling/nodes/{node_id}/capacity"};
   }
-  
+
   // List all node capacities
   rpc ListNodeCapacities(ListNodeCapacitiesRequest) returns (ListNodeCapacitiesResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/scheduling/nodes/capacities"
-    };
+    option (google.api.http) = {get: "/api/v1/scheduling/nodes/capacities"};
   }
 }
 
@@ -178,19 +175,19 @@ message ScheduleActorRequest {
 message ScheduleActorResponse {
   // Request ID for tracking
   string request_id = 1;
-  
+
   // Immediate status (PENDING, SCHEDULED, or FAILED)
   SchedulingStatus status = 2;
-  
+
   // If SCHEDULED: selected node ID
   string node_id = 3;
-  
+
   // If SCHEDULED: node gRPC address
   string node_address = 4;
-  
+
   // If FAILED: error message
   string error_message = 5;
-  
+
   // Timestamp
   google.protobuf.Timestamp timestamp = 6;
 }
@@ -198,7 +195,13 @@ message ScheduleActorResponse {
 // Request to get scheduling status
 message GetSchedulingStatusRequest {
   // Request ID
-  string request_id = 1 [(google.api.field_behavior) = REQUIRED, (buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string request_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
 }
 
 // Response for get scheduling status
@@ -210,7 +213,13 @@ message GetSchedulingStatusResponse {
 // Request to get node capacity
 message GetNodeCapacityRequest {
   // Node ID
-  string node_id = 1 [(google.api.field_behavior) = REQUIRED, (buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string node_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
 }
 
 // Response for get node capacity
@@ -223,7 +232,7 @@ message GetNodeCapacityResponse {
 message ListNodeCapacitiesRequest {
   // Optional: Filter by labels
   map<string, string> label_filters = 1;
-  
+
   // Optional: Pagination
   plexspaces.common.v1.PageRequest page = 2;
 }
@@ -232,7 +241,7 @@ message ListNodeCapacitiesRequest {
 message ListNodeCapacitiesResponse {
   // Node capacities
   repeated NodeCapacityEntry capacities = 1;
-  
+
   // Pagination
   plexspaces.common.v1.PageResponse page = 2;
 }
@@ -241,8 +250,7 @@ message ListNodeCapacitiesResponse {
 message NodeCapacityEntry {
   // Node ID
   string node_id = 1;
-  
+
   // Node capacity (imported from node.proto)
   plexspaces.node.v1.NodeCapacity capacity = 2;
 }
-

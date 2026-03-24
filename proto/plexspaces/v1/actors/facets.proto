@@ -208,12 +208,13 @@
 syntax = "proto3";
 
 package plexspaces.facets.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/actors/facets;plexspaces_facets_v1";
 
 import "google/api/annotations.proto";
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/actors/facets;plexspaces_facets_v1";
 
 // Facet definition
 message FacetDefinition {

@@ -1005,7 +1005,10 @@ impl LockManager for DynamoDBLockManager {
             .table_name(&self.table_name)
             .set_item(Some(item))
             .condition_expression("version = :old_version")
-            .expression_attribute_values(":old_version", AttributeValue::S(existing_version.clone()))
+            .expression_attribute_values(
+                ":old_version",
+                AttributeValue::S(existing_version.clone()),
+            )
             .send()
             .await
         {

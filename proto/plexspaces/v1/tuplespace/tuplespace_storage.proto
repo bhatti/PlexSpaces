@@ -51,8 +51,8 @@ package plexspaces.tuplespace.v1;
 import "google/protobuf/duration.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/tuplespace;plexspaces_tuplespace_v1";
-option java_package = "com.bhatti.plexspaces.tuplespace.v1";
 option java_multiple_files = true;
+option java_package = "com.bhatti.plexspaces.tuplespace.v1";
 
 // NOTE: Storage provider configurations removed - tuplespace now uses shared database
 // from RuntimeConfig.db. Storage backends are selected via factory methods in Rust code

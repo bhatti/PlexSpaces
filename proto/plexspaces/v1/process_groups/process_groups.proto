@@ -183,8 +183,8 @@ import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/timestamp.proto";
-import "plexspaces/v1/common.proto";
 import "plexspaces/v1/actors/actor_runtime.proto";
+import "plexspaces/v1/common.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/process_groups/process_groups;plexspaces_processgroups_v1";
@@ -228,9 +228,7 @@ message ProcessGroup {
     json_schema: {
       title: "ProcessGroup"
       description: "Named group of actors for pub/sub coordination"
-      required: [
-        "group_name"
-      ]
+      required: ["group_name"]
     }
   };
 
@@ -240,7 +238,11 @@ message ProcessGroup {
   // Example: "config-updates", "user_events", "cluster-nodes"
   string group_name = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255, pattern: "^[a-z][a-z0-9_-]*$"},
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-z][a-z0-9_-]*$"
+    },
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
       description: "Group identifier"
       example: "\"config-updates\""
@@ -304,13 +306,22 @@ message ProcessGroup {
 // `tenant:{tenant_id}:group:{group_name}:member:{actor_id}`
 message GroupMembership {
   // Group name
-  string group_name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string group_name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
 
   // Tenant ID
-  string tenant_id = 2 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string tenant_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
 
   // Actor ID in this group
-  string actor_id = 3 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string actor_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
 
   // Node hosting this actor (for routing optimization)
   string node_id = 4 [(buf.validate.field).string.max_len = 255];
@@ -339,7 +350,10 @@ message GroupMembership {
   // - ["config.database", "config.cache"] → receives database and cache config updates
   // - ["events.user.*"] → receives all user events (wildcard support, future)
   // - [] → receives all messages regardless of topic
-  repeated string topics = 8 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
+  repeated string topics = 8 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 255
+  }];
 
   // When actor first joined this group
   google.protobuf.Timestamp joined_at = 6;
@@ -356,7 +370,11 @@ message CreateGroupRequest {
   // Group name (required)
   string group_name = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255, pattern: "^[a-z][a-z0-9_-]*$"},
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+      pattern: "^[a-z][a-z0-9_-]*$"
+    },
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
       description: "Unique group name within tenant"
       example: "\"config-updates\""
@@ -385,7 +403,10 @@ message DeleteGroupRequest {
   // Group name to delete
   string group_name = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -393,13 +414,19 @@ message JoinGroupRequest {
   // Group to join
   string group_name = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Actor ID to add to group
   string actor_id = 3 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Node hosting this actor (optional - can be looked up via ActorRegistry)
@@ -421,20 +448,29 @@ message JoinGroupRequest {
   // - ["config.database"] → only database config updates
   // - ["events.user.login", "events.user.logout"] → only user login/logout events
   // - [] → all messages (default)
-  repeated string topics = 5 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
+  repeated string topics = 5 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 255
+  }];
 }
 
 message LeaveGroupRequest {
   // Group to leave
   string group_name = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Actor ID to remove from group
   string actor_id = 3 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -442,11 +478,17 @@ message GetMembersRequest {
   // Group name
   string group_name = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Pagination (optional)
-  int32 page_size = 3 [(buf.validate.field).int32 = {gte: 0, lte: 10000}];
+  int32 page_size = 3 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 10000
+  }];
   string page_token = 4 [(buf.validate.field).string.max_len = 1024];
 }
 
@@ -463,7 +505,10 @@ message GetLocalMembersRequest {
   // Group name
   string group_name = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -483,7 +528,10 @@ message ListGroupsRequest {
   string name_pattern = 3 [(buf.validate.field).string.max_len = 255];
 
   // Pagination
-  int32 page_size = 4 [(buf.validate.field).int32 = {gte: 0, lte: 10000}];
+  int32 page_size = 4 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 10000
+  }];
   string page_token = 5 [(buf.validate.field).string.max_len = 1024];
 }
 
@@ -500,7 +548,10 @@ message PublishToGroupRequest {
   // Group to publish to
   string group_name = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Topic within the group (optional - if not specified, publishes to all members)
@@ -572,9 +623,7 @@ message PublishToGroupResponse {
 // client.publish_to_group(PublishToGroupRequest { group_name: "config-updates", message: msg, ... }).await?;
 // ```
 service ProcessGroupService {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
-    description: "Erlang pg/pg2-inspired distributed pub/sub and broadcast messaging for actor coordination"
-  };
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {description: "Erlang pg/pg2-inspired distributed pub/sub and broadcast messaging for actor coordination"};
 
   // Create a new process group
   //
@@ -614,9 +663,7 @@ service ProcessGroupService {
   // DeleteGroupRequest { group_name: "config-updates", tenant_id: "acme" }
   // ```
   rpc DeleteGroup(DeleteGroupRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      delete: "/api/v1/process-groups/{group_name}"
-    };
+    option (google.api.http) = {delete: "/api/v1/process-groups/{group_name}"};
   }
 
   // Join a process group
@@ -657,9 +704,7 @@ service ProcessGroupService {
   // LeaveGroupRequest { group_name: "events", actor_id: "handler-1" }
   // ```
   rpc LeaveGroup(LeaveGroupRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      delete: "/api/v1/process-groups/{group_name}/members/{actor_id}"
-    };
+    option (google.api.http) = {delete: "/api/v1/process-groups/{group_name}/members/{actor_id}"};
   }
 
   // Get all members of a group (cluster-wide)
@@ -676,9 +721,7 @@ service ProcessGroupService {
   // // Returns: ["actor-1", "actor-2", "actor-3"]
   // ```
   rpc GetMembers(GetMembersRequest) returns (GetMembersResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/process-groups/{group_name}/members"
-    };
+    option (google.api.http) = {get: "/api/v1/process-groups/{group_name}/members"};
   }
 
   // Get local members of a group (this node only)
@@ -698,9 +741,7 @@ service ProcessGroupService {
   // // Returns only actors on this node
   // ```
   rpc GetLocalMembers(GetLocalMembersRequest) returns (GetLocalMembersResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/process-groups/{group_name}/local-members"
-    };
+    option (google.api.http) = {get: "/api/v1/process-groups/{group_name}/local-members"};
   }
 
   // List all groups (Erlang pg2 which_groups)
@@ -720,9 +761,7 @@ service ProcessGroupService {
   // // Returns: ["config-updates", "user-events", "cluster-nodes"]
   // ```
   rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/process-groups"
-    };
+    option (google.api.http) = {get: "/api/v1/process-groups"};
   }
 
   // Publish a message to all group members

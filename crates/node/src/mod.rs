@@ -3183,108 +3183,16 @@ impl Node {
         let is_local2 = node_part2 == self.id.as_str();
 
         if is_local1 && is_local2 {
-            // Both actors are local
-            // Verify both actors exist in ActorRegistry
-            // Use provided RequestContext for routing lookup (respects tenant/namespace)
             let actor_registry = self.actor_registry().await?;
-            let routing1 = actor_registry
-                .lookup_routing(ctx, actor_id)
-                .await
-                .map_err(|_| NodeError::ActorNotFound(actor_id.clone()))?;
-            if routing1.is_none() || !routing1.unwrap().is_local {
-                return Err(NodeError::ActorNotFound(actor_id.clone()));
-            }
-
-            let routing2 = actor_registry
-                .lookup_routing(ctx, linked_actor_id)
-                .await
-                .map_err(|_| NodeError::ActorNotFound(linked_actor_id.clone()))?;
-            if routing2.is_none() || !routing2.unwrap().is_local {
-                return Err(NodeError::ActorNotFound(linked_actor_id.clone()));
-            }
-
-            // Delegate to ActorRegistry for local linking
             actor_registry
                 .link(actor_id, linked_actor_id)
                 .await
                 .map_err(|e| NodeError::InvalidArgument(format!("Link failed: {}", e)))?;
-
-            Ok(())
-        } else if is_local1 {
-            // actor_id is local, linked_actor_id is remote
-            // Store link locally (for local actor)
-            // Note: Remote actor's link will be stored on remote node via RPC
-            let actor_registry = self.actor_registry().await?;
-            // For remote linking, we only store the local side
-            // The remote side will be linked via RPC call below
-            // We can't use ActorRegistry.link() here because it requires both actors to exist locally
-            // So we manually add to links for the local actor only
-            let links_arc = actor_registry.links();
-            let mut links = links_arc.write().await;
-            links
-                .entry(actor_id.clone())
-                .or_insert_with(Vec::new)
-                .push(linked_actor_id.clone());
-
-            // Call LinkActor RPC on remote node
-            let remote_node_id = crate::NodeId::new(node_part2);
-            let node_address = self.lookup_node_address(&remote_node_id).await?;
-
-            let channel = tonic::transport::Channel::from_shared(node_address.clone())
-                .map_err(|e| NodeError::NetworkError(format!("Invalid address: {}", e)))?
-                .connect()
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("Connection failed: {}", e)))?;
-
-            let mut client = plexspaces_proto::ActorServiceClient::new(channel);
-
-            let request = tonic::Request::new(plexspaces_proto::v1::actor::LinkActorRequest {
-                actor_id: linked_actor_id.clone(),
-                linked_actor_id: actor_id.clone(), // Reverse for remote side
-            });
-            client
-                .link_actor(request)
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("LinkActor RPC failed: {}", e)))?;
-
-            Ok(())
-        } else if is_local2 {
-            // linked_actor_id is local, actor_id is remote
-            // Link local actor to remote actor
-            let actor_registry = self.actor_registry().await?;
-            let links_arc = actor_registry.links();
-            let mut links = links_arc.write().await;
-            links
-                .entry(linked_actor_id.clone())
-                .or_insert_with(Vec::new)
-                .push(actor_id.clone());
-
-            // Call LinkActor RPC on remote node
-            let remote_node_id = crate::NodeId::new(node_part1);
-            let node_address = self.lookup_node_address(&remote_node_id).await?;
-
-            let channel = tonic::transport::Channel::from_shared(node_address.clone())
-                .map_err(|e| NodeError::NetworkError(format!("Invalid address: {}", e)))?
-                .connect()
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("Connection failed: {}", e)))?;
-
-            let mut client = plexspaces_proto::ActorServiceClient::new(channel);
-
-            let request = tonic::Request::new(plexspaces_proto::v1::actor::LinkActorRequest {
-                actor_id: actor_id.clone(),
-                linked_actor_id: linked_actor_id.clone(), // Reverse for remote side
-            });
-            client
-                .link_actor(request)
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("LinkActor RPC failed: {}", e)))?;
-
             Ok(())
         } else {
-            // Both actors are remote - not supported (links must involve at least one local actor)
             Err(NodeError::InvalidArgument(
-                "Cannot link two remote actors from this node".to_string(),
+                "Remote link is not supported; link and unlink currently require local actors"
+                    .to_string(),
             ))
         }
     }
@@ -3320,87 +3228,16 @@ impl Node {
         let is_local2 = node_part2 == self.id.as_str();
 
         if is_local1 && is_local2 {
-            // Both actors are local
-            // Delegate to ActorRegistry for local unlinking
             let actor_registry = self.actor_registry().await?;
             actor_registry
                 .unlink(actor_id, linked_actor_id)
                 .await
                 .map_err(|e| NodeError::InvalidArgument(format!("Unlink failed: {}", e)))?;
-
-            Ok(())
-        } else if is_local1 {
-            // actor_id is local, linked_actor_id is remote
-            let actor_registry = self.actor_registry().await?;
-            let links_arc = actor_registry.links();
-            let mut links = links_arc.write().await;
-            if let Some(linked_actors) = links.get_mut(actor_id) {
-                linked_actors.retain(|id| id != linked_actor_id);
-                if linked_actors.is_empty() {
-                    links.remove(actor_id);
-                }
-            }
-
-            // Call UnlinkActor RPC on remote node
-            let remote_node_id = crate::NodeId::new(node_part2);
-            let node_address = self.lookup_node_address(&remote_node_id).await?;
-
-            let channel = tonic::transport::Channel::from_shared(node_address.clone())
-                .map_err(|e| NodeError::NetworkError(format!("Invalid address: {}", e)))?
-                .connect()
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("Connection failed: {}", e)))?;
-
-            let mut client = plexspaces_proto::ActorServiceClient::new(channel);
-
-            let request = tonic::Request::new(plexspaces_proto::v1::actor::UnlinkActorRequest {
-                actor_id: linked_actor_id.clone(),
-                linked_actor_id: actor_id.clone(),
-            });
-            client
-                .unlink_actor(request)
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("UnlinkActor RPC failed: {}", e)))?;
-
-            Ok(())
-        } else if is_local2 {
-            // linked_actor_id is local, actor_id is remote
-            let actor_registry = self.actor_registry().await?;
-            let links_arc = actor_registry.links();
-            let mut links = links_arc.write().await;
-            if let Some(linked_actors) = links.get_mut(linked_actor_id) {
-                linked_actors.retain(|id| id != actor_id);
-                if linked_actors.is_empty() {
-                    links.remove(linked_actor_id);
-                }
-            }
-
-            // Call UnlinkActor RPC on remote node
-            let remote_node_id = crate::NodeId::new(node_part1);
-            let node_address = self.lookup_node_address(&remote_node_id).await?;
-
-            let channel = tonic::transport::Channel::from_shared(node_address.clone())
-                .map_err(|e| NodeError::NetworkError(format!("Invalid address: {}", e)))?
-                .connect()
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("Connection failed: {}", e)))?;
-
-            let mut client = plexspaces_proto::ActorServiceClient::new(channel);
-
-            let request = tonic::Request::new(plexspaces_proto::v1::actor::UnlinkActorRequest {
-                actor_id: actor_id.clone(),
-                linked_actor_id: linked_actor_id.clone(),
-            });
-            client
-                .unlink_actor(request)
-                .await
-                .map_err(|e| NodeError::NetworkError(format!("UnlinkActor RPC failed: {}", e)))?;
-
             Ok(())
         } else {
-            // Both actors are remote - not supported
             Err(NodeError::InvalidArgument(
-                "Cannot unlink two remote actors from this node".to_string(),
+                "Remote unlink is not supported; link and unlink currently require local actors"
+                    .to_string(),
             ))
         }
     }
@@ -3980,129 +3817,6 @@ impl Node {
         }
     }
 
-    /// Deactivate a virtual actor (remove from memory)
-    ///
-    /// ## Purpose
-    /// Deactivates a virtual actor that has been idle, freeing memory while
-    /// maintaining addressability.
-    ///
-    /// ## Behavior
-    /// 1. Persist actor state to storage (if persist_on_deactivation enabled)
-    /// 2. Remove actor from memory
-    /// 3. Update VirtualActorLifecycle (last_accessed, is_activating = false)
-    /// 4. Queue any new messages for later activation
-    ///
-    /// ## Arguments
-    /// * `actor_id` - The virtual actor to deactivate
-    /// * `force` - Force deactivation even if actor has pending messages
-    ///
-    /// ## Returns
-    /// Ok(()) if deactivation successful
-    ///
-    /// ## Errors
-    /// Returns error if actor is not virtual or deactivation fails
-    pub async fn deactivate_virtual_actor(
-        &self,
-        actor_id: &ActorId,
-        _force: bool,
-    ) -> Result<(), NodeError> {
-        // Normalize actor ID to include node ID if missing
-        let actor_id = self.normalize_actor_id(actor_id);
-
-        // Use VirtualActorManager to get facet
-        let manager = self.get_virtual_actor_manager().await?;
-        let facet_arc = manager
-            .get_facet(&actor_id)
-            .await
-            .map_err(|_e| NodeError::ActorNotFound(actor_id.clone()))?;
-
-        // Use trait method directly - facet is Box<dyn VirtualActorLifecycleFacet>
-        let mut facet_guard = facet_arc.write().await;
-        facet_guard.mark_deactivated().await;
-        drop(facet_guard);
-
-        // TODO: Persist actor state if persist_on_deactivation enabled
-        // For now, just remove from active actors
-        // Future: Save state to ObjectRegistry or storage backend
-
-        // For virtual actor suspension, we need to:
-        // 1. Stop the actor properly (terminate message loop) using stop_from_arc()
-        // 2. Remove the actor instance (so actor is not active) but preserve metadata
-        // 3. Keep actor_type, metadata, and config (so we can rebuild)
-        // 4. Re-register VirtualActorWrapper (so actor remains addressable)
-        //
-        // Production-grade design: Use stop_from_arc() to stop the actor, then use
-        // suspend_virtual_actor() which preserves metadata (unlike unregister_with_cleanup)
-
-        let actor_registry = self.actor_registry().await?;
-
-        // Step 1: Stop the actor properly (terminates message loop gracefully)
-        // CRITICAL: Must stop actor BEFORE suspending to prevent race conditions
-        tracing::debug!(actor_id = %actor_id, "[DEACTIVATE] Step 1: Stopping actor before suspension");
-        if let Some(instance) = actor_registry.get_actor_instance(&actor_id).await {
-            if let Ok(actor_arc) = instance.downcast::<plexspaces_actor::Actor>() {
-                if let Err(e) = actor_arc.stop_from_arc().await {
-                    tracing::warn!(
-                        actor_id = %actor_id,
-                        error = %e,
-                        "Failed to stop actor during suspension (continuing)"
-                    );
-                }
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            } else {
-                tracing::debug!(actor_id = %actor_id, "[DEACTIVATE] Failed to downcast actor instance");
-            }
-        } else {
-            tracing::debug!(actor_id = %actor_id, "[DEACTIVATE] No actor instance found (already suspended?)");
-        }
-
-        // Step 2: Suspend virtual actor (removes instance and ActorRef, preserves metadata)
-        tracing::debug!(actor_id = %actor_id, "[DEACTIVATE] Step 2: Suspending virtual actor");
-        actor_registry.suspend_virtual_actor(&actor_id).await;
-
-        // Step 2.5: Remove from active instances tracking (for LRU eviction)
-        manager.remove_from_active_tracking(&actor_id).await;
-
-        // CRITICAL: Re-register VirtualActorWrapper so actor remains addressable (Orleans design)
-        // After deactivation, virtual actors should still be registered (with VirtualActorWrapper)
-        // so they can receive messages and reactivate automatically
-        // This ensures "always addressable" property - actor exists virtually even when not active
-        use plexspaces_actor::VirtualActorWrapper;
-        // Use internal context for system operations (virtual actor re-registration is system-level)
-        let ctx = self
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let actor_factory = self
-            .service_locator()
-            .get_actor_factory()
-            .await
-            .ok_or_else(|| {
-                NodeError::ConfigError("ActorFactory not registered in ServiceLocator".to_string())
-            })?;
-        let virtual_wrapper: Arc<dyn plexspaces_core::MessageSender> =
-            Arc::new(VirtualActorWrapper::new(
-                actor_id.clone(),
-                self.service_locator().clone(),
-                actor_factory,
-            ));
-
-        // Re-register VirtualActorWrapper (actor remains addressable but not active)
-        actor_registry
-            .register_actor(
-                &ctx,
-                actor_id.clone(),
-                virtual_wrapper,
-                None, // No actor type needed for re-registration
-                None, // Config is preserved in VirtualActorManager
-                None, // No instance - actor is deactivated
-                None, // behavior_kind preserved in registry
-            )
-            .await;
-
-        Ok(())
-    }
-
     /// Check if virtual actor exists (without activating)
     ///
     /// ## Purpose
@@ -4158,7 +3872,7 @@ impl Node {
         ctx: &RequestContext,
         actor_id: ActorId,
         facet: VirtualActorFacet,
-        actor_type: Option<String>,
+        actor_type: String,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
     ) -> Result<(), NodeError> {
         // Convert VirtualActorFacet to VirtualActorLifecycleFacet trait object
@@ -4169,19 +3883,17 @@ impl Node {
         // Use VirtualActorManager for registration (source of truth for virtual actors)
         let manager = self.get_virtual_actor_manager().await?;
         let actor_id_clone = actor_id.clone();
-        let actor_type_str = actor_type.ok_or_else(|| {
-            NodeError::ConfigError(
-                "actor_type is required for virtual actor registration".to_string(),
-            )
-        })?;
         manager
             .register(
                 actor_id,
                 facet_box,
-                actor_type_str,
+                actor_type,
                 config,
                 ctx.tenant_id().to_string(),
                 ctx.namespace().to_string(),
+                vec![],
+                std::collections::HashMap::new(),
+                plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
             )
             .await
             .map_err(|e| NodeError::ActorRegistrationFailed(actor_id_clone, e.to_string()))
@@ -4247,47 +3959,19 @@ impl Node {
                         };
 
                     if should_deactivate {
-                        // Deactivate actor (non-blocking, log errors)
-                        // Deactivate using VirtualActorManager directly
-                        if let Ok(manager) = node.get_virtual_actor_manager().await {
-                            if let Ok(facet_arc) = manager.get_facet(&actor_id).await {
-                                let mut facet_guard = facet_arc.write().await;
-                                // Use trait method directly - facet is Box<dyn VirtualActorLifecycleFacet>
-                                facet_guard.mark_deactivated().await;
-                            }
-                            // Use service_locator to get ActorRegistry
-
-                            if let Some(actor_registry) =
-                                node.service_locator().actor_registry().await
-                            {
-                                if let Err(e) =
-                                    actor_registry.unregister_with_cleanup(&actor_id).await
-                                {
-                                    tracing::warn!(
-                                        "Failed to deactivate idle virtual actor {}: {}",
-                                        actor_id,
-                                        e
-                                    );
-                                } else {
-                                    // Remove from active instances tracking (for LRU eviction)
-                                    manager.remove_from_active_tracking(&actor_id).await;
-                                }
-                            } else {
-                                // Fallback to direct access if not registered yet
-                                if let Ok(actor_registry) = node.actor_registry().await {
-                                    if let Err(e) =
-                                        actor_registry.unregister_with_cleanup(&actor_id).await
-                                    {
-                                        tracing::warn!(
-                                            "Failed to deactivate idle virtual actor {}: {}",
-                                            actor_id,
-                                            e
-                                        );
-                                    } else {
-                                        // Remove from active instances tracking (for LRU eviction)
-                                        manager.remove_from_active_tracking(&actor_id).await;
-                                    }
-                                }
+                        if let Some(actor_factory) =
+                            node.service_locator().get_actor_factory().await
+                        {
+                            let ctx = node
+                                .service_locator()
+                                .request_context_for_system_operations()
+                                .await;
+                            if let Err(e) = actor_factory.stop_actor(&ctx, &actor_id).await {
+                                tracing::warn!(
+                                    "Failed to deactivate idle virtual actor {}: {}",
+                                    actor_id,
+                                    e
+                                );
                             }
                         }
                     }
@@ -4528,33 +4212,23 @@ mod tests {
         if let Some(_actor_trait) = actor_registry.lookup_actor(&actor_id).await {
             Ok(Some(ActorRef::remote(
                 actor_id.clone(),
+                "".to_string(), // tenant_id
                 "".to_string(), // TODO: get namespace from context
                 node.id().as_str().to_string(),
                 node.service_locator().clone(),
             )))
         } else {
-            // Check routing
-            // Test helper function - routing lookup for test actor references
-            // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-            let internal_ctx = node
-                .service_locator()
-                .request_context_for_system_operations()
-                .await;
-            let routing = actor_registry
-                .lookup_routing(&internal_ctx, &actor_id)
-                .await
-                .map_err(|e| NodeError::ActorRefCreationFailed(actor_id.clone(), e.to_string()))?;
-
-            if let Some(routing_info) = routing {
-                if routing_info.is_local {
-                    Ok(None)
-                } else {
+            if let Ok((_, node_id)) = plexspaces_core::ActorRef::parse_actor_id(&actor_id) {
+                if node_id != node.id().as_str() {
                     Ok(Some(ActorRef::remote(
                         actor_id.clone(),
-                        "".to_string(), // TODO: get namespace from context
-                        routing_info.node_id,
+                        "".to_string(),
+                        "".to_string(),
+                        node_id,
                         node.service_locator().clone(),
                     )))
+                } else {
+                    Ok(None)
                 }
             } else {
                 Ok(None)
@@ -4612,7 +4286,7 @@ mod tests {
                 &internal_ctx,
                 actor_id.to_string(),
                 wrapper,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -4671,7 +4345,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -4679,21 +4353,10 @@ mod tests {
             .await;
 
         // Should find local actor via ActorRegistry
-        let internal_ctx2 = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        match actor_registry
-            .lookup_routing(&internal_ctx2, &"test-actor@test-node".to_string())
+        assert!(actor_registry
+            .lookup_actor(&"test-actor@test-node".to_string())
             .await
-        {
-            Ok(Some(routing_info)) => {
-                assert!(routing_info.is_local);
-                assert_eq!(routing_info.node_id, "test-node");
-            }
-            Ok(None) => panic!("Actor not found"),
-            Err(_) => panic!("Lookup failed"),
-        }
+            .is_some());
     }
 
     #[tokio::test]
@@ -4748,7 +4411,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -4761,27 +4424,30 @@ mod tests {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
             actor_registry
-                .register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None, None)
+                .register_actor(
+                    &ctx,
+                    actor_ref.id().clone(),
+                    sender,
+                    "TestActor".to_string(),
+                    None,
+                    None,
+                    None,
+                )
                 .await;
         }
         // Test code - looking up test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx2 = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
         assert!(actor_registry
-            .lookup_routing(&internal_ctx2, &"test-actor@test-node".to_string())
+            .lookup_actor(&"test-actor@test-node".to_string())
             .await
-            .is_ok());
+            .is_some());
 
         // Unregister
         actor_registry
             .unregister_with_cleanup(&"test-actor@test-node".to_string())
             .await
             .unwrap();
-        // After unregistering, lookup_actor should return None (actor not found)
-        // lookup_routing might still succeed for local node, so check lookup_actor instead
+        // After unregistering, the local sender should no longer be discoverable.
         let lookup_result = actor_registry
             .lookup_actor(&"test-actor@test-node".to_string())
             .await;
@@ -4822,7 +4488,15 @@ mod tests {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
             actor_registry
-                .register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None, None)
+                .register_actor(
+                    &ctx,
+                    actor_ref.id().clone(),
+                    sender,
+                    "TestActor".to_string(),
+                    None,
+                    None,
+                    None,
+                )
                 .await;
         }
 
@@ -4834,7 +4508,15 @@ mod tests {
             // Tenant comes from auth, not config
             let ctx = RequestContext::new_without_auth(String::new(), String::new());
             actor_registry
-                .register_actor(&ctx, actor_ref.id().clone(), sender, None, None, None, None)
+                .register_actor(
+                    &ctx,
+                    actor_ref.id().clone(),
+                    sender,
+                    "TestActor".to_string(),
+                    None,
+                    None,
+                    None,
+                )
                 .await;
         }
     }
@@ -4883,7 +4565,15 @@ mod tests {
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
         actor_registry
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
 
         // Create message
@@ -5091,21 +4781,10 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
         // Test code - looking up test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx2 = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        match actor_registry
-            .lookup_routing(&internal_ctx2, &"test-actor@test-node".to_string())
+        assert!(actor_registry
+            .lookup_actor(&"test-actor@test-node".to_string())
             .await
-        {
-            Ok(Some(routing_info)) => {
-                assert!(routing_info.is_local);
-                assert_eq!(routing_info.node_id, "test-node");
-            }
-            Ok(None) => panic!("Actor not found"),
-            Err(_) => panic!("Lookup failed"),
-        }
+            .is_some());
     }
 
     // NOTE: test_spawn_actor_monitors_termination removed
@@ -5273,7 +4952,15 @@ mod tests {
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry2
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
 
         // Register node2 in ObjectRegistry on node1 (so node1 can find it)
@@ -5348,52 +5035,18 @@ mod tests {
         let object_registry = node.service_locator.get_object_registry().await.unwrap();
         object_registry.register(&ctx, registration).await.unwrap();
 
-        // Try to find actor with @node2 suffix
-        let actor_registry = get_actor_registry(&node).await;
-        // Test code - looking up test actors
-        // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node
-            .service_locator()
-            .request_context_for_system_operations()
-            .await;
-        let result = actor_registry
-            .lookup_routing(&internal_ctx, &"test-actor@node2".to_string())
-            .await;
-
-        // Should find it as remote (because node2 is registered in ObjectRegistry)
+        let result = node.lookup_node_address(&crate::NodeId::new("node2")).await;
         assert!(result.is_ok());
-        match result.unwrap() {
-            Some(routing_info) => {
-                assert!(!routing_info.is_local);
-                assert_eq!(routing_info.node_id, "node2");
-            }
-            None => panic!("Actor not found"),
-        }
     }
 
     #[tokio::test]
     async fn test_find_actor_remote_not_found() {
         let node = NodeBuilder::new("node1").build().await;
 
-        // Try to find actor that doesn't exist anywhere
-        let actor_registry = get_actor_registry(&node).await;
-        let result = actor_registry
-            .lookup_routing(
-                &node
-                    .service_locator()
-                    .request_context_for_system_operations()
-                    .await,
-                &"nonexistent@unknown-node".to_string(),
-            )
+        let result = node
+            .lookup_node_address(&crate::NodeId::new("unknown-node"))
             .await;
-
-        // lookup_routing returns Ok(None) when node is not found in ObjectRegistry
-        // (it doesn't return an error, just None)
-        assert!(result.is_ok());
-        assert!(
-            result.unwrap().is_none(),
-            "Should return None for non-existent remote node"
-        );
+        assert!(result.is_err(), "Should fail for non-existent remote node");
     }
 
     #[tokio::test]
@@ -5430,10 +5083,18 @@ mod tests {
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry2
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
 
-        // Register node2 in ObjectRegistry on node1 (so node1 can find it via lookup_routing)
+        // Register node2 in ObjectRegistry on node1 so remote node resolution can succeed.
         use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
         let ctx = node1
             .service_locator()
@@ -5449,26 +5110,10 @@ mod tests {
         let object_registry = node1.service_locator.get_object_registry().await.unwrap();
         object_registry.register(&ctx, registration).await.unwrap();
 
-        // Now node1 should find the actor via ObjectRegistry (lookup_routing uses ObjectRegistry, not TupleSpace)
-        let actor_registry1 = get_actor_registry(&node1).await;
-        // Test code - looking up test actors
-        // This is test code, so node1.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        let internal_ctx = node1
-            .service_locator()
-            .request_context_for_system_operations()
+        let result = node1
+            .lookup_node_address(&crate::NodeId::new("node2"))
             .await;
-        let result = actor_registry1
-            .lookup_routing(&internal_ctx, &"test-actor@node2".to_string())
-            .await;
-
         assert!(result.is_ok());
-        match result.unwrap() {
-            Some(routing_info) => {
-                assert!(!routing_info.is_local);
-                assert_eq!(routing_info.node_id, "node2");
-            }
-            None => panic!("Actor not found"),
-        }
     }
 
     #[tokio::test]
@@ -5527,7 +5172,15 @@ mod tests {
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
 
         // Create monitoring channel
@@ -5668,7 +5321,15 @@ mod tests {
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
 
         // Create 3 monitors
@@ -5850,7 +5511,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -5868,7 +5529,15 @@ mod tests {
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
 
         let (tx, mut rx) = mpsc::channel(1);
@@ -5956,7 +5625,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -5974,7 +5643,15 @@ mod tests {
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref);
         actor_registry
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
 
         let (tx, mut rx) = mpsc::channel(1);
@@ -6084,7 +5761,15 @@ mod tests {
         let actor_id = actor_ref.id().clone();
         let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref.clone());
         actor_registry
-            .register_actor(&ctx, actor_id, sender, None, None, None, None)
+            .register_actor(
+                &ctx,
+                actor_id,
+                sender,
+                "TestActor".to_string(),
+                None,
+                None,
+                None,
+            )
             .await;
 
         // active_actors is only updated when actors are spawned via ActorFactory, not when registered
@@ -6222,7 +5907,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -6242,7 +5927,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    None,
+                    "TestActor".to_string(),
                     Some(config.clone()),
                     None,
                     None,
@@ -6312,7 +5997,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -6369,7 +6054,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -6388,7 +6073,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    None,
+                    "TestActor".to_string(),
                     Some(config),
                     None,
                     None,
@@ -6457,7 +6142,7 @@ mod tests {
                 &internal_ctx,
                 actor1_ref.id().clone(),
                 wrapper1,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -6474,7 +6159,7 @@ mod tests {
                     &ctx,
                     actor1_ref.id().clone(),
                     sender1,
-                    None,
+                    "TestActor".to_string(),
                     Some(config1),
                     None,
                     None,
@@ -6516,7 +6201,7 @@ mod tests {
                 &internal_ctx,
                 actor2_ref.id().clone(),
                 wrapper2,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -6531,7 +6216,7 @@ mod tests {
                     &ctx,
                     actor2_ref.id().clone(),
                     sender2,
-                    None,
+                    "TestActor".to_string(),
                     Some(config2),
                     None,
                     None,
@@ -6623,7 +6308,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -6641,7 +6326,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    None,
+                    "TestActor".to_string(),
                     Some(config),
                     None,
                     None,
@@ -6692,7 +6377,7 @@ mod tests {
                 &ctx,
                 actor_id.clone(),
                 sender.clone(),
-                None,
+                "TestActor".to_string(),
                 Some(config),
                 None,
                 None,
@@ -6789,7 +6474,7 @@ mod tests {
                 &internal_ctx,
                 actor_ref.id().clone(),
                 wrapper,
-                None,
+                "TestActor".to_string(),
                 None,
                 None,
                 None,
@@ -6804,7 +6489,7 @@ mod tests {
                     &ctx,
                     actor_ref.id().clone(),
                     sender,
-                    None,
+                    "TestActor".to_string(),
                     Some(config),
                     None,
                     None,
@@ -7404,21 +7089,10 @@ mod tests {
 }
 
 // ============================================================================
-// LinkProvider and ActivationProvider Implementation
+// Linking notes
 // ============================================================================
 //
-// NOTE: LinkProvider and ActivationProvider are now implemented in ActorRegistry
-// (see crates/core/src/actor_registry.rs) to support local actors.
-//
-// Node::link() and Node::unlink() still support remote actor linking via gRPC,
-// but this is advanced functionality. For local actors, use ActorRegistry directly.
-//
-// TODO: Remote Actor Linking Support
-// Node currently supports remote actor linking via gRPC (see Node::link() and Node::unlink()).
-// This is advanced functionality and can be enhanced later. For now:
-// - Local actors: Use ActorRegistry (implements LinkProvider)
-// - Remote actors: Use Node::link() / Node::unlink() directly (gRPC-based)
-// Future enhancement: Add remote linking support to ActorRegistry by:
-// 1. Adding optional Node reference to ActorRegistry
-// 2. Checking if actors are local before linking
+// Local link and unlink behavior is owned by ActorRegistry.
+// Node keeps the remote-link orchestration surface because remote resolution belongs at the node
+// boundary rather than in the local actor registry.
 // 3. Delegating to Node for remote actor linking

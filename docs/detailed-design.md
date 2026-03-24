@@ -92,7 +92,6 @@ Actor IDs follow a standardized format for consistency and proto-first design:
 - `user-123//read-state-tracker::orbit-read-state-ts@node-1` (full format)
 - `//read-state-tracker::orbit-read-state-ts@node-1` (no base ID, ULID generated)
 - `//GenServer::default@node-1` (no namespace)
-- `counter@node-1` (legacy format, backward compatible)
 
 **Factory Methods**:
 ```rust
@@ -607,11 +606,12 @@ Orleans-style activation/deactivation with automatic instance creation:
 2. **Auto-Activation**: When message arrives for non-existent virtual actor:
    - `invoke_actor()` discovers no actors match `actor_type`
    - Checks `VirtualActorManager.is_virtual_actor_type(actor_type)`
-   - Calls `get_or_activate_actor_impl()` which:
-     - Builds actor_id: `build_actor_id(base_id, actor_type, namespace, node_id)`
+   - Performs internal activation inside `ActorServiceImpl::invoke_actor()` which:
+     - Reuses suspended instance metadata when a virtual actor id is already known
+     - Builds actor_id: `build_actor_id(base_id, actor_type, namespace, node_id)` for type-driven activation
      - Retrieves type metadata from `VirtualActorManager`
      - Creates all facets from `facet_config`: `create_facets_from_config(facet_config, facet_registry)`
-     - Spawns actor with facets attached
+     - Spawns actor with facets attached when no suspended instance exists
    - Retries lookup to discover newly created actor
 
 3. **Facet Support**: Supports all facet types:

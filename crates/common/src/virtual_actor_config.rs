@@ -86,7 +86,7 @@ pub fn get_max_pool_per_actor_type(config: Option<&DefaultVirtualActorConfig>) -
 /// ActivationStrategy (defaults to LAZY if not set or UNSPECIFIED)
 pub fn get_activation_strategy(config: Option<&DefaultVirtualActorConfig>) -> ActivationStrategy {
     config
-        .and_then(|c| ActivationStrategy::from_i32(c.activation_strategy))
+        .and_then(|c| ActivationStrategy::try_from(c.activation_strategy).ok())
         .filter(|s| *s != ActivationStrategy::ActivationStrategyUnspecified)
         .unwrap_or(DEFAULT_ACTIVATION_STRATEGY)
 }

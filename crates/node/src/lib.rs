@@ -100,7 +100,6 @@ pub mod shutdown_coordinator;
 // Node builder for fluent node creation API
 pub mod node_builder;
 pub mod service_wrappers;
-// VirtualActorWrapper is in plexspaces-actor crate - use plexspaces_actor::VirtualActorWrapper directly
 // TODO: regular_actor_wrapper module file missing - commented out until file is created
 // pub mod regular_actor_wrapper;
 pub use node_builder::NodeBuilder;

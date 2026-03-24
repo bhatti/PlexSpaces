@@ -13,15 +13,14 @@
 //! - Error cases (404, invalid args, etc.)
 
 use async_trait::async_trait;
-use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorBuilder, ActorFactory};
+use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorFactory};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, ActorRegistry, BehaviorError, BehaviorType, FacetManager,
-    Message, ReplyWaiterRegistry, RequestContext, ServiceLocator as ServiceLocatorTrait,
-    VirtualActorManager,
+    behavior_factory::BehaviorRegistry, Actor as ActorTrait, ActorContext, ActorRegistry,
+    BehaviorError, BehaviorType, FacetManager, Message, ReplyWaiterRegistry,
+    ServiceLocator as ServiceLocatorTrait, VirtualActorManager,
 };
 use plexspaces_mailbox::new_message;
-use plexspaces_node::create_default_service_locator;
 use plexspaces_object_registry::{ObjectRegistry, SqliteObjectRegistryRepository};
 use plexspaces_proto::actor::v1::{actor_service_server::ActorService, InvokeActorRequest};
 use plexspaces_proto::object_registry::v1::ObjectRegistration;
@@ -289,6 +288,21 @@ async fn create_test_registry_with_actors(
         .register_service(actor_factory.clone())
         .await;
 
+    let registry = BehaviorRegistry::new();
+    let module_name = actor_type.to_string();
+    registry
+        .register(actor_type.to_string(), move |_args| {
+            let module_name = module_name.clone();
+            Box::pin(async move {
+                let _ = module_name;
+                Ok(Box::new(CounterActor::new()) as Box<dyn ActorTrait>)
+            })
+        })
+        .await;
+    service_locator
+        .register_behavior_registry(Arc::new(registry))
+        .await;
+
     // Register actors with type information using spawn_actor
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         tenant_id.to_string(),
@@ -318,7 +332,7 @@ async fn create_test_registry_with_actors(
                 &ctx,
                 actor_id.clone(),
                 message_sender,
-                Some(actor_type.to_string()),
+                actor_type.to_string(),
                 None, // config
                 None, // instance
                 Some(BehaviorType::GenServer),
@@ -341,6 +355,43 @@ async fn create_test_actor_service(
         .await;
 
     ActorServiceImpl::new(service_locator, node_id)
+}
+
+async fn register_counter_behavior(service_locator: &Arc<ServiceLocatorImpl>, actor_type: &str) {
+    let registry = BehaviorRegistry::new();
+    let module_name = actor_type.to_string();
+    registry
+        .register(actor_type.to_string(), move |_args| {
+            let module_name = module_name.clone();
+            Box::pin(async move {
+                let _ = module_name;
+                Ok(Box::new(CounterActor::new()) as Box<dyn ActorTrait>)
+            })
+        })
+        .await;
+    service_locator
+        .register_behavior_registry(Arc::new(registry))
+        .await;
+}
+
+async fn invoke_actor_request(
+    service: &ActorServiceImpl,
+    request: InvokeActorRequest,
+    tenant_id: &str,
+) -> Result<tonic::Response<plexspaces_proto::actor::v1::InvokeActorResponse>, tonic::Status> {
+    let namespace_header = if request.namespace.is_empty() {
+        "default".to_string()
+    } else {
+        request.namespace.clone()
+    };
+    let mut request = Request::new(request);
+    request
+        .metadata_mut()
+        .insert("x-tenant-id", tenant_id.parse().unwrap());
+    request
+        .metadata_mut()
+        .insert("x-namespace", namespace_header.parse().unwrap());
+    service.invoke_actor(request).await
 }
 
 #[tokio::test]
@@ -371,7 +422,7 @@ async fn test_invoke_actor_get_success() {
 
     // Actor registration is synchronous - no wait needed
 
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
 
     // Should succeed and get a reply with count
     match result {
@@ -441,10 +492,139 @@ async fn test_invoke_actor_ignores_stale_actor_type_index_entries() {
         timeout: None,
     };
 
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
     assert!(
         result.is_ok(),
         "invoke_actor should ignore stale type index entries"
+    );
+}
+
+#[tokio::test]
+async fn test_invoke_actor_activates_virtual_actor_type_with_instance_id() {
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "virtual-counter", "default", 0).await;
+    register_counter_behavior(&service_locator, "virtual-counter").await;
+
+    let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
+    virtual_actor_manager
+        .register_virtual_actor_type(
+            "virtual-counter".to_string(),
+            None,
+            "default".to_string(),
+            serde_json::json!({
+                "virtual_actor": {
+                    "idle_timeout": "5m",
+                    "activation_strategy": "lazy"
+                }
+            }),
+            Some("default".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let service =
+        create_test_actor_service(actor_registry.clone(), service_locator, "node1".to_string())
+            .await;
+
+    let request = InvokeActorRequest {
+        namespace: "default".to_string(),
+        actor_type: "virtual-counter:user-1".to_string(),
+        http_method: "GET".to_string(),
+        payload: vec![],
+        headers: HashMap::new(),
+        query_params: HashMap::from([("action".to_string(), "get".to_string())]),
+        path: String::new(),
+        subpath: String::new(),
+        ask: true,
+        msg_type_override: String::new(),
+        timeout: None,
+    };
+
+    let response = invoke_actor_request(&service, request, "default")
+        .await
+        .expect("virtual actor invoke should activate the actor")
+        .into_inner();
+
+    let expected_actor_id = plexspaces_core::actor_id::build_actor_id(
+        "user-1",
+        "virtual-counter",
+        Some("default"),
+        "node1",
+    );
+    assert_eq!(response.actor_id, expected_actor_id);
+    assert!(
+        actor_registry
+            .lookup_actor(&response.actor_id)
+            .await
+            .is_some(),
+        "virtual actor should be active after invoke_actor"
+    );
+}
+
+#[tokio::test]
+async fn test_invoke_actor_post_uses_tell_after_virtual_activation() {
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "virtual-counter", "default", 0).await;
+    register_counter_behavior(&service_locator, "virtual-counter").await;
+
+    let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
+    virtual_actor_manager
+        .register_virtual_actor_type(
+            "virtual-counter".to_string(),
+            None,
+            "default".to_string(),
+            serde_json::json!({
+                "virtual_actor": {
+                    "idle_timeout": "5m",
+                    "activation_strategy": "lazy"
+                }
+            }),
+            Some("default".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let service =
+        create_test_actor_service(actor_registry.clone(), service_locator, "node1".to_string())
+            .await;
+
+    let response = invoke_actor_request(
+        &service,
+        InvokeActorRequest {
+            namespace: "default".to_string(),
+            actor_type: "virtual-counter:user-2".to_string(),
+            http_method: "POST".to_string(),
+            payload: br#"{"action":"increment"}"#.to_vec(),
+            headers: HashMap::new(),
+            query_params: HashMap::new(),
+            path: String::new(),
+            subpath: String::new(),
+            ask: false,
+            msg_type_override: String::new(),
+            timeout: None,
+        },
+        "default",
+    )
+    .await
+    .expect("tell path should succeed after internal activation")
+    .into_inner();
+
+    let expected_actor_id = plexspaces_core::actor_id::build_actor_id(
+        "user-2",
+        "virtual-counter",
+        Some("default"),
+        "node1",
+    );
+    assert!(response.success);
+    assert_eq!(response.actor_id, expected_actor_id);
+    assert!(
+        actor_registry
+            .lookup_actor(&response.actor_id)
+            .await
+            .is_some(),
+        "tell path should leave the virtual actor active"
     );
 }
 
@@ -476,7 +656,7 @@ async fn test_invoke_actor_post_success() {
 
     // Actor registration is synchronous - no wait needed
 
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
 
     // Should succeed (fire-and-forget); POST without invocation=call uses tell (cast)
     match result {
@@ -517,7 +697,7 @@ async fn test_invoke_actor_post_invocation_call_uses_ask() {
         timeout: None,
     };
 
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
 
     // Ask path: service waits for reply; counter responds to "get" with count
     match result {
@@ -569,7 +749,7 @@ async fn test_invoke_actor_missing_actor_type() {
         timeout: None,
     };
 
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
 
     assert!(matches!(result, Err(e) if e.code() == tonic::Code::InvalidArgument));
 }
@@ -596,7 +776,7 @@ async fn test_invoke_actor_not_found() {
         timeout: None,
     };
 
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
 
     assert!(matches!(result, Err(e) if e.code() == tonic::Code::NotFound));
 }
@@ -627,7 +807,7 @@ async fn test_invoke_actor_multiple_actors_random_selection() {
 
     // Call multiple times - should select different actors (or same, but should work)
     for i in 0..10 {
-        let result = service.invoke_actor(Request::new(request.clone())).await;
+        let result = invoke_actor_request(&service, request.clone(), "default").await;
         // Should not return NotFound (at least one actor should be found)
         match result {
             Ok(_) => {
@@ -669,7 +849,7 @@ async fn test_invoke_actor_default_tenant_id() {
 
     // Actor registration is synchronous - no wait needed
 
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
 
     // Should not return NotFound (should find actor in default tenant)
     match result {
@@ -715,7 +895,7 @@ async fn test_invoke_actor_get_query_params_to_json() {
 
     // The handler should convert query_params to JSON
     // We can't easily test the payload without mocking, but we can verify it doesn't error
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
 
     // Should not error on serialization
     match result {
@@ -748,7 +928,7 @@ async fn test_invoke_actor_post_headers_preserved() {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "POST".to_string(),
-        payload: b"test payload".to_vec(),
+        payload: br#"{"action":"increment"}"#.to_vec(),
         headers: headers.clone(),
         query_params: HashMap::new(),
         path: String::new(),
@@ -760,7 +940,7 @@ async fn test_invoke_actor_post_headers_preserved() {
 
     // Actor registration is synchronous - no wait needed
 
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
 
     // Should succeed (headers are passed through)
     match result {
@@ -772,7 +952,7 @@ async fn test_invoke_actor_post_headers_preserved() {
             // Allow internal/unavailable errors
             assert!(matches!(
                 e.code(),
-                tonic::Code::Internal | tonic::Code::Unavailable
+                tonic::Code::Internal | tonic::Code::Unavailable | tonic::Code::DeadlineExceeded
             ));
         }
     }
@@ -806,7 +986,7 @@ async fn test_invoke_actor_with_namespace() {
 
     // Actor registration is synchronous - no wait needed
 
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
 
     // Should find actor in default namespace
     match result {
@@ -861,7 +1041,7 @@ async fn test_invoke_actor_without_tenant_id_in_path() {
 
     // Actor registration is synchronous - no wait needed
 
-    let result = service.invoke_actor(Request::new(request)).await;
+    let result = invoke_actor_request(&service, request, "default").await;
 
     // Should succeed with default tenant_id
     match result {

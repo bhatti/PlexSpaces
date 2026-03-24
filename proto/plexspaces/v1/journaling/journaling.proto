@@ -63,32 +63,31 @@
 syntax = "proto3";
 package plexspaces.journaling.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
-import "protoc-gen-openapiv2/options/annotations.proto";
 import "plexspaces/v1/common.proto";
-import "buf/validate/validate.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/journaling/journaling;plexspaces_journaling_v1";
-option java_package = "com.bhatti.plexspaces.journaling.v1";
 option java_multiple_files = true;
-
+option java_package = "com.bhatti.plexspaces.journaling.v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpaces Journaling API";
-    version: "1.0";
-    description: "Event sourcing and durable execution infrastructure";
+    title: "PlexSpaces Journaling API"
+    version: "1.0"
+    description: "Event sourcing and durable execution infrastructure"
     contact: {
-      name: "PlexSpaces";
-      url: "https://github.com/bhatti/plexspaces";
-    };
-  };
-  schemes: HTTPS;
-  schemes: HTTP;
-  consumes: "application/json";
-  produces: "application/json";
+      name: "PlexSpaces"
+      url: "https://github.com/bhatti/plexspaces"
+    }
+  }
+  schemes: HTTPS
+  schemes: HTTP
+  consumes: "application/json"
+  produces: "application/json"
 };
 
 // ============================================================================
@@ -178,12 +177,12 @@ enum ProcessingResult {
 message StateChanged {
   bytes old_state = 1;
   bytes new_state = 2;
-  string change_type = 3;  // e.g., "counter_incremented", "status_updated"
+  string change_type = 3; // e.g., "counter_incremented", "status_updated"
 }
 
 /// Side effect execution (external call, cached during replay)
 message SideEffectExecuted {
-  string effect_id = 1;  // Unique ID for caching
+  string effect_id = 1; // Unique ID for caching
   SideEffectType effect_type = 2;
   bytes request = 3;
   bytes response = 4;
@@ -193,10 +192,10 @@ message SideEffectExecuted {
 /// Side effect type
 enum SideEffectType {
   SIDE_EFFECT_TYPE_UNSPECIFIED = 0;
-  SIDE_EFFECT_TYPE_EXTERNAL_CALL = 1;  // HTTP/gRPC call
+  SIDE_EFFECT_TYPE_EXTERNAL_CALL = 1; // HTTP/gRPC call
   SIDE_EFFECT_TYPE_DATABASE_QUERY = 2;
   SIDE_EFFECT_TYPE_FILE_IO = 3;
-  SIDE_EFFECT_TYPE_RANDOM_GENERATION = 4;  // RNG calls (must be cached!)
+  SIDE_EFFECT_TYPE_RANDOM_GENERATION = 4; // RNG calls (must be cached!)
 }
 
 /// Timer scheduled
@@ -455,8 +454,8 @@ message CheckpointConfig {
 enum CompressionType {
   COMPRESSION_TYPE_UNSPECIFIED = 0;
   COMPRESSION_TYPE_NONE = 1;
-  COMPRESSION_TYPE_ZSTD = 2;     // High compression (checkpoints)
-  COMPRESSION_TYPE_SNAPPY = 3;   // Fast compression (journal)
+  COMPRESSION_TYPE_ZSTD = 2; // High compression (checkpoints)
+  COMPRESSION_TYPE_SNAPPY = 3; // Fast compression (journal)
 }
 
 // ============================================================================
@@ -548,7 +547,7 @@ message TruncateToResponse {
 
 /// Get journal statistics request
 message GetStatsRequest {
-  string actor_id = 1;  // Optional: stats for specific actor
+  string actor_id = 1; // Optional: stats for specific actor
 }
 
 // ==================== Event Sourcing Request/Response Messages ====================

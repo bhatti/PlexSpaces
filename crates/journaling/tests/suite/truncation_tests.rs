@@ -5,9 +5,9 @@
 
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_tests {
-    use plexspaces_journaling::*;
-    use plexspaces_journaling::sql::SqliteJournalStorage;
     use plexspaces_facet::Facet;
+    use plexspaces_journaling::sql::SqliteJournalStorage;
+    use plexspaces_journaling::*;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -37,11 +37,7 @@ mod sqlite_tests {
             metadata: HashMap::new(),
         };
 
-        let checkpoint_manager = CheckpointManager::new(
-            storage.clone(),
-            checkpoint_config,
-            1,
-        );
+        let checkpoint_manager = CheckpointManager::new(storage.clone(), checkpoint_config, 1);
 
         // Create entries 1-10
         for i in 1..=10 {
@@ -71,14 +67,19 @@ mod sqlite_tests {
         // Trigger checkpoint at sequence 10
         // This should truncate entries <= 9, keeping entry 10
         let state_data = b"state".to_vec();
-        checkpoint_manager.maybe_checkpoint(actor_id, 10, state_data).await.unwrap();
+        checkpoint_manager
+            .maybe_checkpoint(actor_id, 10, state_data)
+            .await
+            .unwrap();
 
         storage.flush().await.unwrap();
 
         // Verify: entries 1-9 truncated, entry 10 remains
         let entries = storage.replay_from(actor_id, 0).await.unwrap();
         assert_eq!(entries.len(), 1, "Should have 1 entry (sequence 10)");
-        assert_eq!(entries[0].sequence, 10, "Remaining entry should be sequence 10");
+        assert_eq!(
+            entries[0].sequence, 10,
+            "Remaining entry should be sequence 10"
+        );
     }
 }
-

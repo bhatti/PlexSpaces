@@ -511,10 +511,7 @@ async fn api_applications(
             );
         }
         if let Some(ref m) = app.metrics {
-            app_json.insert(
-                "metrics".to_string(),
-                application_metrics_to_json(m),
-            );
+            app_json.insert("metrics".to_string(), application_metrics_to_json(m));
         }
         apps.push(serde_json::Value::Object(app_json));
     }

@@ -39,7 +39,7 @@ mod tests {
     #[cfg(feature = "sqlite-backend")]
     use plexspaces_journaling::sql::SqliteJournalStorage;
     use plexspaces_journaling::{
-        CompressionType, DurabilityConfig, DurabilityFacet, JournalBackend, JournalStorage,
+        CompressionType, DurabilityConfig, DurabilityFacet, JournalStorage,
     };
     use plexspaces_mailbox::{Mailbox, MailboxBuilder, Message};
     use std::sync::Arc;

@@ -389,7 +389,15 @@ async fn test_node_route_remote_message() {
     let actor_id = actor_ref2.id().clone();
     let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
     actor_registry2
-        .register_actor(&ctx, actor_id, sender, None, None, None, None)
+        .register_actor(
+            &ctx,
+            actor_id,
+            sender,
+            "TestActor".to_string(),
+            None,
+            None,
+            None,
+        )
         .await;
 
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
@@ -519,7 +527,15 @@ async fn test_connection_pooling() {
     let actor_id = actor_ref2.id().clone();
     let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
     actor_registry2
-        .register_actor(&ctx, actor_id, sender, None, None, None, None)
+        .register_actor(
+            &ctx,
+            actor_id,
+            sender,
+            "TestActor".to_string(),
+            None,
+            None,
+            None,
+        )
         .await;
 
     use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};

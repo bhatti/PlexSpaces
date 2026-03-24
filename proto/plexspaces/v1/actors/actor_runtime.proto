@@ -382,26 +382,25 @@ package plexspaces.actor.v1;
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
-import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
-import "google/protobuf/any.proto";
-import "protoc-gen-openapiv2/options/annotations.proto";
+import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/actors/actor_runtime;plexspaces_actor_v1";
-option java_package = "com.bhatti.plexspaces.actor.v1";
 option java_multiple_files = true;
-
+option java_package = "com.bhatti.plexspaces.actor.v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpace Actor Runtime API";
-    version: "1.0";
-    description: "API for managing durable actors and their lifecycle";
-  };
-  schemes: HTTPS;
-  consumes: "application/json";
-  produces: "application/json";
+    title: "PlexSpace Actor Runtime API"
+    version: "1.0"
+    description: "API for managing durable actors and their lifecycle"
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
 };
 
 // Actor instance representation.
@@ -428,17 +427,27 @@ message Actor {
     json_schema: {
       title: "Actor"
       description: "Durable actor instance"
-      required: ["actor_id", "actor_type"]
+      required: [
+        "actor_id",
+        "actor_type"
+      ]
     }
   };
 
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}  // ULID format
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    } /* ULID format */
   ];
   string actor_type = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 128, pattern: "^[a-z][a-z0-9_-]*$"}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[a-z][a-z0-9_-]*$"
+    }
   ];
   ActorState state = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
   string node_id = 4 [
@@ -457,7 +466,6 @@ message Actor {
   // FACET EXTENSIBILITY: Attached facets provide additional capabilities
   // Examples: virtual_actor, otp_genserver, otp_supervisor, durable_execution, workflow
   repeated plexspaces.common.v1.Facet facets = 10;
-
 
   // Schema version of actor_state serialization for format evolution
   //
@@ -603,15 +611,15 @@ message Actor {
 // - FAILED state includes error message for debugging (see Actor message for error details)
 enum ActorState {
   ACTOR_STATE_UNSPECIFIED = 0;
-  ACTOR_STATE_CREATING = 1;      // Actor is created but not yet started (replaces "Initializing")
-  ACTOR_STATE_ACTIVE = 2;        // Actor is running and processing messages
-  ACTOR_STATE_INACTIVE = 3;      // Actor is suspended/not processing (replaces "Suspended")
-  ACTOR_STATE_ACTIVATING = 4;    // Actor is activating (loading state, running on_activate)
-  ACTOR_STATE_DEACTIVATING = 5;  // Actor is deactivating (saving state, running on_deactivate)
-  ACTOR_STATE_STOPPING = 6;      // Actor is stopping (shutdown in progress)
-  ACTOR_STATE_MIGRATING = 7;     // Actor is migrating to another node
-  ACTOR_STATE_FAILED = 8;        // Actor has crashed (error message in Actor.error_message field)
-  ACTOR_STATE_TERMINATED = 9;    // Actor has permanently stopped (replaces "Stopped")
+  ACTOR_STATE_CREATING = 1; // Actor is created but not yet started (replaces "Initializing")
+  ACTOR_STATE_ACTIVE = 2; // Actor is running and processing messages
+  ACTOR_STATE_INACTIVE = 3; // Actor is suspended/not processing (replaces "Suspended")
+  ACTOR_STATE_ACTIVATING = 4; // Actor is activating (loading state, running on_activate)
+  ACTOR_STATE_DEACTIVATING = 5; // Actor is deactivating (saving state, running on_deactivate)
+  ACTOR_STATE_STOPPING = 6; // Actor is stopping (shutdown in progress)
+  ACTOR_STATE_MIGRATING = 7; // Actor is migrating to another node
+  ACTOR_STATE_FAILED = 8; // Actor has crashed (error message in Actor.error_message field)
+  ACTOR_STATE_TERMINATED = 9; // Actor has permanently stopped (replaces "Stopped")
 }
 
 // Exit reason for actor termination (Erlang/OTP-style)
@@ -634,11 +642,11 @@ enum ActorState {
 // - Used by supervisors to decide restart policies
 enum ExitReason {
   EXIT_REASON_UNSPECIFIED = 0;
-  EXIT_REASON_NORMAL = 1;        // Normal termination (not an error)
-  EXIT_REASON_SHUTDOWN = 2;      // Shutdown requested (graceful)
-  EXIT_REASON_KILLED = 3;        // Killed forcefully
-  EXIT_REASON_ERROR = 4;        // Error with message (error_message field contains details)
-  EXIT_REASON_LINKED = 5;        // Linked actor died (linked_actor_id and linked_reason fields)
+  EXIT_REASON_NORMAL = 1; // Normal termination (not an error)
+  EXIT_REASON_SHUTDOWN = 2; // Shutdown requested (graceful)
+  EXIT_REASON_KILLED = 3; // Killed forcefully
+  EXIT_REASON_ERROR = 4; // Error with message (error_message field contains details)
+  EXIT_REASON_LINKED = 5; // Linked actor died (linked_actor_id and linked_reason fields)
 }
 
 // Exit action when handling EXIT from linked actor
@@ -653,8 +661,8 @@ enum ExitReason {
 // - Handle: Actor continues running (traps the exit)
 enum ExitAction {
   EXIT_ACTION_UNSPECIFIED = 0;
-  EXIT_ACTION_PROPAGATE = 1;     // Propagate exit - this actor will also terminate
-  EXIT_ACTION_HANDLE = 2;        // Handle exit - this actor continues running
+  EXIT_ACTION_PROPAGATE = 1; // Propagate exit - this actor will also terminate
+  EXIT_ACTION_HANDLE = 2; // Handle exit - this actor continues running
 }
 
 // Exit reason details (for EXIT_REASON_ERROR and EXIT_REASON_LINKED)
@@ -678,10 +686,16 @@ message ActorConfig {
     }
   };
 
-  google.protobuf.Duration mailbox_timeout = 1 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour timeout
-  uint32 max_mailbox_size = 2 [(buf.validate.field).uint32 = {gte: 1, lte: 1000000}];  // 1 to 1M messages
+  google.protobuf.Duration mailbox_timeout = 1 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour timeout
+  uint32 max_mailbox_size = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 1000000
+  }]; // 1 to 1M messages
   bool enable_persistence = 3;
-  google.protobuf.Duration checkpoint_interval = 4 [(buf.validate.field).duration = {gte: {seconds: 1}, lte: {seconds: 86400}}];  // 1 second to 24 hours
+  google.protobuf.Duration checkpoint_interval = 4 [(buf.validate.field).duration = {
+    gte: {seconds: 1}
+    lte: {seconds: 86400}
+  }]; // 1 second to 24 hours
   plexspaces.common.v1.RetryPolicy restart_policy = 5;
   SupervisionStrategy supervision_strategy = 6;
   map<string, google.protobuf.Any> properties = 7;
@@ -702,7 +716,10 @@ message ActorConfig {
   ActorResourceRequirements resource_requirements = 16;
 
   // Shard group IDs (for task routing and co-scheduling)
-  repeated string actor_groups = 17 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
+  repeated string actor_groups = 17 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 255
+  }];
 
   // NOTE: Actors are ALWAYS isolated (Erlang/OTP principle)
   //
@@ -772,19 +789,25 @@ message ActorConfig {
 // Placement strategy for actor activation (Orleans-inspired)
 enum PlacementStrategy {
   PLACEMENT_STRATEGY_UNSPECIFIED = 0;
-  PLACEMENT_STRATEGY_RANDOM = 1;          // Random node selection
-  PLACEMENT_STRATEGY_PREFER_LOCAL = 2;    // Co-locate with caller
-  PLACEMENT_STRATEGY_LOAD_BASED = 3;      // Balance by load
-  PLACEMENT_STRATEGY_RESOURCE_BASED = 4;  // Based on resource availability
-  PLACEMENT_STRATEGY_AFFINITY = 5;        // Affinity groups
-  PLACEMENT_STRATEGY_CUSTOM = 99;         // User-defined
+  PLACEMENT_STRATEGY_RANDOM = 1; // Random node selection
+  PLACEMENT_STRATEGY_PREFER_LOCAL = 2; // Co-locate with caller
+  PLACEMENT_STRATEGY_LOAD_BASED = 3; // Balance by load
+  PLACEMENT_STRATEGY_RESOURCE_BASED = 4; // Based on resource availability
+  PLACEMENT_STRATEGY_AFFINITY = 5; // Affinity groups
+  PLACEMENT_STRATEGY_CUSTOM = 99; // User-defined
 }
 
 // Resource requirements for placement
 message ResourceRequirements {
-  uint64 min_memory_mb = 1 [(buf.validate.field).uint64.lte = 1048576];  // Max 1TB
-  double min_cpu_cores = 2 [(buf.validate.field).double = {gte: 0.1, lte: 128.0}];  // 0.1 to 128 cores
-  repeated string required_capabilities = 3 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 128}];
+  uint64 min_memory_mb = 1 [(buf.validate.field).uint64.lte = 1048576]; // Max 1TB
+  double min_cpu_cores = 2 [(buf.validate.field).double = {
+    gte: 0.1
+    lte: 128.0
+  }]; // 0.1 to 128 cores
+  repeated string required_capabilities = 3 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 128
+  }];
   map<string, string> custom_requirements = 4;
 }
 
@@ -798,7 +821,10 @@ message ActorResourceRequirements {
 // Stateless worker configuration (Orleans-inspired)
 message StatelessWorkerConfig {
   // Maximum number of concurrent instances
-  uint32 max_instances = 1 [(buf.validate.field).uint32 = {gte: 1, lte: 10000}];
+  uint32 max_instances = 1 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 10000
+  }];
 
   // Minimum number of instances to keep warm
   uint32 min_instances = 2 [(buf.validate.field).uint32.lte = 10000];
@@ -817,31 +843,37 @@ enum LoadBalancingStrategy {
 // Partition strategy for data-parallel actors
 enum PartitionStrategy {
   PARTITION_STRATEGY_UNSPECIFIED = 0;
-  PARTITION_STRATEGY_HASH = 1;           // Hash-based partitioning (default)
-  PARTITION_STRATEGY_RANGE = 2;          // Range-based partitioning
+  PARTITION_STRATEGY_HASH = 1; // Hash-based partitioning (default)
+  PARTITION_STRATEGY_RANGE = 2; // Range-based partitioning
   PARTITION_STRATEGY_CONSISTENT_HASH = 3; // Consistent hashing
-  PARTITION_STRATEGY_CUSTOM = 99;        // User-defined partitioner
+  PARTITION_STRATEGY_CUSTOM = 99; // User-defined partitioner
 }
 
 // Rebalancing policy for data-parallel actors
 enum RebalancePolicy {
   REBALANCE_POLICY_UNSPECIFIED = 0;
-  REBALANCE_POLICY_NONE = 1;        // No automatic rebalancing
-  REBALANCE_POLICY_ON_SCALE = 2;    // Rebalance when shards added/removed
-  REBALANCE_POLICY_LOAD_BASED = 3;  // Rebalance based on load metrics
+  REBALANCE_POLICY_NONE = 1; // No automatic rebalancing
+  REBALANCE_POLICY_ON_SCALE = 2; // Rebalance when shards added/removed
+  REBALANCE_POLICY_LOAD_BASED = 3; // Rebalance based on load metrics
 }
 
 // Data-parallel (shard group) strategy; same for all shards in the group.
 // Shard identity is implicit (index in ShardGroup.shard_actor_ids), not stored per-actor.
 message DataParallelConfig {
   // Shard group ID
-  string group_id = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string group_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
 
   // Number of shards in the group (1 to 1 billion)
-  uint32 shard_count = 2 [(buf.validate.field).uint32 = {gte: 1, lte: 1000000000}];
+  uint32 shard_count = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 1000000000
+  }];
 
   reserved 3;
-  reserved "shard_id";  // Removed: shard identity is index in ShardGroup.shard_actor_ids
+  reserved "shard_id"; // Removed: shard identity is index in ShardGroup.shard_actor_ids
 
   // Partitioning strategy
   PartitionStrategy partition_strategy = 4;
@@ -864,7 +896,7 @@ message ShardGroup {
   // Strategy for the group (group_id, shard_count, partition_strategy, rebalance_policy, placement)
   DataParallelConfig config = 1;
   string actor_type = 2;
-  repeated string shard_actor_ids = 3;  // Indexed by shard index 0 to config.shard_count-1
+  repeated string shard_actor_ids = 3; // Indexed by shard index 0 to config.shard_count-1
   ShardGroupState state = 4;
   google.protobuf.Timestamp created_at = 5;
   map<string, string> metadata = 6;
@@ -873,12 +905,12 @@ message ShardGroup {
 
 enum ShardGroupState {
   SHARD_GROUP_STATE_UNSPECIFIED = 0;
-  SHARD_GROUP_STATE_CREATING = 1;     // Shards being created
-  SHARD_GROUP_STATE_ACTIVE = 2;       // All shards active
-  SHARD_GROUP_STATE_REBALANCING = 3;  // Shards being rebalanced
-  SHARD_GROUP_STATE_DRAINING = 4;     // Shards being drained
-  SHARD_GROUP_STATE_STOPPING = 5;     // Shards being stopped
-  SHARD_GROUP_STATE_STOPPED = 6;      // All shards stopped
+  SHARD_GROUP_STATE_CREATING = 1; // Shards being created
+  SHARD_GROUP_STATE_ACTIVE = 2; // All shards active
+  SHARD_GROUP_STATE_REBALANCING = 3; // Shards being rebalanced
+  SHARD_GROUP_STATE_DRAINING = 4; // Shards being drained
+  SHARD_GROUP_STATE_STOPPING = 5; // Shards being stopped
+  SHARD_GROUP_STATE_STOPPED = 6; // All shards stopped
 }
 
 // Rebalancing status for shard groups
@@ -906,10 +938,10 @@ message RebalanceStatus {
 // When absent or SAME_NODE, all shards are created on the node that receives the RPC.
 // FROM_REGISTRY uses NodeRegistry.list_nodes (optional cluster filter); NODE_IDS uses explicit list.
 enum NodePlacementStrategy {
-  NODE_PLACEMENT_STRATEGY_UNSPECIFIED = 0;  // Same as SAME_NODE: all shards on local node
+  NODE_PLACEMENT_STRATEGY_UNSPECIFIED = 0; // Same as SAME_NODE: all shards on local node
   NODE_PLACEMENT_STRATEGY_SAME_NODE = 1;
-  NODE_PLACEMENT_STRATEGY_FROM_REGISTRY = 2;  // Round-robin shards across nodes from NodeRegistry
-  NODE_PLACEMENT_STRATEGY_NODE_IDS = 3;       // Round-robin shards across given node_ids
+  NODE_PLACEMENT_STRATEGY_FROM_REGISTRY = 2; // Round-robin shards across nodes from NodeRegistry
+  NODE_PLACEMENT_STRATEGY_NODE_IDS = 3; // Round-robin shards across given node_ids
 }
 
 // Unified node placement: strategy, affinity, and resource requirements.
@@ -924,7 +956,10 @@ message NodePlacement {
   // Node must match all labels (Kubernetes-inspired). Used by scheduler for node selection.
   map<string, string> required_labels = 4;
   // Avoid node IDs (anti-affinity; scheduler excludes these)
-  repeated string avoid_node_ids = 5 [(buf.validate.field).repeated.items.string = {min_len: 1, max_len: 255}];
+  repeated string avoid_node_ids = 5 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_len: 255
+  }];
   // CPU, memory, disk, GPU requirements. Scheduler filters by NodeCapacity.available.
   plexspaces.common.v1.ResourceSpec resource_requirements = 6;
   // Affinity labels (co-location hint; scheduler may prefer nodes with matching labels)
@@ -935,7 +970,10 @@ message CreateShardGroupRequest {
   // Group strategy (group_id, shard_count, partition_strategy, rebalance_policy, placement)
   // Use config.placement.required_labels for node placement; scheduler matches nodes by placement.
   DataParallelConfig config = 1 [(buf.validate.field).required = true];
-  string actor_type = 2 [(buf.validate.field).string = {min_len: 1, max_len: 128}];
+  string actor_type = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
   // Per-shard ActorConfig (optional data_parallel_config here is ignored; use config above)
   ActorConfig shard_config = 3;
   bytes initial_state = 4;
@@ -1029,17 +1067,17 @@ message ScatterGatherResponse {
 message BulkUpdateShardGroupRequest {
   // Group to update
   string group_id = 1;
-  
+
   // Update messages: partition_key -> message
   // Messages will be routed to appropriate shards based on partition_key
   map<string, plexspaces.common.v1.Message> updates = 2;
-  
+
   // Consistency level for updates
   ConsistencyLevel consistency_level = 3;
-  
+
   // Timeout for updates
   google.protobuf.Duration timeout = 4;
-  
+
   // Wait for responses (true = wait for all, false = fire-and-forget)
   bool wait_for_responses = 5;
 }
@@ -1047,16 +1085,16 @@ message BulkUpdateShardGroupRequest {
 message BulkUpdateShardGroupResponse {
   // Number of updates sent
   uint32 updates_sent = 1;
-  
+
   // Number of successful updates
   uint32 updates_succeeded = 2;
-  
+
   // Number of failed updates
   uint32 updates_failed = 3;
-  
+
   // Per-shard statistics
   repeated ShardUpdateStats shard_stats = 4;
-  
+
   // Errors (if any)
   repeated string errors = 5;
 }
@@ -1074,13 +1112,13 @@ message ShardUpdateStats {
 message MapShardGroupRequest {
   // Group to map over
   string group_id = 1;
-  
+
   // Map function message (sent to each shard)
   plexspaces.common.v1.Message map_function = 2;
-  
+
   // Timeout for map operation
   google.protobuf.Duration timeout = 3;
-  
+
   // Minimum number of shards that must respond (0 = all required)
   uint32 min_responses = 4;
 }
@@ -1088,7 +1126,7 @@ message MapShardGroupRequest {
 message MapShardGroupResponse {
   // Mapped results from each shard
   repeated ShardQueryResponse shard_results = 1;
-  
+
   // Statistics
   ScatterGatherStats stats = 2;
 }
@@ -1189,17 +1227,17 @@ message ScaleShardGroupResponse {
 // State management mode (lattice-based data-parallel actors)
 enum StateMgmtMode {
   STATE_MGMT_MODE_UNSPECIFIED = 0;
-  STATE_MGMT_MODE_TRADITIONAL = 1;  // Regular mutable state
-  STATE_MGMT_MODE_LATTICE = 2;      // Coordination-free lattice state (CRDT)
+  STATE_MGMT_MODE_TRADITIONAL = 1; // Regular mutable state
+  STATE_MGMT_MODE_LATTICE = 2; // Coordination-free lattice state (CRDT)
 }
 
 // Consistency level for lattice-based actors
 enum ConsistencyLevel {
   CONSISTENCY_LEVEL_UNSPECIFIED = 0;
-  CONSISTENCY_LEVEL_EVENTUAL = 1;      // No ordering guarantees
-  CONSISTENCY_LEVEL_CAUSAL = 2;        // Causal consistency (vector clocks)
+  CONSISTENCY_LEVEL_EVENTUAL = 1; // No ordering guarantees
+  CONSISTENCY_LEVEL_CAUSAL = 2; // Causal consistency (vector clocks)
   CONSISTENCY_LEVEL_READ_COMMITTED = 3; // Read committed isolation
-  CONSISTENCY_LEVEL_LINEARIZABLE = 4;   // Strict consistency (coordination required)
+  CONSISTENCY_LEVEL_LINEARIZABLE = 4; // Strict consistency (coordination required)
 }
 
 // Supervision strategies
@@ -1221,11 +1259,14 @@ message ActorMetrics {
 
   uint64 messages_processed = 1;
   uint64 messages_failed = 2;
-  google.protobuf.Duration average_processing_time = 3 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour per message
+  google.protobuf.Duration average_processing_time = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour per message
   uint64 restarts = 4;
   google.protobuf.Timestamp last_activity = 5;
-  uint64 memory_usage_bytes = 6 [(buf.validate.field).uint64.lte = 1099511627776];  // Max 1TB
-  double cpu_usage_percent = 7 [(buf.validate.field).double = {gte: 0.0, lte: 100.0}];
+  uint64 memory_usage_bytes = 6 [(buf.validate.field).uint64.lte = 1099511627776]; // Max 1TB
+  double cpu_usage_percent = 7 [(buf.validate.field).double = {
+    gte: 0.0
+    lte: 100.0
+  }];
 }
 
 // Request to spawn an actor on a specific remote node (Erlang spawn/4 equivalent)
@@ -1345,7 +1386,11 @@ message SpawnActorRequest {
   // - wasm_url: Fetch WASM from URL
   string actor_type = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 128, pattern: "^[a-z][a-z0-9_-]*$"}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[a-z][a-z0-9_-]*$"
+    }
   ];
 
   // Optional: Client-specified actor ID (for virtual actors)
@@ -1394,7 +1439,10 @@ message SpawnActorRequest {
   // Use case: data-parallel workloads, shard groups, worker pools.
   uint32 instances_count = 8 [
     (google.api.field_behavior) = OPTIONAL,
-    (buf.validate.field).uint32 = {gte: 0, lte: 1024}
+    (buf.validate.field).uint32 = {
+      gte: 0
+      lte: 1024
+    }
   ];
 
   // RESERVED for future WASM support (Week 11-12)
@@ -1433,7 +1481,10 @@ message SpawnActorResponse {
   // Use this for messaging: actor_ref.tell(msg), actor_ref.ask(msg)
   string actor_ref = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 512}  // actor_id@node_id format
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 512
+    } /* actor_id@node_id format */
   ];
 
   // Full actor details (state, config, metrics)
@@ -1467,7 +1518,10 @@ message GetActorRequest {
 
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Namespace for tenant isolation (tenant_id from JWT)
@@ -1512,7 +1566,7 @@ message ListActorsResponse {
 message SendMessageRequest {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
-      title: "Send Message Request" 
+      title: "Send Message Request"
       description: "Request to send a message to an actor"
       required: ["message"]
     }
@@ -1520,11 +1574,14 @@ message SendMessageRequest {
 
   plexspaces.common.v1.Message message = 1 [(google.api.field_behavior) = REQUIRED];
   bool wait_for_response = 2;
-  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour timeout
+  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour timeout
 }
 
 message SendMessageResponse {
-  string message_id = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string message_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
   plexspaces.common.v1.Message response = 2; // Only if wait_for_response = true
 }
 
@@ -1545,11 +1602,17 @@ message StreamMessageRequest {
 
 // Response for streaming messages
 message StreamMessageResponse {
-  string message_id = 1 [(buf.validate.field).string = {min_len: 1, max_len: 255}];
+  string message_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 255
+  }];
   // Acknowledgement of sequence number
   uint64 sequence = 2;
   // Status: "delivered", "failed", "queued"
-  string status = 3 [(buf.validate.field).string = {min_len: 1, max_len: 32}];
+  string status = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 32
+  }];
   // Optional error message
   string error = 4 [(buf.validate.field).string.max_len = 1024];
 }
@@ -1560,13 +1623,19 @@ message SetActorStateRequest {
     json_schema: {
       title: "Set Actor State Request"
       description: "Request to change actor state"
-      required: ["actor_id", "target_state"]
+      required: [
+        "actor_id",
+        "target_state"
+      ]
     }
   };
 
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   ActorState target_state = 2 [(google.api.field_behavior) = REQUIRED];
   bool force = 3;
@@ -1582,17 +1651,26 @@ message MigrateActorRequest {
     json_schema: {
       title: "Migrate Actor Request"
       description: "Request to migrate actor to different node"
-      required: ["actor_id", "target_node_id"]
+      required: [
+        "actor_id",
+        "target_node_id"
+      ]
     }
   };
 
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string target_node_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   bool preserve_state = 3;
 }
@@ -1613,7 +1691,10 @@ message DeleteActorRequest {
 
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   bool force = 2;
 
@@ -1666,14 +1747,21 @@ message ActorLifecycleEvent {
     json_schema: {
       title: "Actor Lifecycle Event"
       description: "Actor state transition event for monitoring and observability"
-      required: ["actor_id", "timestamp", "event_type"]
+      required: [
+        "actor_id",
+        "timestamp",
+        "event_type"
+      ]
     }
   };
 
   // Actor that emitted this event
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // When event occurred
@@ -1789,7 +1877,10 @@ message ActorTerminated {
   // "killed": Forcefully terminated
   string reason = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 256}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
   ];
 }
 
@@ -1818,7 +1909,10 @@ message ActorFailed {
   // - "error: connection refused"
   string error = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 2048}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 2048
+    }
   ];
 
   // Optional: Stack trace for debugging
@@ -1844,7 +1938,10 @@ message ActorMigrating {
   // Target node where actor is migrating
   string target_node = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -1872,21 +1969,34 @@ message MonitorActorRequest {
     json_schema: {
       title: "Monitor Actor Request"
       description: "Request to monitor an actor for termination"
-      required: ["actor_id", "supervisor_id", "supervisor_callback"]
+      required: [
+        "actor_id",
+        "supervisor_id",
+        "supervisor_callback"
+      ]
     }
   };
 
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string supervisor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string supervisor_callback = 3 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 512}  // gRPC address
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 512
+    } /* gRPC address */
   ];
 }
 
@@ -1912,7 +2022,10 @@ message MonitorActorResponse {
 
   string monitor_ref = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}  // ULID format
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    } /* ULID format */
   ];
 }
 
@@ -1939,21 +2052,34 @@ message ActorDownNotification {
     json_schema: {
       title: "Actor Down Notification"
       description: "Notification that monitored actor terminated"
-      required: ["actor_id", "supervisor_id", "reason"]
+      required: [
+        "actor_id",
+        "supervisor_id",
+        "reason"
+      ]
     }
   };
 
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string supervisor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string reason = 3 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 256}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+    }
   ];
 }
 
@@ -2019,20 +2145,29 @@ message ActorLink {
     json_schema: {
       title: "Actor Link"
       description: "Two-way link between actors for cascading failures"
-      required: ["actor_id", "linked_actor_id"]
+      required: [
+        "actor_id",
+        "linked_actor_id"
+      ]
     }
   };
 
   /// First actor in the link
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   /// Second actor in the link (bidirectional)
   string linked_actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   /// Link creation timestamp (for observability)
@@ -2071,17 +2206,26 @@ message LinkActorRequest {
     json_schema: {
       title: "Link Actor Request"
       description: "Request to link two actors for cascading failures"
-      required: ["actor_id", "linked_actor_id"]
+      required: [
+        "actor_id",
+        "linked_actor_id"
+      ]
     }
   };
 
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string linked_actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -2110,17 +2254,26 @@ message UnlinkActorRequest {
     json_schema: {
       title: "Unlink Actor Request"
       description: "Request to unlink two actors"
-      required: ["actor_id", "linked_actor_id"]
+      required: [
+        "actor_id",
+        "linked_actor_id"
+      ]
     }
   };
 
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   string linked_actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -2138,9 +2291,7 @@ message UnlinkActorResponse {
 
 // Actor system service
 service ActorService {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
-    description: "Service for managing durable actors"
-  };
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {description: "Service for managing durable actors"};
 
   // Spawn an actor on the node receiving this gRPC request
   //
@@ -2190,9 +2341,7 @@ service ActorService {
 
   // Get an actor by ID
   rpc GetActor(GetActorRequest) returns (GetActorResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/actors/{actor_id}"
-    };
+    option (google.api.http) = {get: "/api/v1/actors/{actor_id}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Actor"
       description: "Retrieve an actor by its ID"
@@ -2202,9 +2351,7 @@ service ActorService {
 
   // List actors with filtering
   rpc ListActors(ListActorsRequest) returns (ListActorsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/actors"
-    };
+    option (google.api.http) = {get: "/api/v1/actors"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List Actors"
       description: "List actors with optional filtering"
@@ -2263,9 +2410,7 @@ service ActorService {
 
   // Delete an actor
   rpc DeleteActor(DeleteActorRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      delete: "/api/v1/actors/{actor_id}"
-    };
+    option (google.api.http) = {delete: "/api/v1/actors/{actor_id}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Delete Actor"
       description: "Delete an actor instance"
@@ -2337,9 +2482,7 @@ service ActorService {
   // ## Erlang Philosophy
   // Equivalent to Erlang's `unlink(Pid)` - removes bidirectional link.
   rpc UnlinkActor(UnlinkActorRequest) returns (UnlinkActorResponse) {
-    option (google.api.http) = {
-      delete: "/api/v1/actors/{actor_id}/links/{linked_actor_id}"
-    };
+    option (google.api.http) = {delete: "/api/v1/actors/{actor_id}/links/{linked_actor_id}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Unlink Actor"
       description: "Remove bidirectional link between two actors (Erlang unlink/1)"
@@ -2437,48 +2580,10 @@ service ActorService {
   // - is_active: Actor is currently active (in memory)
   // - is_virtual: Actor has VirtualActorFacet (is virtual)
   rpc CheckActorExists(CheckActorExistsRequest) returns (CheckActorExistsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/actors/{actor_id}/exists"
-    };
+    option (google.api.http) = {get: "/api/v1/actors/{actor_id}/exists"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Check Actor Exists"
       description: "Check if virtual actor exists without activating"
-      tags: "Virtual Actors"
-    };
-  }
-
-  // Get or activate a virtual actor (Orleans-style)
-  //
-  // ## Purpose
-  // Gets existing actor if active, or activates virtual actor if inactive.
-  // This is the primary API for virtual actors (Orleans grains pattern).
-  //
-  // ## Orleans Comparison
-  // Orleans: `IGrainFactory.GetGrain<T>(key)` - always returns grain reference
-  // PlexSpaces: `GetOrActivateActor(actor_id, actor_type?, initial_state?, config?)` - activates if needed
-  //
-  // ## Behavior
-  // 1. If actor exists and is active → Return existing ActorRef
-  // 2. If actor exists but is inactive (virtual) → Activate and return ActorRef
-  // 3. If actor doesn't exist → Create new actor (if actor_type provided) and return ActorRef
-  //
-  // ## Virtual Actor Pattern
-  // - Actor ID must be client-specified (e.g., "user/123", "session/abc")
-  // - Actor must have VirtualActorFacet attached (enables lazy activation)
-  // - First message triggers activation automatically
-  //
-  // ## Design Notes
-  // - actor_id: Client-specified, required (format: "{actor_type}/{key}" or "{actor_type}@{key}")
-  // - actor_type: Required if actor doesn't exist (used to create new actor)
-  // - initial_state, config: Used if creating new actor
-  rpc GetOrActivateActor(GetOrActivateActorRequest) returns (GetOrActivateActorResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/actors/get-or-activate"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Get Or Activate Actor"
-      description: "Get existing actor or activate virtual actor (Orleans-style)"
       tags: "Virtual Actors"
     };
   }
@@ -2513,11 +2618,11 @@ service ActorService {
   rpc InvokeActor(InvokeActorRequest) returns (InvokeActorResponse) {
     option (google.api.http) = {
       get: "/api/v1/actors/{namespace}/{actor_type}"
-      additional_bindings {
+      additional_bindings: {
         post: "/api/v1/actors/{namespace}/{actor_type}"
         body: "*"
       }
-      additional_bindings {
+      additional_bindings: {
         put: "/api/v1/actors/{namespace}/{actor_type}"
         body: "*"
       }
@@ -2550,9 +2655,7 @@ service ActorService {
   // - Requires permission to terminate actors in the namespace
   // - Tenant isolation enforced via JWT claims
   rpc TerminateActor(TerminateActorRequest) returns (TerminateActorResponse) {
-    option (google.api.http) = {
-      delete: "/api/v1/actors/{namespace}/{actor_id}"
-    };
+    option (google.api.http) = {delete: "/api/v1/actors/{namespace}/{actor_id}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Terminate Actor"
       description: "Gracefully terminate an actor by ID (permanent termination, pairs with SpawnActor)"
@@ -2604,7 +2707,10 @@ message ActivateActorRequest {
   // Actor ID to activate (must have VirtualActorFacet)
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Optional: Force activation even if already active
@@ -2643,7 +2749,10 @@ message DeactivateActorRequest {
   // Actor ID to deactivate (must have VirtualActorFacet)
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Optional: Force deactivation even if actor has pending messages
@@ -2674,7 +2783,10 @@ message TerminateActorRequest {
   // Actor ID to terminate
   string actor_id = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Optional: Force termination even if actor has pending messages
@@ -2726,7 +2838,10 @@ message CheckActorExistsRequest {
   // Actor ID to check
   string actor_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -2749,86 +2864,11 @@ message CheckActorExistsResponse {
   bool is_virtual = 3;
 }
 
-// Request to get or activate a virtual actor (Orleans-style)
-//
-// ## Purpose
-// Gets existing actor if active, or activates virtual actor if inactive.
-// This is the primary API for virtual actors (Orleans grains pattern).
-//
-// ## Orleans Comparison
-// Orleans: `IGrainFactory.GetGrain<T>(key)` - always returns grain reference
-// PlexSpaces: `GetOrActivateActor(actor_id, factory)` - activates if needed
-//
-// ## Behavior
-// 1. If actor exists and is active → Return existing ActorRef
-// 2. If actor exists but is inactive (virtual) → Activate and return ActorRef
-// 3. If actor doesn't exist → Create new actor (if factory provided) and return ActorRef
-//
-// ## Virtual Actor Pattern
-// - Actor ID must be client-specified (e.g., "user/123", "session/abc")
-// - Actor must have VirtualActorFacet attached (enables lazy activation)
-// - First message triggers activation automatically
-message GetOrActivateActorRequest {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Get Or Activate Actor Request"
-      description: "Get existing actor or activate virtual actor (Orleans-style)"
-      required: ["actor_id"]
-    }
-  };
-
-  // Actor ID (client-specified, required)
-  // Format: "{actor_type}/{key}" or "{actor_type}@{key}"
-  // Examples: "user/123", "session/abc-xyz", "counter@node1"
-  string actor_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
-  ];
-
-  // Actor type (required if actor doesn't exist)
-  // Used to create new actor if actor_id doesn't exist
-  string actor_type = 2 [
-    (buf.validate.field).string = {min_len: 1, max_len: 128, pattern: "^[a-z][a-z0-9_-]*$"}
-  ];
-
-  // Initial state (used if creating new actor)
-  bytes initial_state = 3;
-
-  // Actor config (used if creating new actor)
-  ActorConfig config = 4;
-
-  // Force activation even if already active
-  bool force_activation = 5;
-}
-
-// Response to get or activate actor request
-message GetOrActivateActorResponse {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Get Or Activate Actor Response"
-      description: "Response with actor reference"
-      required: ["actor_ref"]
-    }
-  };
-
-  // Actor reference (format: "actor_id@node_id")
-  string actor_ref = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 512}
-  ];
-
-  // Full actor details
-  Actor actor = 2;
-
-  // Was actor activated (true) or already active (false)
-  bool was_activated = 3;
-}
-
 // Request to invoke an actor via HTTP-like interface (FaaS-style)
 //
-  // ## Purpose
-  // Enables FaaS-like invocation of actors via HTTP GET/POST/PUT/DELETE requests.
-  // The tenant_id, namespace, and actor_type are extracted from the HTTP path.
+// ## Purpose
+// Enables FaaS-like invocation of actors via HTTP GET/POST/PUT/DELETE requests.
+// The tenant_id, namespace, and actor_type are extracted from the HTTP path.
 //
 // ## HTTP Method Handling
 // - GET: Query parameters are converted to JSON and stored in payload as string
@@ -2854,7 +2894,10 @@ message InvokeActorRequest {
   // Used to lookup actors via ActorRegistry discover_actors_by_type
   string actor_type = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 128}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+    }
   ];
 
   // HTTP method (GET, POST, PUT, or DELETE)
@@ -2896,7 +2939,14 @@ message InvokeActorRequest {
   // Allowed values (Erlang-style): call, cast, info only. Others not supported at this time.
   string msg_type_override = 10 [
     (google.api.field_behavior) = OPTIONAL,
-    (buf.validate.field).string = {in: ["", "call", "cast", "info"]}
+    (buf.validate.field).string = {
+      in: [
+        "",
+        "call",
+        "cast",
+        "info"
+      ]
+    }
   ];
 
   // Optional timeout for request-reply (ask) operations.
@@ -2904,7 +2954,7 @@ message InvokeActorRequest {
   // HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
   google.protobuf.Duration timeout = 11 [
     (google.api.field_behavior) = OPTIONAL,
-    (buf.validate.field).duration.lte.seconds = 3600  // Max 1 hour
+    (buf.validate.field).duration.lte.seconds = 3600 // Max 1 hour
   ];
 }
 
@@ -2938,6 +2988,7 @@ message InvokeActorResponse {
   // Error message (if success is false)
   string error_message = 5;
 }
+
 //
 // ## JavaNOW Heritage
 // JavaNOW provided event notification through:
@@ -2982,9 +3033,7 @@ message InvokeActorResponse {
 // 4. **Filtered**: Subscribers express interest patterns (actor ID, event type, etc.)
 // 5. **Resilient**: Slow/failing subscribers don't impact actor performance
 service LifecycleEventChannel {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
-    description: "Event streaming for actor lifecycle observability"
-  };
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {description: "Event streaming for actor lifecycle observability"};
 
   // Subscribe to lifecycle events (streaming)
   //
@@ -3105,7 +3154,7 @@ message LifecycleEventFilter {
 
   // Buffer size for slow subscriber (default: 1000 events)
   // When buffer full, drop_policy determines behavior
-  uint32 buffer_size = 6 [(buf.validate.field).uint32.lte = 100000];  // Max 100K events
+  uint32 buffer_size = 6 [(buf.validate.field).uint32.lte = 100000]; // Max 100K events
 
   // Drop policy when buffer full
   DropPolicy drop_policy = 7;
@@ -3127,9 +3176,9 @@ enum LifecycleEventType {
 // Drop policy for buffer overflow (JavaNOW-inspired backpressure)
 enum DropPolicy {
   DROP_POLICY_UNSPECIFIED = 0;
-  DROP_POLICY_DROP_OLDEST = 1;  // Drop oldest events, keep newest (good for real-time)
-  DROP_POLICY_DROP_NEWEST = 2;  // Drop newest events, keep oldest (good for audit)
-  DROP_POLICY_BLOCK = 3;        // Block publisher until buffer drains (use carefully!)
+  DROP_POLICY_DROP_OLDEST = 1; // Drop oldest events, keep newest (good for real-time)
+  DROP_POLICY_DROP_NEWEST = 2; // Drop newest events, keep oldest (good for audit)
+  DROP_POLICY_BLOCK = 3; // Block publisher until buffer drains (use carefully!)
 }
 
 // Virtual Actor Lifecycle (Orleans-inspired)
@@ -3257,7 +3306,7 @@ enum ActorRefErrorCode {
 message ActorRefError {
   ActorRefErrorCode code = 1;
   string message = 2;
-  string actor_id = 3;  // Optional: actor ID that caused error
+  string actor_id = 3; // Optional: actor ID that caused error
 }
 
 // ============================================================================

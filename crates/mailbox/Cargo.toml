@@ -13,6 +13,7 @@ description = "Message queue and mailbox implementations"
 # Mailbox depends on channel for backend abstraction
 plexspaces-proto = { workspace = true }
 plexspaces-channel = { path = "../channel", default-features = false }
+plexspaces-core = { workspace = true }
 
 # Core dependencies
 tokio = { workspace = true }

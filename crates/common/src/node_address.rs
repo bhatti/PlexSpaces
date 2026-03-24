@@ -13,9 +13,7 @@
 
 fn canonicalize_host(host: &str) -> String {
     match host {
-        "localhost" | "127.0.0.1" | "0.0.0.0" | "::1" | "[::1]" | "[::]" => {
-            "loopback".to_string()
-        }
+        "localhost" | "127.0.0.1" | "0.0.0.0" | "::1" | "[::1]" | "[::]" => "loopback".to_string(),
         other => other.to_ascii_lowercase(),
     }
 }
@@ -31,10 +29,7 @@ fn split_host_port(address: &str) -> (String, String) {
 
     if let Some(stripped) = trimmed.strip_prefix('[') {
         if let Some((host, remainder)) = stripped.split_once(']') {
-            let port = remainder
-                .strip_prefix(':')
-                .unwrap_or_default()
-                .to_string();
+            let port = remainder.strip_prefix(':').unwrap_or_default().to_string();
             return (canonicalize_host(&format!("[{}]", host)), port);
         }
     }

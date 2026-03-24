@@ -21,16 +21,19 @@
 //! Comprehensive test suite for ReminderFacet following TDD principles.
 //! Tests cover registration, unregistration, persistence, and max_occurrences.
 
+use async_trait::async_trait;
 use plexspaces_core::{ActorId, ActorRef, ActorService, Message, ServiceLocator};
-use plexspaces_journaling::{JournalStorage, SqliteJournalStorage, ReminderFacet, ReminderError, ReminderRegistration, ReminderState};
-use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_facet::Facet;
+use plexspaces_journaling::{
+    JournalStorage, ReminderError, ReminderFacet, ReminderRegistration, ReminderState,
+    SqliteJournalStorage,
+};
+use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::prost_types;
 use plexspaces_services::ServiceLocatorImpl;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::time::sleep;
-use async_trait::async_trait;
 
 /// Mock ActorService that tracks sent messages
 struct MockActorService {
@@ -82,7 +85,10 @@ async fn setup_facet_with_services(
 ) -> (ReminderFacet, Arc<MockActorService>) {
     let (service_locator, mock_service) = create_test_service_locator().await;
     let mut facet = ReminderFacet::new(storage, serde_json::json!({}), 50, service_locator);
-    facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+    facet
+        .on_attach(actor_id, serde_json::json!({}))
+        .await
+        .unwrap();
     (facet, mock_service)
 }
 
@@ -99,7 +105,9 @@ async fn test_reminder_facet_attach() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let (service_locator, _mock_service) = create_test_service_locator().await;
     let mut facet = ReminderFacet::new(storage, serde_json::json!({}), 50, service_locator);
-    let result = facet.on_attach("test-actor@test-node", serde_json::json!({})).await;
+    let result = facet
+        .on_attach("test-actor@test-node", serde_json::json!({}))
+        .await;
     assert!(result.is_ok());
 }
 
@@ -108,7 +116,10 @@ async fn test_reminder_facet_detach() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let (service_locator, _mock_service) = create_test_service_locator().await;
     let mut facet = ReminderFacet::new(storage, serde_json::json!({}), 50, service_locator);
-    facet.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
+    facet
+        .on_attach("test-actor@test-node", serde_json::json!({}))
+        .await
+        .unwrap();
     let result = facet.on_detach("test-actor@test-node").await;
     assert!(result.is_ok());
 }
@@ -116,8 +127,9 @@ async fn test_reminder_facet_detach() {
 #[tokio::test]
 async fn test_register_reminder() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, _mock_service) = setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
-    
+    let (mut facet, _mock_service) =
+        setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
+
     let next_fire = SystemTime::now() + Duration::from_secs(60);
     let registration = ReminderRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -131,7 +143,7 @@ async fn test_register_reminder() {
         persist_across_activations: true,
         max_occurrences: 0, // Infinite
     };
-    
+
     let result = facet.register_reminder(registration).await;
     assert!(result.is_ok());
 }
@@ -139,8 +151,9 @@ async fn test_register_reminder() {
 #[tokio::test]
 async fn test_register_duplicate_reminder_fails() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, _mock_service) = setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
-    
+    let (mut facet, _mock_service) =
+        setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
+
     let next_fire = SystemTime::now() + Duration::from_secs(60);
     let registration = ReminderRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -154,22 +167,26 @@ async fn test_register_duplicate_reminder_fails() {
         persist_across_activations: true,
         max_occurrences: 0,
     };
-    
+
     // First registration should succeed
     let result1 = facet.register_reminder(registration.clone()).await;
     assert!(result1.is_ok());
-    
+
     // Second registration with same name should fail
     let result2 = facet.register_reminder(registration).await;
     assert!(result2.is_err());
-    assert!(matches!(result2.unwrap_err(), ReminderError::ReminderExists(_)));
+    assert!(matches!(
+        result2.unwrap_err(),
+        ReminderError::ReminderExists(_)
+    ));
 }
 
 #[tokio::test]
 async fn test_unregister_reminder() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, _mock_service) = setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
-    
+    let (mut facet, _mock_service) =
+        setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
+
     let next_fire = SystemTime::now() + Duration::from_secs(60);
     let registration = ReminderRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -183,9 +200,9 @@ async fn test_unregister_reminder() {
         persist_across_activations: true,
         max_occurrences: 0,
     };
-    
+
     facet.register_reminder(registration).await.unwrap();
-    
+
     let result = facet.unregister_reminder("unregister-reminder").await;
     assert!(result.is_ok());
 }
@@ -195,18 +212,25 @@ async fn test_unregister_nonexistent_reminder_fails() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
     let (service_locator, _mock_service) = create_test_service_locator().await;
     let mut facet = ReminderFacet::new(storage, serde_json::json!({}), 50, service_locator);
-    facet.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
-    
+    facet
+        .on_attach("test-actor@test-node", serde_json::json!({}))
+        .await
+        .unwrap();
+
     let result = facet.unregister_reminder("nonexistent").await;
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), ReminderError::ReminderNotFound(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        ReminderError::ReminderNotFound(_)
+    ));
 }
 
 #[tokio::test]
 async fn test_reminder_persistence() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet1, _mock_service1) = setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
-    
+    let (mut facet1, _mock_service1) =
+        setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
+
     let next_fire = SystemTime::now() + Duration::from_secs(60);
     let registration = ReminderRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -220,28 +244,36 @@ async fn test_reminder_persistence() {
         persist_across_activations: true,
         max_occurrences: 0,
     };
-    
+
     facet1.register_reminder(registration).await.unwrap();
-    
+
     // Detach and create new facet (simulating actor deactivation/reactivation)
     facet1.on_detach("test-actor@test-node").await.unwrap();
-    
+
     // Create new facet and attach (simulating reactivation)
     let (service_locator2, _mock_service2) = create_test_service_locator().await;
-    let mut facet2 = ReminderFacet::new(storage.clone(), serde_json::json!({}), 50, service_locator2);
-    facet2.on_attach("test-actor@test-node", serde_json::json!({})).await.unwrap();
-    
+    let mut facet2 =
+        ReminderFacet::new(storage.clone(), serde_json::json!({}), 50, service_locator2);
+    facet2
+        .on_attach("test-actor@test-node", serde_json::json!({}))
+        .await
+        .unwrap();
+
     // Reminder should be loaded from storage
     let reminders = facet2.list_reminders().await;
     assert_eq!(reminders.len(), 1);
-    assert_eq!(reminders[0].registration.as_ref().unwrap().reminder_name, "persistent-reminder");
+    assert_eq!(
+        reminders[0].registration.as_ref().unwrap().reminder_name,
+        "persistent-reminder"
+    );
 }
 
 #[tokio::test]
 async fn test_max_occurrences_auto_deletion() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, _mock_service) = setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
-    
+    let (mut facet, _mock_service) =
+        setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
+
     // Register reminder with max_occurrences = 2
     let next_fire = SystemTime::now() + Duration::from_millis(50);
     let registration = ReminderRegistration {
@@ -256,25 +288,30 @@ async fn test_max_occurrences_auto_deletion() {
         persist_across_activations: true,
         max_occurrences: 2,
     };
-    
+
     facet.register_reminder(registration).await.unwrap();
-    
+
     // Wait for reminder to fire twice (background task polls every 100ms, reminder fires every 50ms)
     // Need enough time for background task to check and fire twice
     sleep(Duration::from_millis(300)).await;
-    
+
     // Reminder should be auto-deleted after 2 fires
     let reminders = facet.list_reminders().await;
-    assert_eq!(reminders.len(), 0, "Reminder should be auto-deleted after max_occurrences");
+    assert_eq!(
+        reminders.len(),
+        0,
+        "Reminder should be auto-deleted after max_occurrences"
+    );
 }
 
 #[tokio::test]
 async fn test_multiple_reminders() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, _mock_service) = setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
-    
+    let (mut facet, _mock_service) =
+        setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
+
     let next_fire = SystemTime::now() + Duration::from_secs(60);
-    
+
     // Register multiple reminders
     for i in 0..5 {
         let registration = ReminderRegistration {
@@ -291,7 +328,7 @@ async fn test_multiple_reminders() {
         };
         facet.register_reminder(registration).await.unwrap();
     }
-    
+
     // Should have all reminders
     let reminders = facet.list_reminders().await;
     assert_eq!(reminders.len(), 5);
@@ -300,8 +337,9 @@ async fn test_multiple_reminders() {
 #[tokio::test]
 async fn test_reminders_cleared_on_detach() {
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-    let (mut facet, _mock_service) = setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
-    
+    let (mut facet, _mock_service) =
+        setup_facet_with_services(storage.clone(), "test-actor@test-node").await;
+
     let next_fire = SystemTime::now() + Duration::from_secs(60);
     let registration = ReminderRegistration {
         actor_id: "test-actor@test-node".to_string(),
@@ -315,16 +353,18 @@ async fn test_reminders_cleared_on_detach() {
         persist_across_activations: true,
         max_occurrences: 0,
     };
-    
+
     facet.register_reminder(registration).await.unwrap();
-    
+
     // Detach should stop background task but reminders persist in storage
     facet.on_detach("test-actor@test-node").await.unwrap();
-    
+
     // Reminders are persisted, so they should still be in storage
     // (but background task is stopped)
     // Note: load_reminders is part of JournalStorage trait, accessible via storage
-    let reminders = storage.load_reminders("test-actor@test-node").await.unwrap();
+    let reminders = storage
+        .load_reminders("test-actor@test-node")
+        .await
+        .unwrap();
     assert_eq!(reminders.len(), 1);
 }
-

@@ -6,9 +6,9 @@
 
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_tests {
-    use plexspaces_journaling::*;
-    use plexspaces_journaling::sql::SqliteJournalStorage;
     use plexspaces_facet::Facet;
+    use plexspaces_journaling::sql::SqliteJournalStorage;
+    use plexspaces_journaling::*;
     use plexspaces_proto::prost_types;
     use std::sync::Arc;
     use std::time::SystemTime;
@@ -52,25 +52,34 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-loop";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         println!("=== Processing 5 messages in loop ===");
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            
+
             println!("Iteration {}: before_method", i);
             facet.before_method(method, &payload).await.unwrap();
-            
+
             let entries_after_before = storage.replay_from(actor_id, 0).await.unwrap();
-            println!("  Entries after before_method: {}", entries_after_before.len());
-            
+            println!(
+                "  Entries after before_method: {}",
+                entries_after_before.len()
+            );
+
             let result = format!("counter = {}", i).into_bytes();
             println!("Iteration {}: after_method", i);
             facet.after_method(method, &payload, &result).await.unwrap();
-            
+
             let entries_after_after = storage.replay_from(actor_id, 0).await.unwrap();
-            println!("  Entries after after_method: {}", entries_after_after.len());
+            println!(
+                "  Entries after after_method: {}",
+                entries_after_after.len()
+            );
         }
 
         println!("=== Flushing ===");
@@ -79,11 +88,11 @@ mod sqlite_tests {
         println!("=== Final check ===");
         let final_entries = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Final entries: {}", final_entries.len());
-        
+
         for (i, entry) in final_entries.iter().enumerate() {
             println!("  Entry {}: sequence={}", i, entry.sequence);
         }
-        
+
         assert_eq!(final_entries.len(), 10, "Should have 10 entries");
     }
 
@@ -105,18 +114,21 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-loop-flush";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            
+
             facet.before_method(method, &payload).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
             facet.after_method(method, &payload, &result).await.unwrap();
-            
+
             storage.flush().await.unwrap();
-            
+
             let entries = storage.replay_from(actor_id, 0).await.unwrap();
             println!("Entries after message {}: {}", i, entries.len());
         }
@@ -143,12 +155,15 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-batch";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            
+
             facet.before_method(method, &payload).await.unwrap();
             let result = format!("counter = {}", i).into_bytes();
             facet.after_method(method, &payload, &result).await.unwrap();
@@ -161,7 +176,7 @@ mod sqlite_tests {
 
         let entries_after_flush = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries after flush: {}", entries_after_flush.len());
-        
+
         assert_eq!(entries_after_flush.len(), 10, "Should have 10 entries");
     }
 
@@ -188,35 +203,47 @@ mod sqlite_tests {
         let actor_id = "debug-append";
 
         println!("=== Step 1: Attach ===");
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
-        
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
+
         let entries_after_attach = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries after attach: {}", entries_after_attach.len());
 
         println!("=== Step 2: before_method ===");
         let before_result = facet.before_method("test", b"test").await;
         println!("before_method returned: {:?}", before_result);
-        
+
         let entries_after_before = storage.replay_from(actor_id, 0).await.unwrap();
-        println!("Entries after before_method (before flush): {}", entries_after_before.len());
+        println!(
+            "Entries after before_method (before flush): {}",
+            entries_after_before.len()
+        );
 
         println!("=== Step 3: Flush after before_method ===");
         storage.flush().await.unwrap();
         let entries_after_before_flush = storage.replay_from(actor_id, 0).await.unwrap();
-        println!("Entries after before_method (after flush): {}", entries_after_before_flush.len());
+        println!(
+            "Entries after before_method (after flush): {}",
+            entries_after_before_flush.len()
+        );
 
         println!("=== Step 4: after_method ===");
         let after_result = facet.after_method("test", b"test", b"result").await;
         println!("after_method returned: {:?}", after_result);
-        
+
         let entries_after_after = storage.replay_from(actor_id, 0).await.unwrap();
-        println!("Entries after after_method (before flush): {}", entries_after_after.len());
+        println!(
+            "Entries after after_method (before flush): {}",
+            entries_after_after.len()
+        );
 
         println!("=== Step 5: Final flush ===");
         storage.flush().await.unwrap();
         let final_entries = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Final entries: {}", final_entries.len());
-        
+
         assert_eq!(final_entries.len(), 2, "Should have 2 entries");
     }
 
@@ -224,7 +251,7 @@ mod sqlite_tests {
     #[tokio::test]
     async fn test_storage_instance_isolation() {
         let storage1 = create_test_storage().await;
-        
+
         let config = DurabilityConfig {
             backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 1000,
@@ -239,19 +266,25 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage1.clone(), config_to_value(&config), 50);
         let actor_id = "debug-instance";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
         facet.before_method("test", b"test").await.unwrap();
-        facet.after_method("test", b"test", b"result").await.unwrap();
-        
+        facet
+            .after_method("test", b"test", b"result")
+            .await
+            .unwrap();
+
         storage1.flush().await.unwrap();
-        
+
         let entries1 = storage1.replay_from(actor_id, 0).await.unwrap();
         println!("Entries using storage1: {}", entries1.len());
-        
+
         let storage2 = storage1.clone();
         let entries2 = storage2.replay_from(actor_id, 0).await.unwrap();
         println!("Entries using storage2 (clone): {}", entries2.len());
-        
+
         assert_eq!(entries1.len(), 2, "storage1 should see entries");
         assert_eq!(entries2.len(), 2, "storage2 (clone) should see entries");
     }
@@ -274,28 +307,34 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-transaction";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         facet.before_method("test", b"test").await.unwrap();
-        
+
         let entries_before_flush = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries before flush: {}", entries_before_flush.len());
-        
+
         storage.flush().await.unwrap();
-        
+
         let entries_after_flush = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries after flush: {}", entries_after_flush.len());
-        
-        facet.after_method("test", b"test", b"result").await.unwrap();
-        
+
+        facet
+            .after_method("test", b"test", b"result")
+            .await
+            .unwrap();
+
         let entries_before_flush2 = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries before flush2: {}", entries_before_flush2.len());
-        
+
         storage.flush().await.unwrap();
-        
+
         let final_entries = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Final entries: {}", final_entries.len());
-        
+
         assert_eq!(final_entries.len(), 2, "Should have 2 entries");
     }
 
@@ -320,9 +359,15 @@ mod sqlite_tests {
         let mut facet1 = DurabilityFacet::new(storage1.clone(), config_to_value(&config1), 50);
         let actor_id1 = "debug-checkpoint-10";
 
-        facet1.on_attach(actor_id1, serde_json::json!({})).await.unwrap();
+        facet1
+            .on_attach(actor_id1, serde_json::json!({}))
+            .await
+            .unwrap();
         facet1.before_method("test", b"test").await.unwrap();
-        facet1.after_method("test", b"test", b"result").await.unwrap();
+        facet1
+            .after_method("test", b"test", b"result")
+            .await
+            .unwrap();
         storage1.flush().await.unwrap();
 
         let entries1 = storage1.replay_from(actor_id1, 0).await.unwrap();
@@ -343,9 +388,15 @@ mod sqlite_tests {
         let mut facet2 = DurabilityFacet::new(storage2.clone(), config_to_value(&config2), 50);
         let actor_id2 = "debug-checkpoint-1000";
 
-        facet2.on_attach(actor_id2, serde_json::json!({})).await.unwrap();
+        facet2
+            .on_attach(actor_id2, serde_json::json!({}))
+            .await
+            .unwrap();
         facet2.before_method("test", b"test").await.unwrap();
-        facet2.after_method("test", b"test", b"result").await.unwrap();
+        facet2
+            .after_method("test", b"test", b"result")
+            .await
+            .unwrap();
         storage2.flush().await.unwrap();
 
         let entries2 = storage2.replay_from(actor_id2, 0).await.unwrap();
@@ -379,16 +430,19 @@ mod sqlite_tests {
         let actor_id = "test-actor-4";
 
         println!("Attaching facet...");
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         println!("Processing 5 messages...");
         for i in 1..=5 {
             let method = "increment";
             let payload = serde_json::json!({ "value": i }).to_string().into_bytes();
-            
+
             println!("  Message {}: before_method", i);
             facet.before_method(method, &payload).await.unwrap();
-            
+
             let result = format!("counter = {}", i).into_bytes();
             println!("  Message {}: after_method", i);
             facet.after_method(method, &payload, &result).await.unwrap();
@@ -400,24 +454,31 @@ mod sqlite_tests {
         println!("=== Phase 2: Verify entries before detach ===");
         let entries_before = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries before detach: {}", entries_before.len());
-        
+
         for (i, entry) in entries_before.iter().enumerate() {
-            println!("  Entry {}: sequence={}, actor_id={}", i, entry.sequence, entry.actor_id);
+            println!(
+                "  Entry {}: sequence={}, actor_id={}",
+                i, entry.sequence, entry.actor_id
+            );
         }
-        
+
         assert_eq!(
             entries_before.len(),
             10,
             "Should have 10 entries before restart (5 messages * 2 entries), got {}",
             entries_before.len()
         );
-        
+
         println!("=== Phase 3: Detach ===");
         facet.on_detach(actor_id).await.unwrap();
-        
+
         let entries_after_detach = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries after detach: {}", entries_after_detach.len());
-        assert_eq!(entries_after_detach.len(), 10, "Entries should persist after detach");
+        assert_eq!(
+            entries_after_detach.len(),
+            10,
+            "Entries should persist after detach"
+        );
 
         println!("=== Phase 4: Create new facet and reattach ===");
         let restart_config = DurabilityConfig {
@@ -430,19 +491,26 @@ mod sqlite_tests {
             backend_config: None,
             state_schema_version: 1,
         };
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&restart_config), 50);
-        
+        let mut new_facet =
+            DurabilityFacet::new(storage.clone(), config_to_value(&restart_config), 50);
+
         println!("Reattaching facet...");
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         println!("=== Phase 5: Verify entries after reattach ===");
         let entries_after = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries after reattach: {}", entries_after.len());
-        
+
         for (i, entry) in entries_after.iter().enumerate() {
-            println!("  Entry {}: sequence={}, actor_id={}", i, entry.sequence, entry.actor_id);
+            println!(
+                "  Entry {}: sequence={}, actor_id={}",
+                i, entry.sequence, entry.actor_id
+            );
         }
-        
+
         assert_eq!(
             entries_after.len(),
             10,
@@ -504,30 +572,42 @@ mod sqlite_tests {
         let mut facet1 = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-seq";
 
-        facet1.on_attach(actor_id, serde_json::json!({})).await.unwrap();
-        
+        facet1
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
+
         for i in 1..=3 {
-            facet1.before_method("test", &format!("{}", i).into_bytes()).await.unwrap();
-            facet1.after_method("test", &[], &format!("result-{}", i).into_bytes()).await.unwrap();
+            facet1
+                .before_method("test", &format!("{}", i).into_bytes())
+                .await
+                .unwrap();
+            facet1
+                .after_method("test", &[], &format!("result-{}", i).into_bytes())
+                .await
+                .unwrap();
         }
-        
+
         storage.flush().await.unwrap();
-        
+
         let entries1 = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries after first write: {}", entries1.len());
         assert_eq!(entries1.len(), 6, "Should have 6 entries");
 
         facet1.on_detach(actor_id).await.unwrap();
-        
+
         let mut facet2 = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        facet2.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet2
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         facet2.before_method("test", b"new").await.unwrap();
         storage.flush().await.unwrap();
-        
+
         let entries2 = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries after reattach and new write: {}", entries2.len());
-        
+
         if !entries2.is_empty() {
             let last_entry = entries2.last().unwrap();
             println!("Last entry sequence: {}", last_entry.sequence);
@@ -554,24 +634,37 @@ mod sqlite_tests {
 
         for cycle in 1..=3 {
             println!("=== Cycle {} ===", cycle);
-            
+
             let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-            facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
-            
-            facet.before_method("test", &format!("cycle-{}", cycle).into_bytes()).await.unwrap();
-            facet.after_method("test", &[], &format!("result-{}", cycle).into_bytes()).await.unwrap();
-            
+            facet
+                .on_attach(actor_id, serde_json::json!({}))
+                .await
+                .unwrap();
+
+            facet
+                .before_method("test", &format!("cycle-{}", cycle).into_bytes())
+                .await
+                .unwrap();
+            facet
+                .after_method("test", &[], &format!("result-{}", cycle).into_bytes())
+                .await
+                .unwrap();
+
             storage.flush().await.unwrap();
-            
+
             let entries = storage.replay_from(actor_id, 0).await.unwrap();
             println!("Entries after cycle {}: {}", cycle, entries.len());
-            
+
             facet.on_detach(actor_id).await.unwrap();
         }
 
         let final_entries = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Final entries: {}", final_entries.len());
-        assert_eq!(final_entries.len(), 6, "Should have 6 entries (3 cycles * 2 entries)");
+        assert_eq!(
+            final_entries.len(),
+            6,
+            "Should have 6 entries (3 cycles * 2 entries)"
+        );
     }
 
     // =============================================================================
@@ -607,14 +700,17 @@ mod sqlite_tests {
         println!("=== Step 2: Write one entry ===");
         let method = "test";
         let payload = b"test".to_vec();
-        
+
         println!("Calling before_method...");
         let before_result = facet.before_method(method, &payload).await;
         println!("before_method result: {:?}", before_result);
         assert!(before_result.is_ok(), "before_method should succeed");
 
         let entries_after_before = storage.replay_from(actor_id, 0).await.unwrap();
-        println!("Entries after before_method: {}", entries_after_before.len());
+        println!(
+            "Entries after before_method: {}",
+            entries_after_before.len()
+        );
 
         println!("Calling after_method...");
         let result = b"result".to_vec();
@@ -626,14 +722,22 @@ mod sqlite_tests {
 
         let entries_after = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries after after_method: {}", entries_after.len());
-        
+
         for (i, entry) in entries_after.iter().enumerate() {
-            println!("Entry {}: sequence={}, actor_id={}, type={:?}", 
-                i, entry.sequence, entry.actor_id, 
-                entry.entry.as_ref().map(|e| format!("{:?}", e)));
+            println!(
+                "Entry {}: sequence={}, actor_id={}, type={:?}",
+                i,
+                entry.sequence,
+                entry.actor_id,
+                entry.entry.as_ref().map(|e| format!("{:?}", e))
+            );
         }
 
-        assert_eq!(entries_after.len(), 2, "Should have 2 entries (MessageReceived + MessageProcessed)");
+        assert_eq!(
+            entries_after.len(),
+            2,
+            "Should have 2 entries (MessageReceived + MessageProcessed)"
+        );
     }
 
     /// Test: Compare replay_on_activation=true vs false
@@ -657,13 +761,22 @@ mod sqlite_tests {
         let mut facet1 = DurabilityFacet::new(storage1.clone(), config_to_value(&config1), 50);
         let actor_id1 = "debug-no-replay";
 
-        facet1.on_attach(actor_id1, serde_json::json!({})).await.unwrap();
+        facet1
+            .on_attach(actor_id1, serde_json::json!({}))
+            .await
+            .unwrap();
         facet1.before_method("test", b"test").await.unwrap();
-        facet1.after_method("test", b"test", b"result").await.unwrap();
+        facet1
+            .after_method("test", b"test", b"result")
+            .await
+            .unwrap();
         storage1.flush().await.unwrap();
 
         let entries1 = storage1.replay_from(actor_id1, 0).await.unwrap();
-        println!("Entries with replay_on_activation=false: {}", entries1.len());
+        println!(
+            "Entries with replay_on_activation=false: {}",
+            entries1.len()
+        );
         assert_eq!(entries1.len(), 2, "Should have 2 entries");
 
         println!("=== Test 2: replay_on_activation = true ===");
@@ -681,9 +794,15 @@ mod sqlite_tests {
         let mut facet2 = DurabilityFacet::new(storage2.clone(), config_to_value(&config2), 50);
         let actor_id2 = "debug-with-replay";
 
-        facet2.on_attach(actor_id2, serde_json::json!({})).await.unwrap();
+        facet2
+            .on_attach(actor_id2, serde_json::json!({}))
+            .await
+            .unwrap();
         facet2.before_method("test", b"test").await.unwrap();
-        facet2.after_method("test", b"test", b"result").await.unwrap();
+        facet2
+            .after_method("test", b"test", b"result")
+            .await
+            .unwrap();
         storage2.flush().await.unwrap();
 
         let entries2 = storage2.replay_from(actor_id2, 0).await.unwrap();
@@ -713,22 +832,31 @@ mod sqlite_tests {
         let entries_before_attach = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries before attach: {}", entries_before_attach.len());
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         println!("=== After attach, before write ===");
         let entries_after_attach = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries after attach: {}", entries_after_attach.len());
 
         facet.before_method("test", b"test").await.unwrap();
-        
+
         println!("=== After before_method ===");
         let entries_after_before = storage.replay_from(actor_id, 0).await.unwrap();
-        println!("Entries after before_method: {}", entries_after_before.len());
+        println!(
+            "Entries after before_method: {}",
+            entries_after_before.len()
+        );
         if !entries_after_before.is_empty() {
             println!("First entry sequence: {}", entries_after_before[0].sequence);
         }
 
-        facet.after_method("test", b"test", b"result").await.unwrap();
+        facet
+            .after_method("test", b"test", b"result")
+            .await
+            .unwrap();
         storage.flush().await.unwrap();
 
         println!("=== After after_method ===");
@@ -771,7 +899,11 @@ mod sqlite_tests {
 
         let entries_direct = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries from direct write: {}", entries_direct.len());
-        assert_eq!(entries_direct.len(), 1, "Should have 1 entry from direct write");
+        assert_eq!(
+            entries_direct.len(),
+            1,
+            "Should have 1 entry from direct write"
+        );
 
         println!("=== Test 2: Facet write with replay_on_activation=true ===");
         let config = DurabilityConfig {
@@ -788,14 +920,24 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id2 = "debug-facet";
 
-        facet.on_attach(actor_id2, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id2, serde_json::json!({}))
+            .await
+            .unwrap();
         facet.before_method("test", b"test").await.unwrap();
-        facet.after_method("test", b"test", b"result").await.unwrap();
+        facet
+            .after_method("test", b"test", b"result")
+            .await
+            .unwrap();
         storage.flush().await.unwrap();
 
         let entries_facet = storage.replay_from(actor_id2, 0).await.unwrap();
         println!("Entries from facet write: {}", entries_facet.len());
-        assert_eq!(entries_facet.len(), 2, "Should have 2 entries from facet write");
+        assert_eq!(
+            entries_facet.len(),
+            2,
+            "Should have 2 entries from facet write"
+        );
     }
 
     /// Test: Check if entries are written but with wrong actor_id
@@ -816,9 +958,15 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-actor-id";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
         facet.before_method("test", b"test").await.unwrap();
-        facet.after_method("test", b"test", b"result").await.unwrap();
+        facet
+            .after_method("test", b"test", b"result")
+            .await
+            .unwrap();
         storage.flush().await.unwrap();
 
         let all_entries = storage.replay_from("", 0).await;
@@ -826,9 +974,12 @@ mod sqlite_tests {
 
         let entries = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries for actor_id '{}': {}", actor_id, entries.len());
-        
+
         for entry in &entries {
-            println!("Entry actor_id: '{}', sequence: {}", entry.actor_id, entry.sequence);
+            println!(
+                "Entry actor_id: '{}', sequence: {}",
+                entry.actor_id, entry.sequence
+            );
         }
     }
 
@@ -850,18 +1001,24 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "debug-query";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         facet.before_method("test", b"test").await.unwrap();
-        facet.after_method("test", b"test", b"result").await.unwrap();
+        facet
+            .after_method("test", b"test", b"result")
+            .await
+            .unwrap();
         storage.flush().await.unwrap();
 
         let entries_0 = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Entries with from_sequence=0: {}", entries_0.len());
-        
+
         let entries_1 = storage.replay_from(actor_id, 1).await.unwrap();
         println!("Entries with from_sequence=1: {}", entries_1.len());
-        
+
         let stats = storage.get_stats(Some(actor_id)).await.unwrap();
         println!("Stats for actor: total_entries={}", stats.total_entries);
     }
@@ -888,7 +1045,7 @@ mod sqlite_tests {
         println!("=== Step 1: on_attach ===");
         let attach_result = facet.on_attach(actor_id, serde_json::json!({})).await;
         println!("Attach result: {:?}", attach_result);
-        
+
         let checkpoint_result = storage.get_latest_checkpoint(actor_id).await;
         println!("Checkpoint result: {:?}", checkpoint_result);
 
@@ -898,9 +1055,12 @@ mod sqlite_tests {
         println!("=== Step 2: before_method ===");
         let before_result = facet.before_method("test", b"test").await;
         println!("Before result: {:?}", before_result);
-        
+
         let entries_after_before = storage.replay_from(actor_id, 0).await.unwrap();
-        println!("Entries after before_method: {}", entries_after_before.len());
+        println!(
+            "Entries after before_method: {}",
+            entries_after_before.len()
+        );
 
         println!("=== Step 3: after_method ===");
         let after_result = facet.after_method("test", b"test", b"result").await;
@@ -913,7 +1073,7 @@ mod sqlite_tests {
         println!("=== Step 5: verify entries ===");
         let final_entries = storage.replay_from(actor_id, 0).await.unwrap();
         println!("Final entries: {}", final_entries.len());
-        
+
         for (i, entry) in final_entries.iter().enumerate() {
             println!("Entry {}: id={}, actor_id={}, sequence={}, type={:?}",
                 i, entry.id, entry.actor_id, entry.sequence,

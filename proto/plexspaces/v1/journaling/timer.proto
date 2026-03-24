@@ -16,7 +16,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-
 // PlexSpaces Timer and Reminder API
 //
 // ## Purpose
@@ -288,11 +287,12 @@
 syntax = "proto3";
 
 package plexspaces.timer.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/journaling/timer;plexspaces_timer_v1";
 
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/journaling/timer;plexspaces_timer_v1";
 
 // Timer registration (non-durable, in-memory)
 // Timers are NOT persisted and are lost on actor deactivation

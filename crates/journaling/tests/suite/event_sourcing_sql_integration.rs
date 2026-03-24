@@ -5,8 +5,8 @@
 
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_tests {
+    use plexspaces_facet::Facet;
     use plexspaces_journaling::*;
-use plexspaces_facet::Facet;
     use plexspaces_proto::common::v1::PageRequest;
     use plexspaces_proto::prost_types;
     use std::collections::HashMap;
@@ -261,7 +261,10 @@ use plexspaces_facet::Facet;
             "time_travel_enabled": config.time_travel_enabled,
         });
         let mut facet = EventSourcingFacet::new(storage.clone(), config_value, 50);
-        facet.on_attach("actor-1", serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach("actor-1", serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process multiple state changes
         for i in 1..=5 {
@@ -515,4 +518,3 @@ use plexspaces_facet::Facet;
         }
     }
 }
-

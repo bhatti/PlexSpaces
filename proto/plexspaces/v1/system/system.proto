@@ -34,28 +34,27 @@ package plexspaces.system.v1;
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
-import "google/protobuf/struct.proto";
 import "google/protobuf/empty.proto";
-import "protoc-gen-openapiv2/options/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "plexspaces/prv/circuitbreaker/circuitbreaker.proto";
 import "plexspaces/v1/common.proto";
 import "plexspaces/v1/metrics/metrics.proto";
-import "plexspaces/prv/circuitbreaker/circuitbreaker.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/system/system;plexspaces_system_v1";
-option java_package = "com.bhatti.plexspaces.system.v1";
 option java_multiple_files = true;
-
+option java_package = "com.bhatti.plexspaces.system.v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpace System Management API";
-    version: "1.0";
-    description: "API for system administration and management";
-  };
-  schemes: HTTPS;
-  consumes: "application/json";
-  produces: "application/json";
+    title: "PlexSpace System Management API"
+    version: "1.0"
+    description: "API for system administration and management"
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
 };
 
 // System information
@@ -113,7 +112,10 @@ message ConfigSetting {
     json_schema: {
       title: "Config Setting"
       description: "A configuration setting"
-      required: ["key", "value"]
+      required: [
+        "key",
+        "value"
+      ]
     }
   };
 
@@ -268,9 +270,9 @@ message NodeHealthState {
 // - UNKNOWN: Health status cannot be determined
 enum ServingStatus {
   SERVING_STATUS_UNSPECIFIED = 0;
-  SERVING_STATUS_SERVING = 1;      // Ready to serve requests
-  SERVING_STATUS_NOT_SERVING = 2;  // Not ready (various reasons)
-  SERVING_STATUS_UNKNOWN = 3;      // Cannot determine status
+  SERVING_STATUS_SERVING = 1; // Ready to serve requests
+  SERVING_STATUS_NOT_SERVING = 2; // Not ready (various reasons)
+  SERVING_STATUS_UNKNOWN = 3; // Cannot determine status
 }
 
 // Probe type (Kubernetes-style)
@@ -289,9 +291,9 @@ enum ServingStatus {
 // - See https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
 enum ProbeType {
   PROBE_TYPE_UNSPECIFIED = 0;
-  PROBE_TYPE_STARTUP = 1;    // Checks if startup complete
-  PROBE_TYPE_LIVENESS = 2;   // Checks if node is alive (not deadlocked/crashed)
-  PROBE_TYPE_READINESS = 3;  // Checks if node is ready (not overloaded)
+  PROBE_TYPE_STARTUP = 1; // Checks if startup complete
+  PROBE_TYPE_LIVENESS = 2; // Checks if node is alive (not deadlocked/crashed)
+  PROBE_TYPE_READINESS = 3; // Checks if node is ready (not overloaded)
 }
 
 // Node readiness status (detailed)
@@ -315,17 +317,17 @@ message NodeReadinessStatus {
   string not_ready_reason = 2;
 
   // Individual readiness checks
-  bool liveness_passing = 3;          // Is node alive?
-  bool queue_depth_ok = 4;            // Queue depth < threshold?
-  bool tuplespace_healthy = 5;        // TupleSpace backend reachable?
-  bool required_nodes_connected = 6;  // Required nodes connected?
+  bool liveness_passing = 3; // Is node alive?
+  bool queue_depth_ok = 4; // Queue depth < threshold?
+  bool tuplespace_healthy = 5; // TupleSpace backend reachable?
+  bool required_nodes_connected = 6; // Required nodes connected?
 
   // Metrics
   uint64 total_queue_depth = 7;
   uint64 queue_depth_threshold = 8;
   uint32 connected_nodes_count = 9;
   repeated string required_nodes = 10;
-  repeated string missing_nodes = 11;  // Required nodes not connected
+  repeated string missing_nodes = 11; // Required nodes not connected
 }
 
 // Health probe configuration
@@ -339,13 +341,13 @@ message NodeReadinessStatus {
 // - Allows tuning for different workload characteristics
 message HealthProbeConfig {
   // Monitoring interval (how often to check health)
-  google.protobuf.Duration monitoring_interval = 1;  // Default: 5 seconds
+  google.protobuf.Duration monitoring_interval = 1; // Default: 5 seconds
 
   // Graceful shutdown drain timeout
-  google.protobuf.Duration drain_timeout = 2;  // Default: 30 seconds
+  google.protobuf.Duration drain_timeout = 2; // Default: 30 seconds
 
   // Queue depth threshold for readiness
-  uint64 queue_depth_threshold = 3;  // Default: 10000
+  uint64 queue_depth_threshold = 3; // Default: 10000
 
   // Required nodes for readiness (if empty, no requirement)
   repeated string required_nodes = 4;
@@ -388,13 +390,13 @@ message DependencyCircuitBreakerConfig {
   bool enabled = 1;
 
   // Default failure threshold (number of consecutive failures before opening circuit)
-  uint32 default_failure_threshold = 2;  // Default: 5
+  uint32 default_failure_threshold = 2; // Default: 5
 
   // Default timeout before attempting recovery (seconds)
-  uint64 default_timeout_secs = 3;  // Default: 60
+  uint64 default_timeout_secs = 3; // Default: 60
 
   // Default success threshold (number of successes in half-open to close circuit)
-  uint32 default_success_threshold = 4;  // Default: 2
+  uint32 default_success_threshold = 4; // Default: 2
 
   // Per-dependency overrides (key = dependency name, value = circuit breaker config)
   map<string, plexspaces.circuitbreaker.prv.CircuitBreakerConfig> dependency_overrides = 5;
@@ -412,7 +414,6 @@ message DependencyRegistrationConfig {
   // Dependencies to register automatically
   // Format: "name:type:critical" (e.g., "database:service:true", "redis:service:false")
   repeated string dependencies = 2;
-
 }
 
 // Dependency health check
@@ -574,7 +575,7 @@ message BeginShutdownRequest {
   string reason = 1 [(buf.validate.field).string.max_len = 1024];
 
   // Override default drain timeout
-  google.protobuf.Duration drain_timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+  google.protobuf.Duration drain_timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
 }
 
 message BeginShutdownResponse {
@@ -620,7 +621,7 @@ message LivenessProbeRequest {
 message LivenessProbeResponse {
   // Whether node is alive
   bool is_alive = 1;
-  
+
   // Status code for HTTP (200 if alive, 503 if not)
   int32 http_status_code = 2;
 }
@@ -634,10 +635,10 @@ message ReadinessProbeRequest {
 message ReadinessProbeResponse {
   // Whether node is ready
   bool is_ready = 1;
-  
+
   // Status code for HTTP (200 if ready, 503 if not)
   int32 http_status_code = 2;
-  
+
   // Reason if not ready (for debugging)
   string not_ready_reason = 3;
 }
@@ -651,10 +652,10 @@ message StartupProbeRequest {
 message StartupProbeResponse {
   // Whether startup is complete
   bool startup_complete = 1;
-  
+
   // Status code for HTTP (200 if complete, 503 if not)
   int32 http_status_code = 2;
-  
+
   // Reason if not complete (for debugging)
   string not_complete_reason = 3;
 }
@@ -671,7 +672,7 @@ message GetMetricsResponse {
 }
 
 message GetConfigRequest {
-  string key_pattern = 1 [(buf.validate.field).string.max_len = 512];  // Glob pattern for keys
+  string key_pattern = 1 [(buf.validate.field).string.max_len = 512]; // Glob pattern for keys
   bool include_secrets = 2;
 }
 
@@ -783,7 +784,7 @@ message ShutdownRequest {
   };
 
   bool graceful = 1;
-  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
   string reason = 3 [(buf.validate.field).string.max_len = 1024];
 }
 
@@ -829,9 +830,9 @@ message ShutdownResponse {
 // - SIGHUP → Reload/restart
 enum ShutdownSignal {
   SHUTDOWN_SIGNAL_UNSPECIFIED = 0;
-  SHUTDOWN_SIGNAL_SIGTERM = 1;    // Graceful shutdown (K8s sends this)
-  SHUTDOWN_SIGNAL_SIGINT = 2;     // Interrupt (Ctrl+C)
-  SHUTDOWN_SIGNAL_SIGHUP = 3;     // Hangup (reload config, graceful restart)
+  SHUTDOWN_SIGNAL_SIGTERM = 1; // Graceful shutdown (K8s sends this)
+  SHUTDOWN_SIGNAL_SIGINT = 2; // Interrupt (Ctrl+C)
+  SHUTDOWN_SIGNAL_SIGHUP = 3; // Hangup (reload config, graceful restart)
 }
 
 // Shutdown phase tracking
@@ -847,14 +848,14 @@ enum ShutdownSignal {
 // Each phase transition is logged and can be monitored via GetShutdownStatus RPC.
 enum ShutdownPhase {
   SHUTDOWN_PHASE_UNSPECIFIED = 0;
-  SHUTDOWN_PHASE_RUNNING = 1;                      // Normal operation
-  SHUTDOWN_PHASE_HEALTH_NOT_SERVING = 2;           // Health set to NOT_SERVING
-  SHUTDOWN_PHASE_DRAINING = 3;                     // Draining in-flight requests
-  SHUTDOWN_PHASE_STOPPING_ACTORS = 4;              // Stopping all actors
-  SHUTDOWN_PHASE_CLOSING_CONNECTIONS = 5;          // Closing gRPC connections
-  SHUTDOWN_PHASE_SHUTTING_DOWN_TUPLESPACE = 6;    // Shutting down TupleSpace
-  SHUTDOWN_PHASE_FINAL_CLEANUP = 7;                // Final cleanup tasks
-  SHUTDOWN_PHASE_COMPLETE = 8;                     // Shutdown complete
+  SHUTDOWN_PHASE_RUNNING = 1; // Normal operation
+  SHUTDOWN_PHASE_HEALTH_NOT_SERVING = 2; // Health set to NOT_SERVING
+  SHUTDOWN_PHASE_DRAINING = 3; // Draining in-flight requests
+  SHUTDOWN_PHASE_STOPPING_ACTORS = 4; // Stopping all actors
+  SHUTDOWN_PHASE_CLOSING_CONNECTIONS = 5; // Closing gRPC connections
+  SHUTDOWN_PHASE_SHUTTING_DOWN_TUPLESPACE = 6; // Shutting down TupleSpace
+  SHUTDOWN_PHASE_FINAL_CLEANUP = 7; // Final cleanup tasks
+  SHUTDOWN_PHASE_COMPLETE = 8; // Shutdown complete
 }
 
 // Shutdown status (observability)
@@ -936,15 +937,11 @@ message GetShutdownStatusResponse {
 
 // System Management service
 service SystemService {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
-    description: "Service for system administration and management"
-  };
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {description: "Service for system administration and management"};
 
   // Get system information
   rpc GetSystemInfo(GetSystemInfoRequest) returns (GetSystemInfoResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/system/info"
-    };
+    option (google.api.http) = {get: "/api/v1/system/info"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get System Info"
       description: "Get system information and status"
@@ -954,9 +951,7 @@ service SystemService {
 
   // Health check (custom detailed health, use grpc.health.v1.Health for K8s probes)
   rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/system/health"
-    };
+    option (google.api.http) = {get: "/api/v1/system/health"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Health Check"
       description: "Check system health status"
@@ -975,9 +970,7 @@ service SystemService {
   // - Supports partial failure scenarios (non-critical dependencies can fail)
   // - HTTP endpoint: GET /api/v1/system/health/detailed
   rpc GetDetailedHealth(GetDetailedHealthRequest) returns (GetDetailedHealthResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/system/health/detailed"
-    };
+    option (google.api.http) = {get: "/api/v1/system/health/detailed"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Detailed Health"
       description: "Get detailed health status with dependency checks"
@@ -996,9 +989,7 @@ service SystemService {
   // - Does not check dependencies (only basic liveness)
   // - HTTP endpoint: GET /health/live
   rpc LivenessProbe(LivenessProbeRequest) returns (LivenessProbeResponse) {
-    option (google.api.http) = {
-      get: "/health/live"
-    };
+    option (google.api.http) = {get: "/health/live"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Liveness Probe"
       description: "Kubernetes liveness probe endpoint"
@@ -1017,9 +1008,7 @@ service SystemService {
   // - Non-critical dependencies can fail without blocking readiness
   // - HTTP endpoint: GET /health/ready
   rpc ReadinessProbe(ReadinessProbeRequest) returns (ReadinessProbeResponse) {
-    option (google.api.http) = {
-      get: "/health/ready"
-    };
+    option (google.api.http) = {get: "/health/ready"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Readiness Probe"
       description: "Kubernetes readiness probe endpoint"
@@ -1038,9 +1027,7 @@ service SystemService {
   // - Checks critical dependencies required for startup
   // - HTTP endpoint: GET /health/startup
   rpc StartupProbe(StartupProbeRequest) returns (StartupProbeResponse) {
-    option (google.api.http) = {
-      get: "/health/startup"
-    };
+    option (google.api.http) = {get: "/health/startup"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Startup Probe"
       description: "Kubernetes startup probe endpoint"
@@ -1058,9 +1045,7 @@ service SystemService {
   // This is a custom PlexSpaces RPC. For Kubernetes probes, use the standard
   // grpc.health.v1.Health service instead.
   rpc GetNodeReadiness(GetNodeReadinessRequest) returns (GetNodeReadinessResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/system/readiness"
-    };
+    option (google.api.http) = {get: "/api/v1/system/readiness"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Node Readiness"
       description: "Get detailed readiness status for debugging"
@@ -1116,9 +1101,7 @@ service SystemService {
 
   // Get metrics
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/system/metrics"
-    };
+    option (google.api.http) = {get: "/api/v1/system/metrics"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Metrics"
       description: "Get system performance metrics"
@@ -1128,9 +1111,7 @@ service SystemService {
 
   // Get configuration
   rpc GetConfig(GetConfigRequest) returns (GetConfigResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/system/config"
-    };
+    option (google.api.http) = {get: "/api/v1/system/config"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Config"
       description: "Get system configuration settings"
@@ -1153,9 +1134,7 @@ service SystemService {
 
   // Get logs
   rpc GetLogs(GetLogsRequest) returns (GetLogsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/system/logs"
-    };
+    option (google.api.http) = {get: "/api/v1/system/logs"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Logs"
       description: "Retrieve system logs"
@@ -1178,9 +1157,7 @@ service SystemService {
 
   // List backups
   rpc ListBackups(ListBackupsRequest) returns (ListBackupsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/system/backups"
-    };
+    option (google.api.http) = {get: "/api/v1/system/backups"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "List Backups"
       description: "List system backups"
@@ -1224,9 +1201,7 @@ service SystemService {
   // - Debug stuck shutdown phases
   // - Metrics collection (shutdown duration per phase)
   rpc GetShutdownStatus(GetShutdownStatusRequest) returns (GetShutdownStatusResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/system/shutdown/status"
-    };
+    option (google.api.http) = {get: "/api/v1/system/shutdown/status"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Shutdown Status"
       description: "Get detailed status of graceful shutdown progress"
@@ -1234,4 +1209,3 @@ service SystemService {
     };
   }
 }
-

@@ -20,22 +20,21 @@
 //!
 //! ## Purpose
 //! Provides a simple trait-based interface for sending messages to actors, inspired by Orleans grains.
-//! Virtual actors can wrap this trait to automatically handle activation on `tell()`.
+//! Local virtual activation is owned by `ActorRegistry`, while concrete senders focus on delivery.
 //!
 //! ## Design (Orleans-Inspired)
-//! - **Always Addressable**: MessageSender trait objects are always available via ActorRegistry
-//! - **Automatic Activation**: Virtual actor wrapper activates on first `tell()` call
-//! - **Simple API**: Just `tell()` method - activation is transparent
+//! - **Always Addressable**: Active senders are tracked in `ActorRegistry`
+//! - **Automatic Activation**: `ActorRegistry::tell()` and `ActorRegistry::ask()` activate virtual actors on demand
+//! - **Simple API**: Concrete senders only perform delivery
 //!
 //! ## Usage
 //! ```rust,ignore
-//! // Regular actor wrapper implements MessageSender trait
+//! // Concrete actor sender implements MessageSender
 //! let regular_sender = ActorRef::local(actor_id, mailbox, service_locator);
 //! regular_sender.tell(message).await?; // Sends to mailbox
 //!
-//! // Virtual actor wrapper automatically handles activation
-//! let virtual_sender = VirtualActorWrapper::new(actor_id, node);
-//! virtual_sender.tell(message).await?; // Activates if needed, then forwards message
+//! // ActorRegistry handles local activation for virtual actors
+//! registry.tell(&actor_id, message).await?;
 //! ```
 
 use async_trait::async_trait;
@@ -45,13 +44,13 @@ use std::any::Any;
 /// MessageSender trait - interface for sending messages to actors
 ///
 /// ## Purpose
-/// Trait for sending messages to actors. Virtual actors can wrap this to handle activation automatically.
+/// Trait for sending messages to actors.
 /// This is the "sender" side - use this to send messages to actors.
 ///
 /// ## Design (Orleans-Inspired)
-/// - **Always Addressable**: Trait objects stored in ActorRegistry
-/// - **Automatic Activation**: Virtual actor wrapper activates on first `tell()` if needed
-/// - **Simple**: Just one method - `tell()`
+/// - **Always Addressable**: Active senders are stored in `ActorRegistry`
+/// - **Automatic Activation**: Registry-owned local routing activates virtual actors when needed
+/// - **Simple**: Senders only implement delivery semantics
 ///
 /// ## Comparison to Other Frameworks
 /// - **Orleans**: Grain references always available, method calls activate automatically
@@ -68,7 +67,7 @@ pub trait MessageSender: Send + Sync + Any {
     ///
     /// ## Purpose
     /// Erlang-style `!` operator - sends message to actor's mailbox.
-    /// For virtual actors, this automatically activates the actor if needed.
+    /// Local virtual activation is handled by `ActorRegistry` before this sender is called.
     ///
     /// ## Arguments
     /// * `message` - Message to send
@@ -77,8 +76,8 @@ pub trait MessageSender: Send + Sync + Any {
     /// Ok(()) if message was sent successfully
     ///
     /// ## Behavior
-    /// - **Regular actors**: Uses ActorRef::tell() which sends to mailbox
-    /// - **Virtual actors**: Activates if needed, then uses ActorRef::tell()
+    /// - **Regular actors**: `ActorRef::tell()` sends directly to the mailbox
+    /// - **Virtual actors**: `ActorRegistry::tell()` activates if needed, then calls the sender
     async fn tell(&self, message: Message) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     /// Send a message and wait for a reply (request-reply pattern)

@@ -36,23 +36,21 @@ syntax = "proto3";
 
 package plexspaces.keyvalue.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
-import "buf/validate/validate.proto";
 import "plexspaces/v1/common.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/keyvalue/keyvalue;plexspaces_keyvalue_v1";
-option java_package = "com.bhatti.plexspaces.keyvalue.v1";
 option java_multiple_files = true;
+option java_package = "com.bhatti.plexspaces.keyvalue.v1";
 
 // KeyValue service for key-value storage operations
 service KeyValueService {
   // Get value by key
   rpc Get(GetRequest) returns (GetResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/keyvalue/{key}"
-    };
+    option (google.api.http) = {get: "/api/v1/keyvalue/{key}"};
   }
 
   // Put key-value pair
@@ -65,23 +63,17 @@ service KeyValueService {
 
   // Delete key
   rpc Delete(DeleteRequest) returns (DeleteResponse) {
-    option (google.api.http) = {
-      delete: "/api/v1/keyvalue/{key}"
-    };
+    option (google.api.http) = {delete: "/api/v1/keyvalue/{key}"};
   }
 
   // Check if key exists
   rpc Exists(ExistsRequest) returns (ExistsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/keyvalue/{key}:exists"
-    };
+    option (google.api.http) = {get: "/api/v1/keyvalue/{key}:exists"};
   }
 
   // List all keys with prefix
   rpc List(ListRequest) returns (ListResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/keyvalue"
-    };
+    option (google.api.http) = {get: "/api/v1/keyvalue"};
   }
 
   // Get multiple keys at once
@@ -118,9 +110,7 @@ service KeyValueService {
 
   // Get TTL remaining for key
   rpc GetTtl(GetTtlRequest) returns (GetTtlResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/keyvalue/{key}/ttl"
-    };
+    option (google.api.http) = {get: "/api/v1/keyvalue/{key}/ttl"};
   }
 
   // Compare-and-swap
@@ -149,23 +139,17 @@ service KeyValueService {
 
   // Clear all keys with prefix
   rpc ClearPrefix(ClearPrefixRequest) returns (ClearPrefixResponse) {
-    option (google.api.http) = {
-      delete: "/api/v1/keyvalue:clearPrefix"
-    };
+    option (google.api.http) = {delete: "/api/v1/keyvalue:clearPrefix"};
   }
 
   // Count keys with prefix
   rpc CountPrefix(CountPrefixRequest) returns (CountPrefixResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/keyvalue:countPrefix"
-    };
+    option (google.api.http) = {get: "/api/v1/keyvalue:countPrefix"};
   }
 
   // Get storage statistics
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/keyvalue/stats"
-    };
+    option (google.api.http) = {get: "/api/v1/keyvalue/stats"};
   }
 }
 
@@ -174,7 +158,10 @@ message GetRequest {
   // Key to get
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
@@ -186,7 +173,7 @@ message GetRequest {
 message GetResponse {
   // Value if key exists
   bytes value = 1;
-  
+
   // Whether key exists
   bool exists = 2;
 }
@@ -196,7 +183,10 @@ message PutRequest {
   // Key to put
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
 
   // Value to store
@@ -218,7 +208,10 @@ message DeleteRequest {
   // Key to delete
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
@@ -237,7 +230,10 @@ message ExistsRequest {
   // Key to check
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
@@ -275,7 +271,16 @@ message MultiGetRequest {
   // Keys to get
   repeated string keys = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).repeated = {min_items: 1, max_items: 1000, items: {string: {min_len: 1, max_len: 1024}}}
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 1000
+      items: {
+        string: {
+          min_len: 1
+          max_len: 1024
+        }
+      }
+    }
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
@@ -293,10 +298,10 @@ message MultiGetResponse {
 message KeyValueEntry {
   // Key
   string key = 1;
-  
+
   // Value if exists
   bytes value = 2;
-  
+
   // Whether key exists
   bool exists = 3;
 }
@@ -306,7 +311,10 @@ message MultiPutRequest {
   // Key-value pairs to put
   repeated KeyValuePair pairs = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).repeated = {min_items: 1, max_items: 1000}
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 1000
+    }
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
@@ -319,9 +327,12 @@ message KeyValuePair {
   // Key
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
-  
+
   // Value
   bytes value = 2 [(google.api.field_behavior) = REQUIRED];
 }
@@ -337,7 +348,10 @@ message PutWithTtlRequest {
   // Key to put
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
 
   // Value to store
@@ -346,7 +360,10 @@ message PutWithTtlRequest {
   // Time-to-live
   google.protobuf.Duration ttl = 3 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).duration = {gte: {seconds: 1}, lte: {seconds: 2592000}}  // 1s to 30 days
+    (buf.validate.field).duration = {
+      gte: {seconds: 1}
+      lte: {seconds: 2592000}
+    } /* 1s to 30 days */
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
@@ -365,13 +382,19 @@ message RefreshTtlRequest {
   // Key to refresh
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
 
   // New TTL
   google.protobuf.Duration ttl = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).duration = {gte: {seconds: 1}, lte: {seconds: 2592000}}  // 1s to 30 days
+    (buf.validate.field).duration = {
+      gte: {seconds: 1}
+      lte: {seconds: 2592000}
+    } /* 1s to 30 days */
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
@@ -390,7 +413,10 @@ message GetTtlRequest {
   // Key to check
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
 
   // Namespace for tenant isolation (optional; empty string = default).
@@ -402,7 +428,7 @@ message GetTtlRequest {
 message GetTtlResponse {
   // TTL remaining if key exists with TTL
   google.protobuf.Duration ttl = 1;
-  
+
   // Whether key exists
   bool exists = 2;
 }
@@ -412,11 +438,14 @@ message CasRequest {
   // Key for CAS operation
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
 
   // Expected value (None means key must not exist)
-  bytes expected_value = 2;  // Empty bytes = None
+  bytes expected_value = 2; // Empty bytes = None
 
   // New value
   bytes new_value = 3 [(google.api.field_behavior) = REQUIRED];
@@ -437,7 +466,10 @@ message IncrementRequest {
   // Key for counter
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
 
   // Delta to add
@@ -459,7 +491,10 @@ message DecrementRequest {
   // Key for counter
   string key = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 1024}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 1024
+    }
   ];
 
   // Delta to subtract
@@ -525,25 +560,10 @@ message GetStatsRequest {
 message GetStatsResponse {
   // Total number of keys
   uint64 total_keys = 1;
-  
+
   // Total size in bytes (approximate)
   uint64 total_size_bytes = 2;
-  
+
   // Backend type (e.g., "InMemory", "SQLite", "Redis", "PostgreSQL")
   string backend_type = 3;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

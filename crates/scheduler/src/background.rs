@@ -160,7 +160,9 @@ impl BackgroundScheduler {
             .lock()
             .expect("active scheduler registry lock poisoned");
         if !active.insert(self.node_id.clone()) {
-            return Err(BackgroundSchedulerError::AlreadyStarted(self.node_id.clone()));
+            return Err(BackgroundSchedulerError::AlreadyStarted(
+                self.node_id.clone(),
+            ));
         }
         Ok(())
     }
@@ -192,11 +194,7 @@ impl BackgroundScheduler {
                 metadata: std::collections::HashMap::new(),
             };
             let ctx = self.default_context();
-            match self
-                .lock_manager
-                .acquire_lock(&ctx, options)
-                .await
-            {
+            match self.lock_manager.acquire_lock(&ctx, options).await {
                 Ok(lease) => lease,
                 Err(e) => {
                     self.release_node_start();

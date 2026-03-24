@@ -409,7 +409,7 @@ service ObjectRegistry {
   rpc Discover(DiscoverRequest) returns (DiscoverResponse) {
     option (google.api.http) = {
       get: "/api/v1/registry/objects"
-      additional_bindings {post: "/api/v1/registry/objects:discover"}
+      additional_bindings: {post: "/api/v1/registry/objects:discover"}
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Discover Objects"
@@ -482,7 +482,10 @@ message UnregisterRequest {
   // Object ID to unregister
   string object_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Object type (for key construction)
@@ -505,7 +508,10 @@ message LookupRequest {
   // Object ID to lookup
   string object_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Object type (optional - if not specified, searches all types)
@@ -565,12 +571,15 @@ message DiscoverRequest {
 
   // Filter by minimum health age (exclude stale objects)
   // Example: last_heartbeat < (now - max_age) → excluded
-  google.protobuf.Duration max_heartbeat_age = 9 [(buf.validate.field).duration.lte.seconds = 604800];  // Max 7 days
+  google.protobuf.Duration max_heartbeat_age = 9 [(buf.validate.field).duration.lte.seconds = 604800]; // Max 7 days
 
   // ==================== PAGINATION ====================
 
   // Maximum results per page (default: 100, max: 1000)
-  int32 page_size = 10 [(buf.validate.field).int32 = {gte: 0, lte: 1000}];
+  int32 page_size = 10 [(buf.validate.field).int32 = {
+    gte: 0
+    lte: 1000
+  }];
 
   // Pagination token from previous response (opaque)
   string page_token = 11 [(buf.validate.field).string.max_len = 512];
@@ -604,7 +613,10 @@ message HeartbeatRequest {
   // Object ID sending heartbeat
   string object_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 
   // Object type

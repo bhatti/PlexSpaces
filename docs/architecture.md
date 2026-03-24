@@ -1012,7 +1012,6 @@ Actors receive full HTTP path information for custom routing:
 
 - `message.uri_path`: Full URL path (e.g., "/api/v1/actors/default/default/counter/metrics")
 - `message.uri_method`: HTTP method (GET, POST, PUT, DELETE)
-- `message.metadata["http_path"]`: Full URL path (for backward compatibility)
 - `message.metadata["http_subpath"]`: Path after actor_type (for future routing)
 
 ### Routing Patterns

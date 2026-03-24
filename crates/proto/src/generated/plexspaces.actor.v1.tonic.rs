@@ -86,6 +86,29 @@ pub mod actor_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
+        /** Spawn an actor on the node receiving this gRPC request
+
+ ## Purpose
+ Spawns an actor on the node where this RPC is called. The target node is implicit
+ from the gRPC endpoint (no target_node_id field needed).
+
+ ## Erlang Comparison
+ Erlang: spawn(Node, Module, Function, Args)
+ PlexSpaces: SpawnActor(actor_type, actor_id?, initial_state, config)
+   - Node is implicit from gRPC connection endpoint
+
+ ## Design Notes
+ - This RPC is called ON the target node (node2 receives the request)
+ - The caller (node1) sends gRPC request to node2's ActorService
+ - node2 validates actor_type exists locally, then spawns
+ - Returns ActorRef in format "actor_id@node2" for location-transparent messaging
+ - actor_id is optional: if provided (client-specified), use it; if not, server generates ULID
+
+ ## Security
+ - Target node validates caller has permission to spawn actors
+ - Target node validates actor_type is registered and safe to spawn
+ - Rate limiting applied per caller to prevent spawn bombing
+*/
         pub async fn spawn_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::SpawnActorRequest>,
@@ -604,17 +627,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Check if virtual actor exists (without activating)
-
- ## Purpose
- Query whether a virtual actor exists without triggering activation.
- Useful for existence checks, health monitoring, and discovery.
-
- ## Returns
- - exists: Actor exists (virtual or active)
- - is_active: Actor is currently active (in memory)
- - is_virtual: Actor has VirtualActorFacet (is virtual)
-*/
         pub async fn check_actor_exists(
             &mut self,
             request: impl tonic::IntoRequest<super::CheckActorExistsRequest>,
@@ -645,89 +657,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Get or activate a virtual actor (Orleans-style)
-
- ## Purpose
- Gets existing actor if active, or activates virtual actor if inactive.
- This is the primary API for virtual actors (Orleans grains pattern).
-
- ## Orleans Comparison
- Orleans: `IGrainFactory.GetGrain<T>(key)` - always returns grain reference
- PlexSpaces: `GetOrActivateActor(actor_id, actor_type?, initial_state?, config?)` - activates if needed
-
- ## Behavior
- 1. If actor exists and is active → Return existing ActorRef
- 2. If actor exists but is inactive (virtual) → Activate and return ActorRef
- 3. If actor doesn't exist → Create new actor (if actor_type provided) and return ActorRef
-
- ## Virtual Actor Pattern
- - Actor ID must be client-specified (e.g., "user/123", "session/abc")
- - Actor must have VirtualActorFacet attached (enables lazy activation)
- - First message triggers activation automatically
-
- ## Design Notes
- - actor_id: Client-specified, required (format: "{actor_type}/{key}" or "{actor_type}@{key}")
- - actor_type: Required if actor doesn't exist (used to create new actor)
- - initial_state, config: Used if creating new actor
-*/
-        pub async fn get_or_activate_actor(
-            &mut self,
-            request: impl tonic::IntoRequest<super::GetOrActivateActorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetOrActivateActorResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.actor.v1.ActorService/GetOrActivateActor",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "plexspaces.actor.v1.ActorService",
-                        "GetOrActivateActor",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        /** Invoke an actor via HTTP-like interface (FaaS-style)
-
- ## Purpose
- Provides a FaaS-like interface for invoking actors via HTTP GET/POST requests.
- This enables actors to be invoked like serverless functions while maintaining
- the actor model's stateful, message-driven architecture.
-
- ## HTTP Method Behavior
- - **GET**: Converts query parameters to JSON payload, calls actor.ask() (request-reply)
- - **POST**: Converts request body to payload and headers to headers, calls actor.tell() (fire-and-forget)
-
- ## Actor Lookup
- - Looks up actors by actor_type using ObjectRegistry discover with object_category filter
- - If multiple actors of same type found, randomly selects one (load balancing)
- - Returns 404 if no actor of requested type found
-
- ## Security
- - Extracts tenant_id from JWT claims if authentication enabled
- - Verifies JWT tenant_id matches requested tenant_id in path
- - Default tenant_id is "default" when no authentication provided
- - All actors must have tenant_id (default if no auth)
-
- ## Path Format
- `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}`
- - tenant_id: Tenant identifier (default: "default")
- - namespace: Namespace identifier (default: "default" if not specified)
- - actor_type: Type of actor to invoke (used for lookup)
-*/
         pub async fn invoke_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::InvokeActorRequest>,
@@ -755,27 +684,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Terminate an actor gracefully by ID
-
- ## Purpose
- Gracefully terminates an actor, allowing it to complete pending work and clean up.
- This is the HTTP DELETE endpoint for actors (mapped from DELETE /api/v1/actors/{namespace}/{actor_id}).
- Pairs with SpawnActor for complete actor lifecycle management.
-
- ## Behavior
- - Sends graceful shutdown signal to actor
- - Actor completes pending messages (with timeout)
- - Actor state is persisted (if DurabilityFacet attached)
- - Actor is removed from registry
-
- ## Difference from DeactivateActor
- - TerminateActor: Permanent termination (actor removed from system)
- - DeactivateActor: Temporary passivation (virtual actor can reactivate on next message)
-
- ## Security
- - Requires permission to terminate actors in the namespace
- - Tenant isolation enforced via JWT claims
-*/
         pub async fn terminate_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::TerminateActorRequest>,
@@ -1190,6 +1098,29 @@ pub mod actor_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with ActorServiceServer.
     #[async_trait]
     pub trait ActorService: Send + Sync + 'static {
+        /** Spawn an actor on the node receiving this gRPC request
+
+ ## Purpose
+ Spawns an actor on the node where this RPC is called. The target node is implicit
+ from the gRPC endpoint (no target_node_id field needed).
+
+ ## Erlang Comparison
+ Erlang: spawn(Node, Module, Function, Args)
+ PlexSpaces: SpawnActor(actor_type, actor_id?, initial_state, config)
+   - Node is implicit from gRPC connection endpoint
+
+ ## Design Notes
+ - This RPC is called ON the target node (node2 receives the request)
+ - The caller (node1) sends gRPC request to node2's ActorService
+ - node2 validates actor_type exists locally, then spawns
+ - Returns ActorRef in format "actor_id@node2" for location-transparent messaging
+ - actor_id is optional: if provided (client-specified), use it; if not, server generates ULID
+
+ ## Security
+ - Target node validates caller has permission to spawn actors
+ - Target node validates actor_type is registered and safe to spawn
+ - Rate limiting applied per caller to prevent spawn bombing
+*/
         async fn spawn_actor(
             &self,
             request: tonic::Request<super::SpawnActorRequest>,
@@ -1408,17 +1339,6 @@ pub mod actor_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
-        /** Check if virtual actor exists (without activating)
-
- ## Purpose
- Query whether a virtual actor exists without triggering activation.
- Useful for existence checks, health monitoring, and discovery.
-
- ## Returns
- - exists: Actor exists (virtual or active)
- - is_active: Actor is currently active (in memory)
- - is_virtual: Actor has VirtualActorFacet (is virtual)
-*/
         async fn check_actor_exists(
             &self,
             request: tonic::Request<super::CheckActorExistsRequest>,
@@ -1426,66 +1346,6 @@ pub mod actor_service_server {
             tonic::Response<super::CheckActorExistsResponse>,
             tonic::Status,
         >;
-        /** Get or activate a virtual actor (Orleans-style)
-
- ## Purpose
- Gets existing actor if active, or activates virtual actor if inactive.
- This is the primary API for virtual actors (Orleans grains pattern).
-
- ## Orleans Comparison
- Orleans: `IGrainFactory.GetGrain<T>(key)` - always returns grain reference
- PlexSpaces: `GetOrActivateActor(actor_id, actor_type?, initial_state?, config?)` - activates if needed
-
- ## Behavior
- 1. If actor exists and is active → Return existing ActorRef
- 2. If actor exists but is inactive (virtual) → Activate and return ActorRef
- 3. If actor doesn't exist → Create new actor (if actor_type provided) and return ActorRef
-
- ## Virtual Actor Pattern
- - Actor ID must be client-specified (e.g., "user/123", "session/abc")
- - Actor must have VirtualActorFacet attached (enables lazy activation)
- - First message triggers activation automatically
-
- ## Design Notes
- - actor_id: Client-specified, required (format: "{actor_type}/{key}" or "{actor_type}@{key}")
- - actor_type: Required if actor doesn't exist (used to create new actor)
- - initial_state, config: Used if creating new actor
-*/
-        async fn get_or_activate_actor(
-            &self,
-            request: tonic::Request<super::GetOrActivateActorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::GetOrActivateActorResponse>,
-            tonic::Status,
-        >;
-        /** Invoke an actor via HTTP-like interface (FaaS-style)
-
- ## Purpose
- Provides a FaaS-like interface for invoking actors via HTTP GET/POST requests.
- This enables actors to be invoked like serverless functions while maintaining
- the actor model's stateful, message-driven architecture.
-
- ## HTTP Method Behavior
- - **GET**: Converts query parameters to JSON payload, calls actor.ask() (request-reply)
- - **POST**: Converts request body to payload and headers to headers, calls actor.tell() (fire-and-forget)
-
- ## Actor Lookup
- - Looks up actors by actor_type using ObjectRegistry discover with object_category filter
- - If multiple actors of same type found, randomly selects one (load balancing)
- - Returns 404 if no actor of requested type found
-
- ## Security
- - Extracts tenant_id from JWT claims if authentication enabled
- - Verifies JWT tenant_id matches requested tenant_id in path
- - Default tenant_id is "default" when no authentication provided
- - All actors must have tenant_id (default if no auth)
-
- ## Path Format
- `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}`
- - tenant_id: Tenant identifier (default: "default")
- - namespace: Namespace identifier (default: "default" if not specified)
- - actor_type: Type of actor to invoke (used for lookup)
-*/
         async fn invoke_actor(
             &self,
             request: tonic::Request<super::InvokeActorRequest>,
@@ -1493,27 +1353,6 @@ pub mod actor_service_server {
             tonic::Response<super::InvokeActorResponse>,
             tonic::Status,
         >;
-        /** Terminate an actor gracefully by ID
-
- ## Purpose
- Gracefully terminates an actor, allowing it to complete pending work and clean up.
- This is the HTTP DELETE endpoint for actors (mapped from DELETE /api/v1/actors/{namespace}/{actor_id}).
- Pairs with SpawnActor for complete actor lifecycle management.
-
- ## Behavior
- - Sends graceful shutdown signal to actor
- - Actor completes pending messages (with timeout)
- - Actor state is persisted (if DurabilityFacet attached)
- - Actor is removed from registry
-
- ## Difference from DeactivateActor
- - TerminateActor: Permanent termination (actor removed from system)
- - DeactivateActor: Temporary passivation (virtual actor can reactivate on next message)
-
- ## Security
- - Requires permission to terminate actors in the namespace
- - Tenant isolation enforced via JWT claims
-*/
         async fn terminate_actor(
             &self,
             request: tonic::Request<super::TerminateActorRequest>,
@@ -2420,53 +2259,6 @@ pub mod actor_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = CheckActorExistsSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.actor.v1.ActorService/GetOrActivateActor" => {
-                    #[allow(non_camel_case_types)]
-                    struct GetOrActivateActorSvc<T: ActorService>(pub Arc<T>);
-                    impl<
-                        T: ActorService,
-                    > tonic::server::UnaryService<super::GetOrActivateActorRequest>
-                    for GetOrActivateActorSvc<T> {
-                        type Response = super::GetOrActivateActorResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::GetOrActivateActorRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as ActorService>::get_or_activate_actor(&inner, request)
-                                    .await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = GetOrActivateActorSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

@@ -16,33 +16,31 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-
 syntax = "proto3";
 
 package plexspaces.persistence.prv;
 
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
-import "google/protobuf/timestamp.proto";
-import "google/protobuf/struct.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/empty.proto";
-import "protoc-gen-openapiv2/options/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/prv/persistence/persistence;plexspaces_persistence_prv";
-option java_package = "com.bhatti.plexspaces.persistence.v1";
 option java_multiple_files = true;
-
+option java_package = "com.bhatti.plexspaces.persistence.v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpace Persistence API";
-    version: "1.0";
-    description: "API for event sourcing and state persistence";
-  };
-  schemes: HTTPS;
-  consumes: "application/json";
-  produces: "application/json";
+    title: "PlexSpace Persistence API"
+    version: "1.0"
+    description: "API for event sourcing and state persistence"
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
 };
 
 // Event for event sourcing
@@ -51,7 +49,12 @@ message Event {
     json_schema: {
       title: "Event"
       description: "Domain event for event sourcing"
-      required: ["id", "actor_id", "event_type", "data"]
+      required: [
+        "id",
+        "actor_id",
+        "event_type",
+        "data"
+      ]
     }
   };
 
@@ -307,7 +310,10 @@ message AppendEventsRequest {
     json_schema: {
       title: "Append Events Request"
       description: "Request to append events to the journal"
-      required: ["actor_id", "events"]
+      required: [
+        "actor_id",
+        "events"
+      ]
     }
   };
 
@@ -342,14 +348,16 @@ message ReadEventsResponse {
   uint64 last_sequence = 3;
 }
 
-
 // Request to create checkpoint
 message CreateCheckpointRequest {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
       title: "Create Checkpoint Request"
       description: "Request to create a checkpoint"
-      required: ["actor_id", "sequence_number"]
+      required: [
+        "actor_id",
+        "sequence_number"
+      ]
     }
   };
 
@@ -522,4 +530,3 @@ message TruncateJournalResponse {
 }
 
 // Note: PersistenceService gRPC service removed - message types retained for internal use
-

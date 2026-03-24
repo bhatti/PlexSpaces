@@ -17,7 +17,6 @@ pub mod reminder_facet_tests;
 pub mod reminder_sql_integration;
 pub mod replay_integration;
 pub mod replay_isolation;
-pub mod requires_actor_ref_service_tests;
 pub mod side_effect_caching;
 pub mod sqlite_persistence;
 pub mod timer_facet_distributed_locks;

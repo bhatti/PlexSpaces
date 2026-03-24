@@ -1033,7 +1033,7 @@ impl WasmInstance {
                                     let queue_name = queue_name.to_string();
                                     let msg_type = msg_type.to_string();
                                     let payload = payload_bytes.to_vec();
-                                    
+
                                     // Spawn async task to send to queue
                                     tokio::spawn(async move {
                                         match host_functions.send_to_queue(&queue_name, &msg_type, payload).await {
@@ -1054,7 +1054,7 @@ impl WasmInstance {
                                             }
                                         }
                                     });
-                                    
+
                                     0i32 // Success
                                 }
                                 _ => {
@@ -1106,7 +1106,7 @@ impl WasmInstance {
                                     let topic_name = topic_name.to_string();
                                     let msg_type = msg_type.to_string();
                                     let payload = payload_bytes.to_vec();
-                                    
+
                                     // Spawn async task to publish to topic
                                     tokio::spawn(async move {
                                         match host_functions.publish_to_topic(&topic_name, &msg_type, payload).await {
@@ -1127,7 +1127,7 @@ impl WasmInstance {
                                             }
                                         }
                                     });
-                                    
+
                                     0i32 // Success
                                 }
                                 _ => {
@@ -1169,7 +1169,7 @@ impl WasmInstance {
                                 Ok(_queue_name) => {
                                     let _host_functions = Arc::clone(&caller.data().host_functions);
                                     let _timeout_ms = timeout_ms as u64;
-                                    
+
                                     // NOTE: This is a synchronous host function, but receive_from_queue is async.
                                     // Traditional WASM modules use synchronous host functions. For async operations
                                     // like receive_from_queue, use WASM components instead which support async host functions.

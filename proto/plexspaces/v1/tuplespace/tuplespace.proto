@@ -112,26 +112,25 @@ package plexspaces.tuplespace.v1;
 import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
-import "protoc-gen-openapiv2/options/annotations.proto";
+import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
 import "plexspaces/v1/tuplespace/tuplespace_storage.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/tuplespace;plexspaces_tuplespace_v1";
-option java_package = "com.bhatti.plexspaces.tuplespace.v1";
 option java_multiple_files = true;
-
+option java_package = "com.bhatti.plexspaces.tuplespace.v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpace TupleSpace API";
-    version: "1.0";
-    description: "API for Linda-style tuplespace operations";
-  };
-  schemes: HTTPS;
-  consumes: "application/json";
-  produces: "application/json";
+    title: "PlexSpace TupleSpace API"
+    version: "1.0"
+    description: "API for Linda-style tuplespace operations"
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
 };
 
 // Tuple field value
@@ -174,9 +173,9 @@ message PatternField {
   };
 
   oneof matcher {
-    TupleField exact = 1;      // Exact value match
-    bool wildcard = 2;         // Match any value
-    FieldType type = 3;        // Match by type
+    TupleField exact = 1; // Exact value match
+    bool wildcard = 2; // Match any value
+    FieldType type = 3; // Match by type
   }
 }
 
@@ -209,7 +208,7 @@ message Lease {
     }
   };
 
-  google.protobuf.Duration ttl = 1 [(buf.validate.field).duration.lte.seconds = 2592000];  // Max 30 days
+  google.protobuf.Duration ttl = 1 [(buf.validate.field).duration.lte.seconds = 2592000]; // Max 30 days
   string owner = 2 [(buf.validate.field).string.max_len = 255];
   bool renewable = 3;
   google.protobuf.Timestamp expires_at = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
@@ -231,10 +230,13 @@ message Tuple {
   ];
   repeated TupleField fields = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).repeated = {min_items: 1, max_items: 1000}  // At least 1 field, max 1000
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 1000
+    } /* At least 1 field, max 1000 */
   ];
   google.protobuf.Timestamp timestamp = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
-  Lease lease = 4;  // Optional lease for automatic expiry
+  Lease lease = 4; // Optional lease for automatic expiry
   map<string, google.protobuf.Value> metadata = 5;
   SpatialLocation location = 6;
 }
@@ -286,13 +288,19 @@ message Subscription {
     json_schema: {
       title: "Subscription"
       description: "Subscription to tuplespace events"
-      required: ["id", "template"]
+      required: [
+        "id",
+        "template"
+      ]
     }
   };
 
   string id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
   Tuple template = 2 [(google.api.field_behavior) = REQUIRED];
   plexspaces.common.v1.QoSLevel qos = 3;
@@ -341,7 +349,7 @@ message Transaction {
     (buf.validate.field).string.max_len = 255
   ];
   IsolationLevel isolation_level = 2;
-  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
   google.protobuf.Timestamp created_at = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
   TransactionState state = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
@@ -377,7 +385,10 @@ message WriteRequest {
 
   repeated Tuple tuples = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).repeated = {min_items: 1, max_items: 10000}  // At least 1, max 10K tuples
+    (buf.validate.field).repeated = {
+      min_items: 1
+      max_items: 10000
+    } /* At least 1, max 10K tuples */
   ];
   string transaction_id = 2 [(buf.validate.field).string.max_len = 255];
 }
@@ -396,10 +407,13 @@ message ReadRequest {
   };
 
   Tuple template = 1 [(google.api.field_behavior) = REQUIRED];
-  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
   bool blocking = 3;
   bool take = 4; // true for take operations
-  int32 max_results = 5 [(buf.validate.field).int32 = {gte: 1, lte: 10000}];  // 1 to 10K results
+  int32 max_results = 5 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 10000
+  }]; // 1 to 10K results
   string transaction_id = 6 [(buf.validate.field).string.max_len = 255];
   SpatialRegion spatial_filter = 7;
 }
@@ -504,7 +518,10 @@ message UnsubscribeRequest {
 
   string subscription_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -517,7 +534,7 @@ message BeginTransactionRequest {
   };
 
   IsolationLevel isolation_level = 1;
-  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600];  // Max 1 hour
+  google.protobuf.Duration timeout = 2 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour
 }
 
 message BeginTransactionResponse {
@@ -535,7 +552,10 @@ message CommitTransactionRequest {
 
   string transaction_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -554,7 +574,10 @@ message AbortTransactionRequest {
 
   string transaction_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
 }
 
@@ -573,9 +596,12 @@ message RenewLeaseRequest {
 
   string tuple_id = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 255}
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
   ];
-  google.protobuf.Duration new_ttl = 2 [(buf.validate.field).duration.lte.seconds = 2592000];  // Max 30 days
+  google.protobuf.Duration new_ttl = 2 [(buf.validate.field).duration.lte.seconds = 2592000]; // Max 30 days
 }
 
 message RenewLeaseResponse {
@@ -630,7 +656,7 @@ message TupleSpaceConfig {
 
   // Default TTL in seconds for tuples with leases
   // 0 = no default TTL (tuples must specify their own)
-  uint64 default_ttl_seconds = 1 [(buf.validate.field).uint64.lte = 2592000];  // Max 30 days
+  uint64 default_ttl_seconds = 1 [(buf.validate.field).uint64.lte = 2592000]; // Max 30 days
 
   // Enable pattern matching optimizations (indexing)
   bool enable_indexing = 2;
@@ -638,9 +664,7 @@ message TupleSpaceConfig {
 
 // TupleSpace service
 service TupleSpaceService {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
-    description: "Service for Linda-style tuplespace operations"
-  };
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {description: "Service for Linda-style tuplespace operations"};
 
   // Write tuples
   rpc Write(WriteRequest) returns (WriteResponse) {
@@ -725,9 +749,7 @@ service TupleSpaceService {
 
   // Unsubscribe from tuple events
   rpc Unsubscribe(UnsubscribeRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      delete: "/api/v1/tuplespace/subscriptions/{subscription_id}"
-    };
+    option (google.api.http) = {delete: "/api/v1/tuplespace/subscriptions/{subscription_id}"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Unsubscribe from Events"
       description: "Unsubscribe from tuple events"
@@ -776,9 +798,7 @@ service TupleSpaceService {
 
   // Clear tuplespace
   rpc Clear(plexspaces.common.v1.Empty) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      delete: "/api/v1/tuplespace/tuples"
-    };
+    option (google.api.http) = {delete: "/api/v1/tuplespace/tuples"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Clear TupleSpace"
       description: "Clear all tuples from the tuplespace"
@@ -835,9 +855,7 @@ service TupleSpaceService {
   // }
   // ```
   rpc GetStats(plexspaces.common.v1.Empty) returns (GetStatsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/tuplespace/stats"
-    };
+    option (google.api.http) = {get: "/api/v1/tuplespace/stats"};
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Get Storage Statistics"
       description: "Retrieve TupleSpace storage performance and usage statistics"
@@ -845,4 +863,3 @@ service TupleSpaceService {
     };
   }
 }
-

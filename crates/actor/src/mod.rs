@@ -2051,13 +2051,11 @@ impl Actor {
             let behavior_kind = behavior_guard.behavior_kind();
             drop(behavior_guard);
             let actor_type = match behavior_type {
-                plexspaces_core::BehaviorType::GenServer => Some("GenServer".to_string()),
-                plexspaces_core::BehaviorType::GenEvent => Some("GenEvent".to_string()),
-                plexspaces_core::BehaviorType::GenStateMachine => {
-                    Some("GenStateMachine".to_string())
-                }
-                plexspaces_core::BehaviorType::Workflow => Some("Workflow".to_string()),
-                plexspaces_core::BehaviorType::Custom(s) => Some(s),
+                plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
+                plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
+                plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+                plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
+                plexspaces_core::BehaviorType::Custom(s) => s,
             };
 
             // Register actor in registry with type information for dashboard
@@ -3265,28 +3263,13 @@ mod tests {
     }
 }
 
-// Implement ActorStateFetcher trait for Actor to allow state fetching from plexspaces_core
-//
-// ## Purpose
-// This implementation allows `plexspaces_core` to fetch actor state without importing `Actor` directly.
-// This breaks the circular dependency between `plexspaces_core` and `plexspaces_actor`.
-//
-// ## Usage
-// The trait is used by:
-// - `ActorRegistry::get_actor_state()` - gets actor instance state
-// - `ActorRegistry::is_actor_state_active()` - checks if actor state is Active
-// - `VirtualActorManager::is_active()` - checks if virtual actor is active (state is Active)
-//
-// ## Implementation
-// Returns the actor's current state as a proto `ActorState` enum value.
-// This is consistent for all actor types (regular/virtual/workflows/etc.).
+// Implement ActorHandle trait for Actor so that ActorRegistry can check state,
+// access the mailbox, and stop the actor without importing Actor directly.
 #[async_trait::async_trait]
-impl plexspaces_core::ActorStateFetcher for Actor {
-    async fn get_state(&self) -> i32 {
+impl plexspaces_core::ActorHandle for Actor {
+    async fn actor_state(&self) -> i32 {
         use crate::ActorState;
         use plexspaces_proto::v1::actor::ActorState as ProtoActorState;
-
-        // Convert ActorState to proto enum value
         match self.state().await {
             ActorState::Unspecified => ProtoActorState::ActorStateUnspecified as i32,
             ActorState::Creating => ProtoActorState::ActorStateCreating as i32,
@@ -3300,42 +3283,14 @@ impl plexspaces_core::ActorStateFetcher for Actor {
             ActorState::Terminated => ProtoActorState::ActorStateTerminated as i32,
         }
     }
-}
 
-/// Register callback for state fetching
-///
-/// ## Purpose
-/// Registers a callback that allows `plexspaces_core` to fetch actor state without importing `Actor` directly.
-/// The callback uses `Arc::downcast` to get the concrete `Actor` type, then calls the `ActorStateFetcher::get_state()`
-/// trait method.
-///
-/// ## Usage
-/// This should be called during initialization (e.g., in `NodeBuilder::build()` or similar) to register the callback.
-/// The callback is used by `ActorRegistry::get_actor_state()` and `ActorRegistry::is_actor_state_active()`.
-///
-/// ## Implementation
-/// The callback uses the `ActorStateFetcher` trait to fetch state. This allows `plexspaces_core` to check
-/// actor state without circular dependencies. This is consistent for all actor types (regular/virtual/workflows/etc.).
-pub fn register_state_fetcher_callback() {
-    use plexspaces_core::ActorStateFetcher;
-    use std::future::Future;
-    use std::pin::Pin;
-    use std::sync::Arc;
-
-    plexspaces_core::actor_state_checker::register_state_fetcher_callback(
-        |instance: &Arc<dyn std::any::Any + Send + Sync>| {
-            let instance_clone = instance.clone();
-            Box::pin(async move {
-                // Try to downcast to Actor Arc (we can import Actor here)
-                if let Ok(actor_arc) = Arc::downcast::<Actor>(instance_clone) {
-                    // Call the trait method to get state
-                    let state_value = actor_arc.get_state().await;
-                    Some(state_value)
-                } else {
-                    tracing::warn!("[ACTOR_STATE_FETCHER] Failed to downcast to Actor");
-                    None
-                }
-            }) as Pin<Box<dyn Future<Output = Option<i32>> + Send>>
-        },
-    );
+    async fn stop_actor(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Mark as Stopping so the message loop drops new messages
+        *self.state.write().await = ActorState::Stopping;
+        // Send the shutdown signal — mpsc::Sender is Clone so we can send from &self
+        if let Some(tx) = self.shutdown_tx.as_ref() {
+            let _ = tx.send(()).await;
+        }
+        Ok(())
+    }
 }

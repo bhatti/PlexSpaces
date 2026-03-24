@@ -111,12 +111,16 @@ pub async fn is_actor_local(
     false
 }
 
-/// Generic ask helper: register waiter, set message sender/correlation, lookup target, send via tell(), wait for reply.
+/// Generic ask helper for shared temporary-sender fanout operations.
 /// Returns a Future for parallel operations (map/reduce).
 ///
 /// ## Purpose
-/// Unified ask pattern implementation that can be used by both ActorRef and ActorService.
-/// Caller is responsible for creating temp sender and calling cleanup_ask_resources after (success or error).
+/// `ActorRegistry::ask()` is the standard local ask path for one request/one temporary sender.
+/// This helper is reserved for shard-group fanout paths that intentionally reuse one temporary
+/// sender while tracking one `ReplyWaiter` per correlation id.
+///
+/// Caller is responsible for creating and cleaning up the shared temporary sender. This helper
+/// owns per-correlation waiter registration and removal.
 ///
 /// ## Arguments
 /// * `ctx` - RequestContext with tenant_id and namespace (required for proper isolation) - FIRST PARAMETER
@@ -171,51 +175,56 @@ pub fn ask_helper(
             .actor_registry()
             .await
             .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry not available".to_string()))?;
-        let sender = match registry.lookup_actor(&target_actor_id).await {
-            Some(s) => s,
+        let is_local = match registry.lookup_actor(&target_actor_id).await {
+            Some(_) => true,
             None => {
-                // Actor not local: try remote if actor_id has node_id and it is not the local node.
-                // Enables ScatterGather and ask() to reach shards on other nodes (ConnectNodes registers nodes in ObjectRegistry).
                 let (_, node_id_opt) = extract_node_id(&target_actor_id);
-                if let Some(node_id) = node_id_opt {
-                    let local_node_id = registry.local_node_id().to_string();
-                    if node_id != local_node_id {
-                        waiter_registry.remove(&correlation_id).await;
-                        match route_remote(
-                            ctx,
-                            service_locator,
-                            node_id,
-                            target_actor_id.clone(),
-                            message,
-                            true,
-                            Some(timeout),
-                        )
-                        .await
-                        {
-                            Ok((_, Some(reply))) => return Ok(reply),
-                            Ok((_, None)) => {
-                                return Err(ActorRefError::SendFailed(
-                                    "Remote ask returned no reply".to_string(),
-                                ))
-                            }
-                            Err(e) => return Err(e),
-                        }
-                    }
+                match node_id_opt {
+                    Some(node_id) => node_id == registry.local_node_id(),
+                    None => true,
                 }
-                waiter_registry.remove(&correlation_id).await;
-                return Err(ActorRefError::ActorNotFound(target_actor_id.clone()));
             }
         };
 
-        if let Err(e) = sender.tell(message).await {
+        if !is_local {
+            let (_, node_id_opt) = extract_node_id(&target_actor_id);
+            if let Some(node_id) = node_id_opt {
+                waiter_registry.remove(&correlation_id).await;
+                match route_remote(
+                    ctx,
+                    service_locator,
+                    node_id,
+                    target_actor_id.clone(),
+                    message,
+                    true,
+                    Some(timeout),
+                )
+                .await
+                {
+                    Ok((_, Some(reply))) => return Ok(reply),
+                    Ok((_, None)) => {
+                        return Err(ActorRefError::SendFailed(
+                            "Remote ask returned no reply".to_string(),
+                        ))
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+
+        if let Err(e) = registry.tell(&target_actor_id, message).await {
             waiter_registry.remove(&correlation_id).await;
-            return Err(ActorRefError::SendFailed(format!(
-                "Failed to send message: {}",
-                e
-            )));
+            return Err(match e {
+                plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
+                    ActorRefError::ActorNotFound(id)
+                }
+                plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
+                other => ActorRefError::SendFailed(other.to_string()),
+            });
         }
 
         let result = waiter.wait(timeout).await;
+        waiter_registry.remove(&correlation_id).await;
         match &result {
             Ok(reply) => {
                 tracing::debug!(
@@ -272,24 +281,10 @@ pub fn route_local(
         let start = std::time::Instant::now();
         let message_id = message.id.clone();
 
-        // Look up MessageSender from ActorRegistry
         let actor_registry = service_locator
             .actor_registry()
             .await
             .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry not available".to_string()))?;
-
-        // Try constructed actor_id first, then original receiver_id
-        let sender = if let Some(s) = actor_registry.lookup_actor(&actor_id).await {
-            s
-        } else if message.receiver_id != actor_id {
-            // Try lookup with original receiver ID (may have different node_id)
-            actor_registry
-                .lookup_actor(&message.receiver_id)
-                .await
-                .ok_or_else(|| ActorRefError::ActorNotFound(actor_id.clone()))?
-        } else {
-            return Err(ActorRefError::ActorNotFound(actor_id.clone()));
-        };
 
         // OBSERVABILITY: Track duration
         let duration = start.elapsed();
@@ -297,65 +292,17 @@ pub fn route_local(
             .record(duration.as_secs_f64());
 
         if wait_for_response {
-            // ASK PATTERN: Use ask_helper for unified routing
             let timeout_duration = timeout.unwrap_or(Duration::from_secs(5));
-
-            // Generate unique correlation_id and temp_sender_id
-            let correlation_id = Ulid::new().to_string();
-
-            // Get local node ID for temp_sender_id
-            let local_node_id = if let Some(node_config) = service_locator.get_node_config().await {
-                node_config.id
-            } else if let Some(registry) = service_locator.actor_registry().await {
-                registry.local_node_id().to_string()
-            } else {
-                return Err(ActorRefError::SendFailed(
-                    "Cannot determine local node ID".to_string(),
-                ));
-            };
-
-            use plexspaces_core::TEMP_SENDER_PREFIX;
-            let temp_sender_id = format!(
-                "{}-{}@{}",
-                TEMP_SENDER_PREFIX, correlation_id, local_node_id
-            );
-            let expires_at = std::time::Instant::now() + (timeout_duration * 2);
-
-            // Create temporary sender via ActorFactory
-            if let Some(factory) = service_locator.get_actor_factory().await {
-                let create_result = factory
-                    .create_temporary_sender(
-                        &ctx,
-                        temp_sender_id.clone(),
-                        correlation_id.clone(),
-                        expires_at,
-                    )
-                    .await;
-                create_result.map_err(|e| {
-                    ActorRefError::SendFailed(format!("Failed to create temporary sender: {}", e))
-                })?;
-            } else {
-                return Err(ActorRefError::SendFailed(
-                    "ActorFactory not found in ServiceLocator".to_string(),
-                ));
-            }
-
-            // Use ask_helper for unified routing (returns Future)
-            let result = ask_helper(
-                ctx,
-                service_locator.clone(),
-                actor_id.clone(),
-                message,
-                temp_sender_id.clone(),
-                correlation_id.clone(),
-                timeout_duration,
-            )
-            .await;
-
-            // Cleanup temporary sender
-            if let Some(registry) = service_locator.actor_registry().await {
-                registry.remove_temporary_sender(&temp_sender_id).await;
-            }
+            let result = actor_registry
+                .ask(&ctx, &actor_id, message, timeout_duration)
+                .await
+                .map_err(|e| match e {
+                    plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
+                        ActorRefError::ActorNotFound(id)
+                    }
+                    plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
+                    other => ActorRefError::SendFailed(other.to_string()),
+                });
 
             // Update metrics
             match &result {
@@ -389,11 +336,16 @@ pub fn route_local(
 
             result.map(|reply| (message_id, Some(reply)))
         } else {
-            // TELL PATTERN: Use MessageSender::tell() directly
-            let result = sender
-                .tell(message)
+            let result = actor_registry
+                .tell(&actor_id, message)
                 .await
-                .map_err(|e| ActorRefError::SendFailed(format!("Failed to send message: {}", e)));
+                .map_err(|e| match e {
+                    plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
+                        ActorRefError::ActorNotFound(id)
+                    }
+                    plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
+                    other => ActorRefError::SendFailed(other.to_string()),
+                });
 
             // Update metrics
             if let Some(accessor) = service_locator.get_node_metrics_accessor().await {

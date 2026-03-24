@@ -215,7 +215,8 @@ async fn node_service_connect_nodes_registers_seed_addresses_in_cluster_view(
 #[tokio::test]
 async fn node_service_seed_registration_upserts_to_concrete_node_and_supports_id_and_address_lookup(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (addr, registry) = start_node_service_server_with_registry("node-connect-upsert", "heat").await?;
+    let (addr, registry) =
+        start_node_service_server_with_registry("node-connect-upsert", "heat").await?;
     let endpoint = format!("http://127.0.0.1:{}", addr.port());
     let mut client = NodeServiceClient::connect(endpoint).await?;
 
@@ -230,8 +231,9 @@ async fn node_service_seed_registration_upserts_to_concrete_node_and_supports_id
         }))
         .await?;
 
-    let ctx = plexspaces_common::RequestContext::new_without_auth(String::new(), "heat".to_string())
-        .with_admin(true);
+    let ctx =
+        plexspaces_common::RequestContext::new_without_auth(String::new(), "heat".to_string())
+            .with_admin(true);
     registry
         .register_node(
             &ctx,

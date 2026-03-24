@@ -152,7 +152,7 @@ mod tests {
                     &ctx,
                     "test@node1".to_string(),
                     sender,
-                    None,
+                    "TestActor".to_string(),
                     None,
                     None,
                     None,

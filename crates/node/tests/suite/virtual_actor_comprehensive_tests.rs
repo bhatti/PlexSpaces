@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use plexspaces_actor::{Actor as ActorStruct, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::Message;
+use plexspaces_core::ServiceLocator;
 use plexspaces_core::{
     Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
 };
@@ -290,7 +291,7 @@ async fn test_lazy_activation_pending_messages_processed() {
 
     // Send multiple messages rapidly - should queue during activation
     // Send messages via ActorRef to trigger activation
-    // Activation is synchronous (VirtualActorWrapper.tell() awaits activate_virtual_actor())
+    // Activation is synchronous through registry-owned local tell() and virtual activation
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     for _ in 0..5 {
         let msg = create_test_message_with_type(
@@ -351,7 +352,7 @@ async fn test_lazy_activation_activation_failure_handling() {
     let result = actor_ref.tell(activate_msg).await;
     assert!(result.is_ok(), "Activation should succeed");
 
-    // Activation is synchronous - VirtualActorWrapper.tell() awaits activate_virtual_actor()
+    // Activation is synchronous through registry-owned local tell() and virtual activation
     // Now use ActorRef for ask() pattern
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
 
@@ -436,12 +437,12 @@ async fn test_lazy_activation_tell_then_ask() {
     .await
     .unwrap();
 
-    // Get ActorRef (will be VirtualActorWrapper for lazy virtual actors)
+    // Get sender for a lazy virtual actor before first activation
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
 
     // Send tell() - should activate synchronously
-    // VirtualActorWrapper.tell() awaits activate_virtual_actor() which is synchronous
-    // After activation, VirtualActorWrapper is replaced by ActorRef in registry
+    // Local tell() triggers synchronous activation through the registry
+    // After activation, the running sender is registered in the actor registry
     let tell_msg =
         create_test_message_with_type(serde_json::to_vec(&TestMessage::Increment).unwrap(), "cast");
     eprintln!(
@@ -452,8 +453,7 @@ async fn test_lazy_activation_tell_then_ask() {
     eprintln!("🟢 [TEST] tell() completed: actor_id={}", actor_id);
 
     // Activation is synchronous - actor is ready immediately after tell() returns
-    // VirtualActorWrapper is replaced by ActorRef in registry after activation
-    // Get fresh ActorRef from registry (will be ActorRef, not VirtualActorWrapper)
+    // Get fresh sender from the registry after activation
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
     eprintln!(
         "🟢 [TEST] Got fresh ActorRef after tell(): actor_id={}",
@@ -1080,7 +1080,15 @@ async fn test_virtual_actor_manual_deactivation() {
     assert!(is_active, "Actor should be active");
 
     // Manually deactivate
-    node.deactivate_virtual_actor(&actor_id, false)
+    let stop_ctx = node
+        .service_locator()
+        .request_context_for_system_operations()
+        .await;
+    node.service_locator()
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&stop_ctx, &actor_id)
         .await
         .unwrap();
 
@@ -1593,7 +1601,15 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
     eprintln!("🟢 [TEST] Created checkpoint with count=3");
 
     // Suspend the actor
-    node.deactivate_virtual_actor(&actor_id, false)
+    let stop_ctx = node
+        .service_locator()
+        .request_context_for_system_operations()
+        .await;
+    node.service_locator()
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&stop_ctx, &actor_id)
         .await
         .unwrap();
 
@@ -1808,7 +1824,15 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
     eprintln!("🟢 [TEST] Created checkpoint with count=5");
 
     // Suspend the actor
-    node.deactivate_virtual_actor(&actor_id, false)
+    let stop_ctx = node
+        .service_locator()
+        .request_context_for_system_operations()
+        .await;
+    node.service_locator()
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&stop_ctx, &actor_id)
         .await
         .unwrap();
 
@@ -1957,7 +1981,7 @@ async fn test_lazy_activation_ask_directly() {
     .await
     .unwrap();
 
-    // Get ActorRef (will be VirtualActorWrapper)
+    // Get sender before activation
     let actor_ref = lookup_actor_ref(&node, &actor_id).await.unwrap().unwrap();
 
     // Send ask() directly - should activate and respond
@@ -2046,10 +2070,7 @@ async fn test_virtual_actor_implicit_activation() {
     let behavior = CounterActor::new();
 
     let mut mailbox_config = MailboxConfig::default();
-    mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
     mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
-    mailbox_config.durability_strategy =
-        plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
@@ -2109,10 +2130,7 @@ async fn test_virtual_actor_idle_deactivation() {
     let behavior = CounterActor::new();
 
     let mut mailbox_config = MailboxConfig::default();
-    mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
     mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
-    mailbox_config.durability_strategy =
-        plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
@@ -2172,10 +2190,7 @@ async fn test_virtual_actor_pending_messages() {
     let behavior = CounterActor::new();
 
     let mut mailbox_config = MailboxConfig::default();
-    mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
     mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
-    mailbox_config.durability_strategy =
-        plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
@@ -2227,10 +2242,7 @@ async fn test_activate_actor_manual() {
     let behavior = CounterActor::new();
 
     let mut mailbox_config = MailboxConfig::default();
-    mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
     mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
-    mailbox_config.durability_strategy =
-        plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
@@ -2274,10 +2286,7 @@ async fn test_deactivate_actor_manual() {
     let behavior = CounterActor::new();
 
     let mut mailbox_config = MailboxConfig::default();
-    mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
     mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
-    mailbox_config.durability_strategy =
-        plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
@@ -2313,7 +2322,15 @@ async fn test_deactivate_actor_manual() {
     assert!(is_active, "Actor should be active");
 
     // Manually deactivate
-    node.deactivate_virtual_actor(&actor_id5, false)
+    let stop_ctx = node
+        .service_locator()
+        .request_context_for_system_operations()
+        .await;
+    node.service_locator()
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&stop_ctx, &actor_id5)
         .await
         .unwrap();
 

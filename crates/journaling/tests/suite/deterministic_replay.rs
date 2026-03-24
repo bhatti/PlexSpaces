@@ -10,12 +10,12 @@
 
 #[cfg(any(feature = "sqlite-backend", feature = "postgres-backend"))]
 mod sqlite_tests {
-    use plexspaces_journaling::*;
-    #[cfg(feature = "sqlite-backend")]
-    use plexspaces_journaling::sql::SqliteJournalStorage;
+    use plexspaces_facet::Facet;
     #[cfg(feature = "postgres-backend")]
     use plexspaces_journaling::sql::PostgresJournalStorage;
-    use plexspaces_facet::Facet;
+    #[cfg(feature = "sqlite-backend")]
+    use plexspaces_journaling::sql::SqliteJournalStorage;
+    use plexspaces_journaling::*;
     use plexspaces_proto::prost_types;
     use std::sync::Arc;
     use std::time::SystemTime;
@@ -28,8 +28,9 @@ mod sqlite_tests {
 
     #[cfg(all(feature = "postgres-backend", not(feature = "sqlite-backend")))]
     async fn create_test_storage() -> Arc<dyn JournalStorage> {
-        let db_url = std::env::var("TEST_POSTGRES_URL")
-            .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost/plexspaces_test".to_string());
+        let db_url = std::env::var("TEST_POSTGRES_URL").unwrap_or_else(|_| {
+            "postgresql://postgres:postgres@localhost/plexspaces_test".to_string()
+        });
         Arc::new(PostgresJournalStorage::new(&db_url).await.unwrap())
     }
 
@@ -62,23 +63,26 @@ mod sqlite_tests {
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
         let backend = JournalBackend::JournalBackendPostgres as i32;
-        
+
         let config = DurabilityConfig {
             backend,
-        checkpoint_interval: 1000, // No checkpointing for this test
-        checkpoint_timeout: None,
-        replay_on_activation: true,
-        cache_side_effects: true,
-        compression: CompressionType::CompressionTypeNone as i32,
-        backend_config: None,
-        state_schema_version: 1,
-    };
+            checkpoint_interval: 1000, // No checkpointing for this test
+            checkpoint_timeout: None,
+            replay_on_activation: true,
+            cache_side_effects: true,
+            compression: CompressionType::CompressionTypeNone as i32,
+            backend_config: None,
+            state_schema_version: 1,
+        };
 
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-actor-1";
 
         // Phase 1: Normal execution - process 3 messages
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Simulate processing 3 messages
         for i in 1..=3 {
@@ -113,7 +117,10 @@ mod sqlite_tests {
 
         // Create new facet instance (simulating actor restart)
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Phase 3: Verify replay occurred
         // The execution context should be restored with side effects cached
@@ -144,7 +151,7 @@ mod sqlite_tests {
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
         let backend = JournalBackend::JournalBackendPostgres as i32;
-        
+
         let config = DurabilityConfig {
             backend,
             checkpoint_interval: 50, // Checkpoint every 50 messages
@@ -159,7 +166,10 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-actor-2";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process 100 messages
         for i in 1..=100 {
@@ -174,7 +184,7 @@ mod sqlite_tests {
             if i == 50 {
                 // Flush to ensure all entries are written before checkpoint
                 storage.flush().await.unwrap();
-                
+
                 // Manually trigger checkpoint (normally done by CheckpointManager)
                 // At message 50, we have 100 entries (50 messages * 2 entries each)
                 let checkpoint = Checkpoint {
@@ -189,7 +199,7 @@ mod sqlite_tests {
                 storage.save_checkpoint(&checkpoint).await.unwrap();
             }
         }
-        
+
         // Flush after all messages to ensure entries are written
         storage.flush().await.unwrap();
 
@@ -199,16 +209,26 @@ mod sqlite_tests {
         // But automatic checkpointing at sequence 200 (checkpoint_interval=50) will create a new checkpoint
         // The latest checkpoint will be at sequence 200
         let latest_checkpoint = storage.get_latest_checkpoint(actor_id).await.unwrap();
-        assert!(latest_checkpoint.sequence >= 100, "Checkpoint should be at sequence >= 100");
+        assert!(
+            latest_checkpoint.sequence >= 100,
+            "Checkpoint should be at sequence >= 100"
+        );
 
         // Verify all entries exist (200 entries total)
         let all_entries = storage.replay_from(actor_id, 0).await.unwrap();
-        assert_eq!(all_entries.len(), 200, "Should have 200 entries (100 messages * 2)");
+        assert_eq!(
+            all_entries.len(),
+            200,
+            "Should have 200 entries (100 messages * 2)"
+        );
 
         // Restart actor
         facet.on_detach(actor_id).await.unwrap();
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Verify entries still exist after restart
         let entries_after_restart = storage.replay_from(actor_id, 0).await.unwrap();
@@ -217,12 +237,11 @@ mod sqlite_tests {
             200,
             "Should have all 200 entries after restart"
         );
-        
+
         // Verify checkpoint still exists
         let checkpoint_after_restart = storage.get_latest_checkpoint(actor_id).await.unwrap();
         assert_eq!(
-            checkpoint_after_restart.sequence,
-            latest_checkpoint.sequence,
+            checkpoint_after_restart.sequence, latest_checkpoint.sequence,
             "Checkpoint should persist after restart"
         );
     }
@@ -241,7 +260,7 @@ mod sqlite_tests {
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
         let backend = JournalBackend::JournalBackendPostgres as i32;
-        
+
         let config = DurabilityConfig {
             backend,
             checkpoint_interval: 1000,
@@ -256,7 +275,10 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-actor-3";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Record a side effect by processing a message that triggers a side effect
         // In a real implementation, the actor would call ctx.record_side_effect()
@@ -289,7 +311,11 @@ mod sqlite_tests {
             .filter(|e| {
                 matches!(
                     e.entry,
-                    Some(plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(_))
+                    Some(
+                        plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(
+                            _
+                        )
+                    )
                 )
             })
             .collect();
@@ -302,7 +328,10 @@ mod sqlite_tests {
         // Restart actor
         facet.on_detach(actor_id).await.unwrap();
         let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // In replay mode, side effect should be cached (not re-executed)
         // Verify by checking that the side effect entry exists in journal
@@ -312,7 +341,11 @@ mod sqlite_tests {
             .filter(|e| {
                 matches!(
                     e.entry,
-                    Some(plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(_))
+                    Some(
+                        plexspaces_proto::v1::journaling::journal_entry::Entry::SideEffectExecuted(
+                            _
+                        )
+                    )
                 )
             })
             .collect();
@@ -336,7 +369,7 @@ mod sqlite_tests {
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
         let backend = JournalBackend::JournalBackendPostgres as i32;
-        
+
         let config = DurabilityConfig {
             backend,
             checkpoint_interval: 1000,
@@ -352,7 +385,10 @@ mod sqlite_tests {
         let actor_id = "new-actor";
 
         // Attach to new actor (no journal entries)
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Should succeed and create new execution context
         // Verify by checking that we can process a message
@@ -372,7 +408,7 @@ mod sqlite_tests {
         let backend = JournalBackend::JournalBackendSqlite as i32;
         #[cfg(feature = "postgres-backend")]
         let backend = JournalBackend::JournalBackendPostgres as i32;
-        
+
         let config = DurabilityConfig {
             backend,
             checkpoint_interval: 10,
@@ -387,7 +423,10 @@ mod sqlite_tests {
         let mut facet = DurabilityFacet::new(storage.clone(), config_to_value(&config), 50);
         let actor_id = "test-actor-4";
 
-        facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Process some messages
         for i in 1..=5 {
@@ -411,10 +450,10 @@ mod sqlite_tests {
             "Should have 10 entries before restart (5 messages * 2 entries), got {}",
             entries_before.len()
         );
-        
+
         // Restart actor
         facet.on_detach(actor_id).await.unwrap();
-        
+
         // Create new config for restart (use SQLite backend)
         let restart_config = DurabilityConfig {
             backend: JournalBackend::JournalBackendSqlite as i32,
@@ -426,10 +465,14 @@ mod sqlite_tests {
             backend_config: None,
             state_schema_version: 1,
         };
-        let mut new_facet = DurabilityFacet::new(storage.clone(), config_to_value(&restart_config), 50);
-        
+        let mut new_facet =
+            DurabilityFacet::new(storage.clone(), config_to_value(&restart_config), 50);
+
         // Should succeed even without checkpoint (replay from beginning)
-        new_facet.on_attach(actor_id, serde_json::json!({})).await.unwrap();
+        new_facet
+            .on_attach(actor_id, serde_json::json!({}))
+            .await
+            .unwrap();
 
         // Verify all entries are still in journal (they should persist)
         // Use replay_from(actor_id, 0) to get all entries (sequence >= 0)
@@ -442,4 +485,3 @@ mod sqlite_tests {
         );
     }
 }
-

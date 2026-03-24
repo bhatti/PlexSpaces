@@ -39,6 +39,27 @@ pub fn app_request_with_tenant<T: Send>(body: T) -> Request<T> {
     req
 }
 
+fn parse_node_id(actor_id: &ActorId) -> Option<String> {
+    plexspaces_core::actor_id::parse_actor_id(actor_id)
+        .ok()
+        .map(|parsed| parsed.node_id)
+}
+
+async fn actor_exists_locally(actor_registry: &ActorRegistry, actor_id: &ActorId) -> bool {
+    if actor_registry.lookup_actor(actor_id).await.is_some() {
+        return true;
+    }
+    if actor_registry
+        .registered_actor_ids()
+        .read()
+        .await
+        .contains(actor_id)
+    {
+        return true;
+    }
+    false
+}
+
 /// Lookup ActorRef for an actor (replaces Node::lookup_actor_ref)
 pub async fn lookup_actor_ref(
     node: &Node,
@@ -56,123 +77,23 @@ pub async fn lookup_actor_ref(
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
 
-    // Check if MessageSender exists in registry (lookup_actor returns MessageSender)
-    // For local actors, the MessageSender is an ActorRef, but we can't downcast it directly
-    // Instead, we'll use the routing info to determine if it's local, then create the appropriate ActorRef
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
-        "default".to_string(),
-        "default".to_string(),
-    );
-    let routing = actor_registry
-        .lookup_routing(&ctx, &actor_id)
-        .await
-        .map_err(|_e| {
-            plexspaces_node::NodeError::ActorRefCreationFailed(
-                actor_id.clone(),
-                "Failed to lookup routing".to_string(),
-            )
-        })?;
-
-    if let Some(routing_info) = routing {
-        if routing_info.is_local {
-            // Local actor - check if it exists in registry
-            if let Some(message_sender) = actor_registry.lookup_actor(&actor_id).await {
-                // CRITICAL: Check if MessageSender is VirtualActorWrapper (lazy/suspended virtual actor)
-                // For lazy virtual actors that aren't active, we need to route through VirtualActorWrapper
-                // VirtualActorWrapper.tell() will activate the actor automatically
-                // Use type_name to check if it's VirtualActorWrapper (hacky but works without as_any())
-                let type_name = std::any::type_name_of_val(&*message_sender);
-                if type_name.contains("VirtualActorWrapper") {
-                    // VirtualActorWrapper found - actor is registered but not active
-                    // Return remote ActorRef which will route through VirtualActorWrapper.tell() for activation
-                    // This ensures lazy activation works correctly
-                    Ok(Some(ActorRef::remote(
-                        actor_id.clone(),
-                        "".to_string(), // test namespace
-                        node.id().as_str().to_string(),
-                        node.service_locator().clone(),
-                    )))
-                } else {
-                    // ActorRef found - actor is active, get mailbox from actor instance
-                    if let Some(actor_instance) = actor_registry.get_actor_instance(&actor_id).await
-                    {
-                        use plexspaces_actor::Actor;
-                        if let Some(actor) =
-                            actor_instance.downcast_ref::<plexspaces_actor::Actor>()
-                        {
-                            // Get mailbox from actor (works for active actors)
-                            let mailbox = actor.mailbox().clone();
-                            Ok(Some(ActorRef::local(
-                                actor_id.clone(),
-                                "".to_string(), // test namespace
-                                mailbox,
-                                node.service_locator().clone(),
-                            )))
-                        } else {
-                            // Can't get mailbox - return remote ActorRef as fallback
-                            Ok(Some(ActorRef::remote(
-                                actor_id.clone(),
-                                "".to_string(), // test namespace
-                                node.id().as_str().to_string(),
-                                node.service_locator().clone(),
-                            )))
-                        }
-                    } else {
-                        // No actor instance but MessageSender exists - return remote ActorRef
-                        Ok(Some(ActorRef::remote(
-                            actor_id.clone(),
-                            "".to_string(), // test namespace
-                            node.id().as_str().to_string(),
-                            node.service_locator().clone(),
-                        )))
-                    }
-                }
-            } else {
-                Ok(None)
-            }
-        } else {
-            // Remote actor
-            Ok(Some(ActorRef::remote(
-                actor_id.clone(),
-                "".to_string(), // test namespace
-                routing_info.node_id,
-                node.service_locator().clone(),
-            )))
-        }
-    } else if actor_registry.lookup_actor(&actor_id).await.is_some() {
-        // Actor exists but no routing info - assume local
+    if actor_exists_locally(&actor_registry, &actor_id).await {
         Ok(Some(ActorRef::remote(
             actor_id.clone(),
-            "".to_string(), // test namespace
+            "".to_string(),
+            "".to_string(),
             node.id().as_str().to_string(),
             node.service_locator().clone(),
         )))
     } else {
-        // Check routing for remote actors
-        let ctx = plexspaces_core::RequestContext::new_without_auth(
-            "default".to_string(),
-            "default".to_string(),
-        );
-        let routing = actor_registry
-            .lookup_routing(&ctx, &actor_id)
-            .await
-            .map_err(|e| {
-                plexspaces_node::NodeError::ActorRefCreationFailed(actor_id.clone(), e.to_string())
-            })?;
-
-        if let Some(routing_info) = routing {
-            if routing_info.is_local {
-                // Local actor but no Actor trait - actor doesn't exist
-                Ok(None)
-            } else {
-                // Remote actor
-                Ok(Some(ActorRef::remote(
-                    actor_id.clone(),
-                    String::new(),
-                    routing_info.node_id,
-                    node.service_locator().clone(),
-                )))
-            }
+        let node_id = parse_node_id(&actor_id).unwrap_or_else(|| node.id().as_str().to_string());
+        if node_id != node.id().as_str() {
+            Ok(Some(ActorRef::remote(
+                actor_id.clone(),
+                String::new(),
+                node_id,
+                node.service_locator().clone(),
+            )))
         } else {
             Ok(None)
         }
@@ -294,78 +215,15 @@ where
             .await?
             .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.clone()))
     } else {
-        // Check routing for remote actors
-        let ctx = plexspaces_core::RequestContext::new_without_auth(
-            "default".to_string(),
-            "default".to_string(),
-        );
-        let routing = actor_registry
-            .lookup_routing(&ctx, &actor_id)
-            .await
-            .map_err(|e| {
-                plexspaces_node::NodeError::ActorRefCreationFailed(actor_id.clone(), e.to_string())
-            })?;
-
-        if let Some(routing_info) = routing {
-            if routing_info.is_local {
-                // Local actor but not activated - use spawn_built_actor to preserve behavior and facets
-                // spawn_built_actor is the correct choice when we already have a built actor with
-                // custom behavior and facets attached
-                let actor = actor_factory().await?;
-                let mailbox = actor.mailbox().clone();
-
-                // Extract actor_type from behavior
-                let behavior_type = actor.behavior().read().await.behavior_type();
-                let actor_type = match behavior_type {
-                    plexspaces_core::BehaviorType::GenServer => Some("GenServer".to_string()),
-                    plexspaces_core::BehaviorType::GenEvent => Some("GenEvent".to_string()),
-                    plexspaces_core::BehaviorType::GenStateMachine => {
-                        Some("GenStateMachine".to_string())
-                    }
-                    plexspaces_core::BehaviorType::Workflow => Some("Workflow".to_string()),
-                    plexspaces_core::BehaviorType::Custom(ref s) => Some(s.clone()),
-                };
-
-                // Use spawn_actor to create the actor
-                // Note: spawn_actor normalizes the actor ID internally
-                let ctx = plexspaces_core::RequestContext::new_without_auth(
-                    "default".to_string(),
-                    "default".to_string(),
-                );
-                let actor_type_str = actor_type.unwrap_or_else(|| "GenServer".to_string());
-                let _message_sender = actor_factory_trait
-                    .spawn_actor(
-                        &ctx,
-                        &actor_id,
-                        &actor_type_str,
-                        vec![],
-                        None,
-                        std::collections::HashMap::new(),
-                        vec![],
-                    )
-                    .await
-                    .map_err(|e| {
-                        plexspaces_node::NodeError::ConfigError(format!(
-                            "Failed to spawn actor: {}",
-                            e
-                        ))
-                    })?;
-
-                // Registration is synchronous - spawn_built_actor awaits actor.start() which
-                // calls register_in_registry().await, so the actor is already registered.
-                // Get ActorRef from registry to ensure we have the correct ID (normalized)
-                lookup_actor_ref(node, &actor_id)
-                    .await?
-                    .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.clone()))
-            } else {
-                // Remote actor
-                Ok(ActorRef::remote(
-                    actor_id.clone(),
-                    String::new(),
-                    routing_info.node_id,
-                    node.service_locator().clone(),
-                ))
-            }
+        let parsed_node_id =
+            parse_node_id(&actor_id).unwrap_or_else(|| node.id().as_str().to_string());
+        if parsed_node_id != node.id().as_str() {
+            Ok(ActorRef::remote(
+                actor_id.clone(),
+                String::new(),
+                parsed_node_id,
+                node.service_locator().clone(),
+            ))
         } else {
             // Actor doesn't exist - use spawn_built_actor to preserve behavior and facets
             let actor = actor_factory().await?;
@@ -447,7 +305,15 @@ pub async fn register_actor_with_message_sender(
         "default".to_string(),
     );
     actor_registry
-        .register_actor(&ctx, actor_id.to_string(), wrapper, None, None, None, None)
+        .register_actor(
+            &ctx,
+            actor_id.to_string(),
+            wrapper,
+            "TestActor".to_string(),
+            None,
+            None,
+            None,
+        )
         .await;
 }
 
@@ -489,36 +355,17 @@ pub async fn find_actor_helper(
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
 
-    // Check routing info
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
-        "default".to_string(),
-        "default".to_string(),
-    );
-    let routing = actor_registry
-        .lookup_routing(&ctx, &actor_id)
-        .await
-        .map_err(|_e| plexspaces_node::NodeError::ActorNotFound(actor_id.clone()))?;
-
-    if let Some(routing_info) = routing {
-        if routing_info.is_local {
-            // Check if actor is actually activated
-            if actor_registry.is_actor_activated(&actor_id).await {
-                Ok(plexspaces_node::ActorLocation::Local(actor_id.clone()))
-            } else {
-                // Check if it's a virtual actor (use Node's method if available, otherwise skip)
-                // Virtual actors are handled by VirtualActorManager which is accessed via Node
-                // For now, if actor is not activated, it doesn't exist locally
-                Err(plexspaces_node::NodeError::ActorNotFound(actor_id))
-            }
-        } else {
-            // Remote actor
-            Ok(plexspaces_node::ActorLocation::Remote(
-                plexspaces_node::NodeId::from(routing_info.node_id),
-            ))
-        }
+    if actor_exists_locally(&actor_registry, &actor_id).await {
+        Ok(plexspaces_node::ActorLocation::Local(actor_id.clone()))
     } else {
-        // No routing info - actor doesn't exist
-        Err(plexspaces_node::NodeError::ActorNotFound(actor_id))
+        let node_id = parse_node_id(&actor_id).unwrap_or_else(|| node.id().as_str().to_string());
+        if node_id != node.id().as_str() {
+            Ok(plexspaces_node::ActorLocation::Remote(
+                plexspaces_node::NodeId::from(node_id),
+            ))
+        } else {
+            Err(plexspaces_node::NodeError::ActorNotFound(actor_id))
+        }
     }
 }
 

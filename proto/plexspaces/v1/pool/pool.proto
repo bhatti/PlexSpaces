@@ -42,11 +42,12 @@
 syntax = "proto3";
 
 package plexspaces.pool.v1;
-option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/pool/pool;plexspaces_pool_v1";
 
 import "google/api/annotations.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/pool/pool;plexspaces_pool_v1";
 
 // Pool scaling state
 enum ScalingState {
@@ -268,9 +269,7 @@ service PoolService {
 
   // Get pool statistics
   rpc GetStats(GetStatsRequest) returns (GetStatsResponse) {
-    option (google.api.http) = {
-      get: "/api/v1/pools/{pool_name}/stats"
-    };
+    option (google.api.http) = {get: "/api/v1/pools/{pool_name}/stats"};
   }
 
   // Scale pool manually
@@ -307,16 +306,12 @@ service PoolService {
 
   // Delete pool
   rpc DeletePool(DeletePoolRequest) returns (DeletePoolResponse) {
-    option (google.api.http) = {
-      delete: "/api/v1/pools/{pool_name}"
-    };
+    option (google.api.http) = {delete: "/api/v1/pools/{pool_name}"};
   }
 
   // Stream pool metrics (for monitoring)
   rpc StreamMetrics(StreamMetricsRequest) returns (stream PoolMetrics) {
-    option (google.api.http) = {
-      get: "/api/v1/pools/{pool_name}/metrics/stream"
-    };
+    option (google.api.http) = {get: "/api/v1/pools/{pool_name}/metrics/stream"};
   }
 }
 

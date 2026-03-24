@@ -951,14 +951,13 @@ impl GenServer for InitAwareMetricsActor {
         };
 
         if !msg.sender_id.is_empty() {
-            let reply_msg = create_test_proto_message(
-                serde_json::to_vec(&reply_payload).map_err(|e| {
+            let reply_msg =
+                create_test_proto_message(serde_json::to_vec(&reply_payload).map_err(|e| {
                     BehaviorError::ProcessingError(format!(
                         "Failed to serialize metrics payload: {}",
                         e
                     ))
-                })?,
-            );
+                })?);
             ctx.send_reply(
                 if msg.correlation_id.is_empty() {
                     None
@@ -1483,11 +1482,7 @@ async fn test_remote_spawn_actor_uses_request_namespace_for_actor_id() {
         .into_inner();
 
     assert_eq!(
-        response
-            .actor
-            .as_ref()
-            .expect("actor response")
-            .actor_type,
+        response.actor.as_ref().expect("actor response").actor_type,
         "counter"
     );
     assert_ne!(
@@ -1502,19 +1497,11 @@ async fn test_remote_spawn_actor_uses_request_namespace_for_actor_id() {
         response.actor_ref
     );
     assert_eq!(
-        response
-            .actor
-            .as_ref()
-            .expect("actor response")
-            .actor_id,
+        response.actor.as_ref().expect("actor response").actor_id,
         response.actor_ref
     );
     assert_eq!(
-        response
-            .actor
-            .as_ref()
-            .expect("actor response")
-            .namespace,
+        response.actor.as_ref().expect("actor response").namespace,
         "heat-diffusion-rust"
     );
 
@@ -1524,7 +1511,9 @@ async fn test_remote_spawn_actor_uses_request_namespace_for_actor_id() {
         .discover_actors_by_type(&discover_ctx, "counter")
         .await;
     assert!(
-        discovered.iter().any(|actor_id| actor_id == &response.actor_ref),
+        discovered
+            .iter()
+            .any(|actor_id| actor_id == &response.actor_ref),
         "spawned actor should be discoverable in the requested namespace"
     );
 }
@@ -1661,7 +1650,9 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
         .await
         .expect("node2 behavior registry")
         .register("init-aware-metrics", |_initial_state| {
-            Box::pin(async move { Ok(Box::new(InitAwareMetricsActor::new()) as Box<dyn ActorTrait>) })
+            Box::pin(
+                async move { Ok(Box::new(InitAwareMetricsActor::new()) as Box<dyn ActorTrait>) },
+            )
         })
         .await;
 
@@ -1686,7 +1677,9 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
         .await
         .expect("node1 behavior registry")
         .register("init-aware-metrics", |_initial_state| {
-            Box::pin(async move { Ok(Box::new(InitAwareMetricsActor::new()) as Box<dyn ActorTrait>) })
+            Box::pin(
+                async move { Ok(Box::new(InitAwareMetricsActor::new()) as Box<dyn ActorTrait>) },
+            )
         })
         .await;
 
@@ -1751,7 +1744,10 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
         .await
         .expect("bulk update")
         .into_inner();
-    assert_eq!(bulk_resp.updates_failed, 0, "all init updates should succeed");
+    assert_eq!(
+        bulk_resp.updates_failed, 0,
+        "all init updates should succeed"
+    );
 
     let scatter_resp = node1_service
         .scatter_gather(Request::new(ScatterGatherRequest {
@@ -1780,10 +1776,18 @@ async fn test_bulk_update_initializes_remote_shards_before_scatter_gather() {
     }
 
     assert_eq!(payloads.len(), 2);
-    assert!(payloads.iter().all(|payload| payload.get("error").is_none()));
-    assert!(payloads.iter().all(|payload| payload.get("compute_time_ms").and_then(|v| v.as_u64()) == Some(7)));
-    assert!(payloads.iter().all(|payload| payload.get("coordination_time_ms").and_then(|v| v.as_u64()) == Some(3)));
-    assert!(payloads.iter().all(|payload| payload.get("tuple_operations").and_then(|v| v.as_u64()) == Some(4)));
+    assert!(payloads
+        .iter()
+        .all(|payload| payload.get("error").is_none()));
+    assert!(payloads
+        .iter()
+        .all(|payload| payload.get("compute_time_ms").and_then(|v| v.as_u64()) == Some(7)));
+    assert!(payloads
+        .iter()
+        .all(|payload| payload.get("coordination_time_ms").and_then(|v| v.as_u64()) == Some(3)));
+    assert!(payloads
+        .iter()
+        .all(|payload| payload.get("tuple_operations").and_then(|v| v.as_u64()) == Some(4)));
     let node_ids = payloads
         .iter()
         .filter_map(|payload| payload.get("node_id").and_then(|value| value.as_str()))
@@ -1826,7 +1830,11 @@ async fn test_broadcast_shard_group_success() {
     });
 
     let result = service.broadcast_shard_group(req).await;
-    assert!(result.is_ok(), "Broadcast should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Broadcast should succeed: {:?}",
+        result.err()
+    );
     let resp = result.unwrap().into_inner();
     let stats = resp.stats.as_ref().expect("stats should be present");
     assert_eq!(stats.shards_queried, 3);
@@ -1881,10 +1889,15 @@ async fn test_reduce_shard_group_no_reducible_values() {
 
     let result = service.reduce_shard_group(req).await;
     // Reduce correctly fails when shard responses don't contain reducible values
-    assert!(result.is_err(), "Reduce should fail when actors return empty payloads");
+    assert!(
+        result.is_err(),
+        "Reduce should fail when actors return empty payloads"
+    );
     let status = result.unwrap_err();
     assert!(
-        status.message().contains("No values available for reduction")
+        status
+            .message()
+            .contains("No values available for reduction")
             || status.message().contains("reduction"),
         "Error should indicate reduction failure: {}",
         status.message()
@@ -1939,7 +1952,10 @@ async fn test_all_reduce_shard_group_no_reducible_values() {
     });
 
     let result = service.all_reduce_shard_group(req).await;
-    assert!(result.is_err(), "AllReduce should fail when actors return empty payloads");
+    assert!(
+        result.is_err(),
+        "AllReduce should fail when actors return empty payloads"
+    );
     let status = result.unwrap_err();
     assert!(
         status.message().contains("reduction") || status.message().contains("reduce"),
@@ -2082,7 +2098,11 @@ async fn test_spawn_actors_instances_count_replicas() {
         result.err()
     );
     let resp = result.unwrap().into_inner();
-    assert_eq!(resp.results.len(), 3, "Should have 3 results for 3 replicas");
+    assert_eq!(
+        resp.results.len(),
+        3,
+        "Should have 3 results for 3 replicas"
+    );
     assert!(resp.results.iter().all(|r| r.success));
 
     // Verify actor IDs are prefixed correctly: worker-0, worker-1, worker-2
@@ -2115,7 +2135,11 @@ async fn test_spawn_actors_instances_count_zero_spawns_one() {
     let result = service.spawn_actors(req).await;
     assert!(result.is_ok());
     let resp = result.unwrap().into_inner();
-    assert_eq!(resp.results.len(), 1, "instances_count=0 should spawn 1 actor");
+    assert_eq!(
+        resp.results.len(),
+        1,
+        "instances_count=0 should spawn 1 actor"
+    );
     assert!(resp.results[0].success);
 }
 
@@ -2142,6 +2166,9 @@ async fn test_spawn_actors_instances_count_auto_id() {
     // IDs should be auto-generated (not empty)
     for r in &resp.results {
         let actor_ref = &r.response.as_ref().unwrap().actor_ref;
-        assert!(!actor_ref.is_empty(), "Auto-generated ID should not be empty");
+        assert!(
+            !actor_ref.is_empty(),
+            "Auto-generated ID should not be empty"
+        );
     }
 }

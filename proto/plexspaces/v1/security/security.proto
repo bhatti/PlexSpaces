@@ -40,60 +40,59 @@ package plexspaces.security.v1;
 
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
-import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
-import "protoc-gen-openapiv2/options/annotations.proto";
+import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/security/security;plexspaces_security_v1";
-option java_package = "com.bhatti.plexspaces.security.v1";
 option java_multiple_files = true;
-
+option java_package = "com.bhatti.plexspaces.security.v1";
 option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
   info: {
-    title: "PlexSpace Security API";
-    version: "1.0";
-    description: "API for service-to-service authentication and authorization. Supports multiple OpenAPI security schemes: Bearer JWT (HTTP), API key (header/query), and mutual TLS.";
-  };
-  schemes: HTTPS;
-  consumes: "application/json";
-  produces: "application/json";
+    title: "PlexSpace Security API"
+    version: "1.0"
+    description: "API for service-to-service authentication and authorization. Supports multiple OpenAPI security schemes: Bearer JWT (HTTP), API key (header/query), and mutual TLS."
+  }
+  schemes: HTTPS
+  consumes: "application/json"
+  produces: "application/json"
   security_definitions: {
     security: {
-      key: "BearerAuth";
+      key: "BearerAuth"
       value: {
-        type: TYPE_API_KEY;
-        in: IN_HEADER;
-        name: "Authorization";
-        description: "JWT Bearer token. Format: `Bearer <token>`. Required claims: sub, exp, iat, tenant_id. Optional: roles, groups, is_admin.";
-      };
-    };
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "Authorization"
+        description: "JWT Bearer token. Format: `Bearer <token>`. Required claims: sub, exp, iat, tenant_id. Optional: roles, groups, is_admin."
+      }
+    }
     security: {
-      key: "ApiKeyHeader";
+      key: "ApiKeyHeader"
       value: {
-        type: TYPE_API_KEY;
-        in: IN_HEADER;
-        name: "X-API-Key";
-        description: "API key via header. Create keys with CreateApiKey RPC. Keys carry scopes for fine-grained authorization.";
-      };
-    };
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "X-API-Key"
+        description: "API key via header. Create keys with CreateApiKey RPC. Keys carry scopes for fine-grained authorization."
+      }
+    }
     security: {
-      key: "ApiKeyQuery";
+      key: "ApiKeyQuery"
       value: {
-        type: TYPE_API_KEY;
-        in: IN_QUERY;
-        name: "api_key";
-        description: "API key via query parameter. Less secure than header — use only when headers unavailable.";
-      };
-    };
-  };
+        type: TYPE_API_KEY
+        in: IN_QUERY
+        name: "api_key"
+        description: "API key via query parameter. Less secure than header — use only when headers unavailable."
+      }
+    }
+  }
   security: {
     security_requirement: {
-      key: "BearerAuth";
-      value: {};
-    };
-  };
+      key: "BearerAuth"
+      value: {}
+    }
+  }
 };
 
 // Service identity for mTLS
@@ -102,15 +101,19 @@ message ServiceIdentity {
     json_schema: {
       title: "Service Identity"
       description: "Service identity with X.509 certificate for mTLS"
-      required: ["service_id", "certificate", "private_key"]
+      required: [
+        "service_id",
+        "certificate",
+        "private_key"
+      ]
     }
   };
 
-  string service_id = 1 [(google.api.field_behavior) = REQUIRED];  // Service identifier (e.g., "actor-service", "scheduler-service")
-  bytes certificate = 2 [(google.api.field_behavior) = REQUIRED];  // X.509 certificate (PEM format)
-  bytes private_key = 3 [(google.api.field_behavior) = REQUIRED];  // Encrypted private key (PEM format)
+  string service_id = 1 [(google.api.field_behavior) = REQUIRED]; // Service identifier (e.g., "actor-service", "scheduler-service")
+  bytes certificate = 2 [(google.api.field_behavior) = REQUIRED]; // X.509 certificate (PEM format)
+  bytes private_key = 3 [(google.api.field_behavior) = REQUIRED]; // Encrypted private key (PEM format)
   google.protobuf.Timestamp expires_at = 4;
-  repeated string allowed_services = 5;  // Service IDs allowed to connect
+  repeated string allowed_services = 5; // Service IDs allowed to connect
 }
 
 // mTLS configuration
@@ -217,7 +220,10 @@ message ApiKey {
     json_schema: {
       title: "API Key"
       description: "API key for service authentication"
-      required: ["id", "name"]
+      required: [
+        "id",
+        "name"
+      ]
     }
   };
 
@@ -243,8 +249,8 @@ message AuditLogEntry {
 
   string id = 1;
   google.protobuf.Timestamp timestamp = 2;
-  string service_id = 3;  // Changed from user_id to service_id
-  string service_name = 4;  // Changed from username to service_name
+  string service_id = 3; // Changed from user_id to service_id
+  string service_name = 4; // Changed from username to service_name
   string action = 5;
   string resource = 6;
   string resource_id = 7;
@@ -262,13 +268,17 @@ message AuthenticateServiceRequest {
     json_schema: {
       title: "Authenticate Service Request"
       description: "Request to authenticate a service using mTLS"
-      required: ["service_id", "certificate", "signature"]
+      required: [
+        "service_id",
+        "certificate",
+        "signature"
+      ]
     }
   };
 
   string service_id = 1 [(google.api.field_behavior) = REQUIRED];
-  bytes certificate = 2 [(google.api.field_behavior) = REQUIRED];  // Client certificate
-  bytes signature = 3 [(google.api.field_behavior) = REQUIRED];  // Signature of challenge
+  bytes certificate = 2 [(google.api.field_behavior) = REQUIRED]; // Client certificate
+  bytes signature = 3 [(google.api.field_behavior) = REQUIRED]; // Signature of challenge
 }
 
 message AuthenticateServiceResponse {
@@ -280,7 +290,7 @@ message AuthenticateServiceResponse {
   };
 
   ServiceIdentity identity = 1;
-  string token = 2;  // Short-lived token for subsequent requests
+  string token = 2; // Short-lived token for subsequent requests
   google.protobuf.Timestamp expires_at = 3;
 }
 
@@ -305,8 +315,8 @@ message AuthenticateApiResponse {
     }
   };
 
-  string service_id = 1;  // Service ID from JWT claims
-  repeated string scopes = 2;  // Scopes from JWT claims
+  string service_id = 1; // Service ID from JWT claims
+  repeated string scopes = 2; // Scopes from JWT claims
   google.protobuf.Timestamp expires_at = 3;
 }
 
@@ -393,7 +403,7 @@ message GetAuditLogsRequest {
 
   google.protobuf.Timestamp start_time = 1;
   google.protobuf.Timestamp end_time = 2;
-  string service_id = 3;  // Changed from user_id to service_id
+  string service_id = 3; // Changed from user_id to service_id
   string action = 4;
   string resource = 5;
   plexspaces.common.v1.PageRequest page_request = 6;

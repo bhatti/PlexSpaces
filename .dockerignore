@@ -29,6 +29,10 @@ target/
 
 # Example apps (not needed for node binary)
 examples/
+!examples/rust/
+!examples/rust/embedded/
+!examples/rust/embedded/migrating_temporal/
+!examples/rust/embedded/migrating_temporal/**
 
 # SDKs are workspace members (needed for cargo build), but not needed at runtime
 # We copy them in Dockerfile for build, but they're not included in final image

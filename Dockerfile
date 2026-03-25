@@ -33,6 +33,9 @@ RUN apt-get update && apt-get install -y \
 
 # Copy dependency files first (for better caching - cached unless Cargo.toml/Cargo.lock changes)
 COPY Cargo.toml Cargo.lock ./
+COPY build.rs ./
+COPY src/ ./src/
+COPY db/ ./db/
 
 # Copy SDKs (workspace members required for cargo build, but not needed at runtime)
 COPY sdks/ ./sdks/
@@ -42,6 +45,7 @@ COPY sdks/ ./sdks/
 # Proto-generated Rust files are checked into git, so no need to run buf generate
 COPY crates/ ./crates/
 COPY wit/ ./wit/
+COPY examples/rust/embedded/migrating_temporal/ ./examples/rust/embedded/migrating_temporal/
 
 # Copy release.yaml from root directory (config/release.yaml is excluded by .dockerignore)
 RUN mkdir -p ./config

@@ -169,15 +169,15 @@ class ChatRoom:
 
 ### Behavior Types
 
-| Decorator | Behavior | Use Case | Invocation |
-|-----------|----------|----------|------------|
+| Decorator | Behavior | Use Case | Pattern |
+|-----------|----------|----------|---------|
 | `@actor` | GenServer | Request-reply actors (default) | Auto `call` |
 | `@gen_server_actor` | GenServer | Explicit GenServer | Auto `call` |
 | `@event_actor` | GenEvent | Fire-and-forget event handlers | `cast` |
 | `@fsm_actor` | GenStateMachine | State machine workflows | Auto `call` |
 | `@workflow_actor` | Workflow | Long-running orchestrations | Auto `call` |
 
-**GenServer Auto-Invocation**: When using `@actor` or `@gen_server_actor`, all handlers automatically use `invocation="call"` (request-reply). You don't need to specify it in `@handler()`.
+**GenServer Request-Reply Default**: When using `@actor` or `@gen_server_actor`, handlers default to the `call` invocation automatically. You do not need to specify that in `@handler()`.
 
 ### Facets
 

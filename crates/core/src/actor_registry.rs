@@ -16,7 +16,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! Actor registry for local actor lifecycle, lookup, and invocation.
+//! Actor registry for local actor lifecycle, lookup, and message delivery.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -146,7 +146,7 @@ pub struct ActorRegistry {
     /// Value: ActorRef ID that created it, correlation_id, and expiration time
     temporary_senders: Arc<RwLock<HashMap<String, TemporarySenderEntry>>>,
     /// Efficient actor-type lookup: (tenant_id, namespace, actor_type) -> Vec<actor_id>
-    /// Used for FaaS-style actor invocation to quickly find actors by type
+    /// Used for FaaS-style actor request routing to quickly find actors by type
     /// Maintained in sync with actors map for O(1) lookup
     /// Key: (tenant_id, namespace, actor_type), Value: List of actor IDs of that type
     actor_type_index: Arc<RwLock<HashMap<(String, String, String), Vec<ActorId>>>>,
@@ -1210,7 +1210,7 @@ impl ActorRegistry {
     ///
     /// ## Purpose
     /// Finds actors by actor_type within a tenant using efficient hashmap lookup.
-    /// Used for FaaS-like actor invocation where we need to find any actor of a given type.
+    /// Used for FaaS-like actor request routing where we need to find any actor of a given type.
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext for tenant isolation (first parameter)

@@ -950,7 +950,8 @@ graph TB
     
     subgraph PlexSpaces["PlexSpaces Node"]
         Gateway["gRPC-Gateway<br/>(HTTP Server)"]
-        InvokeActor["InvokeActor RPC"]
+        AskReply["AskReply RPC"]
+        SendMessage["SendMessage RPC"]
         ActorRegistry["Actor Registry<br/>(Type Index)"]
         ActorService["Actor Service"]
     end
@@ -966,15 +967,18 @@ graph TB
     API -->|"HTTP Requests"| Gateway
     Curl -->|"REST API"| Gateway
     
-    Gateway -->|"InvokeActorRequest"| InvokeActor
-    InvokeActor -->|"Lookup by type"| ActorRegistry
+    Gateway -->|"AskReplyRequest / SendMessageRequest"| AskReply
+    Gateway -->|"AskReplyRequest / SendMessageRequest"| SendMessage
+    AskReply -->|"Lookup by type"| ActorRegistry
+    SendMessage -->|"Lookup by type"| ActorRegistry
     ActorRegistry -->|"Select actor"| ActorService
     ActorService -->|"tell()/ask()"| Counter
     ActorService -->|"tell()/ask()"| Processor
     ActorService -->|"tell()/ask()"| Calculator
     
     style Gateway fill:#3b82f6,stroke:#60a5fa,stroke-width:2px,color:#fff
-    style InvokeActor fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style AskReply fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style SendMessage fill:#6366f1,stroke:#818cf8,stroke-width:2px,color:#fff
     style ActorRegistry fill:#10b981,stroke:#34d399,stroke-width:2px,color:#000
     style ActorService fill:#ea580c,stroke:#fb923c,stroke-width:2px,color:#fff
 ```
@@ -982,23 +986,19 @@ graph TB
 ### API Endpoint
 
 ```
-GET  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}?param1=value1&param2=value2
-POST /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
-PUT  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
-DELETE /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
-
-# Alternative paths without tenant_id (uses default_tenant_id from node config)
 GET  /api/v1/actors/{namespace}/{actor_type}?param1=value1&param2=value2
+GET  /api/v1/actors/{namespace}/{actor_type}/ask?param1=value1&param2=value2
 POST /api/v1/actors/{namespace}/{actor_type}
 PUT  /api/v1/actors/{namespace}/{actor_type}
-DELETE /api/v1/actors/{namespace}/{actor_type}
+POST /api/v1/actors/{namespace}/{actor_type}/ask
+PUT  /api/v1/actors/{namespace}/{actor_type}/ask
 ```
 
 ### HTTP Method Handling
 
-- **GET**: Query parameters (including `msg_type` for handler name, e.g. count, readings) → JSON payload → `ask()` pattern (request-reply).
-- **POST/PUT/DELETE**: Request body or query params → `tell()` pattern (fire-and-forget) by default.
-- **Explicit request-reply**: Add query param **`invocation=call`** (e.g. `POST ...?invocation=call`). Valid **`invocation`** values (Erlang-style): **call**, **cast**, **info** only.
+- **GET** on `/api/v1/actors/{...}` or `/ask`: Query parameters become JSON payload for `AskReply`.
+- **POST/PUT** on `/api/v1/actors/{...}`: Request body is delivered through `SendMessage` using tell semantics.
+- **POST/PUT** on `/api/v1/actors/{...}/ask`: Request body is delivered through `AskReply` using ask semantics.
 
 ### Actor Discovery
 
@@ -1010,7 +1010,7 @@ DELETE /api/v1/actors/{namespace}/{actor_type}
 
 Actors receive full HTTP path information for custom routing:
 
-- `message.uri_path`: Full URL path (e.g., "/api/v1/actors/default/default/counter/metrics")
+- `message.uri_path`: Full URL path (e.g., "/api/v1/actors/default/counter/metrics")
 - `message.uri_method`: HTTP method (GET, POST, PUT, DELETE)
 - `message.metadata["http_subpath"]`: Path after actor_type (for future routing)
 
@@ -1029,7 +1029,7 @@ graph TB
     end
     
     Client["HTTP Client"] -->|"HTTP/JSON"| HTTP
-    HTTP -->|"InvokeActorRequest"| Service
+    HTTP -->|"AskReplyRequest / SendMessageRequest"| Service
     Service -->|"gRPC"| GRPC
     GRPC -->|"Actor Messages"| Actors["Actors"]
     
@@ -1042,18 +1042,19 @@ graph TB
 - **Separate Servers**: HTTP gateway and gRPC server run concurrently using `tokio::select!`
 - **Shared State**: Both servers share the same `ActorServiceImpl` instance
 - **Port Configuration**: HTTP gateway listens on `grpc_port + 1` (e.g., 8001 if gRPC is 8000)
-- **Direct Service Calls**: HTTP handlers directly invoke `ActorServiceTrait::invoke_actor` rather than making gRPC calls
+- **Direct Service Calls**: HTTP handlers directly invoke `ActorServiceTrait::ask_reply` or `ActorServiceTrait::send_message` rather than making gRPC calls
 
 #### Request Flow
 
-1. **HTTP Request Parsing**: Axum router extracts path parameters (`tenant_id`, `namespace`, `actor_type`)
+1. **HTTP Request Parsing**: Axum router extracts path parameters (`namespace`, `actor_type`)
 2. **Query/Body Parsing**: GET requests parse query params, POST/PUT parse request body
-3. **gRPC Request Construction**: Build `InvokeActorRequest` with:
-   - Path parameters → `tenant_id`, `namespace`, `actor_type`
+3. **gRPC Request Construction**: Build `AskReplyRequest` or `SendMessageRequest` with:
+   - Path parameters → `namespace`, `actor_type`
+   - JWT claims → `tenant_id` when authentication is enabled
    - Query params or body → `payload` (JSON bytes)
-   - HTTP method and optional `invocation` (call/cast/info) → `message_type` ("call" for GET or invocation=call, "cast" for POST/PUT/DELETE by default)
-4. **Service Invocation**: Call `ActorServiceImpl::invoke_actor` directly (not via gRPC)
-5. **Response Conversion**: Convert `InvokeActorResponse` to HTTP/JSON:
+   - HTTP method, headers, path, and subpath as request metadata
+4. **Service Invocation**: Call `ActorServiceImpl::ask_reply` or `ActorServiceImpl::send_message` directly (not via gRPC)
+5. **Response Conversion**: Convert `AskReplyResponse` or `SendMessageResponse` to HTTP/JSON:
    - `payload` (bytes) → JSON value (UTF-8 decode or base64 encode)
    - `success` → HTTP status code (200 for success, 500 for errors)
    - `error_message` → HTTP error response body
@@ -1080,11 +1081,12 @@ actor_ref.ask(message, timeout).await
 
 HTTP methods map to actor message patterns:
 
-| HTTP Method | Message Type | Pattern | Reply Expected |
-|------------|--------------|---------|----------------|
-| GET | `Call` | Ask | Yes (request-reply) |
-| POST/PUT/DELETE | `Cast` | Tell | No (fire-and-forget) |
-| Any with `?invocation=call` | `Call` | Ask | Yes (request-reply) |
+| HTTP Endpoint | Pattern | Reply Expected |
+|------------|---------|----------------|
+| `GET /api/v1/actors/{...}` | AskReply | Yes |
+| `GET /api/v1/actors/{...}/ask` | AskReply | Yes |
+| `POST/PUT /api/v1/actors/{...}` | SendMessage | No |
+| `POST/PUT /api/v1/actors/{...}/ask` | AskReply | Yes |
 
 **Behavior Routing**:
 - `GenServer::route_message` handles both `Call` and `Cast`
@@ -1115,7 +1117,7 @@ Ready for AWS Lambda Function URLs:
 
 1. Deploy PlexSpaces Node as Lambda function
 2. Enable Function URL for HTTP access
-3. Route `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}` to Lambda
+3. Route `/api/v1/actors/{namespace}/{actor_type}` to Lambda
 4. Automatic scaling based on request volume
 
 ### Multi-Tenancy Architecture
@@ -1153,7 +1155,7 @@ Application/Actor → namespace ┘
 
 See [Security Guide](security.md) for comprehensive multi-tenancy documentation.
 
-See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) and [Detailed Design: InvokeActor Service](detailed-design.md#invokeactor-service) for implementation details.
+See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) and [Detailed Design: AskReply and SendMessage Services](detailed-design.md#askreply-and-sendmessage-services) for implementation details.
 
 ## Infrastructure Services
 

@@ -326,88 +326,6 @@
         ]
       }
     },
-    "/api/v1/actors/{actorId}/activate": {
-      "post": {
-        "summary": "Activate Virtual Actor",
-        "description": "Activate a virtual actor (load into memory)",
-        "operationId": "ActivateActor",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ActivateActorResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "description": "Actor ID to activate (must have VirtualActorFacet)",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ActivateActorBody"
-            }
-          }
-        ],
-        "tags": [
-          "Virtual Actors"
-        ]
-      }
-    },
-    "/api/v1/actors/{actorId}/deactivate": {
-      "post": {
-        "summary": "Deactivate Virtual Actor",
-        "description": "Deactivate a virtual actor (remove from memory)",
-        "operationId": "DeactivateActor",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/v1.Empty"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "actorId",
-            "description": "Actor ID to deactivate (must have VirtualActorFacet)",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/DeactivateActorBody"
-            }
-          }
-        ],
-        "tags": [
-          "Virtual Actors"
-        ]
-      }
-    },
     "/api/v1/actors/{actorId}/exists": {
       "get": {
         "summary": "Check Actor Exists",
@@ -599,47 +517,6 @@
         ]
       }
     },
-    "/api/v1/actors/{message.receiverId}/messages": {
-      "post": {
-        "summary": "Send Message",
-        "description": "Send a message to an actor",
-        "operationId": "SendMessage",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/SendMessageResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "message.receiverId",
-            "description": "Receiver actor ID (for point-to-point messaging)\nExample: \"payment-processor@node-2\"\nNote: For pub/sub, use 'channel' field instead",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/SendMessageBody"
-            }
-          }
-        ],
-        "tags": [
-          "Messages"
-        ]
-      }
-    },
     "/api/v1/actors/{namespace}/{actorId}": {
       "delete": {
         "summary": "Terminate Actor",
@@ -697,14 +574,14 @@
     },
     "/api/v1/actors/{namespace}/{actorType}": {
       "get": {
-        "summary": "Invoke Actor",
-        "description": "Invoke an actor via HTTP GET/POST/PUT (FaaS-style interface)",
-        "operationId": "InvokeActor",
+        "summary": "Ask Reply",
+        "description": "Ask an actor via HTTP GET/POST/PUT ask endpoints",
+        "operationId": "AskReply",
         "responses": {
           "200": {
             "description": "A successful response.",
             "schema": {
-              "$ref": "#/definitions/InvokeActorResponse"
+              "$ref": "#/definitions/AskReplyResponse"
             }
           },
           "default": {
@@ -731,14 +608,14 @@
           },
           {
             "name": "httpMethod",
-            "description": "HTTP method (GET, POST, PUT, or DELETE)\nGET/DELETE: Uses ask() (request-reply), POST/PUT: Uses tell() (fire-and-forget)",
+            "description": "HTTP method metadata (GET, POST, or PUT)",
             "in": "query",
             "required": false,
             "type": "string"
           },
           {
             "name": "payload",
-            "description": "Request payload\nFor GET/DELETE: JSON string of query parameters\nFor POST/PUT: Request body bytes",
+            "description": "Request payload\nFor GET: JSON string of query parameters\nFor POST/PUT: Request body bytes",
             "in": "query",
             "required": false,
             "type": "string",
@@ -746,14 +623,14 @@
           },
           {
             "name": "headers",
-            "description": "HTTP headers (for POST/PUT requests)\nConverted from HTTP request headers\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
+            "description": "HTTP headers\nConverted from HTTP request headers\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
             "in": "query",
             "required": false,
             "type": "string"
           },
           {
             "name": "queryParams",
-            "description": "Query parameters (for GET/DELETE requests)\nConverted to JSON and stored in payload\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
+            "description": "Query parameters (for GET requests)\nConverted to JSON and stored in payload\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
             "in": "query",
             "required": false,
             "type": "string"
@@ -773,15 +650,36 @@
             "type": "string"
           },
           {
-            "name": "ask",
-            "description": "When true, use request-reply (ask pattern, message_type \"call\") regardless of HTTP method.\nWhen false or unset: only GET uses ask (request-reply); POST/PUT/DELETE use tell (fire-and-forget, message_type \"cast\").\nHTTP gateway sets this when query param invocation=call (e.g. POST ...?invocation=call). \"msg_type\" in query is handler name (payload).\nConsistent with actor message_type: \"call\" = ask, \"cast\" = tell.",
+            "name": "senderId",
+            "description": "Optional sender actor id for remoting and tracing.",
             "in": "query",
             "required": false,
-            "type": "boolean"
+            "type": "string"
           },
           {
-            "name": "msgTypeOverride",
-            "description": "Optional message type override from HTTP query param \"invocation\" (not \"msg_type\"; msg_type is handler name in payload).\nWhen set: \"call\" = request-reply (ask), \"cast\" = fire-and-forget (tell). Empty/unset = use method default (GET=call, POST/PUT/DELETE=cast).\nAllowed values (Erlang-style): call, cast, info only. Others not supported at this time.",
+            "name": "messageType",
+            "description": "Optional transport message type.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "correlationId",
+            "description": "Optional correlation id preserved for remoting.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "replyTo",
+            "description": "Optional reply_to preserved for remoting.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "messageId",
+            "description": "Optional client-provided message id.",
             "in": "query",
             "required": false,
             "type": "string"
@@ -799,14 +697,231 @@
         ]
       },
       "post": {
-        "summary": "Invoke Actor",
-        "description": "Invoke an actor via HTTP GET/POST/PUT (FaaS-style interface)",
-        "operationId": "InvokeActor2",
+        "summary": "Send Message",
+        "description": "Send a tell message to an actor or actor type",
+        "operationId": "SendMessage",
         "responses": {
           "200": {
             "description": "A successful response.",
             "schema": {
-              "$ref": "#/definitions/InvokeActorResponse"
+              "$ref": "#/definitions/SendMessageResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "namespace",
+            "description": "Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "actorType",
+            "description": "Actor type or actor id to target.\nIf this value contains '@', it is treated as a direct actor id first.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SendMessageBody"
+            }
+          }
+        ],
+        "tags": [
+          "Messages"
+        ]
+      },
+      "put": {
+        "summary": "Send Message",
+        "description": "Send a tell message to an actor or actor type",
+        "operationId": "SendMessage2",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/SendMessageResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "namespace",
+            "description": "Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "actorType",
+            "description": "Actor type or actor id to target.\nIf this value contains '@', it is treated as a direct actor id first.",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SendMessageBody"
+            }
+          }
+        ],
+        "tags": [
+          "Messages"
+        ]
+      }
+    },
+    "/api/v1/actors/{namespace}/{actorType}/ask": {
+      "get": {
+        "summary": "Ask Reply",
+        "description": "Ask an actor via HTTP GET/POST/PUT ask endpoints",
+        "operationId": "AskReply2",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/AskReplyResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "namespace",
+            "description": "Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})\nCan be empty - defaults to empty string if not provided\nTenant ID comes from gRPC auth (JWT middleware) or default config, not from request",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "actorType",
+            "description": "Actor type (extracted from path: /api/v1/actors/{namespace}/{actor_type})\nUsed to lookup actors via ActorRegistry discover_actors_by_type",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "httpMethod",
+            "description": "HTTP method metadata (GET, POST, or PUT)",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "payload",
+            "description": "Request payload\nFor GET: JSON string of query parameters\nFor POST/PUT: Request body bytes",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "headers",
+            "description": "HTTP headers\nConverted from HTTP request headers\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "queryParams",
+            "description": "Query parameters (for GET requests)\nConverted to JSON and stored in payload\n\nThis is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "path",
+            "description": "Full HTTP path for the request (optional)\nExample: \"/api/v1/actors/default/counter/custom/path\"\nAllows actors to perform custom routing based on the complete URL",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "subpath",
+            "description": "Subpath after the actor_type segment (optional)\nExample: for \"/api/v1/actors/default/counter/metrics/latest\"\n         subpath = \"metrics/latest\"\nThis will be used in future for advanced per-actor routing capabilities.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "senderId",
+            "description": "Optional sender actor id for remoting and tracing.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "messageType",
+            "description": "Optional transport message type.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "correlationId",
+            "description": "Optional correlation id preserved for remoting.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "replyTo",
+            "description": "Optional reply_to preserved for remoting.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "messageId",
+            "description": "Optional client-provided message id.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "timeout",
+            "description": "Optional timeout for request-reply (ask) operations.\nDefaults to 5 seconds if not specified. Use for long-running operations like training.\nHTTP gateway extracts from ?timeout=30 query parameter (in seconds).",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Actors"
+        ]
+      },
+      "post": {
+        "summary": "Ask Reply",
+        "description": "Ask an actor via HTTP GET/POST/PUT ask endpoints",
+        "operationId": "AskReply3",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/AskReplyResponse"
             }
           },
           "default": {
@@ -836,7 +951,7 @@
             "in": "body",
             "required": true,
             "schema": {
-              "$ref": "#/definitions/InvokeActorBody"
+              "$ref": "#/definitions/AskReplyBody"
             }
           }
         ],
@@ -845,14 +960,14 @@
         ]
       },
       "put": {
-        "summary": "Invoke Actor",
-        "description": "Invoke an actor via HTTP GET/POST/PUT (FaaS-style interface)",
-        "operationId": "InvokeActor3",
+        "summary": "Ask Reply",
+        "description": "Ask an actor via HTTP GET/POST/PUT ask endpoints",
+        "operationId": "AskReply4",
         "responses": {
           "200": {
             "description": "A successful response.",
             "schema": {
-              "$ref": "#/definitions/InvokeActorResponse"
+              "$ref": "#/definitions/AskReplyResponse"
             }
           },
           "default": {
@@ -882,7 +997,7 @@
             "in": "body",
             "required": true,
             "schema": {
-              "$ref": "#/definitions/InvokeActorBody"
+              "$ref": "#/definitions/AskReplyBody"
             }
           }
         ],
@@ -4945,6 +5060,555 @@
         ]
       }
     },
+    "/api/v1/shard-groups": {
+      "get": {
+        "summary": "List Shard Groups",
+        "description": "List shard groups with optional actor-type and state filters",
+        "operationId": "ListShardGroups",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/ListShardGroupsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "actorType",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "state",
+            "description": " - SHARD_GROUP_STATE_CREATING: Shards being created\n - SHARD_GROUP_STATE_ACTIVE: All shards active\n - SHARD_GROUP_STATE_REBALANCING: Shards being rebalanced\n - SHARD_GROUP_STATE_DRAINING: Shards being drained\n - SHARD_GROUP_STATE_STOPPING: Shards being stopped\n - SHARD_GROUP_STATE_STOPPED: All shards stopped",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "SHARD_GROUP_STATE_UNSPECIFIED",
+              "SHARD_GROUP_STATE_CREATING",
+              "SHARD_GROUP_STATE_ACTIVE",
+              "SHARD_GROUP_STATE_REBALANCING",
+              "SHARD_GROUP_STATE_DRAINING",
+              "SHARD_GROUP_STATE_STOPPING",
+              "SHARD_GROUP_STATE_STOPPED"
+            ],
+            "default": "SHARD_GROUP_STATE_UNSPECIFIED"
+          },
+          {
+            "name": "page.offset",
+            "description": "Offset for pagination (0-based, default: 0)",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "page.limit",
+            "description": "Limit/Page size (default: 50, max: 1000)",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "page.filter",
+            "description": "Filter string (optional)",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "page.orderBy",
+            "description": "Order by field (optional)",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      },
+      "post": {
+        "summary": "Create Shard Group",
+        "description": "Create a shard group and spawn its shards",
+        "operationId": "CreateShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/CreateShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "Request to create a shard group",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/CreateShardGroupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
+    "/api/v1/shard-groups/{groupId}": {
+      "get": {
+        "summary": "Get Shard Group",
+        "description": "Get shard group metadata and shard membership",
+        "operationId": "GetShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/GetShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      },
+      "delete": {
+        "summary": "Delete Shard Group",
+        "description": "Delete a shard group and optionally force shard shutdown",
+        "operationId": "DeleteShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1.Empty"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "shutdownTimeout",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
+    "/api/v1/shard-groups/{groupId}:allReduce": {
+      "post": {
+        "summary": "All Reduce Shard Group",
+        "description": "Run an all-reduce across the shard group",
+        "operationId": "AllReduceShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/AllReduceShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AllReduceShardGroupBody"
+            }
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
+    "/api/v1/shard-groups/{groupId}:barrier": {
+      "post": {
+        "summary": "Barrier Shard Group",
+        "description": "Synchronize shards in a barrier round",
+        "operationId": "BarrierShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/BarrierShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/BarrierShardGroupBody"
+            }
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
+    "/api/v1/shard-groups/{groupId}:broadcast": {
+      "post": {
+        "summary": "Broadcast Shard Group",
+        "description": "Broadcast a message to every shard in the group",
+        "operationId": "BroadcastShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/BroadcastShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/BroadcastShardGroupBody"
+            }
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
+    "/api/v1/shard-groups/{groupId}:bulkUpdate": {
+      "post": {
+        "summary": "Bulk Update Shard Group",
+        "description": "Apply multiple partitioned updates across a shard group",
+        "operationId": "BulkUpdateShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/BulkUpdateShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "description": "Group to update",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/BulkUpdateShardGroupBody"
+            }
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
+    "/api/v1/shard-groups/{groupId}:map": {
+      "post": {
+        "summary": "Map Shard Group",
+        "description": "Apply a function to all shards in parallel",
+        "operationId": "MapShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/MapShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "description": "Group to map over",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/MapShardGroupBody"
+            }
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
+    "/api/v1/shard-groups/{groupId}:reduce": {
+      "post": {
+        "summary": "Reduce Shard Group",
+        "description": "Run a shard-group reduction and return the reduced result",
+        "operationId": "ReduceShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/ReduceShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ReduceShardGroupBody"
+            }
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
+    "/api/v1/shard-groups/{groupId}:scale": {
+      "post": {
+        "summary": "Scale Shard Group",
+        "description": "Scale a shard group to a new shard count",
+        "operationId": "ScaleShardGroup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/ScaleShardGroupResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "description": "Group to scale",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ScaleShardGroupBody"
+            }
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
+    "/api/v1/shard-groups/{groupId}:scatterGather": {
+      "post": {
+        "summary": "Scatter Gather",
+        "description": "Send a query to all shards and aggregate the responses",
+        "operationId": "ScatterGather",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/ScatterGatherResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ScatterGatherBody"
+            }
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
+    "/api/v1/shard-groups/{groupId}:send": {
+      "post": {
+        "summary": "Send To Shard",
+        "description": "Route a message to a shard selected by partition key",
+        "operationId": "SendToShard",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/SendToShardResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/Status"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "groupId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/SendToShardBody"
+            }
+          }
+        ],
+        "tags": [
+          "ShardGroups"
+        ]
+      }
+    },
     "/api/v1/system/backups": {
       "get": {
         "summary": "List Backups",
@@ -6794,297 +7458,6 @@
         ]
       }
     },
-    "/plexspaces.actor.v1.ActorService/AllReduceShardGroup": {
-      "post": {
-        "operationId": "AllReduceShardGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/AllReduceShardGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/AllReduceShardGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/BarrierShardGroup": {
-      "post": {
-        "operationId": "BarrierShardGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/BarrierShardGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/BarrierShardGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/BroadcastShardGroup": {
-      "post": {
-        "operationId": "BroadcastShardGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/BroadcastShardGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/BroadcastShardGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/BulkUpdateShardGroup": {
-      "post": {
-        "summary": "Bulk update: send update messages to multiple shards (DPA UpdateFunction)",
-        "operationId": "BulkUpdateShardGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/BulkUpdateShardGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/BulkUpdateShardGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/CreateShardGroup": {
-      "post": {
-        "summary": "============================================================================\nACTOR GROUPS (data-parallel sharding). See docs/ACTOR_GROUPS_DESIGN.md.\n============================================================================",
-        "operationId": "CreateShardGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/CreateShardGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/CreateShardGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/DeleteShardGroup": {
-      "post": {
-        "operationId": "DeleteShardGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/v1.Empty"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/DeleteShardGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/GetShardGroup": {
-      "post": {
-        "operationId": "GetShardGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/GetShardGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/GetShardGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/ListShardGroups": {
-      "post": {
-        "operationId": "ListShardGroups",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ListShardGroupsResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ListShardGroupsRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/MapShardGroup": {
-      "post": {
-        "summary": "Map: apply function to all shards in parallel (DPA Map operator)",
-        "operationId": "MapShardGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/MapShardGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/MapShardGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
     "/plexspaces.actor.v1.ActorService/MonitorActor": {
       "post": {
         "summary": "Monitor Actor",
@@ -7152,134 +7525,6 @@
         ],
         "tags": [
           "Supervision"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/ReduceShardGroup": {
-      "post": {
-        "operationId": "ReduceShardGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ReduceShardGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ReduceShardGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/ScaleShardGroup": {
-      "post": {
-        "operationId": "ScaleShardGroup",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ScaleShardGroupResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ScaleShardGroupRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/ScatterGather": {
-      "post": {
-        "operationId": "ScatterGather",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/ScatterGatherResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/ScatterGatherRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
-        ]
-      }
-    },
-    "/plexspaces.actor.v1.ActorService/SendToShard": {
-      "post": {
-        "operationId": "SendToShard",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/SendToShardResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "body",
-            "in": "body",
-            "required": true,
-            "schema": {
-              "$ref": "#/definitions/SendToShardRequest"
-            }
-          }
-        ],
-        "tags": [
-          "ActorService"
         ]
       }
     },
@@ -7632,32 +7877,6 @@
       "default": "ACTION_TYPE_UNSPECIFIED",
       "description": "- ACTION_TYPE_ALL: READ | WRITE | DELETE | CLEAR",
       "title": "Action types for subscriptions"
-    },
-    "ActivateActorBody": {
-      "type": "object",
-      "properties": {
-        "force": {
-          "type": "boolean",
-          "title": "Optional: Force activation even if already active"
-        }
-      },
-      "description": "Request to activate a virtual actor",
-      "title": "Activate Actor Request"
-    },
-    "ActivateActorResponse": {
-      "type": "object",
-      "properties": {
-        "actor": {
-          "$ref": "#/definitions/Actor",
-          "title": "Activated actor instance\nNote: actor.state contains the actual lifecycle state (ActorState enum)"
-        },
-        "lifecycle": {
-          "$ref": "#/definitions/VirtualActorLifecycle",
-          "title": "Optional activation metadata (timestamps, counts, etc.)\nThis is metadata only - the actual state is in actor.state (ActorState enum)\nAll actors (virtual or not) use the same ActorState enum for consistency"
-        }
-      },
-      "description": "Response with activated actor",
-      "title": "Activate Actor Response"
     },
     "ActivationStrategy": {
       "type": "string",
@@ -8025,12 +8244,9 @@
         "reason"
       ]
     },
-    "AllReduceShardGroupRequest": {
+    "AllReduceShardGroupBody": {
       "type": "object",
       "properties": {
-        "groupId": {
-          "type": "string"
-        },
         "mapFunction": {
           "$ref": "#/definitions/Message"
         },
@@ -8047,7 +8263,12 @@
         "target": {
           "$ref": "#/definitions/CollectiveTargetField"
         }
-      }
+      },
+      "description": "Request to run all-reduce across a shard group",
+      "title": "All Reduce Shard Group Request",
+      "required": [
+        "mapFunction"
+      ]
     },
     "AllReduceShardGroupResponse": {
       "type": "object",
@@ -8065,7 +8286,9 @@
         "stats": {
           "$ref": "#/definitions/ScatterGatherStats"
         }
-      }
+      },
+      "description": "All-reduce result and per-shard responses",
+      "title": "All Reduce Shard Group Response"
     },
     "Any": {
       "type": "object",
@@ -8350,6 +8573,99 @@
       "description": "- APPLICATION_TYPE_UNSPECIFIED: Unspecified (invalid)\n - APPLICATION_TYPE_LIBRARY: Library application (just modules, no processes)\ne.g., plexspaces-core\n - APPLICATION_TYPE_ACTIVE: Active application (has supervision tree and processes)\ne.g., byzantine-generals, heat-diffusion",
       "title": "Application type"
     },
+    "AskReplyBody": {
+      "type": "object",
+      "properties": {
+        "httpMethod": {
+          "type": "string",
+          "title": "HTTP method metadata (GET, POST, or PUT)"
+        },
+        "payload": {
+          "type": "string",
+          "format": "byte",
+          "title": "Request payload\nFor GET: JSON string of query parameters\nFor POST/PUT: Request body bytes"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "HTTP headers\nConverted from HTTP request headers"
+        },
+        "queryParams": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Query parameters (for GET requests)\nConverted to JSON and stored in payload"
+        },
+        "path": {
+          "type": "string",
+          "title": "Full HTTP path for the request (optional)\nExample: \"/api/v1/actors/default/counter/custom/path\"\nAllows actors to perform custom routing based on the complete URL"
+        },
+        "subpath": {
+          "type": "string",
+          "description": "Subpath after the actor_type segment (optional)\nExample: for \"/api/v1/actors/default/counter/metrics/latest\"\n         subpath = \"metrics/latest\"\nThis will be used in future for advanced per-actor routing capabilities."
+        },
+        "senderId": {
+          "type": "string",
+          "description": "Optional sender actor id for remoting and tracing."
+        },
+        "messageType": {
+          "type": "string",
+          "description": "Optional transport message type."
+        },
+        "correlationId": {
+          "type": "string",
+          "description": "Optional correlation id preserved for remoting."
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "Optional reply_to preserved for remoting."
+        },
+        "messageId": {
+          "type": "string",
+          "description": "Optional client-provided message id."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Optional timeout for request-reply (ask) operations.\nDefaults to 5 seconds if not specified. Use for long-running operations like training.\nHTTP gateway extracts from ?timeout=30 query parameter (in seconds)."
+        }
+      },
+      "description": "Request to ask an actor via HTTP-like interface",
+      "title": "Ask Reply Request"
+    },
+    "AskReplyResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "title": "Success status"
+        },
+        "payload": {
+          "type": "string",
+          "format": "byte",
+          "title": "Response payload (for GET/ask requests)\nContains the reply message from actor"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Response headers (optional metadata)"
+        },
+        "actorId": {
+          "type": "string",
+          "title": "Actor ID that was invoked (format: \"actor_id@node_id\")"
+        },
+        "errorMessage": {
+          "type": "string",
+          "title": "Error message (if success is false)"
+        }
+      },
+      "description": "Response from actor ask invocation",
+      "title": "Ask Reply Response"
+    },
     "BackupInfo": {
       "type": "object",
       "properties": {
@@ -8414,12 +8730,9 @@
       ],
       "default": "BACKUP_TYPE_UNSPECIFIED"
     },
-    "BarrierShardGroupRequest": {
+    "BarrierShardGroupBody": {
       "type": "object",
       "properties": {
-        "groupId": {
-          "type": "string"
-        },
         "barrierId": {
           "type": "string"
         },
@@ -8434,7 +8747,12 @@
           "type": "integer",
           "format": "int64"
         }
-      }
+      },
+      "description": "Request to synchronize a shard group barrier round",
+      "title": "Barrier Shard Group Request",
+      "required": [
+        "barrierId"
+      ]
     },
     "BarrierShardGroupResponse": {
       "type": "object",
@@ -8449,7 +8767,9 @@
         "stats": {
           "$ref": "#/definitions/ScatterGatherStats"
         }
-      }
+      },
+      "description": "Barrier synchronization responses",
+      "title": "Barrier Shard Group Response"
     },
     "BatchHeartbeatRequest": {
       "type": "object",
@@ -8724,12 +9044,9 @@
       },
       "title": "BootVm response"
     },
-    "BroadcastShardGroupRequest": {
+    "BroadcastShardGroupBody": {
       "type": "object",
       "properties": {
-        "groupId": {
-          "type": "string"
-        },
         "message": {
           "$ref": "#/definitions/Message"
         },
@@ -8740,7 +9057,12 @@
           "type": "integer",
           "format": "int64"
         }
-      }
+      },
+      "description": "Request to broadcast a message to all shards",
+      "title": "Broadcast Shard Group Request",
+      "required": [
+        "message"
+      ]
     },
     "BroadcastShardGroupResponse": {
       "type": "object",
@@ -8755,7 +9077,9 @@
         "stats": {
           "$ref": "#/definitions/ScatterGatherStats"
         }
-      }
+      },
+      "description": "Per-shard responses for a broadcast operation",
+      "title": "Broadcast Shard Group Response"
     },
     "Bucket": {
       "type": "object",
@@ -8770,13 +9094,9 @@
         }
       }
     },
-    "BulkUpdateShardGroupRequest": {
+    "BulkUpdateShardGroupBody": {
       "type": "object",
       "properties": {
-        "groupId": {
-          "type": "string",
-          "title": "Group to update"
-        },
         "updates": {
           "type": "object",
           "additionalProperties": {
@@ -8797,7 +9117,11 @@
           "title": "Wait for responses (true = wait for all, false = fire-and-forget)"
         }
       },
-      "title": "Bulk update: send update messages to multiple shards (DPA UpdateFunction)\nInspired by NSDI'22 Data-Parallel Actors paper"
+      "description": "Request to apply multiple updates across a shard group",
+      "title": "Bulk Update Shard Group Request",
+      "required": [
+        "updates"
+      ]
     },
     "BulkUpdateShardGroupResponse": {
       "type": "object",
@@ -8832,7 +9156,9 @@
           },
           "title": "Errors (if any)"
         }
-      }
+      },
+      "description": "Update statistics for a bulk shard-group operation",
+      "title": "Bulk Update Shard Group Response"
     },
     "CancelExecutionBody": {
       "type": "object",
@@ -9422,7 +9748,13 @@
             "type": "string"
           }
         }
-      }
+      },
+      "description": "Request to create a shard group",
+      "title": "Create Shard Group Request",
+      "required": [
+        "config",
+        "actorType"
+      ]
     },
     "CreateShardGroupResponse": {
       "type": "object",
@@ -9430,7 +9762,12 @@
         "group": {
           "$ref": "#/definitions/ShardGroup"
         }
-      }
+      },
+      "description": "Created shard group metadata",
+      "title": "Create Shard Group Response",
+      "required": [
+        "group"
+      ]
     },
     "CreateVmRequest": {
       "type": "object",
@@ -9522,17 +9859,6 @@
       "description": "Exponential backoff configuration for DB operations",
       "title": "Database Backoff Configuration"
     },
-    "DeactivateActorBody": {
-      "type": "object",
-      "properties": {
-        "force": {
-          "type": "boolean",
-          "title": "Optional: Force deactivation even if actor has pending messages"
-        }
-      },
-      "description": "Request to deactivate a virtual actor",
-      "title": "Deactivate Actor Request"
-    },
     "DecrementBody": {
       "type": "object",
       "properties": {
@@ -9608,20 +9934,6 @@
         }
       },
       "title": "Delete response"
-    },
-    "DeleteShardGroupRequest": {
-      "type": "object",
-      "properties": {
-        "groupId": {
-          "type": "string"
-        },
-        "force": {
-          "type": "boolean"
-        },
-        "shutdownTimeout": {
-          "type": "string"
-        }
-      }
     },
     "DependencyCheck": {
       "type": "object",
@@ -10465,21 +10777,18 @@
       },
       "title": "Response for get scheduling status"
     },
-    "GetShardGroupRequest": {
-      "type": "object",
-      "properties": {
-        "groupId": {
-          "type": "string"
-        }
-      }
-    },
     "GetShardGroupResponse": {
       "type": "object",
       "properties": {
         "group": {
           "$ref": "#/definitions/ShardGroup"
         }
-      }
+      },
+      "description": "Shard group details",
+      "title": "Get Shard Group Response",
+      "required": [
+        "group"
+      ]
     },
     "GetShutdownStatusResponse": {
       "type": "object",
@@ -10842,87 +11151,6 @@
         }
       },
       "title": "Instantiate WASM actor response"
-    },
-    "InvokeActorBody": {
-      "type": "object",
-      "properties": {
-        "httpMethod": {
-          "type": "string",
-          "title": "HTTP method (GET, POST, PUT, or DELETE)\nGET/DELETE: Uses ask() (request-reply), POST/PUT: Uses tell() (fire-and-forget)"
-        },
-        "payload": {
-          "type": "string",
-          "format": "byte",
-          "title": "Request payload\nFor GET/DELETE: JSON string of query parameters\nFor POST/PUT: Request body bytes"
-        },
-        "headers": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "HTTP headers (for POST/PUT requests)\nConverted from HTTP request headers"
-        },
-        "queryParams": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Query parameters (for GET/DELETE requests)\nConverted to JSON and stored in payload"
-        },
-        "path": {
-          "type": "string",
-          "title": "Full HTTP path for the request (optional)\nExample: \"/api/v1/actors/default/counter/custom/path\"\nAllows actors to perform custom routing based on the complete URL"
-        },
-        "subpath": {
-          "type": "string",
-          "description": "Subpath after the actor_type segment (optional)\nExample: for \"/api/v1/actors/default/counter/metrics/latest\"\n         subpath = \"metrics/latest\"\nThis will be used in future for advanced per-actor routing capabilities."
-        },
-        "ask": {
-          "type": "boolean",
-          "description": "When true, use request-reply (ask pattern, message_type \"call\") regardless of HTTP method.\nWhen false or unset: only GET uses ask (request-reply); POST/PUT/DELETE use tell (fire-and-forget, message_type \"cast\").\nHTTP gateway sets this when query param invocation=call (e.g. POST ...?invocation=call). \"msg_type\" in query is handler name (payload).\nConsistent with actor message_type: \"call\" = ask, \"cast\" = tell."
-        },
-        "msgTypeOverride": {
-          "type": "string",
-          "description": "Optional message type override from HTTP query param \"invocation\" (not \"msg_type\"; msg_type is handler name in payload).\nWhen set: \"call\" = request-reply (ask), \"cast\" = fire-and-forget (tell). Empty/unset = use method default (GET=call, POST/PUT/DELETE=cast).\nAllowed values (Erlang-style): call, cast, info only. Others not supported at this time."
-        },
-        "timeout": {
-          "type": "string",
-          "description": "Optional timeout for request-reply (ask) operations.\nDefaults to 5 seconds if not specified. Use for long-running operations like training.\nHTTP gateway extracts from ?timeout=30 query parameter (in seconds)."
-        }
-      },
-      "description": "Request to invoke an actor via HTTP-like interface",
-      "title": "Invoke Actor Request"
-    },
-    "InvokeActorResponse": {
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean",
-          "title": "Success status"
-        },
-        "payload": {
-          "type": "string",
-          "format": "byte",
-          "title": "Response payload (for GET/ask requests)\nContains the reply message from actor"
-        },
-        "headers": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Response headers (optional metadata)"
-        },
-        "actorId": {
-          "type": "string",
-          "title": "Actor ID that was invoked (format: \"actor_id@node_id\")"
-        },
-        "errorMessage": {
-          "type": "string",
-          "title": "Error message (if success is false)"
-        }
-      },
-      "description": "Response from actor invocation",
-      "title": "Invoke Actor Response"
     },
     "IsolationLevel": {
       "type": "string",
@@ -11368,20 +11596,6 @@
       },
       "title": "List response"
     },
-    "ListShardGroupsRequest": {
-      "type": "object",
-      "properties": {
-        "actorType": {
-          "type": "string"
-        },
-        "state": {
-          "$ref": "#/definitions/ShardGroupState"
-        },
-        "page": {
-          "$ref": "#/definitions/PageRequest"
-        }
-      }
-    },
     "ListShardGroupsResponse": {
       "type": "object",
       "properties": {
@@ -11395,7 +11609,9 @@
         "page": {
           "$ref": "#/definitions/PageResponse"
         }
-      }
+      },
+      "description": "Paged list of shard groups",
+      "title": "List Shard Groups Response"
     },
     "ListTimersRequest": {
       "type": "object",
@@ -11505,13 +11721,9 @@
         }
       }
     },
-    "MapShardGroupRequest": {
+    "MapShardGroupBody": {
       "type": "object",
       "properties": {
-        "groupId": {
-          "type": "string",
-          "title": "Group to map over"
-        },
         "mapFunction": {
           "$ref": "#/definitions/Message",
           "title": "Map function message (sent to each shard)"
@@ -11526,7 +11738,11 @@
           "title": "Minimum number of shards that must respond (0 = all required)"
         }
       },
-      "title": "Map: apply function to all shards in parallel (DPA Map operator)\nInspired by NSDI'22 Data-Parallel Actors paper"
+      "description": "Request to apply a function to all shards",
+      "title": "Map Shard Group Request",
+      "required": [
+        "mapFunction"
+      ]
     },
     "MapShardGroupResponse": {
       "type": "object",
@@ -11543,7 +11759,9 @@
           "$ref": "#/definitions/ScatterGatherStats",
           "title": "Statistics"
         }
-      }
+      },
+      "description": "Results from mapping across all shards",
+      "title": "Map Shard Group Response"
     },
     "MarkStartupCompleteRequest": {
       "type": "object",
@@ -13571,12 +13789,9 @@
         "url"
       ]
     },
-    "ReduceShardGroupRequest": {
+    "ReduceShardGroupBody": {
       "type": "object",
       "properties": {
-        "groupId": {
-          "type": "string"
-        },
         "mapFunction": {
           "$ref": "#/definitions/Message"
         },
@@ -13593,7 +13808,12 @@
         "target": {
           "$ref": "#/definitions/CollectiveTargetField"
         }
-      }
+      },
+      "description": "Request to reduce values across a shard group",
+      "title": "Reduce Shard Group Request",
+      "required": [
+        "mapFunction"
+      ]
     },
     "ReduceShardGroupResponse": {
       "type": "object",
@@ -13611,7 +13831,9 @@
         "stats": {
           "$ref": "#/definitions/ScatterGatherStats"
         }
-      }
+      },
+      "description": "Reduced result and per-shard responses",
+      "title": "Reduce Shard Group Response"
     },
     "RefreshTtlBody": {
       "type": "object",
@@ -14167,13 +14389,9 @@
       },
       "title": "Scale response"
     },
-    "ScaleShardGroupRequest": {
+    "ScaleShardGroupBody": {
       "type": "object",
       "properties": {
-        "groupId": {
-          "type": "string",
-          "title": "Group to scale"
-        },
         "newShardCount": {
           "type": "integer",
           "format": "int64",
@@ -14188,7 +14406,11 @@
           "title": "Configuration for new shards (if scaling up)"
         }
       },
-      "title": "Scale shard group (add/remove shards with rebalancing)"
+      "description": "Request to scale a shard group",
+      "title": "Scale Shard Group Request",
+      "required": [
+        "newShardCount"
+      ]
     },
     "ScaleShardGroupResponse": {
       "type": "object",
@@ -14201,7 +14423,9 @@
           "$ref": "#/definitions/RebalanceStatus",
           "title": "Rebalancing status"
         }
-      }
+      },
+      "description": "Updated shard group and rebalance status",
+      "title": "Scale Shard Group Response"
     },
     "ScalingPolicy": {
       "type": "object",
@@ -14243,12 +14467,9 @@
       "description": "- SCALING_STATE_PAUSED: Manual override",
       "title": "Pool scaling state"
     },
-    "ScatterGatherRequest": {
+    "ScatterGatherBody": {
       "type": "object",
       "properties": {
-        "groupId": {
-          "type": "string"
-        },
         "query": {
           "$ref": "#/definitions/Message"
         },
@@ -14262,7 +14483,12 @@
           "type": "integer",
           "format": "int64"
         }
-      }
+      },
+      "description": "Request to query all shards and aggregate results",
+      "title": "Scatter Gather Request",
+      "required": [
+        "query"
+      ]
     },
     "ScatterGatherResponse": {
       "type": "object",
@@ -14280,7 +14506,9 @@
         "stats": {
           "$ref": "#/definitions/ScatterGatherStats"
         }
-      }
+      },
+      "description": "Aggregated scatter-gather result",
+      "title": "Scatter Gather Response"
     },
     "ScatterGatherStats": {
       "type": "object",
@@ -14481,119 +14709,83 @@
     "SendMessageBody": {
       "type": "object",
       "properties": {
-        "message": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "title": "Unique message identifier (ULID format)\nGenerated by sender if not provided\nExample: \"01HN9QV1W6EZGQC0P9XYZMR4M1\""
-            },
-            "senderId": {
-              "type": "string",
-              "title": "Sender actor/producer ID (optional for anonymous messages)\nExample: \"user-service@node-1\", \"kafka-producer-123\""
-            },
-            "channel": {
-              "type": "string",
-              "title": "Channel/topic name (for pub/sub and channel messaging)\nExample: \"orders.created\", \"user-events\", \"chat-room-42\"\nNote: For actor messaging, use 'receiver_id' instead"
-            },
-            "messageType": {
-              "type": "string",
-              "description": "Message type discriminator\nCommon values: \"call\", \"cast\", \"info\", \"signal\", \"event\", \"command\", \"query\"\nExample: \"call\" for request/reply, \"cast\" for fire-and-forget\nEmpty = unset. Validated to allowed values only."
-            },
-            "payload": {
-              "type": "string",
-              "format": "byte",
-              "title": "Message payload (opaque bytes)\nEncoding is application-specific (JSON, protobuf, msgpack, etc.)"
-            },
-            "timestamp": {
-              "type": "string",
-              "format": "date-time",
-              "title": "Message timestamp (when created)\nAuto-populated if not provided",
-              "readOnly": true
-            },
-            "headers": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              },
-              "title": "Custom headers/metadata (extensible key-value pairs)\nExamples: \"content-type\", \"x-trace-id\", \"x-tenant-id\""
-            },
-            "priority": {
-              "type": "integer",
-              "format": "int32",
-              "title": "Message priority (0=Low, 25=Normal, 50=High, 75=System, 100=Signal)\nHigher priority messages are delivered first"
-            },
-            "ttl": {
-              "type": "string",
-              "title": "Time-to-live for message expiration\nMessage is discarded if not delivered within TTL (max 24 hours)"
-            },
-            "deliveryCount": {
-              "type": "integer",
-              "format": "int64",
-              "title": "Delivery attempt count (for retry tracking)\nIncremented by message brokers on each delivery attempt"
-            },
-            "idempotencyKey": {
-              "type": "string",
-              "title": "Idempotency key for message deduplication\nMessages with same key within time window are de-duplicated\nExample: \"payment-request-abc-xyz\""
-            },
-            "correlationId": {
-              "type": "string",
-              "title": "Correlation ID for request/reply patterns\nLinks response to original request (distributed tracing)\nExample: \"req-01HN9QV1W6EZGQC0P9XYZMR4M1\""
-            },
-            "replyTo": {
-              "type": "string",
-              "title": "Reply-to address (channel or actor ID for responses)\nTells receiver where to send the response\nExample: \"response-queue-42\", \"callback-actor@node-1\""
-            },
-            "partitionKey": {
-              "type": "string",
-              "title": "Partition key for ordered delivery (Kafka, Redis Streams)\nMessages with same partition_key go to same partition (FIFO within partition)\nExample: \"user-123\" (all messages for user-123 delivered in order)"
-            },
-            "uriPath": {
-              "type": "string",
-              "title": "URI path for HTTP-based invocations (optional)\nPopulated when message originates from HTTP gateway\nExample: \"/api/v1/actors/default/counter/metrics\""
-            },
-            "uriMethod": {
-              "type": "string",
-              "title": "HTTP method for HTTP-based invocations (optional)\nExample: \"GET\", \"POST\", \"PUT\", \"DELETE\""
-            }
-          },
-          "description": "Universal message envelope for actor, channel, and pub/sub communication",
-          "title": "Message"
-        },
-        "waitForResponse": {
-          "type": "boolean"
-        },
-        "timeout": {
+        "httpMethod": {
           "type": "string",
-          "title": "Max 1 hour timeout"
+          "description": "Optional HTTP method metadata for gateway-originated requests."
+        },
+        "payload": {
+          "type": "string",
+          "format": "byte",
+          "description": "Request payload bytes."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Request headers or message metadata."
+        },
+        "queryParams": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Query parameters from HTTP requests."
+        },
+        "path": {
+          "type": "string",
+          "description": "Full request path for gateway-originated requests."
+        },
+        "subpath": {
+          "type": "string",
+          "description": "Remaining path segment after actor_type."
+        },
+        "senderId": {
+          "type": "string",
+          "description": "Optional sender actor id for remoting and tracing."
+        },
+        "messageType": {
+          "type": "string",
+          "description": "Optional application or transport message type."
+        },
+        "correlationId": {
+          "type": "string",
+          "description": "Optional correlation id preserved for remoting."
+        },
+        "replyTo": {
+          "type": "string",
+          "description": "Optional reply_to preserved for remoting."
+        },
+        "messageId": {
+          "type": "string",
+          "description": "Optional client-provided message id."
         }
       },
-      "description": "Request to send a message to an actor",
-      "title": "Send Message Request",
-      "required": [
-        "message",
-        "id",
-        "payload"
-      ]
+      "description": "Request to send a tell message to an actor or actor type",
+      "title": "Send Message Request"
     },
     "SendMessageResponse": {
       "type": "object",
       "properties": {
+        "success": {
+          "type": "boolean"
+        },
         "messageId": {
           "type": "string"
         },
-        "response": {
-          "$ref": "#/definitions/Message",
-          "title": "Only if wait_for_response = true"
-        }
-      }
-    },
-    "SendToShardRequest": {
-      "type": "object",
-      "properties": {
-        "groupId": {
+        "actorId": {
           "type": "string"
         },
+        "errorMessage": {
+          "type": "string"
+        }
+      },
+      "description": "Tell request acknowledgement",
+      "title": "Send Message Response"
+    },
+    "SendToShardBody": {
+      "type": "object",
+      "properties": {
         "partitionKey": {
           "type": "string",
           "format": "byte"
@@ -14607,7 +14799,13 @@
         "timeout": {
           "type": "string"
         }
-      }
+      },
+      "description": "Request to route a message to a shard by partition key",
+      "title": "Send To Shard Request",
+      "required": [
+        "partitionKey",
+        "message"
+      ]
     },
     "SendToShardResponse": {
       "type": "object",
@@ -14622,7 +14820,9 @@
         "response": {
           "$ref": "#/definitions/Message"
         }
-      }
+      },
+      "description": "Shard routing result",
+      "title": "Send To Shard Response"
     },
     "ServiceIdentity": {
       "type": "object",
@@ -16295,41 +16495,6 @@
       },
       "description": "Response after uploading a blob",
       "title": "Upload Blob Response"
-    },
-    "VirtualActorLifecycle": {
-      "type": "object",
-      "properties": {
-        "lastActivated": {
-          "type": "string",
-          "format": "date-time",
-          "title": "Last time actor was activated (loaded into memory)"
-        },
-        "lastAccessed": {
-          "type": "string",
-          "format": "date-time",
-          "title": "Last time actor received a message or performed an operation"
-        },
-        "idleTimeout": {
-          "type": "string",
-          "title": "Idle timeout before deactivation (from facet config)"
-        },
-        "activationCount": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Number of times this actor has been activated"
-        },
-        "isActivating": {
-          "type": "boolean",
-          "title": "Is currently activating (prevents duplicate activations)"
-        },
-        "pendingMessageCount": {
-          "type": "integer",
-          "format": "int64",
-          "title": "Messages queued during activation (processed after activation completes)\nNote: This is a simplified representation - actual queue is in Node"
-        }
-      },
-      "description": "Activation/deactivation metadata for virtual actors (timestamps, counts, etc.)",
-      "title": "Virtual Actor Lifecycle Metadata"
     },
     "VmConfig": {
       "type": "object",

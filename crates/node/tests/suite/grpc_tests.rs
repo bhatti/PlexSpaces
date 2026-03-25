@@ -74,6 +74,28 @@ fn create_proto_message(
     }
 }
 
+fn create_send_message_request(message: ProtoMessageCommon) -> SendMessageRequest {
+    SendMessageRequest {
+        namespace: String::new(),
+        actor_type: message.receiver_id,
+        http_method: "POST".to_string(),
+        payload: message.payload,
+        headers: message.headers,
+        query_params: Default::default(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: message.sender_id,
+        message_type: if message.message_type.is_empty() {
+            "cast".to_string()
+        } else {
+            message.message_type
+        },
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: message.id,
+    }
+}
+
 /// Simple test behavior that processes messages
 struct TestBehavior;
 
@@ -298,19 +320,27 @@ async fn test_send_message_missing_message() {
     let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let request = Request::new(SendMessageRequest {
-        message: None,
-        wait_for_response: false,
-        timeout: None,
+        namespace: String::new(),
+        actor_type: String::new(),
+        http_method: "POST".to_string(),
+        payload: Vec::new(),
+        headers: Default::default(),
+        query_params: Default::default(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "cast".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
     });
 
     let response = ActorServiceTrait::send_message(&service, request).await;
 
-    assert!(response.is_err(), "Should fail for missing message");
+    assert!(response.is_err(), "Should fail for missing actor_type");
     let err = response.unwrap_err();
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
-    assert!(
-        err.message().contains("Message is required") || err.message().contains("Missing message")
-    );
+    assert!(err.message().contains("actor_type"));
 }
 
 #[tokio::test]
@@ -320,21 +350,14 @@ async fn test_send_message_missing_receiver() {
 
     let proto_msg = create_proto_message("msg-1", "sender-1", "", vec![]);
 
-    let request = Request::new(SendMessageRequest {
-        message: Some(proto_msg),
-        wait_for_response: false,
-        timeout: None,
-    });
+    let request = Request::new(create_send_message_request(proto_msg));
 
     let response = ActorServiceTrait::send_message(&service, request).await;
 
     assert!(response.is_err(), "Should fail for empty receiver");
     let err = response.unwrap_err();
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
-    assert!(
-        err.message().contains("Receiver ID is required")
-            || err.message().contains("Missing receiver")
-    );
+    assert!(err.message().contains("actor_type"));
 }
 
 #[tokio::test]
@@ -349,11 +372,7 @@ async fn test_send_message_to_existing_actor() {
         vec![1, 2, 3],
     );
 
-    let request = Request::new(SendMessageRequest {
-        message: Some(proto_msg),
-        wait_for_response: false,
-        timeout: None,
-    });
+    let request = Request::new(create_send_message_request(proto_msg));
 
     let response = ActorServiceTrait::send_message(&service, request).await;
 
@@ -364,10 +383,7 @@ async fn test_send_message_to_existing_actor() {
     );
     let resp = response.unwrap().into_inner();
     assert!(!resp.message_id.is_empty());
-    assert!(
-        resp.response.is_none(),
-        "No response expected for fire-and-forget"
-    );
+    assert!(resp.success, "Tell response should acknowledge success");
 }
 
 #[tokio::test]
@@ -442,11 +458,7 @@ async fn test_message_with_headers_via_service() {
         .headers
         .insert("user-id".to_string(), "user-42".to_string());
 
-    let request = Request::new(SendMessageRequest {
-        message: Some(proto_msg),
-        wait_for_response: false,
-        timeout: None,
-    });
+    let request = Request::new(create_send_message_request(proto_msg));
 
     let response = ActorServiceTrait::send_message(&service, request).await;
 
@@ -474,11 +486,7 @@ async fn test_concurrent_message_sends_via_service() {
                 vec![i as u8],
             );
 
-            let request = Request::new(SendMessageRequest {
-                message: Some(proto_msg),
-                wait_for_response: false,
-                timeout: None,
-            });
+            let request = Request::new(create_send_message_request(proto_msg));
 
             ActorServiceTrait::send_message(&*service_clone, request).await
         });

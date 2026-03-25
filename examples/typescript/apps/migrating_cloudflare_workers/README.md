@@ -103,7 +103,7 @@ The `test.sh` script runs two in-WASM batch benchmarks with coordination cost an
 
 ### Batch Message Benchmark (send_message_batch)
 
-Processes 200+ messages in a single WASM invocation with 10+ members for fan-out:
+Processes 200+ messages in a single WASM request cycle with 10+ members for fan-out:
 
 | Metric | Description |
 |--------|-------------|

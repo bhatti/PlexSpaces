@@ -6,7 +6,7 @@ This file describes how the same use case is implemented with [Restate](https://
 
 - **Durable execution**: Restate journals every step (side effect). On replay after crash/restart, already-journaled steps are replayed from log; new steps run once.
 - **Idempotency**: Handlers can be keyed by idempotency key; duplicate requests with the same key return the cached result (exactly-once).
-- **Service**: You implement a service (e.g. `PaymentService`) with methods like `processPayment`. Restate guarantees exactly-once execution per invocation.
+- **Service**: You implement a service (e.g. `PaymentService`) with methods like `processPayment`. Restate guarantees exactly-once execution per request.
 
 ## Native pattern (conceptual)
 

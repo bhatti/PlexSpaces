@@ -74,13 +74,13 @@ fi
 echo ""
 sleep 2
 
-# Helper function - send POST with invocation=call (request-reply)
+# Helper function - send POST to /ask (request-reply)
 send_post() {
     local desc="$1"
     local payload="$2"
     
-    # Use invocation=call to get response (GenServer request-reply pattern)
-    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME?invocation=call" \
+    # Use /ask to get response (GenServer request-reply pattern)
+    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME/ask" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || RESPONSE=""
     

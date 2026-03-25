@@ -457,12 +457,7 @@ mod tests {
     #[cfg(feature = "sql-backend")]
     #[tokio::test]
     async fn test_create_storage_memory() {
-        let config = StorageConfig::Memory(MemoryStorageConfig {
-            initial_capacity: 1000,
-            cleanup_interval_ms: 60000,
-        });
-
-        let result = create_storage(config).await;
+        let result = create_storage(":memory:").await;
         assert!(
             result.is_ok(),
             "Memory storage (via SQLite :memory:) should work"
@@ -482,15 +477,7 @@ mod tests {
     #[cfg(feature = "sql-backend")]
     #[tokio::test]
     async fn test_create_storage_sqlite() {
-        use plexspaces_proto::tuplespace::v1::SqliteStorageConfig;
-
-        let config = StorageConfig::Sqlite(SqliteStorageConfig {
-            database_path: ":memory:".to_string(),
-            enable_wal: false,
-            cache_size_kb: 2000,
-        });
-
-        let result = create_storage(config).await;
+        let result = create_storage("sqlite::memory:").await;
         assert!(result.is_ok(), "SQLite storage should be created");
     }
 }

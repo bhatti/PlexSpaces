@@ -327,18 +327,20 @@ async fn test_remote_message_delivery() {
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    // Create message
-    let mut message = Message {
-        payload: b"hello from node1".to_vec(),
-        ..Default::default()
-    };
-    message.receiver_id = "receiver@node2".to_string();
-
-    // Send via ActorService (using gRPC trait method)
     let request = Request::new(SendMessageRequest {
-        message: Some(message.clone()),
-        wait_for_response: false,
-        timeout: None,
+        namespace: String::new(),
+        actor_type: "receiver@node2".to_string(),
+        http_method: "POST".to_string(),
+        payload: b"hello from node1".to_vec(),
+        headers: Default::default(),
+        query_params: Default::default(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "cast".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
     });
 
     let result = ActorServiceTrait::send_message(&service, request).await;
@@ -364,30 +366,40 @@ async fn test_bidirectional_communication() {
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     // node1 -> node2
-    let mut message1 = Message {
-        payload: b"hello node2".to_vec(),
-        ..Default::default()
-    };
-    message1.receiver_id = "actor2@node2".to_string();
     let request1 = Request::new(SendMessageRequest {
-        message: Some(message1.clone()),
-        wait_for_response: false,
-        timeout: None,
+        namespace: String::new(),
+        actor_type: "actor2@node2".to_string(),
+        http_method: "POST".to_string(),
+        payload: b"hello node2".to_vec(),
+        headers: Default::default(),
+        query_params: Default::default(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "cast".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
     });
     assert!(ActorServiceTrait::send_message(&service, request1)
         .await
         .is_ok());
 
     // node2 -> node1 (simulated - both actors are on local node)
-    let mut message2 = Message {
-        payload: b"hello node1".to_vec(),
-        ..Default::default()
-    };
-    message2.receiver_id = "actor1@node1".to_string();
     let request2 = Request::new(SendMessageRequest {
-        message: Some(message2.clone()),
-        wait_for_response: false,
-        timeout: None,
+        namespace: String::new(),
+        actor_type: "actor1@node1".to_string(),
+        http_method: "POST".to_string(),
+        payload: b"hello node1".to_vec(),
+        headers: Default::default(),
+        query_params: Default::default(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "cast".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
     });
     assert!(ActorServiceTrait::send_message(&service, request2)
         .await
@@ -408,15 +420,20 @@ async fn test_actor_not_found_remote() {
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     // Try to send to non-existent actor
-    let mut message = Message {
-        payload: b"test".to_vec(),
-        ..Default::default()
-    };
-    message.receiver_id = "nonexistent@node2".to_string();
     let request = Request::new(SendMessageRequest {
-        message: Some(message.clone()),
-        wait_for_response: false,
-        timeout: None,
+        namespace: String::new(),
+        actor_type: "nonexistent@node2".to_string(),
+        http_method: "POST".to_string(),
+        payload: b"test".to_vec(),
+        headers: Default::default(),
+        query_params: Default::default(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "cast".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
     });
 
     let result = ActorServiceTrait::send_message(&service, request).await;
@@ -445,15 +462,20 @@ async fn test_connection_pooling() {
     // Send multiple messages
     for i in 0..10 {
         let payload = format!("message_{}", i);
-        let mut message = Message {
-            payload: payload.as_bytes().to_vec(),
-            ..Default::default()
-        };
-        message.receiver_id = "echo@node2".to_string();
         let request = Request::new(SendMessageRequest {
-            message: Some(message.clone()),
-            wait_for_response: false,
-            timeout: None,
+            namespace: String::new(),
+            actor_type: "echo@node2".to_string(),
+            http_method: "POST".to_string(),
+            payload: payload.as_bytes().to_vec(),
+            headers: Default::default(),
+            query_params: Default::default(),
+            path: String::new(),
+            subpath: String::new(),
+            sender_id: String::new(),
+            message_type: "cast".to_string(),
+            correlation_id: String::new(),
+            reply_to: String::new(),
+            message_id: String::new(),
         });
         assert!(
             ActorServiceTrait::send_message(&service, request)
@@ -481,30 +503,40 @@ async fn test_multiple_target_nodes() {
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     // Send to node2
-    let mut message1 = Message {
-        payload: b"to node2".to_vec(),
-        ..Default::default()
-    };
-    message1.receiver_id = "actor@node2".to_string();
     let request1 = Request::new(SendMessageRequest {
-        message: Some(message1.clone()),
-        wait_for_response: false,
-        timeout: None,
+        namespace: String::new(),
+        actor_type: "actor@node2".to_string(),
+        http_method: "POST".to_string(),
+        payload: b"to node2".to_vec(),
+        headers: Default::default(),
+        query_params: Default::default(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "cast".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
     });
     assert!(ActorServiceTrait::send_message(&service, request1)
         .await
         .is_ok());
 
     // Send to node3
-    let mut message2 = Message {
-        payload: b"to node3".to_vec(),
-        ..Default::default()
-    };
-    message2.receiver_id = "actor@node3".to_string();
     let request2 = Request::new(SendMessageRequest {
-        message: Some(message2.clone()),
-        wait_for_response: false,
-        timeout: None,
+        namespace: String::new(),
+        actor_type: "actor@node3".to_string(),
+        http_method: "POST".to_string(),
+        payload: b"to node3".to_vec(),
+        headers: Default::default(),
+        query_params: Default::default(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "cast".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
     });
     assert!(ActorServiceTrait::send_message(&service, request2)
         .await
@@ -525,15 +557,20 @@ async fn test_node_not_found() {
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
     // Try to send to non-existent node (actor ID doesn't match any registered actor)
-    let mut message = Message {
-        payload: b"test".to_vec(),
-        ..Default::default()
-    };
-    message.receiver_id = "actor@nonexistent_node".to_string();
     let request = Request::new(SendMessageRequest {
-        message: Some(message.clone()),
-        wait_for_response: false,
-        timeout: None,
+        namespace: String::new(),
+        actor_type: "actor@nonexistent_node".to_string(),
+        http_method: "POST".to_string(),
+        payload: b"test".to_vec(),
+        headers: Default::default(),
+        query_params: Default::default(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "cast".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
     });
 
     let result = ActorServiceTrait::send_message(&service, request).await;

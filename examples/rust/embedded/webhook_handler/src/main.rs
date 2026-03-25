@@ -24,8 +24,8 @@
 //! - `#[handler("op", call)]` - routes message to handler method
 //!
 //! ## HTTP Endpoints
-//! - **POST** /api/v1/actors/{tenant}/{namespace}/webhook_handler — deliver a webhook
-//! - **GET**  /api/v1/actors/{tenant}/{namespace}/webhook_handler?action=list — list recent deliveries
+//! - **POST** /api/v1/actors/{namespace}/webhook_handler — deliver a webhook
+//! - **GET**  /api/v1/actors/{namespace}/webhook_handler?action=list — list recent deliveries
 //!
 //! ## Before (manual boilerplate)
 //! ```ignore
@@ -94,7 +94,7 @@ impl WebhookDelivery {
 /// 
 /// ## Annotations
 /// - `#[gen_server_actor(name = "webhook_handler")]` - generates `impl Actor` with Custom("webhook_handler") type
-///   This allows HTTP gateway to route requests to `/api/v1/actors/{tenant}/{namespace}/webhook_handler`
+///   This allows HTTP gateway to route requests to `/api/v1/actors/{namespace}/webhook_handler`
 /// - `#[plexspaces_handlers]` - generates `impl GenServer` dispatching to `#[handler]` methods
 #[gen_server_actor(name = "webhook_handler")]
 struct WebhookHandlerActor {
@@ -213,12 +213,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let http_base = format!("http://127.0.0.1:{}", HTTP_PORT);
     let url_list = format!(
-        "{}/api/v1/actors/{}/{}/webhook_handler?action=list",
-        http_base, TENANT_ID, NAMESPACE
+        "{}/api/v1/actors/{}/webhook_handler?action=list",
+        http_base, NAMESPACE
     );
     let url_deliver = format!(
-        "{}/api/v1/actors/{}/{}/webhook_handler",
-        http_base, TENANT_ID, NAMESPACE
+        "{}/api/v1/actors/{}/webhook_handler",
+        http_base, NAMESPACE
     );
 
     let jwt = make_jwt(TENANT_ID, &jwt_secret)?;
@@ -247,10 +247,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("📤 POST deliver (webhook payload)");
     // Include "action": "deliver" to route to #[handler("deliver")]
-    // Use ?invocation=call to get request-reply (default POST is fire-and-forget)
+    // Use /ask to get request-reply (base POST is fire-and-forget)
     let body1 = json!({ "action": "deliver", "type": "github.push", "repo": "acme/backend", "commits": 3 });
     let post1 = client
-        .post(format!("{}?invocation=call", &url_deliver))
+        .post(format!("{}/ask", &url_deliver))
         .header("Authorization", format!("Bearer {}", jwt))
         .json(&body1)
         .send()
@@ -274,7 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Include "action": "deliver" to route to #[handler("deliver")]
     let body2 = json!({ "action": "deliver", "type": "stripe.payment", "amount_cents": 9999 });
     let _post2 = client
-        .post(format!("{}?invocation=call", &url_deliver))
+        .post(format!("{}/ask", &url_deliver))
         .header("Authorization", format!("Bearer {}", jwt))
         .json(&body2)
         .send()

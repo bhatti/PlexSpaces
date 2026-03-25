@@ -151,7 +151,7 @@ run_attempt_limit=10
 run_start=$(date +%s%N)
 while true; do
   run_response=$(curl -s --max-time 180 -X POST \
-    "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$LEADER_ACTOR?invocation=call&timeout=180" \
+    "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$LEADER_ACTOR/ask?timeout=180" \
     -H "Content-Type: application/json" \
     -d "$run_payload" 2>/dev/null || echo '{"error":"timeout"}')
 

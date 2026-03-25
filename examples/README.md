@@ -132,7 +132,7 @@ cd rust/apps/<app>
 | `reminders` | Durable reminders facet. | `ReminderFacet`, `#[actor]` | [README](rust/embedded/reminders/README.md) |
 | `timers` | In-memory timers (idle, heartbeat, retry). | `TimerFacet`, `spawn_with_facets` | [README](rust/embedded/timers/README.md) |
 | `timeseries_forecasting` | **Workload / ML:** Time-series forecasting pipeline. | Node spawn, pipeline actors | [README](rust/embedded/timeseries_forecasting/README.md) |
-| `webhook_handler` | HTTP-delivered webhook actor (list/deliver). | `#[gen_server_actor]`, InvokeActor HTTP path | [README](rust/embedded/webhook_handler/README.md) |
+| `webhook_handler` | HTTP-delivered webhook actor (list/deliver). | `#[gen_server_actor]`, AskReply/SendMessage HTTP paths | [README](rust/embedded/webhook_handler/README.md) |
 
 ```bash
 cd rust/embedded/<example>

@@ -2210,7 +2210,7 @@ impl WasmInstance {
                     }
                     Err(e) => {
                         let error_msg = e.to_string();
-                        let invocation_label = if message_type_string.eq_ignore_ascii_case("call") {
+                        let message_pattern = if message_type_string.eq_ignore_ascii_case("call") {
                             "ask"
                         } else {
                             "tell"
@@ -2221,7 +2221,7 @@ impl WasmInstance {
                             message_id = %message_id,
                             from_actor = %from_string,
                             msg_type = %message_type_string,
-                            invocation = %invocation_label,
+                            pattern = %message_pattern,
                             error_first_line = %error_first_line,
                             payload_json = %payload_json,
                             payload_len = payload.len(),

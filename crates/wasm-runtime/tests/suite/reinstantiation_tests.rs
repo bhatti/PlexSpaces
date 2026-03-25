@@ -6,7 +6,7 @@
 //! Tests for WASM component re-instantiation necessity
 //!
 //! ## Purpose
-//! Determine whether per-invocation re-instantiation of WASM component instances
+//! Determine whether per-request re-instantiation of WASM component instances
 //! is truly required, or if sequential calls to the same component work without
 //! triggering wasmtime's "cannot enter component instance" trap.
 //!

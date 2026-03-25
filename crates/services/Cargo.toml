@@ -93,7 +93,7 @@ firecracker = ["plexspaces-firecracker"]
 name = "plexspaces_services"
 path = "src/lib.rs"
 
-# Binary used by integration_tests (auth_tests, invoke_actor_grpc_tests) to spawn nodes
+# Binary used by integration_tests (auth_tests, ask_reply_grpc_tests) to spawn nodes
 [[bin]]
 name = "node_runner"
 path = "tests/actor_service/integration/node_runner.rs"
@@ -108,8 +108,8 @@ name = "actor_service_spawn_tests"
 path = "tests/actor_service/actor_service_spawn_tests.rs"
 
 [[test]]
-name = "invoke_actor_tests"
-path = "tests/actor_service/invoke_actor_tests.rs"
+name = "ask_reply_tests"
+path = "tests/actor_service/ask_reply_tests.rs"
 
 [[test]]
 name = "spawn_with_facets_tests"

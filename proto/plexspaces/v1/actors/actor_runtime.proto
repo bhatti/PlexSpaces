@@ -967,10 +967,22 @@ message NodePlacement {
 }
 
 message CreateShardGroupRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Create Shard Group Request"
+      description: "Request to create a shard group"
+      required: ["config", "actor_type"]
+    }
+  };
   // Group strategy (group_id, shard_count, partition_strategy, rebalance_policy, placement)
   // Use config.placement.required_labels for node placement; scheduler matches nodes by placement.
-  DataParallelConfig config = 1 [(buf.validate.field).required = true];
-  string actor_type = 2 [(buf.validate.field).string = {
+  DataParallelConfig config = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).required = true
+  ];
+  string actor_type = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
     min_len: 1
     max_len: 128
   }];
@@ -981,43 +993,121 @@ message CreateShardGroupRequest {
 }
 
 message CreateShardGroupResponse {
-  ShardGroup group = 1;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Create Shard Group Response"
+      description: "Created shard group metadata"
+    }
+  };
+  ShardGroup group = 1 [(google.api.field_behavior) = REQUIRED];
 }
 
 message DeleteShardGroupRequest {
-  string group_id = 1;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Delete Shard Group Request"
+      description: "Request to delete a shard group"
+      required: ["group_id"]
+    }
+  };
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
   bool force = 2;
   google.protobuf.Duration shutdown_timeout = 3;
 }
 
 message GetShardGroupRequest {
-  string group_id = 1;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Get Shard Group Request"
+      description: "Request to fetch a shard group"
+      required: ["group_id"]
+    }
+  };
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
 }
 
 message GetShardGroupResponse {
-  ShardGroup group = 1;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Get Shard Group Response"
+      description: "Shard group details"
+    }
+  };
+  ShardGroup group = 1 [(google.api.field_behavior) = REQUIRED];
 }
 
 message ListShardGroupsRequest {
-  string actor_type = 1;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "List Shard Groups Request"
+      description: "Request to list shard groups"
+    }
+  };
+  string actor_type = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
   ShardGroupState state = 2;
   plexspaces.common.v1.PageRequest page = 3;
 }
 
 message ListShardGroupsResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "List Shard Groups Response"
+      description: "Paged list of shard groups"
+    }
+  };
   repeated ShardGroup groups = 1;
   plexspaces.common.v1.PageResponse page = 2;
 }
 
 message SendToShardRequest {
-  string group_id = 1;
-  bytes partition_key = 2;
-  plexspaces.common.v1.Message message = 3;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Send To Shard Request"
+      description: "Request to route a message to a shard by partition key"
+      required: ["group_id", "partition_key", "message"]
+    }
+  };
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+  bytes partition_key = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).bytes = {min_len: 1}
+  ];
+  plexspaces.common.v1.Message message = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).required = true
+  ];
   bool wait_for_response = 4;
   google.protobuf.Duration timeout = 5;
 }
 
 message SendToShardResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Send To Shard Response"
+      description: "Shard routing result"
+    }
+  };
   uint32 shard_id = 1;
   string shard_actor_id = 2;
   plexspaces.common.v1.Message response = 3;
@@ -1033,8 +1123,24 @@ enum ShardGroupAggregationStrategy {
 }
 
 message ScatterGatherRequest {
-  string group_id = 1;
-  plexspaces.common.v1.Message query = 2;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Scatter Gather Request"
+      description: "Request to query all shards and aggregate results"
+      required: ["group_id", "query"]
+    }
+  };
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+  plexspaces.common.v1.Message query = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).required = true
+  ];
   google.protobuf.Duration timeout = 3;
   ShardGroupAggregationStrategy aggregation = 4;
   uint32 min_responses = 5;
@@ -1057,6 +1163,12 @@ message ScatterGatherStats {
 }
 
 message ScatterGatherResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Scatter Gather Response"
+      description: "Aggregated scatter-gather result"
+    }
+  };
   plexspaces.common.v1.Message result = 1;
   repeated ShardQueryResponse shard_responses = 2;
   ScatterGatherStats stats = 3;
@@ -1065,12 +1177,25 @@ message ScatterGatherResponse {
 // Bulk update: send update messages to multiple shards (DPA UpdateFunction)
 // Inspired by NSDI'22 Data-Parallel Actors paper
 message BulkUpdateShardGroupRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Bulk Update Shard Group Request"
+      description: "Request to apply multiple updates across a shard group"
+      required: ["group_id", "updates"]
+    }
+  };
   // Group to update
-  string group_id = 1;
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
 
   // Update messages: partition_key -> message
   // Messages will be routed to appropriate shards based on partition_key
-  map<string, plexspaces.common.v1.Message> updates = 2;
+  map<string, plexspaces.common.v1.Message> updates = 2 [(google.api.field_behavior) = REQUIRED];
 
   // Consistency level for updates
   ConsistencyLevel consistency_level = 3;
@@ -1083,6 +1208,12 @@ message BulkUpdateShardGroupRequest {
 }
 
 message BulkUpdateShardGroupResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Bulk Update Shard Group Response"
+      description: "Update statistics for a bulk shard-group operation"
+    }
+  };
   // Number of updates sent
   uint32 updates_sent = 1;
 
@@ -1110,11 +1241,27 @@ message ShardUpdateStats {
 // Map: apply function to all shards in parallel (DPA Map operator)
 // Inspired by NSDI'22 Data-Parallel Actors paper
 message MapShardGroupRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Map Shard Group Request"
+      description: "Request to apply a function to all shards"
+      required: ["group_id", "map_function"]
+    }
+  };
   // Group to map over
-  string group_id = 1;
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
 
   // Map function message (sent to each shard)
-  plexspaces.common.v1.Message map_function = 2;
+  plexspaces.common.v1.Message map_function = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).required = true
+  ];
 
   // Timeout for map operation
   google.protobuf.Duration timeout = 3;
@@ -1124,6 +1271,12 @@ message MapShardGroupRequest {
 }
 
 message MapShardGroupResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Map Shard Group Response"
+      description: "Results from mapping across all shards"
+    }
+  };
   // Mapped results from each shard
   repeated ShardQueryResponse shard_results = 1;
 
@@ -1147,20 +1300,58 @@ message CollectiveTargetField {
 }
 
 message BroadcastShardGroupRequest {
-  string group_id = 1;
-  plexspaces.common.v1.Message message = 2;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Broadcast Shard Group Request"
+      description: "Request to broadcast a message to all shards"
+      required: ["group_id", "message"]
+    }
+  };
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+  plexspaces.common.v1.Message message = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).required = true
+  ];
   google.protobuf.Duration timeout = 3;
   uint32 min_acks = 4;
 }
 
 message BroadcastShardGroupResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Broadcast Shard Group Response"
+      description: "Per-shard responses for a broadcast operation"
+    }
+  };
   repeated ShardQueryResponse shard_responses = 1;
   ScatterGatherStats stats = 2;
 }
 
 message ReduceShardGroupRequest {
-  string group_id = 1;
-  plexspaces.common.v1.Message map_function = 2;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Reduce Shard Group Request"
+      description: "Request to reduce values across a shard group"
+      required: ["group_id", "map_function"]
+    }
+  };
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+  plexspaces.common.v1.Message map_function = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).required = true
+  ];
   google.protobuf.Duration timeout = 3;
   uint32 min_responses = 4;
   CollectiveReduction reduction = 5;
@@ -1168,14 +1359,36 @@ message ReduceShardGroupRequest {
 }
 
 message ReduceShardGroupResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Reduce Shard Group Response"
+      description: "Reduced result and per-shard responses"
+    }
+  };
   plexspaces.common.v1.Message result = 1;
   repeated ShardQueryResponse shard_responses = 2;
   ScatterGatherStats stats = 3;
 }
 
 message AllReduceShardGroupRequest {
-  string group_id = 1;
-  plexspaces.common.v1.Message map_function = 2;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "All Reduce Shard Group Request"
+      description: "Request to run all-reduce across a shard group"
+      required: ["group_id", "map_function"]
+    }
+  };
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+  plexspaces.common.v1.Message map_function = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).required = true
+  ];
   google.protobuf.Duration timeout = 3;
   uint32 min_responses = 4;
   CollectiveReduction reduction = 5;
@@ -1183,31 +1396,78 @@ message AllReduceShardGroupRequest {
 }
 
 message AllReduceShardGroupResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "All Reduce Shard Group Response"
+      description: "All-reduce result and per-shard responses"
+    }
+  };
   plexspaces.common.v1.Message result = 1;
   repeated ShardQueryResponse shard_responses = 2;
   ScatterGatherStats stats = 3;
 }
 
 message BarrierShardGroupRequest {
-  string group_id = 1;
-  string barrier_id = 2;
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Barrier Shard Group Request"
+      description: "Request to synchronize a shard group barrier round"
+      required: ["group_id", "barrier_id"]
+    }
+  };
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+  string barrier_id = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
   uint64 round = 3;
   google.protobuf.Duration timeout = 4;
   uint32 min_acks = 5;
 }
 
 message BarrierShardGroupResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Barrier Shard Group Response"
+      description: "Barrier synchronization responses"
+    }
+  };
   repeated ShardQueryResponse shard_responses = 1;
   ScatterGatherStats stats = 2;
 }
 
 // Scale shard group (add/remove shards with rebalancing)
 message ScaleShardGroupRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Scale Shard Group Request"
+      description: "Request to scale a shard group"
+      required: ["group_id", "new_shard_count"]
+    }
+  };
   // Group to scale
-  string group_id = 1;
+  string group_id = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
 
   // New shard count
-  uint32 new_shard_count = 2;
+  uint32 new_shard_count = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).uint32 = {gte: 1}
+  ];
 
   // Rebalancing policy
   RebalancePolicy rebalance_policy = 3;
@@ -1217,6 +1477,12 @@ message ScaleShardGroupRequest {
 }
 
 message ScaleShardGroupResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Scale Shard Group Response"
+      description: "Updated shard group and rebalance status"
+    }
+  };
   // Updated shard group
   ShardGroup group = 1;
 
@@ -1562,27 +1828,91 @@ message ListActorsResponse {
   plexspaces.common.v1.PageResponse page_response = 2;
 }
 
-// Request to send a message
+// Request to send a message via tell semantics
 message SendMessageRequest {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
       title: "Send Message Request"
-      description: "Request to send a message to an actor"
-      required: ["message"]
+      description: "Request to send a tell message to an actor or actor type"
+      required: ["actor_type"]
     }
   };
 
-  plexspaces.common.v1.Message message = 1 [(google.api.field_behavior) = REQUIRED];
-  bool wait_for_response = 2;
-  google.protobuf.Duration timeout = 3 [(buf.validate.field).duration.lte.seconds = 3600]; // Max 1 hour timeout
+  // Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
+  string namespace = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 128}
+  ];
+
+  // Actor type or actor id to target.
+  // If this value contains '@', it is treated as a direct actor id first.
+  string actor_type = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+
+  // Optional HTTP method metadata for gateway-originated requests.
+  string http_method = 3 [(buf.validate.field).string.max_len = 16];
+
+  // Request payload bytes.
+  bytes payload = 4;
+
+  // Request headers or message metadata.
+  map<string, string> headers = 5;
+
+  // Query parameters from HTTP requests.
+  map<string, string> query_params = 6;
+
+  // Full request path for gateway-originated requests.
+  string path = 7 [(buf.validate.field).string.max_len = 2048];
+
+  // Remaining path segment after actor_type.
+  string subpath = 8 [(buf.validate.field).string.max_len = 2048];
+
+  // Optional sender actor id for remoting and tracing.
+  string sender_id = 9 [(buf.validate.field).string.max_len = 255];
+
+  // Optional application or transport message type.
+  string message_type = 10 [(buf.validate.field).string = {
+    in: [
+      "",
+      "cast",
+      "info",
+      "signal",
+      "event",
+      "command",
+      "query"
+    ]
+  }];
+
+  // Optional correlation id preserved for remoting.
+  string correlation_id = 11 [(buf.validate.field).string.max_len = 255];
+
+  // Optional reply_to preserved for remoting.
+  string reply_to = 12 [(buf.validate.field).string.max_len = 255];
+
+  // Optional client-provided message id.
+  string message_id = 13 [(buf.validate.field).string.max_len = 255];
 }
 
 message SendMessageResponse {
-  string message_id = 1 [(buf.validate.field).string = {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "Send Message Response"
+      description: "Tell request acknowledgement"
+    }
+  };
+
+  bool success = 1;
+  string message_id = 2 [(buf.validate.field).string = {
     min_len: 1
     max_len: 255
   }];
-  plexspaces.common.v1.Message response = 2; // Only if wait_for_response = true
+  string actor_id = 3 [(buf.validate.field).string.max_len = 255];
+  string error_message = 4 [(buf.validate.field).string.max_len = 2048];
 }
 
 // Request for streaming messages (high-throughput)
@@ -2359,15 +2689,19 @@ service ActorService {
     };
   }
 
-  // Send message to an actor
+  // Send message to an actor using tell semantics
   rpc SendMessage(SendMessageRequest) returns (SendMessageResponse) {
     option (google.api.http) = {
-      post: "/api/v1/actors/{message.receiver_id}/messages"
+      post: "/api/v1/actors/{namespace}/{actor_type}"
       body: "*"
+      additional_bindings: {
+        put: "/api/v1/actors/{namespace}/{actor_type}"
+        body: "*"
+      }
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
       summary: "Send Message"
-      description: "Send a message to an actor"
+      description: "Send a tell message to an actor or actor type"
       tags: "Messages"
     };
   }
@@ -2513,62 +2847,6 @@ service ActorService {
     };
   }
 
-  // Phase 8.5: Virtual Actor Lifecycle RPCs (Orleans-inspired)
-
-  // Activate a virtual actor (load into memory)
-  //
-  // ## Purpose
-  // Activates a virtual actor that exists virtually but is not yet in memory.
-  // Virtual actors are always addressable but activated on-demand.
-  //
-  // ## When Used
-  // Only works for actors with VirtualActorFacet attached (opt-in pattern).
-  // Regular actors are always active after creation.
-  //
-  // ## Behavior
-  // - Loads actor state from storage (if persisted)
-  // - Instantiates actor in memory
-  // - Processes pending messages (queued during activation)
-  // - Updates VirtualActorLifecycle (last_activated, activation_count)
-  rpc ActivateActor(ActivateActorRequest) returns (ActivateActorResponse) {
-    option (google.api.http) = {
-      post: "/api/v1/actors/{actor_id}/activate"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Activate Virtual Actor"
-      description: "Activate a virtual actor (load into memory)"
-      tags: "Virtual Actors"
-    };
-  }
-
-  // Deactivate a virtual actor (remove from memory)
-  //
-  // ## Purpose
-  // Deactivates a virtual actor that has been idle, freeing memory while
-  // maintaining addressability.
-  //
-  // ## When Used
-  // Only works for actors with VirtualActorFacet attached.
-  // Regular actors cannot be deactivated (must be deleted).
-  //
-  // ## Behavior
-  // - Persists actor state to storage (if persist_on_deactivation enabled)
-  // - Removes actor from memory
-  // - Updates VirtualActorLifecycle (last_accessed, is_activating = false)
-  // - Queues any new messages for later activation
-  rpc DeactivateActor(DeactivateActorRequest) returns (plexspaces.common.v1.Empty) {
-    option (google.api.http) = {
-      post: "/api/v1/actors/{actor_id}/deactivate"
-      body: "*"
-    };
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Deactivate Virtual Actor"
-      description: "Deactivate a virtual actor (remove from memory)"
-      tags: "Virtual Actors"
-    };
-  }
-
   // Check if virtual actor exists (without activating)
   //
   // ## Purpose
@@ -2588,16 +2866,16 @@ service ActorService {
     };
   }
 
-  // Invoke an actor via HTTP-like interface (FaaS-style)
+  // Ask an actor via HTTP-like interface (FaaS-style)
   //
   // ## Purpose
-  // Provides a FaaS-like interface for invoking actors via HTTP GET/POST requests.
+  // Provides a FaaS-like interface for invoking actors via HTTP ask endpoints.
   // This enables actors to be invoked like serverless functions while maintaining
   // the actor model's stateful, message-driven architecture.
   //
   // ## HTTP Method Behavior
-  // - **GET**: Converts query parameters to JSON payload, calls actor.ask() (request-reply)
-  // - **POST**: Converts request body to payload and headers to headers, calls actor.tell() (fire-and-forget)
+  // - **GET**: Converts query parameters to JSON payload and performs ask (request-reply)
+  // - **POST/PUT**: Converts request body to payload and performs ask (request-reply)
   //
   // ## Actor Lookup
   // - Looks up actors by actor_type using ObjectRegistry discover with object_category filter
@@ -2605,31 +2883,32 @@ service ActorService {
   // - Returns 404 if no actor of requested type found
   //
   // ## Security
-  // - Extracts tenant_id from JWT claims if authentication enabled
-  // - Verifies JWT tenant_id matches requested tenant_id in path
-  // - Default tenant_id is "default" when no authentication provided
-  // - All actors must have tenant_id (default if no auth)
+  // - Extracts tenant_id from JWT claims if authentication is enabled
+  // - Uses that tenant context for actor lookup and authorization
+  // - When authentication is disabled, local test clients may supply tenant_id out of band
   //
   // ## Path Format
-  // `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}`
-  // - tenant_id: Tenant identifier (default: "default")
-  // - namespace: Namespace identifier (default: "default" if not specified)
+  // `/api/v1/actors/{namespace}/{actor_type}`
+  // - namespace: Namespace identifier
   // - actor_type: Type of actor to invoke (used for lookup)
-  rpc InvokeActor(InvokeActorRequest) returns (InvokeActorResponse) {
+  rpc AskReply(AskReplyRequest) returns (AskReplyResponse) {
     option (google.api.http) = {
       get: "/api/v1/actors/{namespace}/{actor_type}"
       additional_bindings: {
-        post: "/api/v1/actors/{namespace}/{actor_type}"
+        get: "/api/v1/actors/{namespace}/{actor_type}/ask"
+      }
+      additional_bindings: {
+        post: "/api/v1/actors/{namespace}/{actor_type}/ask"
         body: "*"
       }
       additional_bindings: {
-        put: "/api/v1/actors/{namespace}/{actor_type}"
+        put: "/api/v1/actors/{namespace}/{actor_type}/ask"
         body: "*"
       }
     };
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Invoke Actor"
-      description: "Invoke an actor via HTTP GET/POST/PUT (FaaS-style interface)"
+      summary: "Ask Reply"
+      description: "Ask an actor via HTTP GET/POST/PUT ask endpoints"
       tags: "Actors"
     };
   }
@@ -2647,10 +2926,6 @@ service ActorService {
   // - Actor state is persisted (if DurabilityFacet attached)
   // - Actor is removed from registry
   //
-  // ## Difference from DeactivateActor
-  // - TerminateActor: Permanent termination (actor removed from system)
-  // - DeactivateActor: Temporary passivation (virtual actor can reactivate on next message)
-  //
   // ## Security
   // - Requires permission to terminate actors in the namespace
   // - Tenant isolation enforced via JWT claims
@@ -2666,21 +2941,142 @@ service ActorService {
   // ============================================================================
   // ACTOR GROUPS (data-parallel sharding). See docs/ACTOR_GROUPS_DESIGN.md.
   // ============================================================================
-  rpc CreateShardGroup(CreateShardGroupRequest) returns (CreateShardGroupResponse);
-  rpc DeleteShardGroup(DeleteShardGroupRequest) returns (plexspaces.common.v1.Empty);
-  rpc GetShardGroup(GetShardGroupRequest) returns (GetShardGroupResponse);
-  rpc ListShardGroups(ListShardGroupsRequest) returns (ListShardGroupsResponse);
-  rpc ScaleShardGroup(ScaleShardGroupRequest) returns (ScaleShardGroupResponse);
-  rpc SendToShard(SendToShardRequest) returns (SendToShardResponse);
-  rpc BroadcastShardGroup(BroadcastShardGroupRequest) returns (BroadcastShardGroupResponse);
-  rpc ReduceShardGroup(ReduceShardGroupRequest) returns (ReduceShardGroupResponse);
-  rpc AllReduceShardGroup(AllReduceShardGroupRequest) returns (AllReduceShardGroupResponse);
-  rpc BarrierShardGroup(BarrierShardGroupRequest) returns (BarrierShardGroupResponse);
-  rpc ScatterGather(ScatterGatherRequest) returns (ScatterGatherResponse);
+  rpc CreateShardGroup(CreateShardGroupRequest) returns (CreateShardGroupResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shard-groups"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Create Shard Group"
+      description: "Create a shard group and spawn its shards"
+      tags: "ShardGroups"
+    };
+  }
+  rpc DeleteShardGroup(DeleteShardGroupRequest) returns (plexspaces.common.v1.Empty) {
+    option (google.api.http) = {delete: "/api/v1/shard-groups/{group_id}"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Delete Shard Group"
+      description: "Delete a shard group and optionally force shard shutdown"
+      tags: "ShardGroups"
+    };
+  }
+  rpc GetShardGroup(GetShardGroupRequest) returns (GetShardGroupResponse) {
+    option (google.api.http) = {get: "/api/v1/shard-groups/{group_id}"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Shard Group"
+      description: "Get shard group metadata and shard membership"
+      tags: "ShardGroups"
+    };
+  }
+  rpc ListShardGroups(ListShardGroupsRequest) returns (ListShardGroupsResponse) {
+    option (google.api.http) = {get: "/api/v1/shard-groups"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "List Shard Groups"
+      description: "List shard groups with optional actor-type and state filters"
+      tags: "ShardGroups"
+    };
+  }
+  rpc ScaleShardGroup(ScaleShardGroupRequest) returns (ScaleShardGroupResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shard-groups/{group_id}:scale"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Scale Shard Group"
+      description: "Scale a shard group to a new shard count"
+      tags: "ShardGroups"
+    };
+  }
+  rpc SendToShard(SendToShardRequest) returns (SendToShardResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shard-groups/{group_id}:send"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Send To Shard"
+      description: "Route a message to a shard selected by partition key"
+      tags: "ShardGroups"
+    };
+  }
+  rpc BroadcastShardGroup(BroadcastShardGroupRequest) returns (BroadcastShardGroupResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shard-groups/{group_id}:broadcast"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Broadcast Shard Group"
+      description: "Broadcast a message to every shard in the group"
+      tags: "ShardGroups"
+    };
+  }
+  rpc ReduceShardGroup(ReduceShardGroupRequest) returns (ReduceShardGroupResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shard-groups/{group_id}:reduce"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Reduce Shard Group"
+      description: "Run a shard-group reduction and return the reduced result"
+      tags: "ShardGroups"
+    };
+  }
+  rpc AllReduceShardGroup(AllReduceShardGroupRequest) returns (AllReduceShardGroupResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shard-groups/{group_id}:allReduce"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "All Reduce Shard Group"
+      description: "Run an all-reduce across the shard group"
+      tags: "ShardGroups"
+    };
+  }
+  rpc BarrierShardGroup(BarrierShardGroupRequest) returns (BarrierShardGroupResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shard-groups/{group_id}:barrier"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Barrier Shard Group"
+      description: "Synchronize shards in a barrier round"
+      tags: "ShardGroups"
+    };
+  }
+  rpc ScatterGather(ScatterGatherRequest) returns (ScatterGatherResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shard-groups/{group_id}:scatterGather"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Scatter Gather"
+      description: "Send a query to all shards and aggregate the responses"
+      tags: "ShardGroups"
+    };
+  }
   // Bulk update: send update messages to multiple shards (DPA UpdateFunction)
-  rpc BulkUpdateShardGroup(BulkUpdateShardGroupRequest) returns (BulkUpdateShardGroupResponse);
+  rpc BulkUpdateShardGroup(BulkUpdateShardGroupRequest) returns (BulkUpdateShardGroupResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shard-groups/{group_id}:bulkUpdate"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Bulk Update Shard Group"
+      description: "Apply multiple partitioned updates across a shard group"
+      tags: "ShardGroups"
+    };
+  }
   // Map: apply function to all shards in parallel (DPA Map operator)
-  rpc MapShardGroup(MapShardGroupRequest) returns (MapShardGroupResponse);
+  rpc MapShardGroup(MapShardGroupRequest) returns (MapShardGroupResponse) {
+    option (google.api.http) = {
+      post: "/api/v1/shard-groups/{group_id}:map"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Map Shard Group"
+      description: "Apply a function to all shards in parallel"
+      tags: "ShardGroups"
+    };
+  }
 }
 
 // ============================================================================
@@ -2694,76 +3090,10 @@ service ActorService {
 // EntitySpace event notification and channel/subscriber architecture.
 // This is the foundation for metrics, tracing, and monitoring integration.
 
-// Request to activate a virtual actor
-message ActivateActorRequest {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Activate Actor Request"
-      description: "Request to activate a virtual actor"
-      required: ["actor_id"]
-    }
-  };
-
-  // Actor ID to activate (must have VirtualActorFacet)
-  string actor_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 255
-    }
-  ];
-
-  // Optional: Force activation even if already active
-  bool force = 2;
-}
-
-// Response to activate actor request
-message ActivateActorResponse {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Activate Actor Response"
-      description: "Response with activated actor"
-    }
-  };
-
-  // Activated actor instance
-  // Note: actor.state contains the actual lifecycle state (ActorState enum)
-  Actor actor = 1;
-
-  // Optional activation metadata (timestamps, counts, etc.)
-  // This is metadata only - the actual state is in actor.state (ActorState enum)
-  // All actors (virtual or not) use the same ActorState enum for consistency
-  VirtualActorLifecycle lifecycle = 2;
-}
-
-// Request to deactivate a virtual actor
-message DeactivateActorRequest {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Deactivate Actor Request"
-      description: "Request to deactivate a virtual actor"
-      required: ["actor_id"]
-    }
-  };
-
-  // Actor ID to deactivate (must have VirtualActorFacet)
-  string actor_id = 1 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 255
-    }
-  ];
-
-  // Optional: Force deactivation even if actor has pending messages
-  bool force = 2;
-}
-
 // Request to terminate an actor gracefully
 //
 // ## Purpose
 // Permanently terminates an actor, completing pending work and removing from system.
-// Different from DeactivateActor which is temporary passivation for virtual actors.
 // Pairs with SpawnActorRequest for complete lifecycle management.
 message TerminateActorRequest {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
@@ -2864,20 +3194,20 @@ message CheckActorExistsResponse {
   bool is_virtual = 3;
 }
 
-// Request to invoke an actor via HTTP-like interface (FaaS-style)
+// Request to ask an actor via HTTP-like interface (FaaS-style)
 //
 // ## Purpose
-// Enables FaaS-like invocation of actors via HTTP GET/POST/PUT/DELETE requests.
+// Enables ask-style requests to actors via HTTP GET/POST/PUT routes.
 // The tenant_id, namespace, and actor_type are extracted from the HTTP path.
 //
 // ## HTTP Method Handling
 // - GET: Query parameters are converted to JSON and stored in payload as string
 // - POST: Request body becomes payload, HTTP headers become headers map
-message InvokeActorRequest {
+message AskReplyRequest {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
-      title: "Invoke Actor Request"
-      description: "Request to invoke an actor via HTTP-like interface"
+      title: "Ask Reply Request"
+      description: "Request to ask an actor via HTTP-like interface"
       required: ["actor_type"]
     }
   };
@@ -2900,20 +3230,19 @@ message InvokeActorRequest {
     }
   ];
 
-  // HTTP method (GET, POST, PUT, or DELETE)
-  // GET/DELETE: Uses ask() (request-reply), POST/PUT: Uses tell() (fire-and-forget)
+  // HTTP method metadata (GET, POST, or PUT)
   string http_method = 3;
 
   // Request payload
-  // For GET/DELETE: JSON string of query parameters
+  // For GET: JSON string of query parameters
   // For POST/PUT: Request body bytes
   bytes payload = 4;
 
-  // HTTP headers (for POST/PUT requests)
+  // HTTP headers
   // Converted from HTTP request headers
   map<string, string> headers = 5;
 
-  // Query parameters (for GET/DELETE requests)
+  // Query parameters (for GET requests)
   // Converted to JSON and stored in payload
   map<string, string> query_params = 6;
 
@@ -2928,47 +3257,46 @@ message InvokeActorRequest {
   // This will be used in future for advanced per-actor routing capabilities.
   string subpath = 8;
 
-  // When true, use request-reply (ask pattern, message_type "call") regardless of HTTP method.
-  // When false or unset: only GET uses ask (request-reply); POST/PUT/DELETE use tell (fire-and-forget, message_type "cast").
-  // HTTP gateway sets this when query param invocation=call (e.g. POST ...?invocation=call). "msg_type" in query is handler name (payload).
-  // Consistent with actor message_type: "call" = ask, "cast" = tell.
-  bool ask = 9 [(google.api.field_behavior) = OPTIONAL];
+  // Optional sender actor id for remoting and tracing.
+  string sender_id = 9 [(buf.validate.field).string.max_len = 255];
 
-  // Optional message type override from HTTP query param "invocation" (not "msg_type"; msg_type is handler name in payload).
-  // When set: "call" = request-reply (ask), "cast" = fire-and-forget (tell). Empty/unset = use method default (GET=call, POST/PUT/DELETE=cast).
-  // Allowed values (Erlang-style): call, cast, info only. Others not supported at this time.
-  string msg_type_override = 10 [
-    (google.api.field_behavior) = OPTIONAL,
-    (buf.validate.field).string = {
-      in: [
-        "",
-        "call",
-        "cast",
-        "info"
-      ]
-    }
-  ];
+  // Optional transport message type.
+  string message_type = 10 [(buf.validate.field).string = {
+    in: [
+      "",
+      "call",
+      "query",
+      "command"
+    ]
+  }];
+
+  // Optional correlation id preserved for remoting.
+  string correlation_id = 11 [(buf.validate.field).string.max_len = 255];
+
+  // Optional reply_to preserved for remoting.
+  string reply_to = 12 [(buf.validate.field).string.max_len = 255];
+
+  // Optional client-provided message id.
+  string message_id = 13 [(buf.validate.field).string.max_len = 255];
 
   // Optional timeout for request-reply (ask) operations.
   // Defaults to 5 seconds if not specified. Use for long-running operations like training.
   // HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
-  google.protobuf.Duration timeout = 11 [
+  google.protobuf.Duration timeout = 14 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).duration.lte.seconds = 3600 // Max 1 hour
   ];
 }
 
-// Response from invoking an actor
+// Response from asking an actor
 //
 // ## Purpose
-// Returns the result of actor invocation.
-// For GET (ask): Contains the reply message from actor
-// For POST (tell): Contains success status (fire-and-forget)
-message InvokeActorResponse {
+// Returns the result of an actor ask request.
+message AskReplyResponse {
   option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
     json_schema: {
-      title: "Invoke Actor Response"
-      description: "Response from actor invocation"
+      title: "Ask Reply Response"
+      description: "Response from an actor ask request"
     }
   };
 

@@ -128,7 +128,7 @@ impl HttpRouterLayer {
         self
     }
 
-    /// Register service locator and node ID for actor invocation routes
+    /// Register service locator and node ID for actor ask/tell routes
     pub fn with_actor_service(mut self, service_locator: Arc<plexspaces_core::ServiceLocator>, node_id: String) -> Self {
         self.service_locator = Some(service_locator);
         self.node_id = Some(node_id);
@@ -191,11 +191,11 @@ where
             let path = req.uri().path();
             let method = req.method();
             
-            // Route actor invocation HTTP endpoints (gRPC-Gateway style)
-            // Pattern: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}
+            // Route actor ask/tell HTTP endpoints (gRPC-Gateway style)
+            // Pattern: /api/v1/actors/{namespace}/{actor_type}[/ask]
             if let (Some(service_locator), Some(node_id)) = (&service_locator, &node_id) {
                 if path.starts_with("/api/v1/actors/") {
-                    // Parse path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}
+                    // Parse path: /api/v1/actors/{namespace}/{actor_type}[/ask]
                     let path_parts: Vec<&str> = path.strip_prefix("/api/v1/actors/")
                         .unwrap_or("")
                         .split('/')
@@ -212,80 +212,60 @@ where
                             })
                             .unwrap_or_default();
                         
-                        let (tenant_id, namespace, actor_type) = if path_parts.len() == 3 {
-                            // /api/v1/actors/{tenant_id}/{namespace}/{actor_type}
-                            (path_parts[0].to_string(), path_parts[1].to_string(), path_parts[2].to_string())
-                        } else if path_parts.len() == 2 {
-                            // /api/v1/actors/{namespace}/{actor_type} - tenant_id required in header or query param
-                            // Try to get tenant_id from headers (set by JWT middleware) or query params
-                            let tenant_id = req.headers()
-                                .get("x-tenant-id")
-                                .and_then(|v| v.to_str().ok())
-                                .or_else(|| query_params.get("tenant_id").map(|s| s.as_str()))
-                                .ok_or_else(|| {
-                                    // Return error response if tenant_id not found
-                                    let error_body = format!("tenant_id is required. Either include it in the path as /api/v1/actors/{{tenant_id}}/{{namespace}}/{{actor_type}}, provide x-tenant-id header, or add tenant_id query parameter.");
-                                    return Ok(Response::builder()
-                                        .status(StatusCode::BAD_REQUEST)
-                                        .body(hyper::body::Incoming::from(error_body))
-                                        .unwrap());
-                                })?;
-                            (tenant_id.to_string(), path_parts[0].to_string(), path_parts[1].to_string())
-                        } else {
-                            // Single part - require tenant_id and namespace in headers/query
-                            let tenant_id = req.headers()
-                                .get("x-tenant-id")
-                                .and_then(|v| v.to_str().ok())
-                                .or_else(|| query_params.get("tenant_id").map(|s| s.as_str()))
-                                .ok_or_else(|| {
-                                    let error_body = "tenant_id is required. Provide x-tenant-id header or tenant_id query parameter.";
-                                    return Ok(Response::builder()
-                                        .status(StatusCode::BAD_REQUEST)
-                                        .body(hyper::body::Incoming::from(error_body))
-                                        .unwrap());
-                                })?;
-                            let namespace = req.headers()
-                                .get("x-namespace")
-                                .and_then(|v| v.to_str().ok())
-                                .or_else(|| query_params.get("namespace").map(|s| s.as_str()))
-                                .unwrap_or(""); // namespace can be empty
-                            (tenant_id.to_string(), namespace.to_string(), path_parts[0].to_string())
-                        };
+                        let auth_disabled = service_locator.is_auth_disabled().await;
+                        let jwt_secret = service_locator
+                            .get_security_config()
+                            .await
+                            .and_then(|c| c.jwt)
+                            .and_then(|j| if j.secret.is_empty() { None } else { Some(j.secret) });
+
+                        let tenant_id = req.headers()
+                            .get("authorization")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|auth| {
+                                jwt_secret.as_deref().and_then(|secret| {
+                                    crate::http_jwt::validate_bearer_token(secret, Some(auth))
+                                        .ok()
+                                        .map(|claims| claims.tenant_id)
+                                })
+                            })
+                            .or_else(|| {
+                                if auth_disabled {
+                                    query_params.get("tenant_id").cloned()
+                                } else {
+                                    None
+                                }
+                            })
+                            .ok_or_else(|| {
+                                let error_body = if auth_disabled {
+                                    "tenant_id is required when auth is disabled. Provide tenant_id as a query parameter."
+                                } else {
+                                    "tenant_id is required from a valid Authorization bearer token."
+                                };
+                                return Ok(Response::builder()
+                                    .status(StatusCode::BAD_REQUEST)
+                                    .body(hyper::body::Incoming::from(error_body))
+                                    .unwrap());
+                            })?;
+                        let namespace = path_parts[0].to_string();
+                        let actor_type = path_parts[1].to_string();
                         
                         // Extract query parameters for GET requests (already extracted above, reuse)
                         let query_params: std::collections::HashMap<String, String> = query_params;
                         
-                        // Invocation pattern: use "invocation" query param (e.g. AWS Lambda InvocationType).
-                        // "msg_type" = handler name (count, readings) in payload; "invocation" = call/cast override (POST/PUT/DELETE only).
-                        // POST/PUT default to request-reply (call) so response includes handler result; use ?invocation=cast for fire-and-forget.
-                        let is_get = method == &hyper::Method::GET;
-                        let (ask, msg_type_override) = if is_get {
-                            (true, String::new())
-                        } else {
-                            // Erlang-style: only call, cast, info
-                            const ALLOWED_INVOCATION: [&str; 3] = ["call", "cast", "info"];
-                            let override_val = query_params.get("invocation").map(|v| v.as_str()).unwrap_or("");
-                            let normalized = override_val.trim().to_lowercase();
-                            if !override_val.is_empty() && !ALLOWED_INVOCATION.contains(&normalized.as_str()) {
-                                let err_json = serde_json::json!({
-                                    "code": 400,
-                                    "message": format!("Invalid invocation query param: '{}'. Valid values: call, cast, info", override_val)
-                                });
-                                let resp = Response::builder()
-                                    .status(HyperStatusCode::BAD_REQUEST)
-                                    .header("content-type", "application/json")
-                                    .body(hyper::body::Incoming::from(serde_json::to_string(&err_json).unwrap().into_bytes()))
-                                    .unwrap();
-                                return Ok(resp);
-                            }
-                            let default_ask = method == &hyper::Method::POST || method == &hyper::Method::PUT;
-                            let ask = if override_val.is_empty() {
-                                default_ask
-                            } else {
-                                normalized == "call"
-                            };
-                            (ask, normalized)
-                        };
+                        let is_ask = path_parts.get(2).copied() == Some("ask") || method == &hyper::Method::GET;
+                        if method == &hyper::Method::DELETE {
+                            let err_json = serde_json::json!({
+                                "code": 405,
+                                "message": "DELETE is not supported for actor ask/tell endpoints"
+                            });
+                            let resp = Response::builder()
+                                .status(HyperStatusCode::METHOD_NOT_ALLOWED)
+                                .header("content-type", "application/json")
+                                .body(hyper::body::Incoming::from(serde_json::to_string(&err_json).unwrap().into_bytes()))
+                                .unwrap();
+                            return Ok(resp);
+                        }
 
                         // Extract optional timeout from ?timeout=<seconds> query param (default: 5s)
                         let timeout_duration = query_params.get("timeout")
@@ -293,32 +273,19 @@ where
                             .filter(|&secs| secs > 0 && secs <= 3600)
                             .map(|secs| prost_types::Duration { seconds: secs, nanos: 0 });
 
-                        // Create InvokeActorRequest (tenant_id comes from auth, not request)
-                        use plexspaces_proto::actor::v1::InvokeActorRequest;
-                        let mut invoke_req = InvokeActorRequest {
-                            namespace,
-                            actor_type,
-                            http_method: method.as_str().to_string(),
-                            payload: vec![],
-                            headers: std::collections::HashMap::new(),
-                            query_params,
-                            path: path.to_string(),
-                            subpath: String::new(),
-                            ask,
-                            msg_type_override,
-                            timeout: timeout_duration,
-                        };
+                        let mut request_headers = std::collections::HashMap::new();
+                        let mut payload = vec![];
                         
                         // For POST/PUT, read body as payload
                         if method == &hyper::Method::POST || method == &hyper::Method::PUT {
                             let (parts, body) = req.into_parts();
                             match http_body_util::BodyExt::collect(body).await {
                                 Ok(collected) => {
-                                    invoke_req.payload = collected.to_bytes().to_vec();
+                                    payload = collected.to_bytes().to_vec();
                                     // Extract headers
                                     for (key, value) in parts.headers.iter() {
                                         if let Ok(value_str) = value.to_str() {
-                                            invoke_req.headers.insert(
+                                            request_headers.insert(
                                                 key.as_str().to_string(),
                                                 value_str.to_string()
                                             );
@@ -342,7 +309,7 @@ where
                             // For GET/DELETE, extract headers without consuming body
                             for (key, value) in req.headers().iter() {
                                 if let Ok(value_str) = value.to_str() {
-                                    invoke_req.headers.insert(
+                                    request_headers.insert(
                                         key.as_str().to_string(),
                                         value_str.to_string()
                                     );
@@ -350,29 +317,43 @@ where
                             }
                         }
                         
-                        // Call InvokeActor via ActorService
+                        // Call ActorService ask/tell endpoint
                         use plexspaces_services::actor_service::ActorServiceImpl;
                         let actor_service = ActorServiceImpl::new(service_locator.clone(), node_id.clone());
                         use tonic::Request as TonicRequest;
                         use tonic::metadata::MetadataValue;
                         
                         // Put tenant_id and namespace in gRPC metadata so RequestContext can be created
-                        let mut grpc_req = TonicRequest::new(invoke_req);
-                        grpc_req.metadata_mut().insert(
-                            "x-tenant-id",
-                            MetadataValue::try_from(tenant_id.as_str()).unwrap_or_else(|_| MetadataValue::from_static("")),
-                        );
-                        if !namespace.is_empty() {
-                            if let Ok(ns_value) = MetadataValue::try_from(namespace.as_str()) {
-                                grpc_req.metadata_mut().insert("x-namespace", ns_value);
+                        if is_ask {
+                            use plexspaces_proto::actor::v1::AskReplyRequest;
+                            let mut grpc_req = TonicRequest::new(AskReplyRequest {
+                                namespace,
+                                actor_type,
+                                http_method: method.as_str().to_string(),
+                                payload,
+                                headers: request_headers,
+                                query_params,
+                                path: path.to_string(),
+                                subpath: String::new(),
+                                sender_id: String::new(),
+                                message_type: "call".to_string(),
+                                correlation_id: String::new(),
+                                reply_to: String::new(),
+                                message_id: String::new(),
+                                timeout: timeout_duration,
+                            });
+                            grpc_req.metadata_mut().insert(
+                                "x-tenant-id",
+                                MetadataValue::try_from(tenant_id.as_str()).unwrap_or_else(|_| MetadataValue::from_static("")),
+                            );
+                            if !namespace.is_empty() {
+                                if let Ok(ns_value) = MetadataValue::try_from(namespace.as_str()) {
+                                    grpc_req.metadata_mut().insert("x-namespace", ns_value);
+                                }
                             }
-                        }
-                        
-                        match actor_service.invoke_actor(grpc_req).await {
+                            match actor_service.ask_reply(grpc_req).await {
                             Ok(grpc_resp) => {
                                 let resp_inner = grpc_resp.into_inner();
-                                // Convert InvokeActorResponse to JSON
-                                use plexspaces_proto::actor::v1::InvokeActorResponse;
                                 let json_resp = serde_json::json!({
                                     "success": resp_inner.success,
                                     "payload": if resp_inner.payload.is_empty() {
@@ -422,6 +403,68 @@ where
                                     .body(hyper::body::Incoming::from(serde_json::to_string(&err_json).unwrap().into_bytes()))
                                     .unwrap();
                                 return Ok(resp);
+                            }
+                            }
+                        } else {
+                            use plexspaces_proto::actor::v1::SendMessageRequest;
+                            let mut grpc_req = TonicRequest::new(SendMessageRequest {
+                                namespace,
+                                actor_type,
+                                http_method: method.as_str().to_string(),
+                                payload,
+                                headers: request_headers,
+                                query_params,
+                                path: path.to_string(),
+                                subpath: String::new(),
+                                sender_id: String::new(),
+                                message_type: "cast".to_string(),
+                                correlation_id: String::new(),
+                                reply_to: String::new(),
+                                message_id: String::new(),
+                            });
+                            grpc_req.metadata_mut().insert(
+                                "x-tenant-id",
+                                MetadataValue::try_from(tenant_id.as_str()).unwrap_or_else(|_| MetadataValue::from_static("")),
+                            );
+                            if !namespace.is_empty() {
+                                if let Ok(ns_value) = MetadataValue::try_from(namespace.as_str()) {
+                                    grpc_req.metadata_mut().insert("x-namespace", ns_value);
+                                }
+                            }
+                            match actor_service.send_message(grpc_req).await {
+                                Ok(grpc_resp) => {
+                                    let resp_inner = grpc_resp.into_inner();
+                                    let json_resp = serde_json::json!({
+                                        "success": resp_inner.success,
+                                        "message_id": resp_inner.message_id,
+                                        "actor_id": resp_inner.actor_id,
+                                        "error_message": resp_inner.error_message,
+                                    });
+                                    let resp = Response::builder()
+                                        .status(HyperStatusCode::OK)
+                                        .header("content-type", "application/json")
+                                        .body(hyper::body::Incoming::from(serde_json::to_string(&json_resp).unwrap().into_bytes()))
+                                        .unwrap();
+                                    return Ok(resp);
+                                }
+                                Err(status) => {
+                                    let err_json = serde_json::json!({
+                                        "code": status.code() as u16,
+                                        "message": status.message()
+                                    });
+                                    let http_status = match status.code() {
+                                        tonic::Code::NotFound => HyperStatusCode::NOT_FOUND,
+                                        tonic::Code::InvalidArgument => HyperStatusCode::BAD_REQUEST,
+                                        tonic::Code::PermissionDenied => HyperStatusCode::FORBIDDEN,
+                                        _ => HyperStatusCode::INTERNAL_SERVER_ERROR,
+                                    };
+                                    let resp = Response::builder()
+                                        .status(http_status)
+                                        .header("content-type", "application/json")
+                                        .body(hyper::body::Incoming::from(serde_json::to_string(&err_json).unwrap().into_bytes()))
+                                        .unwrap();
+                                    return Ok(resp);
+                                }
                             }
                         }
                     }

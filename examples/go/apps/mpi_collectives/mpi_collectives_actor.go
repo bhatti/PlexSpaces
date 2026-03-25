@@ -112,7 +112,7 @@ func (w *WorkerActor) Handle(fromActor, msgType, payloadJSON string) string {
 	case "partial_reduce":
 		return w.partialReduce(payloadJSON)
 	case "apply_allreduce":
-		// Legacy direct invocation path kept for compatibility.
+		// Apply the all-reduce result delivered through the worker message path.
 		return w.applyAllreduce(payloadJSON)
 	case "event":
 		// AllReduceShardGroup broadcasts the reduced result to all workers with

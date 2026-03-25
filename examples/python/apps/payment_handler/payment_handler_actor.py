@@ -53,7 +53,7 @@ class PaymentHandler:
         merchant_id = config.get("merchant_id", "default")
         host.log("info", f"PaymentHandler initialized for merchant: {merchant_id}")
     
-    @handler("process_payment")  # GenServer auto-forces invocation="call"
+    @handler("process_payment")  # GenServer handlers use the call pattern automatically
     def process_payment(
         self,
         payment_id: str = "",
@@ -123,7 +123,7 @@ class PaymentHandler:
         host.log("info", f"Payment processed: {tx_id} amount={amount} {currency}")
         return result
     
-    @handler("refund")  # GenServer auto-forces invocation="call"
+    @handler("refund")  # GenServer handlers use the call pattern automatically
     def process_refund(
         self,
         refund_id: str = "",
@@ -221,7 +221,7 @@ class PaymentHandler:
             # Always release lock
             host.lock_release(lock_key, tenant_id, namespace, holder_id, lock_version)
     
-    @handler("get_transaction")  # GenServer auto-forces invocation="call"
+    @handler("get_transaction")  # GenServer handlers use the call pattern automatically
     def get_transaction(self, tx_id: str = "") -> dict:
         """
         Get transaction details (GenServer call).
@@ -241,7 +241,7 @@ class PaymentHandler:
         
         return {"found": False, "tx_id": tx_id}
     
-    @handler("get_balance")  # GenServer auto-forces invocation="call"
+    @handler("get_balance")  # GenServer handlers use the call pattern automatically
     def get_balance(self) -> dict:
         """
         Get current balance (total processed).
@@ -255,7 +255,7 @@ class PaymentHandler:
             "currency": "USD"
         }
     
-    @handler("list_transactions")  # GenServer auto-forces invocation="call"
+    @handler("list_transactions")  # GenServer handlers use the call pattern automatically
     def list_transactions(self, limit: int = 10, customer_id: str = "") -> dict:
         """
         List recent transactions.

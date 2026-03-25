@@ -165,7 +165,7 @@ All behavior decorators support an optional `facets` parameter:
 | `@fsm_actor` | GenStateMachine | State machine workflows | Auto `call` |
 | `@workflow_actor` | Workflow | Long-running orchestrations | Auto `call` |
 
-**GenServer Auto-Invocation**: When using `@actor` or `@gen_server_actor`, all handlers automatically use `invocation="call"` (request-reply). You don't need to specify it explicitly:
+**GenServer Auto-Invocation**: When using `@actor` or `@gen_server_actor`, request-reply handlers use call semantics automatically. You don't need to specify that explicitly:
 
 ```python
 @gen_server_actor
@@ -821,7 +821,7 @@ actor_ref.tell(event).await?;
 ```
 
 **Message Routing Design:**
-- `message_type` = "call" or "cast" (invocation type, set by `invocation` query param or HTTP method)
+- `message_type` = "call" or "cast" (invocation type, set by the API or SDK helper you choose)
 - When `message_type` is "call"/"cast", operation is extracted from `payload.action`, `payload.op`, or `payload.msg_type`
 - When `message_type` is not "call"/"cast", operation is `message_type` itself
 - Handlers match on extracted operation name, not on `message_type`

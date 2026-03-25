@@ -5,7 +5,7 @@ V8 isolates provide lightweight, isolated JavaScript runtimes (separate heaps, s
 ## Concepts
 
 - **Isolate**: One V8 heap; run user code in isolation. Fast to create/destroy compared to full V8 instances.
-- **Batch processing**: Process many log lines (or events) per isolate invocation to amortize overhead.
+- **Batch processing**: Process many log lines (or events) per isolate request cycle to amortize overhead.
 - **Routing**: By log level, tenant, or topic; often done after parse in the application.
 
 ## Native-style usage (Node with worker threads or isolate API)

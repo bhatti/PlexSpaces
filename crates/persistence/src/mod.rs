@@ -23,6 +23,7 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use plexspaces_mailbox::new_message;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -747,7 +748,7 @@ mod tests {
         let actor_id = "test-actor".to_string();
 
         // Test recording and replay
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
         journal.record_message_received(&message).await.unwrap();
 
         let entries = journal.replay_from(&actor_id, 1).await.unwrap();
@@ -788,7 +789,7 @@ mod tests {
     async fn test_record_message_processed() {
         let journal = MemoryJournal::new();
         let actor_id = "test-actor".to_string();
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
 
         // Test Success result
         journal
@@ -1096,7 +1097,7 @@ mod tests {
     async fn test_truncate_to() {
         let journal = MemoryJournal::new();
         let actor_id = "test-actor".to_string();
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
 
         // Add 10 entries
         for _ in 0..10 {
@@ -1191,7 +1192,7 @@ mod tests {
     async fn test_replay_from_advanced() {
         let journal = MemoryJournal::new();
         let actor_id = "test-actor".to_string();
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
 
         // Add one of each entry type
         journal.record_message_received(&message).await.unwrap(); // seq 1
@@ -1414,7 +1415,7 @@ mod tests {
     #[tokio::test]
     async fn test_record_message_processed_retry() {
         let journal = MemoryJournal::new();
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
 
         // Note: Current implementation doesn't support Retry variant directly
         // This test documents expected behavior for future implementation
@@ -1444,7 +1445,7 @@ mod tests {
     async fn test_full_actor_lifecycle_journaling() {
         let journal = MemoryJournal::new();
         let actor_id = "lifecycle-actor".to_string();
-        let message = Message::new(b"test message".to_vec());
+        let message = new_message(b"test message".to_vec());
 
         // 1. Actor activation (Lifecycle entry)
         journal
@@ -1541,7 +1542,7 @@ mod tests {
             .unwrap();
 
         // 2. Simulate some work (other journal entries)
-        let message = Message::new(b"work".to_vec());
+        let message = new_message(b"work".to_vec());
         journal.record_message_received(&message).await.unwrap();
         journal
             .record_message_processed(&message, &Ok(()))
@@ -1595,7 +1596,7 @@ mod tests {
     async fn test_snapshot_truncation_workflow() {
         let journal = MemoryJournal::new();
         let actor_id = "snapshot-actor".to_string();
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
 
         // 1. Generate 100 journal entries
         for _ in 0..100 {
@@ -1681,7 +1682,7 @@ mod tests {
     #[tokio::test]
     async fn test_sequence_number_monotonicity() {
         let journal = MemoryJournal::new();
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
 
         // Record multiple entries
         for _ in 0..10 {
@@ -1777,7 +1778,7 @@ mod tests {
     async fn test_truncate_to_zero_keeps_all() {
         let journal = MemoryJournal::new();
         let actor_id = "test-actor".to_string();
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
 
         // Add 5 entries
         for _ in 0..5 {
@@ -1797,7 +1798,7 @@ mod tests {
         use std::sync::Arc;
 
         let journal = Arc::new(MemoryJournal::new());
-        let message = Message::new(b"concurrent".to_vec());
+        let message = new_message(b"concurrent".to_vec());
 
         // Spawn 10 tasks that concurrently record messages
         let mut handles = vec![];
@@ -1847,7 +1848,7 @@ mod tests {
         assert_eq!(journal.get_entries().await.unwrap().len(), 0);
 
         // Should be functional
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
         journal.record_message_received(&message).await.unwrap();
 
         assert_eq!(journal.get_entries().await.unwrap().len(), 1);
@@ -2073,7 +2074,7 @@ mod tests {
         };
         let journal = MemoryJournal::with_retention(config);
         let actor_id = "actor-123".to_string();
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
 
         // Add journal entries
         for _ in 0..10 {
@@ -2138,7 +2139,7 @@ mod tests {
     async fn test_truncate_to_all_entry_types() {
         let journal = MemoryJournal::new();
         let actor_id = "test-actor".to_string();
-        let message = Message::new(b"test".to_vec());
+        let message = new_message(b"test".to_vec());
 
         // Create one of EACH entry type with different sequence numbers
         // Seq 1: MessageReceived

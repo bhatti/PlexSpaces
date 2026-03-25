@@ -651,7 +651,7 @@ pub fn query_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 struct HandlerInfo {
     op: String,
-    invocation: String, // "call" or "cast"
+    pattern: String, // "call" or "cast"
     method_name: syn::Ident,
 }
 
@@ -671,7 +671,7 @@ fn parse_handler_attr(attr: &Attribute) -> Option<(String, String)> {
     }
 
     let mut op = String::new();
-    let mut invocation = "call".to_string(); // default
+    let mut pattern = "call".to_string(); // default
 
     // Parse #[handler("op")] or #[handler("op", call)] or #[handler("op", cast)]
     let tokens = attr.meta.require_list().ok()?.tokens.to_string();
@@ -688,7 +688,7 @@ fn parse_handler_attr(attr: &Attribute) -> Option<(String, String)> {
     if let Some(second) = parts.get(1) {
         let inv = second.trim();
         if inv == "call" || inv == "cast" {
-            invocation = inv.to_string();
+            pattern = inv.to_string();
         }
     }
 
@@ -696,7 +696,7 @@ fn parse_handler_attr(attr: &Attribute) -> Option<(String, String)> {
         return None;
     }
 
-    Some((op, invocation))
+    Some((op, pattern))
 }
 
 fn parse_init_handler_attr(attr: &Attribute) -> bool {
@@ -741,10 +741,10 @@ fn collect_handlers(impl_block: &ItemImpl) -> Vec<HandlerInfo> {
     for item in &impl_block.items {
         if let ImplItem::Fn(method) = item {
             for attr in &method.attrs {
-                if let Some((op, invocation)) = parse_handler_attr(attr) {
+                if let Some((op, pattern)) = parse_handler_attr(attr) {
                     handlers.push(HandlerInfo {
                         op,
-                        invocation,
+                        pattern,
                         method_name: method.sig.ident.clone(),
                     });
                 }
@@ -1055,7 +1055,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
         .map(|h| {
             let op = &h.op;
             let method = &h.method_name;
-            let is_call = h.invocation == "call";
+            let is_call = h.pattern == "call";
 
             if is_call {
                 // Call semantics: handler returns Result<Value, BehaviorError>, we send reply
@@ -1102,7 +1102,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
     // Add catch-all handler as default case if present
     let default_arm = if let Some(catch_all) = catch_all_handler {
         let method = &catch_all.method_name;
-        let is_call = catch_all.invocation == "call";
+        let is_call = catch_all.pattern == "call";
 
         if is_call {
             quote! {

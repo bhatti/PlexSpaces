@@ -8,7 +8,7 @@ High-level API and annotations for building PlexSpaces actors in Rust, inspired 
 - [Quick Start](#quick-start)
 - [Actor Annotations](#actor-annotations)
 - [Handler Annotations](#handler-annotations)
-- [Message Types and Invocation Semantics](#message-types-and-invocation-semantics)
+- [Message Types and Ask/Tell Semantics](#message-types-and-asktell-semantics)
 - [Handler Dispatch Mechanism](#handler-dispatch-mechanism)
 - [Spawning Actors](#spawning-actors)
 - [Message Creation Helpers](#message-creation-helpers)
@@ -73,8 +73,8 @@ actor_ref.tell(event).await?;
 
 Actor annotations define the behavior type and optional facets:
 
-| Annotation | Behavior Type | Use Case | Default Invocation |
-|------------|---------------|----------|-------------------|
+| Annotation | Behavior Type | Use Case | Default Pattern |
+|------------|---------------|----------|-----------------|
 | `#[gen_server_actor]` | GenServer | Request-reply actors | call |
 | `#[gen_server_actor(facets = ["timer", "durability"])]` | GenServer with facets | Request-reply with capabilities | call |
 | `#[event_actor]` | GenEvent | Fire-and-forget events | cast |
@@ -155,13 +155,13 @@ impl MyActor {
 }
 ```
 
-## Message Types and Invocation Semantics
+## Message Types and Ask/Tell Semantics
 
 PlexSpaces follows Erlang/OTP patterns for message passing:
 
-### Invocation Types
+### Message Patterns
 
-| Invocation | Erlang Equivalent | Semantics | Use With | Handler Method |
+| Pattern | Erlang Equivalent | Semantics | Use With | Handler Method |
 |------------|-------------------|-----------|----------|----------------|
 | `call` | `gen_server:call/2` | Request-reply (synchronous, reply expected) | `ActorRef::ask()` | `handle_request()` |
 | `cast` | `gen_server:cast/2` | Fire-and-forget (asynchronous, reply optional) | `ActorRef::tell()` | `handle_request()` |
@@ -175,30 +175,29 @@ PlexSpaces follows Erlang/OTP patterns for message passing:
 
 The `Message.message_type` field serves two purposes:
 
-1. **Invocation type** (when set to `"call"` or `"cast"`): Controls routing to `handle_request()` vs `handle_cast()` in GenServer
+1. **Message pattern** (when set to `"call"` or `"cast"`): Controls routing to `handle_request()` vs `handle_cast()` in GenServer
 2. **Operation name** (when set to other values): Used directly as the operation name for handler dispatch
 
 ### HTTP Gateway Mapping
 
-The HTTP Gateway maps HTTP methods and query parameters to invocation types:
+The HTTP Gateway now separates ask and tell behavior by endpoint:
 
-| HTTP Method | Query Param | `message_type` | Behavior |
-|-------------|-------------|----------------|----------|
-| GET | (none) | `"call"` | Request-reply |
-| POST/PUT | (none) | `"call"` | Request-reply (default) |
-| POST/PUT | `?invocation=call` | `"call"` | Request-reply |
-| POST/PUT | `?invocation=cast` | `"cast"` | Fire-and-forget |
-| POST/PUT | `?invocation=info` | `"info"` | Async message |
+| HTTP Endpoint | `message_type` | Behavior |
+|-------------|----------------|----------|
+| `GET /api/v1/actors/{namespace}/{actor_type}` | `"call"` | Request-reply |
+| `GET /api/v1/actors/{namespace}/{actor_type}/ask` | `"call"` | Request-reply |
+| `POST/PUT /api/v1/actors/{namespace}/{actor_type}` | `"cast"` | Fire-and-forget |
+| `POST/PUT /api/v1/actors/{namespace}/{actor_type}/ask` | `"call"` | Request-reply |
 
 **Example HTTP requests:**
 
 ```bash
-# Request-reply (GET or POST with default)
-GET /actors/my-actor/invoke?action=get_balance
-POST /actors/my-actor/invoke -d '{"action": "get_balance"}'
+# Request-reply
+GET /api/v1/actors/default/my-actor?action=get_balance
+POST /api/v1/actors/default/my-actor/ask -d '{"action": "get_balance"}'
 
-# Fire-and-forget (explicit cast)
-POST /actors/my-actor/invoke?invocation=cast -d '{"action": "log_event"}'
+# Fire-and-forget
+POST /api/v1/actors/default/my-actor -d '{"action": "log_event"}'
 ```
 
 ## Handler Dispatch Mechanism
@@ -207,7 +206,7 @@ The SDK macro (`#[plexspaces_handlers]`) extracts the operation name from the me
 
 ### Operation Extraction
 
-When `message_type` is `"call"` or `"cast"` (invocation types), the operation name is extracted from the payload. **Canonical key across all SDKs is `message_type`**; aliases `op` and `msg_type` (order: message_type → op → msg_type). Rust SDK also accepts:
+When `message_type` is `"call"` or `"cast"` (message invocations), the operation name is extracted from the payload. **Canonical key across all SDKs is `message_type`**; aliases `op` and `msg_type` (order: message_type → op → msg_type). Rust SDK also accepts:
 
 1. `payload.action` (preferred in Rust)
 2. `payload.op` (fallback)
@@ -351,7 +350,7 @@ let actor_ref2 = spawn(
 
 ## Message Creation Helpers
 
-The SDK provides helper functions for creating messages with correct invocation semantics:
+The SDK provides helper functions for creating messages with correct call or cast semantics:
 
 | Function | Description | Use With |
 |----------|-------------|----------|
@@ -595,11 +594,11 @@ The SDK design follows Erlang/OTP principles and industry best practices:
 
 **Why `message_type` serves dual purpose?**
 
-- **Invocation type** (`"call"`/`"cast"`): Controls routing to request-reply vs fire-and-forget
+- **Message pattern** (`"call"`/`"cast"`): Controls routing to request-reply vs fire-and-forget
 - **Operation name** (other values): Used directly as handler name for backward compatibility
 
 This design allows:
-- Clear invocation semantics (`call` vs `cast`)
+- Clear ask/tell semantics (`call` vs `cast`)
 - Flexible operation naming (`payload.action`, `payload.op`, or `message_type`)
 - Backward compatibility with existing code that uses `message_type` as operation name
 

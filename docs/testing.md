@@ -93,7 +93,7 @@ make test-wasm
 
 Examples and HTTP/gRPC APIs should be tested both with auth disabled and with auth enabled to ensure tenant/namespace handling is correct.
 
-- **Auth disabled** (e.g. `PLEXSPACES_DISABLE_AUTH=1`): `tenant_id` and `namespace` come from node config (`default_tenant_id`, `default_namespace`) or can be empty. No JWT required.
+- **Auth disabled** (e.g. `PLEXSPACES_DISABLE_AUTH=1`): tests may provide `tenant_id` out of band and `namespace` in the request. No JWT required.
 - **Auth enabled**: `tenant_id` is required (from JWT or request); `namespace` is optional. RequestContext validation rejects empty `tenant_id` when auth is enabled.
 
 Run the server with auth disabled for local/testing, then run example scripts (e.g. registry, task-queue). Run again with auth enabled and valid JWT to verify API behavior.
@@ -285,4 +285,3 @@ cargo test
 - `crates/wasm-runtime/tests/README.md` - WASM test details
 - `docs/SSL_CERTIFICATE_FIX.md` - SSL certificate configuration
 - `Makefile` - Test targets and commands
-

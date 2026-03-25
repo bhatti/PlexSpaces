@@ -264,7 +264,7 @@ Facets add dynamic capabilities to actors:
 3. **Usage Patterns**: Learn practical usage patterns with [Usage Guide](usage.md)
 4. **Explore Examples**: Check out the [examples directory](../examples/README.md) for more patterns
 5. **Read Architecture**: Understand the [system design](architecture.md)
-6. **FaaS Invocation**: Learn how to invoke actors via HTTP: GET uses request-reply (ask); POST/PUT/DELETE use fire-and-forget (tell) by default. Use query param `invocation=call` to force request-reply. Valid `invocation` values: **call**, **cast**, **info** (Erlang-style). Use `msg_type` in query for handler name (e.g. GET `?msg_type=count`) - see [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation)
+6. **FaaS Invocation**: Learn how to invoke actors via HTTP: `GET /api/v1/actors/{namespace}/{actor_type}` and `/ask` use `AskReply`; `POST`/`PUT /api/v1/actors/{namespace}/{actor_type}` use `SendMessage`; `POST`/`PUT /ask` use `AskReply` with a request body. See [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation)
 7. **Deploy to Production**: Follow the [installation guide](installation.md)
 8. **Learn Use Cases**: See [real-world applications](use-cases.md)
 

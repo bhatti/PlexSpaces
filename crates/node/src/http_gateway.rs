@@ -20,7 +20,7 @@
 //!
 //! ## Purpose
 //! Provides HTTP gateway functionality for PlexSpaces node, including:
-//! - Actor invocation via HTTP (REST-like API)
+//! - Actor ask/tell handling via HTTP (REST-like API)
 //! - WASM application deployment via HTTP multipart
 //! - Dashboard routes (if enabled)
 //! - JWT authentication middleware
@@ -69,7 +69,7 @@ pub const MAX_WASM_FILE_SIZE: usize = 100 * 1024 * 1024;
 /// HTTP Gateway state type
 ///
 /// ## Components
-/// - `ActorServiceImpl`: For actor invocation
+/// - `ActorServiceImpl`: For actor ask/tell handling
 /// - `bool`: auth_disabled flag
 /// - `Option<String>`: JWT secret (None if not configured)
 /// - `Arc<dyn ServiceLocator>`: Service locator for config access
@@ -118,13 +118,13 @@ pub async fn create_gateway_state(
     )
 }
 
-/// Resolve tenant_id from JWT extension, headers, or fallback
+/// Resolve tenant_id from JWT claims, with local-test fallback when auth is disabled.
 ///
 /// ## Purpose
 /// Determines effective tenant_id based on auth mode:
 /// - If JWT extension is present, use its tenant_id (from validated token)
-/// - If auth enabled, try to validate Authorization header
-/// - Otherwise, fall back to x-tenant-id header
+/// - If auth enabled, try to validate the Authorization header
+/// - If auth is disabled, allow x-tenant-id for local testing only
 ///
 /// ## Arguments
 /// * `jwt` - Optional JWT claims extension (set by auth middleware)
@@ -160,12 +160,15 @@ pub fn effective_tenant_id_from_jwt_or_headers(
         }
     }
 
-    // Fallback to header
-    headers
-        .get("x-tenant-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string()
+    if auth_disabled {
+        return headers
+            .get("x-tenant-id")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+    }
+
+    String::new()
 }
 
 /// JWT auth middleware for HTTP gateway
@@ -244,10 +247,10 @@ pub async fn http_auth_middleware(
     }
 }
 
-/// HTTP handler for InvokeActor
+/// HTTP handler for AskReply and SendMessage actor routes.
 ///
 /// ## Purpose
-/// Handles actor invocation requests via HTTP, translating to gRPC calls.
+/// Handles actor ask/tell requests via HTTP, translating to ActorService calls.
 ///
 /// ## Arguments
 /// * `effective_tenant_id` - Tenant ID from JWT or headers
@@ -256,11 +259,11 @@ pub async fn http_auth_middleware(
 /// * `query` - Query parameters
 /// * `body` - Request body
 /// * `headers` - Request headers
-/// * `actor_service` - Actor service for invocation
+/// * `actor_service` - Actor service for ask/tell handling
 ///
 /// ## Returns
-/// JSON response with actor invocation result
-pub async fn invoke_actor_http(
+/// JSON response with actor ask/tell result
+pub async fn actor_http_request(
     effective_tenant_id: String,
     method: axum::http::Method,
     path: String,
@@ -269,7 +272,6 @@ pub async fn invoke_actor_http(
     headers: HeaderMap,
     actor_service: Arc<ActorServiceImpl>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // Parse path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}
     let path_parts: Vec<&str> = path
         .strip_prefix("/api/v1/actors/")
         .unwrap_or("")
@@ -281,66 +283,53 @@ pub async fn invoke_actor_http(
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({
                 "code": 400,
-                "message": "Invalid path format. Expected /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}"
+                "message": "Invalid path format. Expected /api/v1/actors/{namespace}/{actor_type}[/ask]"
             })),
         ));
     }
 
-    let (_path_tenant_id, namespace, actor_type) = if path_parts.len() == 3 {
-        (
-            path_parts[0].to_string(),
-            path_parts[1].to_string(),
-            path_parts[2].to_string(),
-        )
+    let ask_suffix = path_parts.last().copied() == Some("ask");
+    let core_len = if ask_suffix {
+        path_parts.len().saturating_sub(1)
     } else {
-        (
+        path_parts.len()
+    };
+    let (_path_tenant_id, namespace, actor_type) = match core_len {
+        2 => (
             String::new(),
             path_parts[0].to_string(),
             path_parts[1].to_string(),
-        )
-    };
-    let namespace_for_metadata = namespace.clone();
-
-    // Extract query parameters
-    let query_params: HashMap<String, String> = query.map(|q| q.0).unwrap_or_default();
-
-    // Invocation pattern: use dedicated "invocation" query param (industry practice, e.g. AWS Lambda InvocationType).
-    // - "msg_type" in query is always application-level (handler name: count, readings, ingest) and goes into payload.
-    // - "invocation" in query (POST/PUT/DELETE only) overrides transport: call=request-reply, cast=fire-and-forget.
-    // - POST/PUT default to request-reply (call) so response includes handler result; use ?invocation=cast for fire-and-forget.
-    let method_upper = method.as_str().to_uppercase();
-    let is_get = method_upper.is_empty() || method_upper == "GET";
-    // Erlang-style: only call (request-reply), cast (fire-and-forget), info (async message)
-    const ALLOWED_INVOCATION: [&str; 3] = ["call", "cast", "info"];
-    let (ask, msg_type_override) = if is_get {
-        (true, String::new())
-    } else {
-        let override_val = query_params
-            .get("invocation")
-            .map(|v| v.as_str())
-            .unwrap_or("");
-        let normalized = override_val.trim().to_lowercase();
-        if !override_val.is_empty() && !ALLOWED_INVOCATION.contains(&normalized.as_str()) {
+        ),
+        3 => (
+            path_parts[0].to_string(),
+            path_parts[1].to_string(),
+            path_parts[2].to_string(),
+        ),
+        _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
                     "code": 400,
-                    "message": format!("Invalid invocation query param: '{}'. Valid values: call, cast, info", override_val)
+                    "message": "Invalid actor path"
                 })),
-            ));
+            ))
         }
-        // POST/PUT: default to request-reply so response body contains handler result; explicit cast/info = fire-and-forget
-        let default_ask = method_upper == "POST" || method_upper == "PUT";
-        let ask = if override_val.is_empty() {
-            default_ask
-        } else {
-            normalized == "call"
-        };
-        (ask, normalized)
     };
+    let namespace_for_metadata = namespace.clone();
+    let query_params: HashMap<String, String> = query.map(|q| q.0).unwrap_or_default();
+    let method_upper = method.as_str().to_uppercase();
+    let is_ask = ask_suffix || method_upper == "GET";
 
-    // Extract optional timeout from query param ?timeout=<seconds> (default: 5s for ask operations).
-    // Allows clients to specify longer timeouts for long-running operations (e.g., training).
+    if method_upper == "DELETE" {
+        return Err((
+            StatusCode::METHOD_NOT_ALLOWED,
+            Json(serde_json::json!({
+                "code": 405,
+                "message": "DELETE is not supported for actor ask/tell endpoints"
+            })),
+        ));
+    }
+
     let timeout_duration = query_params
         .get("timeout")
         .and_then(|s| s.parse::<i64>().ok())
@@ -350,89 +339,137 @@ pub async fn invoke_actor_http(
             nanos: 0,
         });
 
-    // Create InvokeActorRequest
-    use plexspaces_proto::actor::v1::InvokeActorRequest;
-    let invoke_req = InvokeActorRequest {
-        namespace,
-        actor_type,
-        http_method: method.as_str().to_string(),
-        payload: body.map(|b| b.to_vec()).unwrap_or_default(),
-        headers: {
-            let mut h = HashMap::new();
-            for (key, value) in headers.iter() {
-                if let Ok(value_str) = value.to_str() {
-                    h.insert(key.as_str().to_string(), value_str.to_string());
-                }
-            }
-            h
-        },
-        query_params,
-        path: path.clone(),
-        subpath: String::new(),
-        ask,
-        msg_type_override,
-        timeout: timeout_duration,
-    };
+    let mut request_headers = HashMap::new();
+    for (key, value) in headers.iter() {
+        if let Ok(value_str) = value.to_str() {
+            request_headers.insert(key.as_str().to_string(), value_str.to_string());
+        }
+    }
 
-    // Call InvokeActor via ActorService
     use plexspaces_proto::actor::v1::actor_service_server::ActorService as ActorServiceTrait;
     use tonic::metadata::MetadataValue;
     use tonic::Request as TonicRequest;
 
-    let mut grpc_req = TonicRequest::new(invoke_req);
-    grpc_req.metadata_mut().insert(
-        "x-tenant-id",
-        MetadataValue::try_from(effective_tenant_id.as_str())
-            .unwrap_or_else(|_| MetadataValue::from_static("")),
-    );
-    grpc_req.metadata_mut().insert(
-        "x-namespace",
-        MetadataValue::try_from(namespace_for_metadata.as_str())
-            .unwrap_or_else(|_| MetadataValue::from_static("")),
-    );
+    if is_ask {
+        use plexspaces_proto::actor::v1::AskReplyRequest;
 
-    match ActorServiceTrait::invoke_actor(&*actor_service, grpc_req).await {
-        Ok(grpc_resp) => {
-            let resp_inner = grpc_resp.into_inner();
-            // Convert InvokeActorResponse to JSON
-            use base64::{engine::general_purpose, Engine as _};
-            let payload_json = if resp_inner.payload.is_empty() {
-                serde_json::Value::Null
-            } else {
-                // Try to decode as UTF-8 string first, otherwise base64 encode
-                match String::from_utf8(resp_inner.payload.clone()) {
-                    Ok(s) => {
-                        // Try to parse as JSON, otherwise return as string
-                        serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
+        let mut grpc_req = TonicRequest::new(AskReplyRequest {
+            namespace,
+            actor_type,
+            http_method: method.as_str().to_string(),
+            payload: body.map(|b| b.to_vec()).unwrap_or_default(),
+            headers: request_headers,
+            query_params,
+            path: path.clone(),
+            subpath: String::new(),
+            sender_id: String::new(),
+            message_type: "call".to_string(),
+            correlation_id: String::new(),
+            reply_to: String::new(),
+            message_id: String::new(),
+            timeout: timeout_duration,
+        });
+        grpc_req.metadata_mut().insert(
+            "x-tenant-id",
+            MetadataValue::try_from(effective_tenant_id.as_str())
+                .unwrap_or_else(|_| MetadataValue::from_static("")),
+        );
+        grpc_req.metadata_mut().insert(
+            "x-namespace",
+            MetadataValue::try_from(namespace_for_metadata.as_str())
+                .unwrap_or_else(|_| MetadataValue::from_static("")),
+        );
+
+        match ActorServiceTrait::ask_reply(&*actor_service, grpc_req).await {
+            Ok(grpc_resp) => {
+                let resp_inner = grpc_resp.into_inner();
+                use base64::{engine::general_purpose, Engine as _};
+                let payload_json = if resp_inner.payload.is_empty() {
+                    serde_json::Value::Null
+                } else {
+                    match String::from_utf8(resp_inner.payload.clone()) {
+                        Ok(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s)),
+                        Err(_) => serde_json::Value::String(
+                            general_purpose::STANDARD.encode(&resp_inner.payload),
+                        ),
                     }
-                    Err(_) => serde_json::Value::String(
-                        general_purpose::STANDARD.encode(&resp_inner.payload),
-                    ),
-                }
-            };
+                };
 
-            let json_resp = serde_json::json!({
-                "success": resp_inner.success,
-                "payload": payload_json,
-                "headers": resp_inner.headers,
-                "actor_id": resp_inner.actor_id,
-                "error_message": resp_inner.error_message,
-            });
-
-            Ok(Json(json_resp))
+                Ok(Json(serde_json::json!({
+                    "success": resp_inner.success,
+                    "payload": payload_json,
+                    "headers": resp_inner.headers,
+                    "actor_id": resp_inner.actor_id,
+                    "error_message": resp_inner.error_message,
+                })))
+            }
+            Err(status) => {
+                let err_json = serde_json::json!({
+                    "code": status.code() as u16,
+                    "message": status.message()
+                });
+                let http_status = match status.code() {
+                    tonic::Code::NotFound => StatusCode::NOT_FOUND,
+                    tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
+                    tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
+                    tonic::Code::DeadlineExceeded => StatusCode::GATEWAY_TIMEOUT,
+                    _ => StatusCode::INTERNAL_SERVER_ERROR,
+                };
+                Err((http_status, Json(err_json)))
+            }
         }
-        Err(status) => {
-            let err_json = serde_json::json!({
-                "code": status.code() as u16,
-                "message": status.message()
-            });
-            let http_status = match status.code() {
-                tonic::Code::NotFound => StatusCode::NOT_FOUND,
-                tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
-                tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
-                _ => StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            Err((http_status, Json(err_json)))
+    } else {
+        use plexspaces_proto::actor::v1::SendMessageRequest;
+
+        let mut grpc_req = TonicRequest::new(SendMessageRequest {
+            namespace,
+            actor_type,
+            http_method: method.as_str().to_string(),
+            payload: body.map(|b| b.to_vec()).unwrap_or_default(),
+            headers: request_headers,
+            query_params,
+            path: path.clone(),
+            subpath: String::new(),
+            sender_id: String::new(),
+            message_type: "cast".to_string(),
+            correlation_id: String::new(),
+            reply_to: String::new(),
+            message_id: String::new(),
+        });
+        grpc_req.metadata_mut().insert(
+            "x-tenant-id",
+            MetadataValue::try_from(effective_tenant_id.as_str())
+                .unwrap_or_else(|_| MetadataValue::from_static("")),
+        );
+        grpc_req.metadata_mut().insert(
+            "x-namespace",
+            MetadataValue::try_from(namespace_for_metadata.as_str())
+                .unwrap_or_else(|_| MetadataValue::from_static("")),
+        );
+
+        match ActorServiceTrait::send_message(&*actor_service, grpc_req).await {
+            Ok(grpc_resp) => {
+                let resp_inner = grpc_resp.into_inner();
+                Ok(Json(serde_json::json!({
+                    "success": resp_inner.success,
+                    "message_id": resp_inner.message_id,
+                    "actor_id": resp_inner.actor_id,
+                    "error_message": resp_inner.error_message,
+                })))
+            }
+            Err(status) => {
+                let err_json = serde_json::json!({
+                    "code": status.code() as u16,
+                    "message": status.message()
+                });
+                let http_status = match status.code() {
+                    tonic::Code::NotFound => StatusCode::NOT_FOUND,
+                    tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
+                    tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
+                    _ => StatusCode::INTERNAL_SERVER_ERROR,
+                };
+                Err((http_status, Json(err_json)))
+            }
         }
     }
 }
@@ -460,7 +497,7 @@ mod tests {
     }
 
     #[test]
-    fn test_effective_tenant_id_from_header() {
+    fn test_effective_tenant_id_from_header_when_auth_disabled() {
         let mut headers = HeaderMap::new();
         headers.insert("x-tenant-id", "test-tenant".parse().unwrap());
 
@@ -469,9 +506,18 @@ mod tests {
     }
 
     #[test]
-    fn test_effective_tenant_id_empty() {
+    fn test_effective_tenant_id_empty_when_auth_disabled() {
         let headers = HeaderMap::new();
         let result = effective_tenant_id_from_jwt_or_headers(&None, true, None, &headers);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_effective_tenant_id_ignores_header_when_auth_enabled() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-tenant-id", "test-tenant".parse().unwrap());
+
+        let result = effective_tenant_id_from_jwt_or_headers(&None, false, Some("secret"), &headers);
         assert_eq!(result, "");
     }
 }

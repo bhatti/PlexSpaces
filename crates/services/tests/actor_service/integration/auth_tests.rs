@@ -226,7 +226,7 @@ async fn test_jwt_http_auth() {
 
     let client = reqwest::Client::new();
     let url = format!(
-        "{}/api/v1/actors/default/default/test?action=get",
+        "{}/api/v1/actors/default/test?action=get",
         http_endpoint
     );
     let response = client
@@ -254,7 +254,7 @@ async fn test_jwt_http_auth() {
     harness.shutdown().await;
 }
 
-/// Test: when auth is disabled, HTTP request without JWT succeeds (tenant from path or header).
+/// Test: when auth is disabled, HTTP request without JWT succeeds with tenant provided out of band.
 #[tokio::test]
 async fn test_http_auth_disabled_no_jwt_succeeds() {
     std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
@@ -275,7 +275,7 @@ async fn test_http_auth_disabled_no_jwt_succeeds() {
     }
 
     let url = format!(
-        "http://127.0.0.1:{}/api/v1/actors/tenant1/default/test",
+        "http://127.0.0.1:{}/api/v1/actors/default/test?tenant_id=tenant1",
         http_port
     );
     let resp = reqwest::Client::new().get(&url).send().await;
@@ -317,7 +317,7 @@ async fn test_http_auth_enabled_no_jwt_fails() {
     }
 
     let url = format!(
-        "http://127.0.0.1:{}/api/v1/actors/tenant1/default/test",
+        "http://127.0.0.1:{}/api/v1/actors/default/test",
         http_port
     );
     let resp = reqwest::Client::new().get(&url).send().await;

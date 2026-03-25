@@ -119,9 +119,9 @@ pub use plexspaces_core::Actor;
 // Message Creation Helpers
 // ============================================================================
 
-/// Create a new message with JSON payload and invocation type.
+/// Create a new message with JSON payload and message invocation.
 ///
-/// ## Invocation Types
+/// ## Message Patterns
 /// - `"call"` - Request-reply (use with `ask()`)
 /// - `"cast"` - Fire-and-forget (use with `tell()`)
 ///

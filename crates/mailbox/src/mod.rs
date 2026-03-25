@@ -1430,6 +1430,44 @@ mod tests {
         create_test_mailbox(mailbox_config_default()).await
     }
 
+    fn with_priority(mut message: Message, priority: MessagePriority) -> Message {
+        message.priority = priority_to_int(priority);
+        message
+    }
+
+    fn with_sender(mut message: Message, sender_id: &str) -> Message {
+        message.sender_id = sender_id.to_string();
+        message
+    }
+
+    fn with_message_type(mut message: Message, message_type: &str) -> Message {
+        message.message_type = message_type.to_string();
+        message
+    }
+
+    fn with_correlation_id(mut message: Message, correlation_id: &str) -> Message {
+        message.correlation_id = correlation_id.to_string();
+        message
+    }
+
+    fn with_reply_to(mut message: Message, reply_to: &str) -> Message {
+        message.reply_to = reply_to.to_string();
+        message
+    }
+
+    fn with_metadata(mut message: Message, key: &str, value: &str) -> Message {
+        message.headers.insert(key.to_string(), value.to_string());
+        message
+    }
+
+    fn sender_id(message: &Message) -> Option<&str> {
+        if message.sender_id.is_empty() {
+            None
+        } else {
+            Some(message.sender_id.as_str())
+        }
+    }
+
     #[tokio::test]
     async fn test_fifo_mailbox() {
         let mut config = mailbox_config_default();
@@ -1489,11 +1527,11 @@ mod tests {
         let mailbox = create_test_mailbox(config).await;
 
         mailbox
-            .enqueue(new_message(b"low".to_vec()).with_priority(MessagePriority::Low))
+            .enqueue(with_priority(new_message(b"low".to_vec()), MessagePriority::Low))
             .await
             .unwrap();
         mailbox
-            .enqueue(new_message(b"high".to_vec()).with_priority(MessagePriority::High))
+            .enqueue(with_priority(new_message(b"high".to_vec()), MessagePriority::High))
             .await
             .unwrap();
 
@@ -1524,8 +1562,11 @@ mod tests {
 
         // Verify signal message has Highest priority
         let signal_msg = signal_message(b"signal".to_vec());
-        assert_eq!(signal_msg.priority(), MessagePriority::Highest);
-        assert_eq!(message_priority_value(&signal_msg.priority()), 5);
+        assert_eq!(priority_from_int(signal_msg.priority), MessagePriority::Highest);
+        assert_eq!(
+            message_priority_value(&priority_from_int(signal_msg.priority)),
+            5
+        );
     }
 
     /// Test 3: Verify background processor moves messages from internal queue to channel
@@ -1537,7 +1578,10 @@ mod tests {
 
         // Enqueue one message
         mailbox
-            .enqueue(new_message(b"test".to_vec()).with_priority(MessagePriority::Normal))
+            .enqueue(with_priority(
+                new_message(b"test".to_vec()),
+                MessagePriority::Normal,
+            ))
             .await
             .unwrap();
 
@@ -1571,11 +1615,11 @@ mod tests {
 
         // Enqueue low priority first, then high priority
         mailbox
-            .enqueue(new_message(b"low".to_vec()).with_priority(MessagePriority::Low))
+            .enqueue(with_priority(new_message(b"low".to_vec()), MessagePriority::Low))
             .await
             .unwrap();
         mailbox
-            .enqueue(new_message(b"high".to_vec()).with_priority(MessagePriority::High))
+            .enqueue(with_priority(new_message(b"high".to_vec()), MessagePriority::High))
             .await
             .unwrap();
 
@@ -1603,7 +1647,7 @@ mod tests {
 
         // Enqueue low priority, then signal (Highest)
         mailbox
-            .enqueue(new_message(b"low".to_vec()).with_priority(MessagePriority::Low))
+            .enqueue(with_priority(new_message(b"low".to_vec()), MessagePriority::Low))
             .await
             .unwrap();
         mailbox
@@ -1638,15 +1682,18 @@ mod tests {
 
         // Enqueue in random order
         mailbox
-            .enqueue(new_message(b"low".to_vec()).with_priority(MessagePriority::Low))
+            .enqueue(with_priority(new_message(b"low".to_vec()), MessagePriority::Low))
             .await
             .unwrap();
         mailbox
-            .enqueue(new_message(b"high".to_vec()).with_priority(MessagePriority::High))
+            .enqueue(with_priority(new_message(b"high".to_vec()), MessagePriority::High))
             .await
             .unwrap();
         mailbox
-            .enqueue(new_message(b"normal".to_vec()).with_priority(MessagePriority::Normal))
+            .enqueue(with_priority(
+                new_message(b"normal".to_vec()),
+                MessagePriority::Normal,
+            ))
             .await
             .unwrap();
         mailbox
@@ -1754,10 +1801,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_message_metadata() {
-        let message = new_message(b"test".to_vec())
-            .with_correlation_id("corr-123".to_string())
-            .with_reply_to("reply-addr".to_string())
-            .with_metadata("type".to_string(), "call".to_string());
+        let message = with_metadata(
+            with_reply_to(
+                with_correlation_id(new_message(b"test".to_vec()), "corr-123"),
+                "reply-addr",
+            ),
+            "type",
+            "call",
+        );
 
         assert_eq!(message.correlation_id, "corr-123");
         assert_eq!(message.reply_to, "reply-addr");
@@ -1775,7 +1826,7 @@ mod tests {
     async fn test_message_system() {
         let message = system_message(b"shutdown".to_vec());
 
-        assert_eq!(message.priority(), MessagePriority::System);
+        assert_eq!(priority_from_int(message.priority), MessagePriority::System);
         assert_eq!(message.payload, b"shutdown");
     }
 
@@ -1801,7 +1852,7 @@ mod tests {
         let message = new_message(b"test-payload".to_vec());
 
         // ID should be non-empty ULID
-        assert!(!message.id().is_empty());
+        assert!(!message.id.is_empty());
 
         // Payload should match
         assert_eq!(message.payload, b"test-payload");
@@ -1811,23 +1862,24 @@ mod tests {
     #[tokio::test]
     async fn test_message_type_str() {
         // Test with message_type field set
-        let msg1 = new_message(b"test".to_vec()).with_message_type("call".to_string());
-        assert_eq!(msg1.message_type_str(), "call");
+        let msg1 = with_message_type(new_message(b"test".to_vec()), "call");
+        assert_eq!(message_type_str(&msg1), "call");
 
         // Test with metadata "type" key (fallback)
-        let msg2 =
-            new_message(b"test".to_vec()).with_metadata("type".to_string(), "cast".to_string());
-        assert_eq!(msg2.message_type_str(), "cast");
+        let msg2 = with_metadata(new_message(b"test".to_vec()), "type", "cast");
+        assert_eq!(message_type_str(&msg2), "cast");
 
         // Test with neither (default to "cast")
         let msg3 = new_message(b"test".to_vec());
-        assert_eq!(msg3.message_type_str(), "cast");
+        assert_eq!(message_type_str(&msg3), "cast");
 
         // Test message_type takes precedence over metadata
-        let msg4 = new_message(b"test".to_vec())
-            .with_message_type("info".to_string())
-            .with_metadata("type".to_string(), "cast".to_string());
-        assert_eq!(msg4.message_type_str(), "info");
+        let msg4 = with_metadata(
+            with_message_type(new_message(b"test".to_vec()), "info"),
+            "type",
+            "cast",
+        );
+        assert_eq!(message_type_str(&msg4), "info");
     }
 
     // ==========================================================================
@@ -1837,47 +1889,57 @@ mod tests {
     /// Test with_sender() and sender_id() methods
     #[tokio::test]
     async fn test_message_with_sender() {
-        let message = new_message(b"test".to_vec()).with_sender("actor-123".to_string());
+        let message = with_sender(new_message(b"test".to_vec()), "actor-123");
 
         assert_eq!(message.sender_id, "actor-123");
-        assert_eq!(message.sender_id(), Some("actor-123"));
+        assert_eq!(sender_id(&message), Some("actor-123"));
 
         // Test message without sender
         let msg2 = new_message(b"test".to_vec());
-        assert_eq!(msg2.sender_id(), None);
+        assert_eq!(sender_id(&msg2), None);
     }
 
     /// Test with_message_type() method
     #[tokio::test]
     async fn test_message_with_message_type() {
-        let message = new_message(b"test".to_vec()).with_message_type("workflow_run".to_string());
+        let message = with_message_type(new_message(b"test".to_vec()), "workflow_run");
 
         assert_eq!(message.message_type, "workflow_run");
-        assert_eq!(message.message_type_str(), "workflow_run");
+        assert_eq!(message_type_str(&message), "workflow_run");
     }
 
     /// Test priority() getter method
     #[tokio::test]
     async fn test_message_priority() {
-        let message = new_message(b"test".to_vec()).with_priority(MessagePriority::High);
+        let message = with_priority(new_message(b"test".to_vec()), MessagePriority::High);
 
-        assert_eq!(message.priority(), MessagePriority::High);
+        assert_eq!(priority_from_int(message.priority), MessagePriority::High);
     }
 
     /// Test builder method chaining
     #[tokio::test]
     async fn test_message_builders_chaining() {
-        let message = new_message(b"payload".to_vec())
-            .with_sender("sender-1".to_string())
-            .with_message_type("call".to_string())
-            .with_priority(MessagePriority::High)
-            .with_correlation_id("corr-456".to_string())
-            .with_reply_to("reply-addr".to_string())
-            .with_metadata("key".to_string(), "value".to_string());
+        let message = with_metadata(
+            with_reply_to(
+                with_correlation_id(
+                    with_priority(
+                        with_message_type(
+                            with_sender(new_message(b"payload".to_vec()), "sender-1"),
+                            "call",
+                        ),
+                        MessagePriority::High,
+                    ),
+                    "corr-456",
+                ),
+                "reply-addr",
+            ),
+            "key",
+            "value",
+        );
 
         assert_eq!(message.sender_id, "sender-1");
         assert_eq!(message.message_type, "call");
-        assert_eq!(message.priority(), MessagePriority::High);
+        assert_eq!(priority_from_int(message.priority), MessagePriority::High);
         assert_eq!(message.correlation_id, "corr-456");
         assert_eq!(message.reply_to, "reply-addr");
         assert_eq!(message.headers.get("key"), Some(&"value".to_string()));
@@ -1918,39 +1980,39 @@ mod tests {
             uri_method: String::new(),
         };
 
-        let message = Message::from_proto(&proto_msg);
+        let message = proto_msg.clone();
 
         assert_eq!(message.id, "test-id");
         assert_eq!(message.sender_id, "sender-123");
         assert_eq!(message.receiver_id, "receiver-456");
         assert_eq!(message.message_type, "call");
         assert_eq!(message.payload, b"test-payload");
-        assert_eq!(message.priority(), MessagePriority::High); // 60 is in 50-74 range
+        assert_eq!(priority_from_int(message.priority), MessagePriority::High); // 60 is in 50-74 range
         assert_eq!(message.correlation_id, "corr-1");
         assert_eq!(message.reply_to, "reply-1");
 
         // Test normal priority (25-49 range)
         let mut proto_msg2 = proto_msg.clone();
         proto_msg2.priority = 30;
-        let message2 = Message::from_proto(&proto_msg2);
-        assert_eq!(message2.priority(), MessagePriority::Normal);
+        let message2 = proto_msg2;
+        assert_eq!(priority_from_int(message2.priority), MessagePriority::Normal);
 
         // Test low priority (< 25 range)
         let mut proto_msg3 = proto_msg.clone();
         proto_msg3.priority = 10;
-        let message3 = Message::from_proto(&proto_msg3);
-        assert_eq!(message3.priority(), MessagePriority::Low); // 10 < 25 maps to Low
+        let message3 = proto_msg3;
+        assert_eq!(priority_from_int(message3.priority), MessagePriority::Low); // 10 < 25 maps to Low
 
         // Test empty sender
         let mut proto_msg4 = proto_msg.clone();
         proto_msg4.sender_id = String::new();
-        let message4 = Message::from_proto(&proto_msg4);
-        assert_eq!(message4.sender_id(), None);
+        let message4 = proto_msg4;
+        assert_eq!(sender_id(&message4), None);
 
         // Test empty receiver (from_proto is a clone, so receiver_id stays empty)
         let mut proto_msg5 = proto_msg.clone();
         proto_msg5.receiver_id = String::new();
-        let message5 = Message::from_proto(&proto_msg5);
+        let message5 = proto_msg5;
         assert_eq!(message5.receiver_id, "");
     }
 
@@ -1958,14 +2020,20 @@ mod tests {
     #[tokio::test]
     async fn test_message_to_proto() {
         // Test Highest priority (Signal equivalent)
-        let msg1 = new_message(b"test".to_vec())
-            .with_priority(MessagePriority::Highest)
-            .with_sender("sender-1".to_string())
-            .with_correlation_id("corr-1".to_string())
-            .with_reply_to("reply-1".to_string())
-            .with_metadata("custom".to_string(), "value".to_string());
-
-        let proto1 = msg1.to_proto();
+        let proto1 = with_metadata(
+            with_reply_to(
+                with_correlation_id(
+                    with_sender(
+                        with_priority(new_message(b"test".to_vec()), MessagePriority::Highest),
+                        "sender-1",
+                    ),
+                    "corr-1",
+                ),
+                "reply-1",
+            ),
+            "custom",
+            "value",
+        );
         assert_eq!(proto1.priority, 100); // Highest = 100
         assert_eq!(proto1.sender_id, "sender-1");
         assert_eq!(proto1.correlation_id, "corr-1"); // stored as direct field
@@ -1973,28 +2041,23 @@ mod tests {
         assert_eq!(proto1.headers.get("custom"), Some(&"value".to_string()));
 
         // Test System priority
-        let msg2 = system_message(b"test".to_vec());
-        let proto2 = msg2.to_proto();
+        let proto2 = system_message(b"test".to_vec());
         assert_eq!(proto2.priority, 75); // System = 75
 
         // Test High priority
-        let msg3 = new_message(b"test".to_vec()).with_priority(MessagePriority::High);
-        let proto3 = msg3.to_proto();
+        let proto3 = with_priority(new_message(b"test".to_vec()), MessagePriority::High);
         assert_eq!(proto3.priority, 50); // High = 50
 
         // Test Normal priority
-        let msg4 = new_message(b"test".to_vec()).with_priority(MessagePriority::Normal);
-        let proto4 = msg4.to_proto();
+        let proto4 = with_priority(new_message(b"test".to_vec()), MessagePriority::Normal);
         assert_eq!(proto4.priority, 25); // Normal = 25
 
         // Test Low priority
-        let msg5 = new_message(b"test".to_vec()).with_priority(MessagePriority::Low);
-        let proto5 = msg5.to_proto();
+        let proto5 = with_priority(new_message(b"test".to_vec()), MessagePriority::Low);
         assert_eq!(proto5.priority, 0); // Low = 0
 
         // Test message without sender
-        let msg6 = new_message(b"test".to_vec());
-        let proto6 = msg6.to_proto();
+        let proto6 = new_message(b"test".to_vec());
         assert_eq!(proto6.sender_id, ""); // Empty if no sender
     }
 
@@ -2331,13 +2394,26 @@ mod tests {
     /// Test Message to ProtoMessage conversion
     #[test]
     fn test_message_to_channel_message() {
-        let msg = new_message(b"test payload".to_vec())
-            .with_priority(MessagePriority::High)
-            .with_correlation_id("corr-123".to_string())
-            .with_reply_to("reply-addr".to_string())
-            .with_sender("sender-actor".to_string())
-            .with_message_type("test_type".to_string())
-            .with_metadata("key1".to_string(), "value1".to_string());
+        let msg = with_metadata(
+            with_message_type(
+                with_sender(
+                    with_reply_to(
+                        with_correlation_id(
+                            with_priority(
+                                new_message(b"test payload".to_vec()),
+                                MessagePriority::High,
+                            ),
+                            "corr-123",
+                        ),
+                        "reply-addr",
+                    ),
+                    "sender-actor",
+                ),
+                "test_type",
+            ),
+            "key1",
+            "value1",
+        );
 
         // ProtoMessage is already in the correct format, just set channel name
         let mut channel_msg = msg.clone();
@@ -2349,11 +2425,8 @@ mod tests {
         assert_eq!(channel_msg.sender_id, "sender-actor");
         assert_eq!(channel_msg.correlation_id, "corr-123");
         assert_eq!(channel_msg.reply_to, "reply-addr");
-        assert_eq!(
-            channel_msg.headers.get("message_type"),
-            Some(&"test_type".to_string())
-        );
-        assert_eq!(channel_msg.headers.get("priority"), Some(&"4".to_string())); // High = 4
+        assert_eq!(channel_msg.message_type, "test_type");
+        assert_eq!(channel_msg.priority, 50);
         assert_eq!(channel_msg.headers.get("key1"), Some(&"value1".to_string()));
     }
 
@@ -2393,11 +2466,11 @@ mod tests {
             uri_method: String::new(),
         };
 
-        let msg: Message = Message::from_proto(&channel_msg);
+        let msg: Message = channel_msg;
 
         assert_eq!(msg.id, "msg-123");
         assert_eq!(msg.payload, b"test payload");
-        assert_eq!(msg.priority(), MessagePriority::High); // 60 is in 50-74 range
+        assert_eq!(priority_from_int(msg.priority), MessagePriority::High); // 60 is in 50-74 range
         assert_eq!(msg.correlation_id, "corr-123");
         assert_eq!(msg.reply_to, "reply-addr");
         assert_eq!(msg.sender_id, "sender-actor");

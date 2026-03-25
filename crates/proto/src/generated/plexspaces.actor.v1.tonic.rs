@@ -86,29 +86,6 @@ pub mod actor_service_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /** Spawn an actor on the node receiving this gRPC request
-
- ## Purpose
- Spawns an actor on the node where this RPC is called. The target node is implicit
- from the gRPC endpoint (no target_node_id field needed).
-
- ## Erlang Comparison
- Erlang: spawn(Node, Module, Function, Args)
- PlexSpaces: SpawnActor(actor_type, actor_id?, initial_state, config)
-   - Node is implicit from gRPC connection endpoint
-
- ## Design Notes
- - This RPC is called ON the target node (node2 receives the request)
- - The caller (node1) sends gRPC request to node2's ActorService
- - node2 validates actor_type exists locally, then spawns
- - Returns ActorRef in format "actor_id@node2" for location-transparent messaging
- - actor_id is optional: if provided (client-specified), use it; if not, server generates ULID
-
- ## Security
- - Target node validates caller has permission to spawn actors
- - Target node validates actor_type is registered and safe to spawn
- - Rate limiting applied per caller to prevent spawn bombing
-*/
         pub async fn spawn_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::SpawnActorRequest>,
@@ -220,7 +197,7 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Send message to an actor
+        /** Send message to an actor using tell semantics
 */
         pub async fn send_message(
             &mut self,
@@ -456,15 +433,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Unlink two actors (Erlang unlink/1 equivalent)
-
- ## Purpose
- Removes the bidirectional link between two actors. After unlinking,
- actors can die independently without cascading failures.
-
- ## Erlang Philosophy
- Equivalent to Erlang's `unlink(Pid)` - removes bidirectional link.
-*/
         pub async fn unlink_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::UnlinkActorRequest>,
@@ -492,22 +460,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Internal: Notify supervisor of actor termination
-
- ## Purpose
- Called by the remote node hosting the actor when it terminates. The remote
- node sends this notification to the supervisor_callback address that was
- provided in MonitorActor.
-
- ## Erlang Philosophy
- Equivalent to receiving {'DOWN', Ref, process, Pid, Reason} message in Erlang.
- The supervisor receives this asynchronously when the monitored actor exits.
-
- ## Design Notes
- - This is an internal RPC, not typically called by user code
- - Supervisor uses this to implement restart strategies
- - reason: "normal" for graceful shutdown, error message for crashes
-*/
         pub async fn notify_actor_down(
             &mut self,
             request: impl tonic::IntoRequest<super::ActorDownNotification>,
@@ -534,95 +486,6 @@ pub mod actor_service_client {
                     GrpcMethod::new(
                         "plexspaces.actor.v1.ActorService",
                         "NotifyActorDown",
-                    ),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        /** Activate a virtual actor (load into memory)
-
- ## Purpose
- Activates a virtual actor that exists virtually but is not yet in memory.
- Virtual actors are always addressable but activated on-demand.
-
- ## When Used
- Only works for actors with VirtualActorFacet attached (opt-in pattern).
- Regular actors are always active after creation.
-
- ## Behavior
- - Loads actor state from storage (if persisted)
- - Instantiates actor in memory
- - Processes pending messages (queued during activation)
- - Updates VirtualActorLifecycle (last_activated, activation_count)
-*/
-        pub async fn activate_actor(
-            &mut self,
-            request: impl tonic::IntoRequest<super::ActivateActorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ActivateActorResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.actor.v1.ActorService/ActivateActor",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("plexspaces.actor.v1.ActorService", "ActivateActor"),
-                );
-            self.inner.unary(req, path, codec).await
-        }
-        /** Deactivate a virtual actor (remove from memory)
-
- ## Purpose
- Deactivates a virtual actor that has been idle, freeing memory while
- maintaining addressability.
-
- ## When Used
- Only works for actors with VirtualActorFacet attached.
- Regular actors cannot be deactivated (must be deleted).
-
- ## Behavior
- - Persists actor state to storage (if persist_on_deactivation enabled)
- - Removes actor from memory
- - Updates VirtualActorLifecycle (last_accessed, is_activating = false)
- - Queues any new messages for later activation
-*/
-        pub async fn deactivate_actor(
-            &mut self,
-            request: impl tonic::IntoRequest<super::DeactivateActorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.actor.v1.ActorService/DeactivateActor",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new(
-                        "plexspaces.actor.v1.ActorService",
-                        "DeactivateActor",
                     ),
                 );
             self.inner.unary(req, path, codec).await
@@ -657,11 +520,11 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        pub async fn invoke_actor(
+        pub async fn ask_reply(
             &mut self,
-            request: impl tonic::IntoRequest<super::InvokeActorRequest>,
+            request: impl tonic::IntoRequest<super::AskReplyRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::InvokeActorResponse>,
+            tonic::Response<super::AskReplyResponse>,
             tonic::Status,
         > {
             self.inner
@@ -675,13 +538,11 @@ pub mod actor_service_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.actor.v1.ActorService/InvokeActor",
+                "/plexspaces.actor.v1.ActorService/AskReply",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("plexspaces.actor.v1.ActorService", "InvokeActor"),
-                );
+                .insert(GrpcMethod::new("plexspaces.actor.v1.ActorService", "AskReply"));
             self.inner.unary(req, path, codec).await
         }
         pub async fn terminate_actor(
@@ -1098,29 +959,6 @@ pub mod actor_service_server {
     /// Generated trait containing gRPC methods that should be implemented for use with ActorServiceServer.
     #[async_trait]
     pub trait ActorService: Send + Sync + 'static {
-        /** Spawn an actor on the node receiving this gRPC request
-
- ## Purpose
- Spawns an actor on the node where this RPC is called. The target node is implicit
- from the gRPC endpoint (no target_node_id field needed).
-
- ## Erlang Comparison
- Erlang: spawn(Node, Module, Function, Args)
- PlexSpaces: SpawnActor(actor_type, actor_id?, initial_state, config)
-   - Node is implicit from gRPC connection endpoint
-
- ## Design Notes
- - This RPC is called ON the target node (node2 receives the request)
- - The caller (node1) sends gRPC request to node2's ActorService
- - node2 validates actor_type exists locally, then spawns
- - Returns ActorRef in format "actor_id@node2" for location-transparent messaging
- - actor_id is optional: if provided (client-specified), use it; if not, server generates ULID
-
- ## Security
- - Target node validates caller has permission to spawn actors
- - Target node validates actor_type is registered and safe to spawn
- - Rate limiting applied per caller to prevent spawn bombing
-*/
         async fn spawn_actor(
             &self,
             request: tonic::Request<super::SpawnActorRequest>,
@@ -1154,7 +992,7 @@ pub mod actor_service_server {
             tonic::Response<super::ListActorsResponse>,
             tonic::Status,
         >;
-        /** Send message to an actor
+        /** Send message to an actor using tell semantics
 */
         async fn send_message(
             &self,
@@ -1254,15 +1092,6 @@ pub mod actor_service_server {
             tonic::Response<super::LinkActorResponse>,
             tonic::Status,
         >;
-        /** Unlink two actors (Erlang unlink/1 equivalent)
-
- ## Purpose
- Removes the bidirectional link between two actors. After unlinking,
- actors can die independently without cascading failures.
-
- ## Erlang Philosophy
- Equivalent to Erlang's `unlink(Pid)` - removes bidirectional link.
-*/
         async fn unlink_actor(
             &self,
             request: tonic::Request<super::UnlinkActorRequest>,
@@ -1270,71 +1099,9 @@ pub mod actor_service_server {
             tonic::Response<super::UnlinkActorResponse>,
             tonic::Status,
         >;
-        /** Internal: Notify supervisor of actor termination
-
- ## Purpose
- Called by the remote node hosting the actor when it terminates. The remote
- node sends this notification to the supervisor_callback address that was
- provided in MonitorActor.
-
- ## Erlang Philosophy
- Equivalent to receiving {'DOWN', Ref, process, Pid, Reason} message in Erlang.
- The supervisor receives this asynchronously when the monitored actor exits.
-
- ## Design Notes
- - This is an internal RPC, not typically called by user code
- - Supervisor uses this to implement restart strategies
- - reason: "normal" for graceful shutdown, error message for crashes
-*/
         async fn notify_actor_down(
             &self,
             request: tonic::Request<super::ActorDownNotification>,
-        ) -> std::result::Result<
-            tonic::Response<super::super::super::common::v1::Empty>,
-            tonic::Status,
-        >;
-        /** Activate a virtual actor (load into memory)
-
- ## Purpose
- Activates a virtual actor that exists virtually but is not yet in memory.
- Virtual actors are always addressable but activated on-demand.
-
- ## When Used
- Only works for actors with VirtualActorFacet attached (opt-in pattern).
- Regular actors are always active after creation.
-
- ## Behavior
- - Loads actor state from storage (if persisted)
- - Instantiates actor in memory
- - Processes pending messages (queued during activation)
- - Updates VirtualActorLifecycle (last_activated, activation_count)
-*/
-        async fn activate_actor(
-            &self,
-            request: tonic::Request<super::ActivateActorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::ActivateActorResponse>,
-            tonic::Status,
-        >;
-        /** Deactivate a virtual actor (remove from memory)
-
- ## Purpose
- Deactivates a virtual actor that has been idle, freeing memory while
- maintaining addressability.
-
- ## When Used
- Only works for actors with VirtualActorFacet attached.
- Regular actors cannot be deactivated (must be deleted).
-
- ## Behavior
- - Persists actor state to storage (if persist_on_deactivation enabled)
- - Removes actor from memory
- - Updates VirtualActorLifecycle (last_accessed, is_activating = false)
- - Queues any new messages for later activation
-*/
-        async fn deactivate_actor(
-            &self,
-            request: tonic::Request<super::DeactivateActorRequest>,
         ) -> std::result::Result<
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
@@ -1346,11 +1113,11 @@ pub mod actor_service_server {
             tonic::Response<super::CheckActorExistsResponse>,
             tonic::Status,
         >;
-        async fn invoke_actor(
+        async fn ask_reply(
             &self,
-            request: tonic::Request<super::InvokeActorRequest>,
+            request: tonic::Request<super::AskReplyRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::InvokeActorResponse>,
+            tonic::Response<super::AskReplyResponse>,
             tonic::Status,
         >;
         async fn terminate_actor(
@@ -2135,98 +1902,6 @@ pub mod actor_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.actor.v1.ActorService/ActivateActor" => {
-                    #[allow(non_camel_case_types)]
-                    struct ActivateActorSvc<T: ActorService>(pub Arc<T>);
-                    impl<
-                        T: ActorService,
-                    > tonic::server::UnaryService<super::ActivateActorRequest>
-                    for ActivateActorSvc<T> {
-                        type Response = super::ActivateActorResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::ActivateActorRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as ActorService>::activate_actor(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = ActivateActorSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.actor.v1.ActorService/DeactivateActor" => {
-                    #[allow(non_camel_case_types)]
-                    struct DeactivateActorSvc<T: ActorService>(pub Arc<T>);
-                    impl<
-                        T: ActorService,
-                    > tonic::server::UnaryService<super::DeactivateActorRequest>
-                    for DeactivateActorSvc<T> {
-                        type Response = super::super::super::common::v1::Empty;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::DeactivateActorRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as ActorService>::deactivate_actor(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = DeactivateActorSvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
                 "/plexspaces.actor.v1.ActorService/CheckActorExists" => {
                     #[allow(non_camel_case_types)]
                     struct CheckActorExistsSvc<T: ActorService>(pub Arc<T>);
@@ -2274,25 +1949,25 @@ pub mod actor_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/plexspaces.actor.v1.ActorService/InvokeActor" => {
+                "/plexspaces.actor.v1.ActorService/AskReply" => {
                     #[allow(non_camel_case_types)]
-                    struct InvokeActorSvc<T: ActorService>(pub Arc<T>);
+                    struct AskReplySvc<T: ActorService>(pub Arc<T>);
                     impl<
                         T: ActorService,
-                    > tonic::server::UnaryService<super::InvokeActorRequest>
-                    for InvokeActorSvc<T> {
-                        type Response = super::InvokeActorResponse;
+                    > tonic::server::UnaryService<super::AskReplyRequest>
+                    for AskReplySvc<T> {
+                        type Response = super::AskReplyResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::InvokeActorRequest>,
+                            request: tonic::Request<super::AskReplyRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as ActorService>::invoke_actor(&inner, request).await
+                                <T as ActorService>::ask_reply(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -2304,7 +1979,7 @@ pub mod actor_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = InvokeActorSvc(inner);
+                        let method = AskReplySvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

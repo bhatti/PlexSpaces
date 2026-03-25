@@ -28,23 +28,20 @@
 //! - **Return Futures**: All async operations return Futures for parallel operations (map/reduce)
 //! - **No cyclic dependencies**: Routing module doesn't depend on ActorRef or ActorService
 
-use async_trait::async_trait;
 use std::future::Future;
-use std::io::Write;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use plexspaces_core::{
-    MessageSender, ReplyWaiter, ReplyWaiterError, RequestContext,
-    ServiceLocator as ServiceLocatorTrait,
+    ReplyWaiter, ReplyWaiterError, RequestContext, ServiceLocator as ServiceLocatorTrait,
 };
-use plexspaces_proto::actor::v1::{actor_service_client::ActorServiceClient, SendMessageRequest};
+use plexspaces_proto::actor::v1::{
+    actor_service_client::ActorServiceClient, AskReplyRequest, SendMessageRequest,
+};
 use plexspaces_proto::common::v1::Message;
 use prost_types;
-use ulid::Ulid;
 
-use crate::ActorRef;
 use crate::ActorRefError;
 
 /// Extract node_id from actor ID (format: "actor_name@node_id" or just "actor_name")
@@ -388,7 +385,7 @@ pub fn route_remote(
     ctx: RequestContext,
     service_locator: Arc<dyn ServiceLocatorTrait>,
     node_id: String,
-    _actor_id: String,
+    actor_id: String,
     message: Message,
     wait_for_response: bool,
     timeout: Option<Duration>,
@@ -422,15 +419,60 @@ pub fn route_remote(
             nanos: d.subsec_nanos() as i32,
         });
 
-        // Create SendMessage request
-        let request = tonic::Request::new(SendMessageRequest {
-            message: Some(proto_message),
-            wait_for_response,
-            timeout: proto_timeout,
-        });
+        let method = if wait_for_response { "GET" } else { "POST" }.to_string();
 
-        // Forward to remote ActorService
-        let response = match client.send_message(request).await {
+        // Forward to remote ActorService using explicit tell vs ask RPCs.
+        let response = match if wait_for_response {
+            client
+                .ask_reply(tonic::Request::new(AskReplyRequest {
+                    namespace: ctx.namespace().to_string(),
+                    actor_type: actor_id.clone(),
+                    http_method: method,
+                    payload: proto_message.payload.clone(),
+                    headers: proto_message.headers.clone(),
+                    query_params: Default::default(),
+                    path: proto_message.uri_path.clone(),
+                    subpath: String::new(),
+                    sender_id: proto_message.sender_id.clone(),
+                    message_type: proto_message.message_type.clone(),
+                    correlation_id: proto_message.correlation_id.clone(),
+                    reply_to: proto_message.reply_to.clone(),
+                    message_id: proto_message.id.clone(),
+                    timeout: proto_timeout,
+                }))
+                .await
+                .map(|resp| {
+                    let inner = resp.into_inner();
+                    (
+                        inner.actor_id,
+                        inner.payload,
+                        inner.headers,
+                        String::new(),
+                    )
+                })
+        } else {
+            client
+                .send_message(tonic::Request::new(SendMessageRequest {
+                    namespace: ctx.namespace().to_string(),
+                    actor_type: actor_id.clone(),
+                    http_method: method,
+                    payload: proto_message.payload.clone(),
+                    headers: proto_message.headers.clone(),
+                    query_params: Default::default(),
+                    path: proto_message.uri_path.clone(),
+                    subpath: String::new(),
+                    sender_id: proto_message.sender_id.clone(),
+                    message_type: proto_message.message_type.clone(),
+                    correlation_id: proto_message.correlation_id.clone(),
+                    reply_to: proto_message.reply_to.clone(),
+                    message_id: proto_message.id.clone(),
+                }))
+                .await
+                .map(|resp| {
+                    let inner = resp.into_inner();
+                    (inner.actor_id, Vec::new(), Default::default(), inner.message_id)
+                })
+        } {
             Ok(r) => r,
             Err(e) => {
                 // Update Node metrics on failure
@@ -455,8 +497,6 @@ pub fn route_remote(
             }
         };
 
-        let response_inner = response.into_inner();
-
         // OBSERVABILITY: Track duration
         let duration = start.elapsed();
         metrics::histogram!("plexspaces_routing_remote_route_duration_seconds")
@@ -473,10 +513,24 @@ pub fn route_remote(
             accessor.increment_remote_deliveries().await;
         }
 
-        // Convert response back to internal Message if present
-        let reply_message = response_inner.response;
-
-        Ok((response_inner.message_id, reply_message))
+        if wait_for_response {
+            let (resolved_actor_id, payload, headers, _) = response;
+            let correlation_id = proto_message.id.clone();
+            let reply_message = Message {
+                id: format!("res-{}", ulid::Ulid::new()),
+                sender_id: resolved_actor_id,
+                receiver_id: proto_message.sender_id,
+                message_type: "call".to_string(),
+                payload,
+                headers,
+                correlation_id,
+                ..Default::default()
+            };
+            Ok((proto_message.id, Some(reply_message)))
+        } else {
+            let (_resolved_actor_id, _payload, _headers, message_id) = response;
+            Ok((message_id, None))
+        }
     })
 }
 
@@ -531,7 +585,7 @@ pub fn route_message(
         )
         .increment(1);
 
-        if is_local {
+        if node_id.is_none() || is_local {
             // LOCAL ROUTING: Use route_local
             let target_actor_id = if let Some(node_id) = node_id {
                 format!("{}@{}", actor_name, node_id)

@@ -1026,26 +1026,62 @@ pub struct ListActorsResponse {
     #[prost(message, optional, tag="2")]
     pub page_response: ::core::option::Option<super::super::common::v1::PageResponse>,
 }
-/// Request to send a message
+/// Request to send a message via tell semantics
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SendMessageRequest {
-    #[prost(message, optional, tag="1")]
-    pub message: ::core::option::Option<super::super::common::v1::Message>,
-    #[prost(bool, tag="2")]
-    pub wait_for_response: bool,
-    /// Max 1 hour timeout
-    #[prost(message, optional, tag="3")]
-    pub timeout: ::core::option::Option<::prost_types::Duration>,
+    /// Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
+    #[prost(string, tag="1")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Actor type or actor id to target.
+    /// If this value contains '@', it is treated as a direct actor id first.
+    #[prost(string, tag="2")]
+    pub actor_type: ::prost::alloc::string::String,
+    /// Optional HTTP method metadata for gateway-originated requests.
+    #[prost(string, tag="3")]
+    pub http_method: ::prost::alloc::string::String,
+    /// Request payload bytes.
+    #[prost(bytes="vec", tag="4")]
+    pub payload: ::prost::alloc::vec::Vec<u8>,
+    /// Request headers or message metadata.
+    #[prost(map="string, string", tag="5")]
+    pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Query parameters from HTTP requests.
+    #[prost(map="string, string", tag="6")]
+    pub query_params: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
+    /// Full request path for gateway-originated requests.
+    #[prost(string, tag="7")]
+    pub path: ::prost::alloc::string::String,
+    /// Remaining path segment after actor_type.
+    #[prost(string, tag="8")]
+    pub subpath: ::prost::alloc::string::String,
+    /// Optional sender actor id for remoting and tracing.
+    #[prost(string, tag="9")]
+    pub sender_id: ::prost::alloc::string::String,
+    /// Optional application or transport message type.
+    #[prost(string, tag="10")]
+    pub message_type: ::prost::alloc::string::String,
+    /// Optional correlation id preserved for remoting.
+    #[prost(string, tag="11")]
+    pub correlation_id: ::prost::alloc::string::String,
+    /// Optional reply_to preserved for remoting.
+    #[prost(string, tag="12")]
+    pub reply_to: ::prost::alloc::string::String,
+    /// Optional client-provided message id.
+    #[prost(string, tag="13")]
+    pub message_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SendMessageResponse {
-    #[prost(string, tag="1")]
+    #[prost(bool, tag="1")]
+    pub success: bool,
+    #[prost(string, tag="2")]
     pub message_id: ::prost::alloc::string::String,
-    /// Only if wait_for_response = true
-    #[prost(message, optional, tag="2")]
-    pub response: ::core::option::Option<super::super::common::v1::Message>,
+    #[prost(string, tag="3")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub error_message: ::prost::alloc::string::String,
 }
 /// Request for streaming messages (high-throughput)
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1543,47 +1579,10 @@ pub struct UnlinkActorResponse {
 // EntitySpace event notification and channel/subscriber architecture.
 // This is the foundation for metrics, tracing, and monitoring integration.
 
-/// Request to activate a virtual actor
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ActivateActorRequest {
-    /// Actor ID to activate (must have VirtualActorFacet)
-    #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
-    /// Optional: Force activation even if already active
-    #[prost(bool, tag="2")]
-    pub force: bool,
-}
-/// Response to activate actor request
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ActivateActorResponse {
-    /// Activated actor instance
-    /// Note: actor.state contains the actual lifecycle state (ActorState enum)
-    #[prost(message, optional, tag="1")]
-    pub actor: ::core::option::Option<Actor>,
-    /// Optional activation metadata (timestamps, counts, etc.)
-    /// This is metadata only - the actual state is in actor.state (ActorState enum)
-    /// All actors (virtual or not) use the same ActorState enum for consistency
-    #[prost(message, optional, tag="2")]
-    pub lifecycle: ::core::option::Option<VirtualActorLifecycle>,
-}
-/// Request to deactivate a virtual actor
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct DeactivateActorRequest {
-    /// Actor ID to deactivate (must have VirtualActorFacet)
-    #[prost(string, tag="1")]
-    pub actor_id: ::prost::alloc::string::String,
-    /// Optional: Force deactivation even if actor has pending messages
-    #[prost(bool, tag="2")]
-    pub force: bool,
-}
 /// Request to terminate an actor gracefully
 ///
 /// ## Purpose
 /// Permanently terminates an actor, completing pending work and removing from system.
-/// Different from DeactivateActor which is temporary passivation for virtual actors.
 /// Pairs with SpawnActorRequest for complete lifecycle management.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1647,10 +1646,10 @@ pub struct CheckActorExistsResponse {
     #[prost(bool, tag="3")]
     pub is_virtual: bool,
 }
-/// Request to invoke an actor via HTTP-like interface (FaaS-style)
+/// Request to ask an actor via HTTP-like interface (FaaS-style)
 ///
 /// ## Purpose
-/// Enables FaaS-like invocation of actors via HTTP GET/POST/PUT/DELETE requests.
+/// Enables ask-style requests to actors via HTTP GET/POST/PUT routes.
 /// The tenant_id, namespace, and actor_type are extracted from the HTTP path.
 ///
 /// ## HTTP Method Handling
@@ -1658,7 +1657,7 @@ pub struct CheckActorExistsResponse {
 /// - POST: Request body becomes payload, HTTP headers become headers map
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct InvokeActorRequest {
+pub struct AskReplyRequest {
     /// Namespace (extracted from path: /api/v1/actors/{namespace}/{actor_type})
     /// Can be empty - defaults to empty string if not provided
     /// Tenant ID comes from gRPC auth (JWT middleware) or default config, not from request
@@ -1668,20 +1667,19 @@ pub struct InvokeActorRequest {
     /// Used to lookup actors via ActorRegistry discover_actors_by_type
     #[prost(string, tag="2")]
     pub actor_type: ::prost::alloc::string::String,
-    /// HTTP method (GET, POST, PUT, or DELETE)
-    /// GET/DELETE: Uses ask() (request-reply), POST/PUT: Uses tell() (fire-and-forget)
+    /// HTTP method metadata (GET, POST, or PUT)
     #[prost(string, tag="3")]
     pub http_method: ::prost::alloc::string::String,
     /// Request payload
-    /// For GET/DELETE: JSON string of query parameters
+    /// For GET: JSON string of query parameters
     /// For POST/PUT: Request body bytes
     #[prost(bytes="vec", tag="4")]
     pub payload: ::prost::alloc::vec::Vec<u8>,
-    /// HTTP headers (for POST/PUT requests)
+    /// HTTP headers
     /// Converted from HTTP request headers
     #[prost(map="string, string", tag="5")]
     pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
-    /// Query parameters (for GET/DELETE requests)
+    /// Query parameters (for GET requests)
     /// Converted to JSON and stored in payload
     #[prost(map="string, string", tag="6")]
     pub query_params: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
@@ -1696,32 +1694,34 @@ pub struct InvokeActorRequest {
     /// This will be used in future for advanced per-actor routing capabilities.
     #[prost(string, tag="8")]
     pub subpath: ::prost::alloc::string::String,
-    /// When true, use request-reply (ask pattern, message_type "call") regardless of HTTP method.
-    /// When false or unset: only GET uses ask (request-reply); POST/PUT/DELETE use tell (fire-and-forget, message_type "cast").
-    /// HTTP gateway sets this when query param invocation=call (e.g. POST ...?invocation=call). "msg_type" in query is handler name (payload).
-    /// Consistent with actor message_type: "call" = ask, "cast" = tell.
-    #[prost(bool, tag="9")]
-    pub ask: bool,
-    /// Optional message type override from HTTP query param "invocation" (not "msg_type"; msg_type is handler name in payload).
-    /// When set: "call" = request-reply (ask), "cast" = fire-and-forget (tell). Empty/unset = use method default (GET=call, POST/PUT/DELETE=cast).
-    /// Allowed values (Erlang-style): call, cast, info only. Others not supported at this time.
+    /// Optional sender actor id for remoting and tracing.
+    #[prost(string, tag="9")]
+    pub sender_id: ::prost::alloc::string::String,
+    /// Optional transport message type.
     #[prost(string, tag="10")]
-    pub msg_type_override: ::prost::alloc::string::String,
+    pub message_type: ::prost::alloc::string::String,
+    /// Optional correlation id preserved for remoting.
+    #[prost(string, tag="11")]
+    pub correlation_id: ::prost::alloc::string::String,
+    /// Optional reply_to preserved for remoting.
+    #[prost(string, tag="12")]
+    pub reply_to: ::prost::alloc::string::String,
+    /// Optional client-provided message id.
+    #[prost(string, tag="13")]
+    pub message_id: ::prost::alloc::string::String,
     /// Optional timeout for request-reply (ask) operations.
     /// Defaults to 5 seconds if not specified. Use for long-running operations like training.
     /// HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
-    #[prost(message, optional, tag="11")]
+    #[prost(message, optional, tag="14")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
 }
-/// Response from invoking an actor
+/// Response from asking an actor
 ///
 /// ## Purpose
-/// Returns the result of actor invocation.
-/// For GET (ask): Contains the reply message from actor
-/// For POST (tell): Contains success status (fire-and-forget)
+/// Returns the result of an actor ask request.
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct InvokeActorResponse {
+pub struct AskReplyResponse {
     /// Success status
     #[prost(bool, tag="1")]
     pub success: bool,

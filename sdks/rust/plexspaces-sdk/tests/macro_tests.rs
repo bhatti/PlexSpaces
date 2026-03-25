@@ -619,15 +619,15 @@ fn test_cast_message_sets_message_type() {
 
 #[test]
 fn test_new_message_with_custom_invocation() {
-    // Test "call" invocation
+    // Test "call" pattern
     let call_msg = new_message("call", json!({ "op": "get" }));
     assert_eq!(call_msg.message_type, "call");
 
-    // Test "cast" invocation
+    // Test "cast" pattern
     let cast_msg = new_message("cast", json!({ "op": "notify" }));
     assert_eq!(cast_msg.message_type, "cast");
 
-    // Test custom invocation type (for extensibility)
+    // Test custom message type (for extensibility)
     let info_msg = new_message("info", json!({ "op": "status" }));
     assert_eq!(info_msg.message_type, "info");
 }

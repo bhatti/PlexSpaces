@@ -22,8 +22,8 @@ mod helpers;
 #[path = "integration/multi_node_tests.rs"]
 mod multi_node_tests;
 
-#[path = "integration/invoke_actor_grpc_tests.rs"]
-mod invoke_actor_grpc_tests;
+#[path = "integration/ask_reply_grpc_tests.rs"]
+mod ask_reply_grpc_tests;
 
 #[path = "integration/auth_tests.rs"]
 mod auth_tests;

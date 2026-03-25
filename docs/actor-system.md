@@ -1767,17 +1767,17 @@ Each facet can:
 
 ## Virtual Actor Activation Details
 
-### Invoke Actor API
+### AskReply and SendMessage APIs
 
-Virtual actors are activated on demand through `invoke_actor`. The public API stays actor-type based, and the framework performs actor lookup first, then internally activates or reinstantiates the virtual actor from stored metadata when no active instance is found.
+Virtual actors are activated on demand through `AskReply` and `SendMessage`. The public API stays actor-type based, and the framework performs actor lookup first, then internally activates or reinstantiates the virtual actor from stored metadata when no active instance is found.
 
 ```rust
-use plexspaces_proto::v1::actor_service::{ActorServiceClient, InvokeActorRequest};
+use plexspaces_proto::v1::actor_service::{ActorServiceClient, AskReplyRequest};
 use tonic::Request;
 
 let mut client = ActorServiceClient::connect("http://localhost:9000").await?;
 
-let request = InvokeActorRequest {
+let request = AskReplyRequest {
     namespace: "default".to_string(),
     actor_type: "user-session:user-123".to_string(),
     http_method: "GET".to_string(),
@@ -1786,12 +1786,10 @@ let request = InvokeActorRequest {
     query_params: Default::default(),
     path: String::new(),
     subpath: String::new(),
-    ask: true,
-    msg_type_override: String::new(),
     timeout: None,
 };
 
-let response = client.invoke_actor(Request::new(request)).await?;
+let response = client.ask_reply(Request::new(request)).await?;
 let response_inner = response.into_inner();
 
 println!("Actor ID: {}", response_inner.actor_id);

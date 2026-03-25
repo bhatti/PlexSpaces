@@ -2055,7 +2055,7 @@ impl Node {
             });
         }
 
-        // Start HTTP gateway server for InvokeActor routes (following demo pattern)
+        // Start HTTP gateway server for AskReply and SendMessage routes.
         // Create a new ActorServiceImpl instance for HTTP gateway (shares same service locator)
         //
         // IMPORTANT: We bind the HTTP port BEFORE spawning the task to fail fast if port is in use
@@ -2135,8 +2135,8 @@ impl Node {
                     dashboard_service_for_http_opt.clone(),
                 );
 
-                // HTTP handler for InvokeActor (effective_tenant_id from JWT when auth enabled, else path/header)
-                async fn invoke_actor_http(
+                // HTTP handler for actor ask/tell routes (effective_tenant_id from JWT when auth enabled, else path/header)
+                async fn actor_http_request(
                     effective_tenant_id: String,
                     method: axum::http::Method,
                     path: String,
@@ -2145,178 +2145,19 @@ impl Node {
                     headers: axum::http::HeaderMap,
                     actor_service: Arc<plexspaces_services::actor_service::ActorServiceImpl>,
                 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-                    let start = std::time::Instant::now();
-                    // Parse path: /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}
-                    let path_parts: Vec<&str> = path
-                        .strip_prefix("/api/v1/actors/")
-                        .unwrap_or("")
-                        .split('/')
-                        .collect();
-
-                    if path_parts.len() < 2 {
-                        return Err((
-                            StatusCode::BAD_REQUEST,
-                            Json(serde_json::json!({
-                                "code": 400,
-                                "message": "Invalid path format. Expected /api/v1/actors/{tenant_id}/{namespace}/{actor_type} or /api/v1/actors/{namespace}/{actor_type}"
-                            })),
-                        ));
-                    }
-
-                    let (_path_tenant_id, namespace, actor_type) = if path_parts.len() == 3 {
-                        (
-                            path_parts[0].to_string(),
-                            path_parts[1].to_string(),
-                            path_parts[2].to_string(),
-                        )
-                    } else {
-                        (
-                            String::new(),
-                            path_parts[0].to_string(),
-                            path_parts[1].to_string(),
-                        )
-                    };
-                    let namespace_for_metadata = namespace.clone();
-
-                    // Extract query parameters
-                    let query_params: HashMap<String, String> =
-                        query.map(|q| q.0).unwrap_or_default();
-
-                    // Invocation pattern: use "invocation" query param (e.g. AWS Lambda InvocationType).
-                    // "msg_type" = handler name in payload; "invocation" = call/cast override (POST/PUT/DELETE only).
-                    // POST/PUT default to request-reply (call) so response includes handler result; use ?invocation=cast for fire-and-forget.
-                    let method_upper = method.as_str().to_uppercase();
-                    let is_get = method_upper.is_empty() || method_upper == "GET";
-                    // Erlang-style: only call (request-reply), cast (fire-and-forget), info (async message)
-                    const ALLOWED_INVOCATION: [&str; 3] = ["call", "cast", "info"];
-                    let (ask, msg_type_override) = if is_get {
-                        (true, String::new())
-                    } else {
-                        let override_val = query_params
-                            .get("invocation")
-                            .map(|v| v.as_str())
-                            .unwrap_or("");
-                        let normalized = override_val.trim().to_lowercase();
-                        if !override_val.is_empty()
-                            && !ALLOWED_INVOCATION.contains(&normalized.as_str())
-                        {
-                            return Err((
-                                axum::http::StatusCode::BAD_REQUEST,
-                                Json(serde_json::json!({
-                                    "code": 400,
-                                    "message": format!("Invalid invocation query param: '{}'. Valid values: call, cast, info", override_val)
-                                })),
-                            ));
-                        }
-                        // POST/PUT: default to request-reply so response body contains handler result; explicit cast/info = fire-and-forget
-                        let default_ask = method_upper == "POST" || method_upper == "PUT";
-                        let ask = if override_val.is_empty() {
-                            default_ask
-                        } else {
-                            normalized == "call"
-                        };
-                        (ask, normalized)
-                    };
-
-                    // Extract optional timeout from ?timeout=<seconds> query param (default: 5s)
-                    let timeout_duration = query_params
-                        .get("timeout")
-                        .and_then(|s| s.parse::<i64>().ok())
-                        .filter(|&secs| secs > 0 && secs <= 3600)
-                        .map(|secs| prost_types::Duration {
-                            seconds: secs,
-                            nanos: 0,
-                        });
-
-                    // Create InvokeActorRequest
-                    use plexspaces_proto::actor::v1::InvokeActorRequest;
-                    let invoke_req = InvokeActorRequest {
-                        namespace,
-                        actor_type,
-                        http_method: method.as_str().to_string(),
-                        payload: body.map(|b| b.to_vec()).unwrap_or_default(),
-                        headers: {
-                            let mut h = HashMap::new();
-                            for (key, value) in headers.iter() {
-                                if let Ok(value_str) = value.to_str() {
-                                    h.insert(key.as_str().to_string(), value_str.to_string());
-                                }
-                            }
-                            h
-                        },
-                        query_params,
-                        path: path.clone(),
-                        subpath: String::new(),
-                        ask,
-                        msg_type_override,
-                        timeout: timeout_duration,
-                    };
-
-                    // Call InvokeActor via ActorService (tenant_id from JWT/middleware or path when auth disabled)
-                    // Propagate namespace from path so RequestContext has correct tenant/namespace for lookup
-                    use plexspaces_proto::actor::v1::actor_service_server::ActorService as ActorServiceTrait;
-                    use tonic::metadata::MetadataValue;
-                    use tonic::Request as TonicRequest;
-                    let mut grpc_req = TonicRequest::new(invoke_req);
-                    grpc_req.metadata_mut().insert(
-                        "x-tenant-id",
-                        MetadataValue::try_from(effective_tenant_id.as_str())
-                            .unwrap_or_else(|_| MetadataValue::from_static("")),
-                    );
-                    grpc_req.metadata_mut().insert(
-                        "x-namespace",
-                        MetadataValue::try_from(namespace_for_metadata.as_str())
-                            .unwrap_or_else(|_| MetadataValue::from_static("")),
-                    );
-
-                    match ActorServiceTrait::invoke_actor(&*actor_service, grpc_req).await {
-                        Ok(grpc_resp) => {
-                            let duration_ms = start.elapsed().as_millis();
-                            let resp_inner = grpc_resp.into_inner();
-                            // Convert InvokeActorResponse to JSON
-                            use base64::{engine::general_purpose, Engine as _};
-                            let payload_json = if resp_inner.payload.is_empty() {
-                                serde_json::Value::Null
-                            } else {
-                                // Try to decode as UTF-8 string first, otherwise base64 encode
-                                match String::from_utf8(resp_inner.payload.clone()) {
-                                    Ok(s) => {
-                                        // Try to parse as JSON, otherwise return as string
-                                        serde_json::from_str(&s)
-                                            .unwrap_or(serde_json::Value::String(s))
-                                    }
-                                    Err(_) => serde_json::Value::String(
-                                        general_purpose::STANDARD.encode(&resp_inner.payload),
-                                    ),
-                                }
-                            };
-                            let json_resp = serde_json::json!({
-                                "success": resp_inner.success,
-                                "payload": payload_json,
-                                "headers": resp_inner.headers,
-                                "actor_id": resp_inner.actor_id,
-                                "error_message": resp_inner.error_message,
-                            });
-
-                            Ok(Json(json_resp))
-                        }
-                        Err(status) => {
-                            let err_json = serde_json::json!({
-                                "code": status.code() as u16,
-                                "message": status.message()
-                            });
-                            let http_status = match status.code() {
-                                tonic::Code::NotFound => StatusCode::NOT_FOUND,
-                                tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
-                                tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
-                                _ => StatusCode::INTERNAL_SERVER_ERROR,
-                            };
-                            Err((http_status, Json(err_json)))
-                        }
-                    }
+                    crate::http_gateway::actor_http_request(
+                        effective_tenant_id,
+                        method,
+                        path,
+                        query,
+                        body,
+                        headers,
+                        actor_service,
+                    )
+                    .await
                 }
 
-                /// Resolve tenant_id from JWT extension, or validate Authorization header when auth enabled (fallback if extension missing).
+                /// Resolve tenant_id from JWT claims, with header fallback only for local testing.
                 fn effective_tenant_id_from_jwt_or_headers(
                     jwt: &Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
                     auth_disabled: bool,
@@ -2340,11 +2181,15 @@ impl Node {
                             }
                         }
                     }
-                    headers
-                        .get("x-tenant-id")
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("")
-                        .to_string()
+                    if auth_disabled {
+                        return headers
+                            .get("x-tenant-id")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("")
+                            .to_string();
+                    }
+
+                    String::new()
                 }
 
                 // JWT auth middleware: when auth enabled, validate Bearer token and set Extension(JwtClaims)
@@ -2413,55 +2258,6 @@ impl Node {
                     .layer(axum::middleware::from_fn_with_state(gateway_state.clone(), http_auth_middleware))
                     .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
                     .route(
-                        "/api/v1/actors/:tenant_id/:namespace/:actor_type",
-                        get({
-                            move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
-                                  Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
-                                  query: Option<Query<HashMap<String, String>>>,
-                                  headers: axum::http::HeaderMap| async move {
-                                let effective_tenant_id = jwt.as_ref().map(|c| c.tenant_id.as_str()).unwrap_or(tenant_id.as_str()).to_string();
-                                let path = format!("/api/v1/actors/{}/{}/{}", tenant_id, namespace, actor_type);
-                                invoke_actor_http(effective_tenant_id, axum::http::Method::GET, path, query, None, headers, actor_service).await
-                            }
-                        })
-                        .post({
-                            move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
-                                  Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
-                                  query: Option<Query<HashMap<String, String>>>,
-                                  headers: axum::http::HeaderMap,
-                                  body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = jwt.as_ref().map(|c| c.tenant_id.as_str()).unwrap_or(tenant_id.as_str()).to_string();
-                                let path = format!("/api/v1/actors/{}/{}/{}", tenant_id, namespace, actor_type);
-                                invoke_actor_http(effective_tenant_id, axum::http::Method::POST, path, query, body, headers, actor_service).await
-                            }
-                        })
-                        .put({
-                            move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
-                                  Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
-                                  query: Option<Query<HashMap<String, String>>>,
-                                  headers: axum::http::HeaderMap,
-                                  body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = jwt.as_ref().map(|c| c.tenant_id.as_str()).unwrap_or(tenant_id.as_str()).to_string();
-                                let path = format!("/api/v1/actors/{}/{}/{}", tenant_id, namespace, actor_type);
-                                invoke_actor_http(effective_tenant_id, axum::http::Method::PUT, path, query, body, headers, actor_service).await
-                            }
-                        })
-                        .delete({
-                            move |axum::extract::State((actor_service, _, _, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
-                                  Path((tenant_id, namespace, actor_type)): Path<(String, String, String)>,
-                                  query: Option<Query<HashMap<String, String>>>,
-                                  headers: axum::http::HeaderMap| async move {
-                                let effective_tenant_id = jwt.as_ref().map(|c| c.tenant_id.as_str()).unwrap_or(tenant_id.as_str()).to_string();
-                                let path = format!("/api/v1/actors/{}/{}/{}", tenant_id, namespace, actor_type);
-                                invoke_actor_http(effective_tenant_id, axum::http::Method::DELETE, path, query, None, headers, actor_service).await
-                            }
-                        })
-                    )
-                    .route(
                         "/api/v1/actors/:namespace/:actor_type",
                         get({
                             move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
@@ -2471,7 +2267,7 @@ impl Node {
                                   headers: axum::http::HeaderMap| async move {
                                 let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
                                 let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
-                                invoke_actor_http(effective_tenant_id, axum::http::Method::GET, path, query, None, headers, actor_service).await
+                                actor_http_request(effective_tenant_id, axum::http::Method::GET, path, query, None, headers, actor_service).await
                             }
                         })
                         .post({
@@ -2483,7 +2279,7 @@ impl Node {
                                   body: Option<axum::body::Bytes>| async move {
                                 let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
                                 let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
-                                invoke_actor_http(effective_tenant_id, axum::http::Method::POST, path, query, body, headers, actor_service).await
+                                actor_http_request(effective_tenant_id, axum::http::Method::POST, path, query, body, headers, actor_service).await
                             }
                         })
                         .put({
@@ -2495,18 +2291,45 @@ impl Node {
                                   body: Option<axum::body::Bytes>| async move {
                                 let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
                                 let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
-                                invoke_actor_http(effective_tenant_id, axum::http::Method::PUT, path, query, body, headers, actor_service).await
+                                actor_http_request(effective_tenant_id, axum::http::Method::PUT, path, query, body, headers, actor_service).await
                             }
                         })
-                        .delete({
+                    )
+                    .route(
+                        "/api/v1/actors/:namespace/:actor_type/ask",
+                        get({
                             move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
                                   jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap| async move {
                                 let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
-                                let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
-                                invoke_actor_http(effective_tenant_id, axum::http::Method::DELETE, path, query, None, headers, actor_service).await
+                                let path = format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
+                                actor_http_request(effective_tenant_id, axum::http::Method::GET, path, query, None, headers, actor_service).await
+                            }
+                        })
+                        .post({
+                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
+                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
+                                  Path((namespace, actor_type)): Path<(String, String)>,
+                                  query: Option<Query<HashMap<String, String>>>,
+                                  headers: axum::http::HeaderMap,
+                                  body: Option<axum::body::Bytes>| async move {
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
+                                let path = format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
+                                actor_http_request(effective_tenant_id, axum::http::Method::POST, path, query, body, headers, actor_service).await
+                            }
+                        })
+                        .put({
+                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
+                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
+                                  Path((namespace, actor_type)): Path<(String, String)>,
+                                  query: Option<Query<HashMap<String, String>>>,
+                                  headers: axum::http::HeaderMap,
+                                  body: Option<axum::body::Bytes>| async move {
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
+                                let path = format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
+                                actor_http_request(effective_tenant_id, axum::http::Method::PUT, path, query, body, headers, actor_service).await
                             }
                         })
                     );
@@ -4272,6 +4095,7 @@ mod tests {
     async fn register_actor_for_test(node: &Node, actor_id: &str, mailbox: Arc<Mailbox>) {
         let wrapper = Arc::new(ActorRef::local(
             actor_id.to_string(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox,
             node.service_locator().clone(),
@@ -4318,6 +4142,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -4328,6 +4153,7 @@ mod tests {
         use plexspaces_core::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
@@ -4385,6 +4211,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -4395,6 +4222,7 @@ mod tests {
         use plexspaces_core::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
@@ -4475,6 +4303,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -4549,6 +4378,7 @@ mod tests {
         );
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
+            "".to_string(),
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
@@ -4770,6 +4600,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox_for_ref,
             service_locator,
         );
@@ -4877,6 +4708,7 @@ mod tests {
         );
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
+            "".to_string(),
             "".to_string(),
             mailbox_for_ref,
             service_locator,
@@ -5157,6 +4989,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "monitored-actor@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -5305,6 +5138,7 @@ mod tests {
         );
         let actor_ref = ActorRef::local(
             "watched-actor@test-node",
+            "".to_string(),
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
@@ -5487,6 +5321,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -5495,6 +5330,7 @@ mod tests {
         use plexspaces_core::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
@@ -5601,6 +5437,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -5609,6 +5446,7 @@ mod tests {
         use plexspaces_core::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
@@ -5745,6 +5583,7 @@ mod tests {
         );
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
+            "".to_string(),
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
@@ -5883,6 +5722,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -5891,6 +5731,7 @@ mod tests {
         use plexspaces_core::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
@@ -5973,6 +5814,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -5981,6 +5823,7 @@ mod tests {
         use plexspaces_core::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
@@ -6030,6 +5873,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "test-actor@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -6038,6 +5882,7 @@ mod tests {
         use plexspaces_core::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
@@ -6120,6 +5965,7 @@ mod tests {
         let actor1_ref = ActorRef::local(
             "actor-1@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox1.clone(),
             node.service_locator(),
         );
@@ -6128,6 +5974,7 @@ mod tests {
         use plexspaces_core::MessageSender;
         let wrapper1 = Arc::new(ActorRef::local(
             actor1_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox1.clone(),
             node.service_locator().clone(),
@@ -6179,6 +6026,7 @@ mod tests {
         let actor2_ref = ActorRef::local(
             "actor-2@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox2.clone(),
             node.service_locator(),
         );
@@ -6187,6 +6035,7 @@ mod tests {
         // Register actor2 with MessageSender first
         let wrapper2 = Arc::new(ActorRef::local(
             actor2_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox2.clone(),
             node.service_locator().clone(),
@@ -6284,6 +6133,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "actor-1@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -6292,6 +6142,7 @@ mod tests {
         use plexspaces_core::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),
@@ -6360,6 +6211,7 @@ mod tests {
         );
         let actor_ref = ActorRef::local(
             "actor-1@test-node",
+            "".to_string(),
             "".to_string(),
             mailbox.clone(),
             node.service_locator(),
@@ -6450,6 +6302,7 @@ mod tests {
         let actor_ref = ActorRef::local(
             "actor-1@test-node",
             "".to_string(),
+            "".to_string(),
             mailbox.clone(),
             node.service_locator(),
         );
@@ -6458,6 +6311,7 @@ mod tests {
         use plexspaces_core::MessageSender;
         let wrapper = Arc::new(ActorRef::local(
             actor_ref.id().clone(),
+            "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox.clone(),
             node.service_locator().clone(),

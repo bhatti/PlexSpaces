@@ -497,7 +497,7 @@ pub struct Message {
     #[prost(message, optional, tag="7")]
     pub timestamp: ::core::option::Option<::prost_types::Timestamp>,
     /// Custom headers/metadata (extensible key-value pairs)
-    /// Examples: "content-type", "x-trace-id", "x-tenant-id"
+    /// Examples: "content-type", "x-trace-id", "x-request-id"
     #[prost(map="string, string", tag="8")]
     pub headers: ::std::collections::HashMap<::prost::alloc::string::String, ::prost::alloc::string::String>,
     // ==================== DELIVERY ====================
@@ -540,14 +540,14 @@ pub struct Message {
     /// Example: "user-123" (all messages for user-123 delivered in order)
     #[prost(string, tag="15")]
     pub partition_key: ::prost::alloc::string::String,
-    // ==================== HTTP INVOCATION ====================
+    // ==================== HTTP REQUEST METADATA ====================
 
-    /// URI path for HTTP-based invocations (optional)
+    /// URI path for HTTP-based requests (optional)
     /// Populated when message originates from HTTP gateway
     /// Example: "/api/v1/actors/default/counter/metrics"
     #[prost(string, tag="16")]
     pub uri_path: ::prost::alloc::string::String,
-    /// HTTP method for HTTP-based invocations (optional)
+    /// HTTP method for HTTP-based requests (optional)
     /// Example: "GET", "POST", "PUT", "DELETE"
     #[prost(string, tag="17")]
     pub uri_method: ::prost::alloc::string::String,

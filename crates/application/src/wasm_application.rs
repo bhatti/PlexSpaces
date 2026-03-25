@@ -201,7 +201,7 @@ impl Actor for WasmActorBehavior {
         // 1. Application msg_type from JSON payload (e.g. "ingest") so SDK can dispatch
         // 2. X-Message-Type header (from HTTP gateway)
         // 3. Envelope message_type ("cast"/"call") - POST=cast (tell), GET/ask=call
-        // 4. Default "cast" so POST without invocation=call is fire-and-forget
+        // 4. Default "cast" so tell-style POST delivery remains fire-and-forget
         let message_type: String = try_msg_type_from_payload(&message.payload)
             .or_else(|| {
                 message

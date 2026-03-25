@@ -109,14 +109,14 @@ Deploy actors to edge locations with automatic synchronization:
 
 Build serverless platforms with durable execution:
 
-- **HTTP-Based Invocation**: Invoke actors via REST API (`GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}`)
+- **HTTP-Based Invocation**: Invoke actors via `AskReply` and `SendMessage` over REST paths such as `GET /api/v1/actors/{namespace}/{actor_type}` and `POST /api/v1/actors/{namespace}/{actor_type}`
 - **AWS Lambda Integration**: Ready for AWS Lambda Function URLs and API Gateway
 - **Serverless Functions**: Treat actors as serverless functions with automatic scaling
 - **Multi-Tenant Isolation**: Built-in tenant-based access control
 - **Load Balancing**: Automatic load distribution across actor instances
 
 **Key Features**:
-- FaaS-style HTTP invocation (GET for reads, POST for updates)
+- FaaS-style HTTP invocation with explicit ask and tell endpoints
 - AWS Lambda Function URL support
 - API Gateway integration
 - Automatic actor discovery by type
@@ -128,7 +128,7 @@ Build serverless platforms with durable execution:
 **Documentation**:
 - [Concepts: FaaS-Style Invocation](concepts.md#faas-style-invocation) - Core concepts
 - [Architecture: FaaS Invocation](architecture.md#faas-invocation) - System design
-- [Detailed Design: InvokeActor Service](detailed-design.md#invokeactor-service) - Implementation details
+- [Detailed Design: AskReply and SendMessage Services](detailed-design.md#askreply-and-sendmessage-services) - Implementation details
 
 - **Function Orchestration**: Multi-function workflows
 - **Stateful Functions**: Functions with memory

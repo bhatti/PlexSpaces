@@ -130,19 +130,14 @@ use plexspaces_actor::parallel::{
     select_collective_value, shard_group_config, shard_query_responses_from_results,
 };
 use plexspaces_actor::ActorRef as ActorRefImpl;
-use plexspaces_actor::{Actor, ActorFactory};
 use plexspaces_core::{
-    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorRegistry, MessageSender,
-    ReplyWaiter, ReplyWaiterError, RequestContext, ServiceLocator as ServiceLocatorTrait,
+    ActorRegistry, RequestContext, ServiceLocator as ServiceLocatorTrait,
 };
 use plexspaces_core::{
-    actor_id::{build_actor_id, parse_actor_id},
-    ActorId,
+    actor_id::{build_actor_id, extract_actor_type, parse_actor_id},
 };
-use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
-use std::io::Write;
 use std::time::{Duration, Instant, SystemTime};
 use ulid::Ulid;
 
@@ -150,8 +145,8 @@ use ulid::Ulid;
 use plexspaces_proto::actor::v1::{
     // gRPC service trait and server
     actor_service_server::ActorService as ActorServiceTrait,
-    ActivateActorRequest,
-    ActivateActorResponse,
+    AskReplyRequest,
+    AskReplyResponse,
     ActorDownNotification,
     AllReduceShardGroupRequest,
     AllReduceShardGroupResponse,
@@ -166,16 +161,12 @@ use plexspaces_proto::actor::v1::{
     // ShardGroup types
     CreateShardGroupRequest,
     CreateShardGroupResponse,
-    DataParallelConfig,
-    DeactivateActorRequest,
     DeleteActorRequest,
     DeleteShardGroupRequest,
     GetActorRequest,
     GetActorResponse,
     GetShardGroupRequest,
     GetShardGroupResponse,
-    InvokeActorRequest,
-    InvokeActorResponse,
     LinkActorRequest,
     LinkActorResponse,
     ListActorsRequest,
@@ -209,7 +200,6 @@ use plexspaces_proto::actor::v1::{
     ShardUpdateStats,
     SpawnActorRequest,
     SpawnActorResponse,
-    SpawnActorResult,
     SpawnActorsRequest,
     SpawnActorsResponse,
     StreamMessageRequest,
@@ -276,12 +266,12 @@ impl ActorServiceImpl {
             .expect("ActorRegistry must be registered in ServiceLocator")
     }
 
-    /// Resolve an actor id for `invoke_actor` when no active local instance is found.
+    /// Resolve an actor id for actor-type-based ask/tell operations when no active local instance is found.
     ///
-    /// `invoke_actor` is actor-type based, so this helper resolves the canonical target actor id.
+    /// AskReply and SendMessage are actor-type based, so this helper resolves the canonical target actor id.
     /// Local activation is owned by `ActorRegistry::ask()` / `ActorRegistry::tell()`, while
     /// remote delivery continues to use the existing routing path.
-    async fn resolve_target_actor_id_for_invoke(
+    async fn resolve_target_actor_id_for_type_lookup(
         &self,
         ctx: &RequestContext,
         requested_actor_type: &str,
@@ -346,6 +336,133 @@ impl ActorServiceImpl {
         );
 
         Ok(target_actor_id)
+    }
+
+    fn duration_from_proto(duration: Option<prost_types::Duration>) -> Option<Duration> {
+        duration.map(|d| {
+            Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64)
+        })
+    }
+
+    fn build_message_metadata(
+        headers: &HashMap<String, String>,
+        path: &str,
+        subpath: &str,
+    ) -> HashMap<String, String> {
+        let mut metadata = headers.clone();
+        if !path.is_empty() {
+            metadata.insert("http_path".to_string(), path.to_string());
+        }
+        if !subpath.is_empty() {
+            metadata.insert("http_subpath".to_string(), subpath.to_string());
+        }
+        metadata
+    }
+
+    fn build_request_payload(
+        payload: &[u8],
+        query_params: &HashMap<String, String>,
+        http_method: &str,
+    ) -> Result<Vec<u8>, Status> {
+        if http_method.eq_ignore_ascii_case("GET") {
+            serde_json::to_vec(query_params)
+                .map_err(|e| Status::internal(format!("Failed to serialize query params: {}", e)))
+        } else if payload.is_empty() {
+            Ok(Vec::new())
+        } else {
+            serde_json::from_slice::<serde_json::Value>(payload)
+                .map_err(|e| Status::invalid_argument(format!("Invalid JSON payload: {}", e)))?;
+            Ok(payload.to_vec())
+        }
+    }
+
+    async fn resolve_actor_target(
+        &self,
+        ctx: &RequestContext,
+        requested_actor_type: &str,
+    ) -> Result<String, Status> {
+        let actor_registry = self.get_actor_registry().await;
+        let discovered_actor_ids = actor_registry
+            .discover_actors_by_type(ctx, requested_actor_type)
+            .await;
+        let mut active_actor_ids = Vec::with_capacity(discovered_actor_ids.len());
+        for actor_id in &discovered_actor_ids {
+            if actor_registry.lookup_actor(actor_id).await.is_some() {
+                active_actor_ids.push(actor_id.clone());
+            }
+        }
+
+        if !active_actor_ids.is_empty() {
+            if active_actor_ids.len() == 1 {
+                return Ok(active_actor_ids[0].clone());
+            }
+            use rand::Rng;
+            let mut rng = rand::thread_rng();
+            let idx = rng.gen_range(0..active_actor_ids.len());
+            return Ok(active_actor_ids[idx].clone());
+        }
+
+        self.resolve_target_actor_id_for_type_lookup(ctx, requested_actor_type, &discovered_actor_ids)
+            .await
+    }
+
+    async fn route_actor_request(
+        &self,
+        ctx: RequestContext,
+        requested_actor_type: &str,
+        message: Message,
+        wait_for_response: bool,
+        timeout: Option<Duration>,
+    ) -> Result<(String, String, Option<Message>), Status> {
+        match self
+            .route_message(
+                ctx.clone(),
+                requested_actor_type,
+                message.clone(),
+                wait_for_response,
+                timeout,
+            )
+            .await
+        {
+            Ok((message_id, reply)) => Ok((requested_actor_type.to_string(), message_id, reply)),
+            Err(status) if status.code() == tonic::Code::NotFound => {
+                let mut type_candidates = Vec::new();
+                type_candidates.push(requested_actor_type.to_string());
+
+                if requested_actor_type.contains('@') {
+                    if let Some(actor_type) = extract_actor_type(requested_actor_type) {
+                        if actor_type != requested_actor_type {
+                            type_candidates.push(actor_type);
+                        }
+                    }
+                } else if let Some((actor_type, _instance_id)) =
+                    requested_actor_type.split_once(':')
+                {
+                    if actor_type != requested_actor_type {
+                        type_candidates.push(actor_type.to_string());
+                    }
+                }
+
+                let mut resolved_actor_id = None;
+                for actor_type in type_candidates {
+                    match self.resolve_actor_target(&ctx, &actor_type).await {
+                        Ok(actor_id) => {
+                            resolved_actor_id = Some(actor_id);
+                            break;
+                        }
+                        Err(candidate_err) if candidate_err.code() == tonic::Code::NotFound => {}
+                        Err(candidate_err) => return Err(candidate_err),
+                    }
+                }
+
+                let resolved_actor_id = resolved_actor_id.ok_or(status)?;
+                let (message_id, reply) = self
+                    .route_message(ctx, &resolved_actor_id, message, wait_for_response, timeout)
+                    .await?;
+                Ok((resolved_actor_id, message_id, reply))
+            }
+            Err(status) => Err(status),
+        }
     }
 
     /// Check if service should accept requests (not shutting down)
@@ -730,44 +847,7 @@ impl ActorServiceImpl {
         )
     }
 
-    /// Helper function to route message (can be called from spawned tasks)
-    /// Extracts routing logic so it can be used without needing &self
-    async fn route_message_helper(
-        ctx: RequestContext,
-        service_locator: &Arc<ServiceLocatorImpl>,
-        actor_id: &str,
-        message: Message,
-        wait_for_response: bool,
-        timeout: Option<std::time::Duration>,
-    ) -> Result<(String, Option<Message>), Status> {
-        // Use unified routing module (returns Future, converts ActorRefError to Status)
-        use plexspaces_actor::routing::route_message as routing_route_message;
-        let result = routing_route_message(
-            ctx,
-            service_locator.clone() as Arc<dyn ServiceLocatorTrait>,
-            actor_id.to_string(),
-            message,
-            wait_for_response,
-            timeout,
-        )
-        .await;
-
-        // Convert ActorRefError to Status
-        result.map_err(|e| match e {
-            plexspaces_actor::ActorRefError::Timeout => {
-                Status::deadline_exceeded("No reply received within timeout")
-            }
-            plexspaces_actor::ActorRefError::ActorNotFound(id) => {
-                Status::not_found(format!("Actor not found: {}", id))
-            }
-            plexspaces_actor::ActorRefError::SendFailed(msg) => {
-                Status::internal(format!("Failed to send message: {}", msg))
-            }
-            _ => Status::internal(format!("Routing error: {}", e)),
-        })
-    }
-
-    /// Route message to local or remote actor
+    /// Route message to local or remote actor.
     ///
     /// # Arguments
     /// * `ctx` - RequestContext with tenant_id and namespace (required for proper isolation) - FIRST PARAMETER
@@ -791,115 +871,13 @@ impl ActorServiceImpl {
         wait_for_response: bool,
         timeout: Option<std::time::Duration>,
     ) -> Result<(String, Option<Message>), Status> {
-        // Extract message_id for logging before moving message
         let message_id = message.id.clone();
-        let message_sender = message.sender_id.clone();
-        let message_receiver = message.receiver_id.clone();
-        let message_type = message.message_type.to_string();
-        let message_correlation_id = message.correlation_id.clone();
-
-        if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!(
-                "🟪 [ACTOR_SERVICE::route_message] START: message_id={}, actor_id={}, sender={:?}, receiver={}, message_type={}, correlation_id={:?}, wait_for_response={}, timeout={:?}",
-                message_id, actor_id, message_sender, message_receiver, message_type, message_correlation_id, wait_for_response, timeout
-            );
-        }
 
         // Use unified routing module (returns Future, converts ActorRefError to Status)
         use plexspaces_actor::routing::route_message as routing_route_message;
         let result = routing_route_message(
             ctx,
             self.service_locator.clone(),
-            actor_id.to_string(),
-            message,
-            wait_for_response,
-            timeout,
-        )
-        .await;
-
-        if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!(
-                "🟪 [ACTOR_SERVICE::route_message] COMPLETED: message_id={}, actor_id={}, result={:?}",
-                message_id, actor_id, result.is_ok()
-            );
-        }
-
-        // Convert ActorRefError to Status
-        result.map_err(|e| match e {
-            plexspaces_actor::ActorRefError::Timeout => {
-                Status::deadline_exceeded("No reply received within timeout")
-            }
-            plexspaces_actor::ActorRefError::ActorNotFound(id) => {
-                Status::not_found(format!("Actor not found: {}", id))
-            }
-            plexspaces_actor::ActorRefError::SendFailed(msg) => {
-                Status::internal(format!("Failed to send message: {}", msg))
-            }
-            _ => Status::internal(format!("Routing error: {}", e)),
-        })
-    }
-
-    /// Route message to local actor
-    ///
-    /// ## Design
-    /// Uses unified routing module. Delegates to `routing::route_local()`.
-    /// This ensures proper routing, metrics, and virtual actor activation.
-    async fn route_local(
-        &self,
-        ctx: RequestContext,
-        actor_name: &str,
-        node_id: &str,
-        message: Message,
-        wait_for_response: bool,
-        timeout: Option<std::time::Duration>,
-    ) -> Result<(String, Option<Message>), Status> {
-        let actor_id = build_actor_id(actor_name, "", None, node_id);
-        // Use unified routing module (returns Future, converts ActorRefError to Status)
-        use plexspaces_actor::routing::route_local as routing_route_local;
-        let result = routing_route_local(
-            ctx,
-            self.service_locator.clone(),
-            actor_id,
-            message,
-            wait_for_response,
-            timeout,
-        )
-        .await;
-
-        // Convert ActorRefError to Status
-        result.map_err(|e| match e {
-            plexspaces_actor::ActorRefError::Timeout => {
-                Status::deadline_exceeded("No reply received within timeout")
-            }
-            plexspaces_actor::ActorRefError::ActorNotFound(id) => {
-                Status::not_found(format!("Actor not found: {}", id))
-            }
-            plexspaces_actor::ActorRefError::SendFailed(msg) => {
-                Status::internal(format!("Failed to send message: {}", msg))
-            }
-            _ => Status::internal(format!("Routing error: {}", e)),
-        })
-    }
-
-    /// Route message to remote actor
-    ///
-    /// ## Design
-    /// Uses unified routing module. Delegates to `routing::route_remote()`.
-    async fn route_remote(
-        &self,
-        ctx: RequestContext,
-        node_id: &str,
-        actor_id: &str,
-        message: Message,
-        wait_for_response: bool,
-        timeout: Option<std::time::Duration>,
-    ) -> Result<(String, Option<Message>), Status> {
-        // Use unified routing module (returns Future, converts ActorRefError to Status)
-        use plexspaces_actor::routing::route_remote as routing_route_remote;
-        let result = routing_route_remote(
-            ctx,
-            self.service_locator.clone(),
-            node_id.to_string(),
             actor_id.to_string(),
             message,
             wait_for_response,
@@ -1219,43 +1197,110 @@ impl ActorServiceTrait for ActorServiceImpl {
         request: Request<SendMessageRequest>,
     ) -> Result<Response<SendMessageResponse>, Status> {
         self.check_accepting_requests().await?;
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+            self.service_locator.clone();
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &service_locator_trait,
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+
         let req = request.into_inner();
-        let proto_message = req
-            .message
-            .ok_or_else(|| Status::invalid_argument("Message is required"))?;
-
-        // Convert proto Message to mailbox Message
-        let message = proto_message.clone();
-
-        // Extract target actor ID from message
-        let actor_id = if proto_message.receiver_id.is_empty() {
-            return Err(Status::invalid_argument("Receiver ID is required"));
+        let namespace = if req.namespace.is_empty() {
+            ctx.namespace().to_string()
         } else {
-            &proto_message.receiver_id
+            req.namespace.clone()
         };
+        let routing_ctx = RequestContext::new_without_auth(ctx.tenant_id().to_string(), namespace);
+        let actor_type = req.actor_type.clone();
+        if actor_type.is_empty() {
+            return Err(Status::invalid_argument("Missing actor_type"));
+        }
 
-        // Convert timeout
-        let timeout = req.timeout.map(|d| {
-            std::time::Duration::from_secs(d.seconds as u64)
-                + std::time::Duration::from_nanos(d.nanos as u64)
-        });
+        let http_method = if req.http_method.is_empty() {
+            "POST".to_string()
+        } else {
+            req.http_method.to_uppercase()
+        };
+        if http_method == "GET" {
+            return Err(Status::invalid_argument(
+                "SendMessage does not support GET; use AskReply",
+            ));
+        }
 
-        // Extract RequestContext from gRPC request metadata
-        // TODO: Extract tenant_id and namespace from metadata headers
-        let ctx = RequestContext::new_without_auth(String::new(), String::new());
+        let full_path = if req.path.is_empty() {
+            format!("/api/v1/actors/{}/{}", routing_ctx.namespace(), actor_type)
+        } else {
+            req.path.clone()
+        };
+        let payload = Self::build_request_payload(&req.payload, &req.query_params, &http_method)?;
+        let mut message = Message {
+            id: if req.message_id.is_empty() {
+                format!("req-{}", Ulid::new())
+            } else {
+                req.message_id.clone()
+            },
+            sender_id: req.sender_id.clone(),
+            receiver_id: actor_type.clone(),
+            message_type: if req.message_type.is_empty() {
+                "cast".to_string()
+            } else {
+                req.message_type.clone()
+            },
+            payload,
+            headers: Self::build_message_metadata(&req.headers, &req.path, &req.subpath),
+            correlation_id: req.correlation_id.clone(),
+            reply_to: req.reply_to.clone(),
+            uri_path: full_path.clone(),
+            uri_method: http_method.clone(),
+            ..Default::default()
+        };
+        if message.message_type == "call" {
+            message.message_type = "cast".to_string();
+        }
 
-        // Route message
-        let (message_id, response) = self
-            .route_message(ctx, actor_id, message, req.wait_for_response, timeout)
-            .await?;
+        tracing::debug!(
+            tenant_id = %routing_ctx.tenant_id(),
+            namespace = %routing_ctx.namespace(),
+            actor_type = %actor_type,
+            method = %http_method,
+            path = %full_path,
+            "send_message tell request started"
+        );
 
-        // Response is already proto Message
-        let response_message = response;
+        let start = Instant::now();
+        let result = self
+            .route_actor_request(routing_ctx, &actor_type, message, false, None)
+            .await;
 
-        Ok(Response::new(SendMessageResponse {
-            message_id,
-            response: response_message,
-        }))
+        match result {
+            Ok((resolved_actor_id, message_id, _)) => {
+                tracing::debug!(
+                    actor_type = %actor_type,
+                    actor_id = %resolved_actor_id,
+                    message_id = %message_id,
+                    duration_ms = start.elapsed().as_millis(),
+                    "send_message tell request completed"
+                );
+                Ok(Response::new(SendMessageResponse {
+                    success: true,
+                    message_id,
+                    actor_id: resolved_actor_id,
+                    error_message: String::new(),
+                }))
+            }
+            Err(status) => {
+                tracing::debug!(
+                    actor_type = %actor_type,
+                    error = %status,
+                    duration_ms = start.elapsed().as_millis(),
+                    "send_message tell request failed"
+                );
+                Err(status)
+            }
+        }
     }
 
     // ========================================================================
@@ -1527,22 +1572,6 @@ impl ActorServiceTrait for ActorServiceImpl {
         Err(Status::unimplemented("unlink_actor not yet implemented"))
     }
 
-    async fn activate_actor(
-        &self,
-        _request: Request<ActivateActorRequest>,
-    ) -> Result<Response<ActivateActorResponse>, Status> {
-        Err(Status::unimplemented("activate_actor not yet implemented"))
-    }
-
-    async fn deactivate_actor(
-        &self,
-        _request: Request<DeactivateActorRequest>,
-    ) -> Result<Response<Empty>, Status> {
-        Err(Status::unimplemented(
-            "deactivate_actor not yet implemented",
-        ))
-    }
-
     async fn check_actor_exists(
         &self,
         _request: Request<CheckActorExistsRequest>,
@@ -1552,532 +1581,112 @@ impl ActorServiceTrait for ActorServiceImpl {
         ))
     }
 
-    async fn invoke_actor(
+    async fn ask_reply(
         &self,
-        request: Request<InvokeActorRequest>,
-    ) -> Result<Response<InvokeActorResponse>, Status> {
-        let start_time = std::time::Instant::now();
-        let _metadata = request.metadata().clone();
-        let _req = request.get_ref().clone(); // Clone to avoid moving request
-
-        // Create RequestContext from gRPC request - uses shared validation from RequestContext
-        // tenant_id comes from auth or default config, not from request body
+        request: Request<AskReplyRequest>,
+    ) -> Result<Response<AskReplyResponse>, Status> {
+        self.check_accepting_requests().await?;
         let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
             self.service_locator.clone();
         let ctx = crate::request_context_from_grpc_request(
             request.metadata(),
-            &std::collections::HashMap::new(),
+            &HashMap::new(),
             &service_locator_trait,
         )
         .await
         .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
 
-        // Get request body (tenant_id is no longer in request)
         let req = request.into_inner();
-
-        // Extract tenant_id and namespace. Path-derived namespace (req.namespace) is the source
-        // of truth for actor lookup so /api/v1/actors/leader-election-term1/LeaderElection and
-        // .../leader-election-term2/LeaderElection resolve to different actors.
-        let tenant_id = ctx.tenant_id().to_string();
-        let namespace = if !req.namespace.is_empty() {
-            req.namespace.clone()
-        } else {
+        let namespace = if req.namespace.is_empty() {
             ctx.namespace().to_string()
-        };
-        let lookup_ctx =
-            plexspaces_core::RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
-
-        // OBSERVABILITY: Start tracing span (clone for span to avoid moving)
-        let tenant_id_for_span = tenant_id.clone();
-        let namespace_for_span = namespace.clone();
-        let span = tracing::span!(
-            tracing::Level::INFO,
-            "actor_service.invoke_actor",
-            tenant_id = %tenant_id_for_span,
-            namespace = %namespace_for_span,
-            actor_type = %req.actor_type,
-            http_method = %req.http_method
-        );
-        let _guard = span.enter();
-
-        // URL for logging (path from request or constructed)
-        let url = if req.path.is_empty() {
-            format!(
-                "/api/v1/actors/{}/{}/{}",
-                tenant_id, namespace, req.actor_type
-            )
         } else {
-            req.path.clone()
+            req.namespace.clone()
         };
-
+        let routing_ctx = RequestContext::new_without_auth(ctx.tenant_id().to_string(), namespace);
         let actor_type = req.actor_type.clone();
         if actor_type.is_empty() {
-            metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                "error_type" => "missing_actor_type",
-                "tenant_id" => tenant_id.clone(),
-                "namespace" => namespace.clone()
-            )
-            .increment(1);
             return Err(Status::invalid_argument("Missing actor_type"));
         }
 
-        // Validate actor_type length (proto validation should catch this, but double-check)
-        if actor_type.len() > 128 {
-            metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                "error_type" => "invalid_actor_type",
-                "tenant_id" => tenant_id,
-                "namespace" => namespace
-            )
-            .increment(1);
-            return Err(Status::invalid_argument(
-                "Actor type exceeds maximum length of 128 characters",
-            ));
-        }
-
-        // Drop span guard before any await to avoid "tried to clone Id, but no span exists" panic.
-        // Holding Entered across .await can cause the span to be dropped from the registry on another thread.
-        drop(_guard);
-
-        // Get ActorRegistry to lookup actors
-        let actor_registry = self.get_actor_registry().await;
-
-        // OBSERVABILITY: Track lookup start
-        let lookup_start = std::time::Instant::now();
-
-        // Discover actors by type using efficient hashmap lookup (O(1))
-        let discovered_actor_ids = actor_registry
-            .discover_actors_by_type(&lookup_ctx, &actor_type)
-            .await;
-        let mut active_actor_ids = Vec::with_capacity(discovered_actor_ids.len());
-        for actor_id in &discovered_actor_ids {
-            if actor_registry.lookup_actor(&actor_id).await.is_some() {
-                active_actor_ids.push(actor_id.clone());
-            }
-        }
-
-        // OBSERVABILITY: Track lookup duration
-        let lookup_duration = lookup_start.elapsed();
-        metrics::histogram!("plexspaces_actor_service_invoke_actor_lookup_duration_seconds")
-            .record(lookup_duration.as_secs_f64());
-
-        if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!(
-                "🟦 [INVOKE_ACTOR] Lookup complete: found {} actors of type '{}' in tenant '{}', namespace '{}' (took {:?})",
-                active_actor_ids.len(), actor_type, tenant_id, namespace, lookup_duration
-            );
-        }
-
-        let mut actor_ids = active_actor_ids;
-        if actor_ids.is_empty() {
-            match self
-                .resolve_target_actor_id_for_invoke(&lookup_ctx, &actor_type, &discovered_actor_ids)
-                .await
-            {
-                Ok(final_actor_id) => {
-                    tracing::info!(
-                        actor_type = %actor_type,
-                        final_actor_id = %final_actor_id,
-                        namespace = %namespace,
-                        tenant_id = %tenant_id,
-                        "🟦 [INVOKE_ACTOR] Resolved virtual actor target for invoke"
-                    );
-
-                    actor_ids = vec![final_actor_id];
-                }
-                Err(status) if status.code() == tonic::Code::NotFound => {
-                    metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                        "error_type" => "actor_not_found",
-                        "tenant_id" => tenant_id.clone(),
-                        "namespace" => namespace.clone(),
-                        "actor_type" => actor_type.clone()
-                    )
-                    .increment(1);
-                    tracing::warn!(
-                        actor_type = %actor_type,
-                        "🟦 [INVOKE_ACTOR] No actors found: type='{}', tenant='{}', namespace='{}'",
-                        actor_type, &tenant_id, &namespace
-                    );
-                    return Err(Status::not_found(format!(
-                        "No actors found for type '{}' in tenant '{}', namespace '{}'",
-                        actor_type, &tenant_id, &namespace
-                    )));
-                }
-                Err(e) => {
-                    tracing::error!(
-                        actor_type = %actor_type,
-                        error = %e,
-                        "Failed to activate virtual actor"
-                    );
-                    return Err(e);
-                }
-            }
-        }
-
-        // Randomly select an actor if multiple found (load balancing)
-        use rand::Rng;
-        let selected_actor_id = if actor_ids.len() == 1 {
-            actor_ids[0].clone()
+        let http_method = if req.http_method.is_empty() {
+            "GET".to_string()
         } else {
-            let mut rng = rand::thread_rng();
-            let idx = rng.gen_range(0..actor_ids.len());
-            actor_ids[idx].clone()
+            req.http_method.to_uppercase()
         };
-
-        if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!(
-                "🟦 [INVOKE_ACTOR] Selected actor: {} (from {} candidates)",
-                selected_actor_id,
-                actor_ids.len()
-            );
-        }
-
-        // Determine invocation pattern: tell (fire-and-forget) vs ask (request-reply)
-        // - tell: message_type "cast"; ask: message_type "call".
-        // msg_type_override (from query param msg_type) takes precedence when set; otherwise ask flag or GET.
-        let http_method = req.http_method.to_uppercase();
-        let is_get = http_method.is_empty() || http_method == "GET";
-        let is_delete = http_method == "DELETE";
-        let use_ask = if req.msg_type_override == "call" {
-            true
-        } else if req.msg_type_override == "cast" {
-            false
+        let full_path = if req.path.is_empty() {
+            format!("/api/v1/actors/{}/{}", routing_ctx.namespace(), actor_type)
         } else {
-            req.ask || is_get
+            req.path.clone()
         };
-
-        // Prepare message payload and metadata
-        let (payload, mut metadata) = if is_get || is_delete {
-            // GET/DELETE: Convert query params to JSON string
-            let query_json = serde_json::to_string(&req.query_params).map_err(|e| {
-                metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                    "error_type" => "serialization_error"
-                )
-                .increment(1);
-                Status::internal(format!("Failed to serialize query params: {}", e))
-            })?;
-            (query_json.into_bytes(), HashMap::new())
-        } else {
-            // POST/PUT: Use body as payload, convert headers to metadata
-            let payload_str = String::from_utf8_lossy(&req.payload);
-            // Log payload for debugging JSON parsing errors (combined with virtual actor activation log above for virtual actors)
-            tracing::debug!(
-                actor_type = %req.actor_type,
-                namespace = %namespace,
-                tenant_id = %tenant_id,
-                payload_json = %payload_str,
-                payload_len = req.payload.len(),
-                "🟦 [INVOKE_ACTOR] POST/PUT payload before routing"
-            );
-
-            // Validate JSON payload early to catch malformed JSON before routing
-            if let Err(e) = serde_json::from_str::<serde_json::Value>(&payload_str) {
-                tracing::error!(
-                    actor_type = %req.actor_type,
-                    namespace = %namespace,
-                    tenant_id = %tenant_id,
-                    payload_json = %payload_str,
-                    payload_len = req.payload.len(),
-                    error = %e,
-                    "🟦 [INVOKE_ACTOR] Invalid JSON payload in request"
-                );
-                return Err(Status::invalid_argument(format!(
-                    "Invalid JSON payload: {}",
-                    e
-                )));
-            }
-
-            (req.payload, req.headers)
-        };
-
-        // Add path information to metadata if provided
-        // This allows actors to access the complete URL path for custom routing
-        if !req.path.is_empty() {
-            metadata.insert("http_path".to_string(), req.path.clone());
-            if tracing::enabled!(tracing::Level::TRACE) {
-                tracing::trace!("🟦 [INVOKE_ACTOR] Custom path provided: {}", req.path);
-            }
-        }
-
-        // Add subpath to metadata if provided (for future routing capabilities)
-        if !req.subpath.is_empty() {
-            metadata.insert("http_subpath".to_string(), req.subpath.clone());
-            if tracing::enabled!(tracing::Level::TRACE) {
-                tracing::trace!("🟦 [INVOKE_ACTOR] Subpath provided: {}", req.subpath);
-            }
-        }
-
-        // Create message (id from client not yet in proto; server assigns ULID for correlation)
-        // Ensure message ID has "req-" prefix for requests (ask) or "cast" for tell
-        let message_id = if use_ask {
-            format!("req-{}", ulid::Ulid::new().to_string())
-        } else {
-            format!("req-{}", ulid::Ulid::new().to_string()) // Both ask and tell use req- prefix
-        };
-        let mut message = Message {
-            id: message_id,
+        let payload = Self::build_request_payload(&req.payload, &req.query_params, &http_method)?;
+        let message = Message {
+            id: if req.message_id.is_empty() {
+                format!("req-{}", Ulid::new())
+            } else {
+                req.message_id.clone()
+            },
+            sender_id: req.sender_id.clone(),
+            receiver_id: actor_type.clone(),
+            message_type: if req.message_type.is_empty() {
+                "call".to_string()
+            } else {
+                req.message_type.clone()
+            },
             payload,
-            receiver_id: selected_actor_id.clone(),
+            headers: Self::build_message_metadata(&req.headers, &req.path, &req.subpath),
+            correlation_id: req.correlation_id.clone(),
+            reply_to: req.reply_to.clone(),
+            uri_path: full_path.clone(),
+            uri_method: http_method.clone(),
             ..Default::default()
         };
-        // Set message type: ask = "call" (request-reply), tell = "cast" (fire-and-forget)
-        message.message_type = if use_ask {
-            "call".to_string()
-        } else {
-            "cast".to_string()
-        };
-        message.headers = metadata;
+        let timeout = Self::duration_from_proto(req.timeout)
+            .or_else(|| Some(Duration::from_secs(5)));
 
-        // Set URI path and method for HTTP-based invocations
-        // Use full path from request, or construct from tenant_id and actor_type
-        let full_path = if !req.path.is_empty() {
-            req.path.clone()
-        } else {
-            format!("/api/v1/actors/{}/{}", &namespace, req.actor_type)
-        };
-        message.uri_path = full_path.clone();
-        message.uri_method = http_method.clone();
+        tracing::debug!(
+            tenant_id = %routing_ctx.tenant_id(),
+            namespace = %routing_ctx.namespace(),
+            actor_type = %actor_type,
+            method = %http_method,
+            path = %full_path,
+            "ask_reply request started"
+        );
 
-        // route_message: wait_for_response=true => ask (request-reply), false => tell (fire-and-forget).
-        // Use timeout from request if provided, otherwise default to 5 seconds for ask operations.
-        let wait_for_response = use_ask;
-        let timeout = if wait_for_response {
-            req.timeout
-                .map(|d| {
-                    std::time::Duration::from_secs(d.seconds as u64)
-                        + std::time::Duration::from_nanos(d.nanos as u64)
-                })
-                .or_else(|| Some(std::time::Duration::from_secs(5)))
-        } else {
-            None
-        };
+        let start = Instant::now();
+        let result = self
+            .route_actor_request(routing_ctx, &actor_type, message, true, timeout)
+            .await;
 
-        let message_id = message.id.clone();
-        let invocation_label = if use_ask { "ask" } else { "tell" };
-        let envelope_msg_type = message.message_type.clone();
-        if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!(
-                message_id = %message_id,
-                invocation = %invocation_label,
-                msg_type = %envelope_msg_type,
-                "🟦 [INVOKE_ACTOR] START: tenant_id={}, namespace={}, actor_type={}, http_method={}, url={}",
-                &tenant_id, &namespace, actor_type, http_method, url
-            );
-        }
-
-        // OBSERVABILITY: Track invocation start
-        let invoke_start = std::time::Instant::now();
-
-        // Branch on ask vs tell (request-reply vs fire-and-forget)
-        let result = if use_ask {
-            // Ask pattern (request-reply): GET or explicit ask=true
-            let method_label = if is_get { "GET" } else { "POST/PUT" };
-            metrics::counter!("plexspaces_actor_service_invoke_actor_total",
-                "method" => method_label,
-                "pattern" => "ask",
-                "tenant_id" => tenant_id.clone(),
-                "namespace" => namespace.clone(),
-                "actor_type" => actor_type.clone()
-            )
-            .increment(1);
-
-            match self
-                .route_message(ctx.clone(), &selected_actor_id, message, true, timeout)
-                .await
-            {
-                Ok((_, Some(reply))) => {
-                    let invoke_duration = invoke_start.elapsed();
-                    metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
-                        "method" => method_label,
-                        "pattern" => "ask",
-                        "status" => "success",
-                        "tenant_id" => tenant_id.clone(),
-                        "namespace" => namespace.clone(),
-                        "actor_type" => actor_type.clone()
-                    )
-                    .record(invoke_duration.as_secs_f64());
-
-                    tracing::info!(
-                        message_id = %message_id,
-                        invocation = "ask",
-                        msg_type = %envelope_msg_type,
-                        actor_id = %selected_actor_id,
-                        path = %full_path,
-                        method = %http_method,
-                        duration_ms = invoke_duration.as_millis(),
-                        payload_size = reply.payload.len(),
-                        "INVOKE_ACTOR SUCCESS (ask) duration_ms={}",
-                        invoke_duration.as_millis()
-                    );
-
-                    Ok(Response::new(InvokeActorResponse {
-                        success: true,
-                        payload: reply.payload,
-                        headers: reply.headers,
-                        actor_id: selected_actor_id.clone(),
-                        error_message: String::new(),
-                    }))
-                }
-                Ok((_, None)) => {
-                    // This shouldn't happen for ask() pattern
-                    Err(Status::internal("No reply received from actor"))
-                }
-                Err(e) => {
-                    let invoke_duration = invoke_start.elapsed();
-                    metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
-                        "method" => method_label,
-                        "pattern" => "ask",
-                        "status" => "error",
-                        "tenant_id" => tenant_id.clone(),
-                        "namespace" => namespace.clone(),
-                        "actor_type" => actor_type.clone()
-                    )
-                    .record(invoke_duration.as_secs_f64());
-                    metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                        "error_type" => "ask_failed",
-                        "method" => method_label,
-                        "tenant_id" => tenant_id.clone(),
-                        "namespace" => namespace.clone(),
-                        "actor_type" => actor_type.clone()
-                    )
-                    .increment(1);
-
-                    let err_first = e.message().lines().next().unwrap_or("");
-                    tracing::error!(
-                        message_id = %message_id,
-                        invocation = "ask",
-                        actor_id = %selected_actor_id,
-                        path = %full_path,
-                        method = %http_method,
-                        error_first_line = %err_first,
-                        duration_ms = invoke_duration.as_millis(),
-                        "INVOKE_ACTOR FAILED (ask) duration_ms={}",
-                        invoke_duration.as_millis()
-                    );
-
-                    Err(e)
-                }
+        match result {
+            Ok((resolved_actor_id, _message_id, Some(reply))) => {
+                tracing::debug!(
+                    actor_type = %actor_type,
+                    actor_id = %resolved_actor_id,
+                    duration_ms = start.elapsed().as_millis(),
+                    reply_size = reply.payload.len(),
+                    "ask_reply request completed"
+                );
+                Ok(Response::new(AskReplyResponse {
+                    success: true,
+                    payload: reply.payload,
+                    headers: reply.headers,
+                    actor_id: resolved_actor_id,
+                    error_message: String::new(),
+                }))
             }
-        } else {
-            // POST/PUT/DELETE: Use tell() (fire-and-forget)
-            let method_label = if http_method == "PUT" {
-                "PUT"
-            } else if is_delete {
-                "DELETE"
-            } else {
-                "POST"
-            };
-            metrics::counter!("plexspaces_actor_service_invoke_actor_total",
-                "method" => method_label,
-                "pattern" => "tell",
-                "tenant_id" => tenant_id.clone(),
-                "namespace" => namespace.clone(),
-                "actor_type" => actor_type.clone()
-            )
-            .increment(1);
-
-            match self
-                .route_message(ctx.clone(), &selected_actor_id, message, false, None)
-                .await
-            {
-                Ok((_, _)) => {
-                    let invoke_duration = invoke_start.elapsed();
-                    let method_label = if http_method == "PUT" {
-                        "PUT"
-                    } else if is_delete {
-                        "DELETE"
-                    } else {
-                        "POST"
-                    };
-                    metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
-                        "method" => method_label,
-                        "pattern" => "tell",
-                        "status" => "success",
-                        "tenant_id" => tenant_id.clone(),
-                        "namespace" => namespace.clone(),
-                        "actor_type" => actor_type.clone()
-                    )
-                    .record(invoke_duration.as_secs_f64());
-
-                    tracing::info!(
-                        message_id = %message_id,
-                        invocation = "tell",
-                        msg_type = %envelope_msg_type,
-                        actor_id = %selected_actor_id,
-                        path = %full_path,
-                        method = %http_method,
-                        duration_ms = invoke_duration.as_millis(),
-                        "INVOKE_ACTOR SUCCESS (tell) duration_ms={}",
-                        invoke_duration.as_millis()
-                    );
-
-                    Ok(Response::new(InvokeActorResponse {
-                        success: true,
-                        payload: vec![],
-                        headers: HashMap::new(),
-                        actor_id: selected_actor_id.clone(),
-                        error_message: String::new(),
-                    }))
-                }
-                Err(e) => {
-                    let invoke_duration = invoke_start.elapsed();
-                    let method_label = if http_method == "PUT" {
-                        "PUT"
-                    } else if is_delete {
-                        "DELETE"
-                    } else {
-                        "POST"
-                    };
-                    metrics::histogram!("plexspaces_actor_service_invoke_actor_duration_seconds",
-                        "method" => method_label,
-                        "pattern" => "tell",
-                        "status" => "error",
-                        "tenant_id" => tenant_id.clone(),
-                        "namespace" => namespace.clone(),
-                        "actor_type" => actor_type.clone()
-                    )
-                    .record(invoke_duration.as_secs_f64());
-                    metrics::counter!("plexspaces_actor_service_invoke_actor_errors_total",
-                        "error_type" => "tell_failed",
-                        "method" => method_label,
-                        "tenant_id" => tenant_id.clone(),
-                        "namespace" => namespace.clone(),
-                        "actor_type" => actor_type.clone()
-                    )
-                    .increment(1);
-
-                    let err_first = e.message().lines().next().unwrap_or("");
-                    tracing::error!(
-                        message_id = %message_id,
-                        invocation = "tell",
-                        actor_id = %selected_actor_id,
-                        path = %full_path,
-                        method = %http_method,
-                        error_first_line = %err_first,
-                        duration_ms = invoke_duration.as_millis(),
-                        "INVOKE_ACTOR FAILED (tell) duration_ms={}",
-                        invoke_duration.as_millis()
-                    );
-
-                    Err(e)
-                }
+            Ok((_resolved_actor_id, _message_id, None)) => {
+                Err(Status::internal("No reply received from actor"))
             }
-        };
-
-        // OBSERVABILITY: Track total duration
-        let total_duration = start_time.elapsed();
-        metrics::histogram!("plexspaces_actor_service_invoke_actor_total_duration_seconds")
-            .record(total_duration.as_secs_f64());
-
-        if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!(
-                path = %full_path,
-                method = %http_method,
-                "🟦 [INVOKE_ACTOR] COMPLETED: total_duration={:?}, success={}",
-                total_duration, result.is_ok()
-            );
+            Err(status) => {
+                tracing::debug!(
+                    actor_type = %actor_type,
+                    error = %status,
+                    duration_ms = start.elapsed().as_millis(),
+                    "ask_reply request failed"
+                );
+                Err(status)
+            }
         }
-
-        result
     }
 
     /// Terminate an actor gracefully by ID
@@ -2086,9 +1695,7 @@ impl ActorServiceTrait for ActorServiceImpl {
     /// Permanently terminates an actor, completing pending work and removing from system.
     /// This is the HTTP DELETE endpoint for actors (pairs with SpawnActor).
     ///
-    /// ## Difference from DeactivateActor
-    /// - TerminateActor: Permanent termination (actor removed from system)
-    /// - DeactivateActor: Temporary passivation (virtual actor can reactivate on next message)
+    /// Terminates the actor permanently rather than passivating it.
     async fn terminate_actor(
         &self,
         request: Request<TerminateActorRequest>,
@@ -4427,20 +4034,6 @@ impl ActorServiceTrait for ActorServiceWrapper {
         self.0.unlink_actor(request).await
     }
 
-    async fn activate_actor(
-        &self,
-        request: Request<ActivateActorRequest>,
-    ) -> Result<Response<ActivateActorResponse>, Status> {
-        self.0.activate_actor(request).await
-    }
-
-    async fn deactivate_actor(
-        &self,
-        request: Request<DeactivateActorRequest>,
-    ) -> Result<Response<Empty>, Status> {
-        self.0.deactivate_actor(request).await
-    }
-
     async fn check_actor_exists(
         &self,
         request: Request<CheckActorExistsRequest>,
@@ -4448,11 +4041,11 @@ impl ActorServiceTrait for ActorServiceWrapper {
         self.0.check_actor_exists(request).await
     }
 
-    async fn invoke_actor(
+    async fn ask_reply(
         &self,
-        request: Request<InvokeActorRequest>,
-    ) -> Result<Response<InvokeActorResponse>, Status> {
-        self.0.invoke_actor(request).await
+        request: Request<AskReplyRequest>,
+    ) -> Result<Response<AskReplyResponse>, Status> {
+        self.0.ask_reply(request).await
     }
 
     async fn terminate_actor(
@@ -4583,6 +4176,28 @@ mod tests {
             id: Ulid::new().to_string(),
             payload,
             ..Default::default()
+        }
+    }
+
+    fn create_test_send_message_request(message: Message) -> SendMessageRequest {
+        SendMessageRequest {
+            namespace: String::new(),
+            actor_type: message.receiver_id.clone(),
+            http_method: "POST".to_string(),
+            payload: message.payload,
+            headers: message.headers,
+            query_params: HashMap::new(),
+            path: String::new(),
+            subpath: String::new(),
+            sender_id: message.sender_id,
+            message_type: if message.message_type.is_empty() {
+                "cast".to_string()
+            } else {
+                message.message_type
+            },
+            correlation_id: message.correlation_id,
+            reply_to: message.reply_to,
+            message_id: message.id,
         }
     }
 
@@ -5361,16 +4976,25 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_send_message_missing_message() {
+    async fn test_send_message_missing_actor_type() {
         // ARRANGE: Create service
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
-        // ACT: Call send_message with no message
         let request = tonic::Request::new(SendMessageRequest {
-            message: None, // Missing!
-            wait_for_response: false,
-            timeout: None,
+            namespace: String::new(),
+            actor_type: String::new(),
+            http_method: "POST".to_string(),
+            payload: Vec::new(),
+            headers: HashMap::new(),
+            query_params: HashMap::new(),
+            path: String::new(),
+            subpath: String::new(),
+            sender_id: String::new(),
+            message_type: "cast".to_string(),
+            correlation_id: String::new(),
+            reply_to: String::new(),
+            message_id: String::new(),
         });
 
         let result = ActorServiceTrait::send_message(&service, request).await;
@@ -5379,7 +5003,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("Message is required"));
+        assert!(err.message().contains("actor_type"));
     }
 
     #[tokio::test]
@@ -5388,15 +5012,9 @@ mod tests {
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
 
-        // Create message without receiver_id
         let mut proto_message = create_test_message(b"test".to_vec());
-        proto_message.receiver_id = String::new(); // Empty receiver_id!
-
-        let request = tonic::Request::new(SendMessageRequest {
-            message: Some(proto_message),
-            wait_for_response: false,
-            timeout: None,
-        });
+        proto_message.receiver_id = String::new();
+        let request = tonic::Request::new(create_test_send_message_request(proto_message));
 
         // ACT
         let result = ActorServiceTrait::send_message(&service, request).await;
@@ -5405,7 +5023,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
-        assert!(err.message().contains("Receiver ID is required"));
+        assert!(err.message().contains("actor_type"));
     }
 
     #[tokio::test]
@@ -5434,11 +5052,7 @@ mod tests {
         let proto_message = message.clone();
         let expected_message_id = proto_message.id.clone();
 
-        let request = tonic::Request::new(SendMessageRequest {
-            message: Some(proto_message),
-            wait_for_response: false,
-            timeout: None,
-        });
+        let request = tonic::Request::new(create_test_send_message_request(proto_message));
 
         // ACT: Send via gRPC handler
         let result = ActorServiceTrait::send_message(&service, request).await;
@@ -5447,7 +5061,7 @@ mod tests {
         assert!(result.is_ok());
         let response = result.unwrap().into_inner();
         assert_eq!(response.message_id, expected_message_id);
-        assert!(response.response.is_none()); // No response for fire-and-forget
+        assert!(response.success);
 
         // Verify delivery (poll immediately - no sleep needed)
         let delivered = mailbox.dequeue().await;
@@ -5483,14 +5097,7 @@ mod tests {
         message.receiver_id = "test@node1".to_string();
         let proto_message = message.clone();
 
-        let request = tonic::Request::new(SendMessageRequest {
-            message: Some(proto_message),
-            wait_for_response: false,
-            timeout: Some(prost_types::Duration {
-                seconds: 5,
-                nanos: 500_000_000, // 5.5 seconds
-            }),
-        });
+        let request = tonic::Request::new(create_test_send_message_request(proto_message));
 
         // ACT: Send with timeout (though fire-and-forget ignores it)
         let result = ActorServiceTrait::send_message(&service, request).await;
@@ -5647,14 +5254,7 @@ mod tests {
         message.receiver_id = "test@node1".to_string();
         let proto_message = message.clone();
 
-        let request = tonic::Request::new(SendMessageRequest {
-            message: Some(proto_message),
-            wait_for_response: false,
-            timeout: Some(prost_types::Duration {
-                seconds: 5,
-                nanos: 500_000_000, // 5.5 seconds total
-            }),
-        });
+        let request = tonic::Request::new(create_test_send_message_request(proto_message));
 
         // ACT: Send with fractional timeout
         let result = ActorServiceTrait::send_message(&service, request).await;

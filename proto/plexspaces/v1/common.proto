@@ -811,7 +811,7 @@ message Message {
   google.protobuf.Timestamp timestamp = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
 
   // Custom headers/metadata (extensible key-value pairs)
-  // Examples: "content-type", "x-trace-id", "x-tenant-id"
+  // Examples: "content-type", "x-trace-id", "x-request-id"
   map<string, string> headers = 8;
 
   // ==================== DELIVERY ====================
@@ -857,14 +857,14 @@ message Message {
   // Example: "user-123" (all messages for user-123 delivered in order)
   string partition_key = 15 [(buf.validate.field).string.max_len = 255];
 
-  // ==================== HTTP INVOCATION ====================
+  // ==================== HTTP REQUEST METADATA ====================
 
-  // URI path for HTTP-based invocations (optional)
+  // URI path for HTTP-based requests (optional)
   // Populated when message originates from HTTP gateway
   // Example: "/api/v1/actors/default/counter/metrics"
   string uri_path = 16 [(buf.validate.field).string.max_len = 2048];
 
-  // HTTP method for HTTP-based invocations (optional)
+  // HTTP method for HTTP-based requests (optional)
   // Example: "GET", "POST", "PUT", "DELETE"
   string uri_method = 17 [(buf.validate.field).string.max_len = 16];
 }

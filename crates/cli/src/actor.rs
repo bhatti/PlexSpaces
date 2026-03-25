@@ -25,7 +25,9 @@
 //! - `list` - List deployed actors
 
 use anyhow::{Context, Result};
-use plexspaces_proto::v1::actor::actor_service_client::ActorServiceClient;
+use plexspaces_proto::v1::actor::{
+    actor_service_client::ActorServiceClient, SendMessageRequest,
+};
 use plexspaces_proto::wasm::v1::{
     wasm_runtime_service_client::WasmRuntimeServiceClient, DeployWasmModuleRequest,
     InstantiateActorRequest, WasmModule,
@@ -143,16 +145,20 @@ pub async fn invoke(node_addr: &str, actor_id: &str, payload: &str) -> Result<()
 
     println!("📨 Sending message to actor: {}", actor_id);
 
-    use plexspaces_proto::v1::actor::SendMessageRequest;
-    use plexspaces_proto::v1::common::Message;
-    let mut msg = Message::default();
-    msg.receiver_id = actor_id.to_string();
-    msg.message_type = "application/json".to_string();
-    msg.payload = payload.as_bytes().to_vec();
-
     let request = SendMessageRequest {
-        message: Some(msg),
-        wait_for_response: false,
+        namespace: String::new(),
+        actor_type: actor_id.to_string(),
+        http_method: "POST".to_string(),
+        payload: payload.as_bytes().to_vec(),
+        headers: Default::default(),
+        query_params: Default::default(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "command".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
         ..Default::default()
     };
 

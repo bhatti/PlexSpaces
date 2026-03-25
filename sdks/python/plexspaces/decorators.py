@@ -90,7 +90,6 @@ class HandlerInfo:
     msg_types: List[str]
     invocation: str = "call"  # "call" (request-reply) or "cast" (fire-and-forget)
 
-
 def handler(*args, invocation: str = "call") -> Callable:
     """
     Decorator to mark a method as a message handler.
@@ -99,8 +98,8 @@ def handler(*args, invocation: str = "call") -> Callable:
     types is received. Arguments are extracted from the JSON payload.
     
     Args:
-        *args: Message type(s) to handle. Can also include invocation type as second arg
-               for backward compatibility: @handler("op", "call") or @handler("op", "cast")
+        *args: Message type(s) to handle. You may include the delivery invocation as
+               an additional positional argument, for example `@handler("op", "call")`.
         invocation: "call" (request-reply, default) or "cast" (fire-and-forget).
                    For GenServer actors, always use "call" since they return responses.
     
@@ -123,13 +122,12 @@ def handler(*args, invocation: str = "call") -> Callable:
             def get_balance(self) -> dict:
                 return {"balance": self.balance}
     """
-    # Parse args: handle both @handler("op", "call") and @handler("op", invocation="call")
+    # Parse args: allow @handler("op", "call") as shorthand for selecting ask/tell behavior.
     msg_types = []
     effective_invocation = invocation
     
     for arg in args:
         if arg in ("call", "cast"):
-            # Second positional arg is invocation type (backward compat)
             effective_invocation = arg
         else:
             msg_types.append(arg)
@@ -213,14 +211,13 @@ def _actor_with_behavior(cls: Type[T], behavior_type: str, facets: Optional[List
     # Workflow behavior: dispatch_message routes workflow_run / workflow_signal:x / workflow_query:x to run/signal/query
     setattr(cls, "_plexspaces_workflow", behavior_type == BEHAVIOR_WORKFLOW)
     
-    # GenServer always uses request-reply (call) - force invocation="call" on all handlers
+    # GenServer always uses request-reply (call), so normalize handlers to that invocation.
     if behavior_type == BEHAVIOR_GEN_SERVER:
         for attr_name in dir(cls):
             attr = getattr(cls, attr_name, None)
             if callable(attr) and hasattr(attr, '_plexspaces_handler'):
                 handler_info: HandlerInfo = attr._plexspaces_handler
                 if handler_info.invocation != "call":
-                    # Override to "call" for GenServer pattern
                     handler_info.invocation = "call"
     
     return cls

@@ -73,13 +73,13 @@ echo ""
 sleep 2
 
 # Helper function - send POST with call (request-reply)
-# Use ?invocation=call for operations that expect a response
+# Use /ask for operations that expect a response
 send_post() {
     local desc="$1"
     local payload="$2"
     
-    # Use invocation=call for request-reply (ask pattern)
-    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME?invocation=call" \
+    # Use /ask for request-reply (ask pattern)
+    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME/ask" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || RESPONSE=""
     

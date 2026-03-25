@@ -53,7 +53,7 @@ show_response() {
                 echo -e "  ${CYAN}→ $label${NC}"
                 echo "$payload" | jq -C . 2>/dev/null || echo "  $payload"
             else
-                echo -e "  ${GREEN}✓${NC} $label (invocation succeeded)"
+                echo -e "  ${GREEN}✓${NC} $label (request succeeded)"
             fi
         else
             echo -e "  ${GREEN}✓${NC} $label"
@@ -195,7 +195,7 @@ for i in 1 2 3 4 5 6; do
                     echo -e "  ${YELLOW}✓${NC} checkout $i: denied — rate limit (remaining: $remaining)"
                 fi
             else
-                echo -e "  ${GREEN}✓${NC} checkout $i: invocation succeeded"
+                echo -e "  ${GREEN}✓${NC} checkout $i: request succeeded"
             fi
         else
             if echo "$R" | grep -q '"allowed":true'; then

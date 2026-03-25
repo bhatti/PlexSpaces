@@ -120,8 +120,8 @@ The ActorService provides comprehensive actor lifecycle management, messaging, a
 | `CreateActor` | Create a new actor | `CreateActorRequest` | `CreateActorResponse` |
 | `GetActor` | Get actor state and metadata | `GetActorRequest` | `GetActorResponse` |
 | `DeleteActor` | Delete/stop an actor | `DeleteActorRequest` | `DeleteActorResponse` |
-| `SendMessage` | Send message to actor (fire-and-forget) | `SendMessageRequest` | `SendMessageResponse` |
-| `InvokeActor` | HTTP-style actor invocation (FaaS) | `InvokeActorRequest` | `InvokeActorResponse` |
+| `SendMessage` | HTTP-style tell to actor (fire-and-forget) | `SendMessageRequest` | `SendMessageResponse` |
+| `AskReply` | HTTP-style ask to actor (request-reply) | `AskReplyRequest` | `AskReplyResponse` |
 | `LinkActor` | Create Erlang-style link | `LinkActorRequest` | `LinkActorResponse` |
 | `UnlinkActor` | Remove link | `UnlinkActorRequest` | `UnlinkActorResponse` |
 | `MonitorActor` | Monitor actor lifecycle | `MonitorActorRequest` | `MonitorActorResponse` |
@@ -131,16 +131,20 @@ The ActorService provides comprehensive actor lifecycle management, messaging, a
 
 #### FaaS-Style Invocation
 
-The `InvokeActor` RPC provides HTTP-style invocation for serverless patterns:
+The actor runtime exposes separate RPCs for ask and tell semantics:
 
-- **GET** → ask (request-reply). Query params become payload.
-- **POST/PUT/DELETE** → tell (fire-and-forget) by default. Use query param **`invocation=call`** for request-reply (e.g. `POST ...?invocation=call`). Valid **`invocation`** values (Erlang-style): **call**, **cast**, **info** only. Query param **`msg_type`** is the handler name (e.g. count, readings) and is passed in the payload.
+- **`AskReply`** handles request-reply over `GET /api/v1/actors/{namespace}/{actor_type}`, `GET /api/v1/actors/{namespace}/{actor_type}/ask`, and `POST`/`PUT` on the `/ask` path.
+- **`SendMessage`** handles fire-and-forget delivery over `POST`/`PUT /api/v1/actors/{namespace}/{actor_type}`.
+- When authentication is enabled, `tenant_id` is derived from the JWT and is not part of the actor HTTP path.
+- `GET` is not supported for `SendMessage`.
 
 ```
-GET  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}     - Read (ask, request-reply)
-POST /api/v1/actors/{tenant_id}/{namespace}/{actor_type}     - Create/Update (tell)
-PUT  /api/v1/actors/{tenant_id}/{namespace}/{actor_type}     - Update (tell)
-DELETE /api/v1/actors/{tenant_id}/{namespace}/{actor_type}   - Delete (tell)
+GET  /api/v1/actors/{namespace}/{actor_type}         - AskReply
+GET  /api/v1/actors/{namespace}/{actor_type}/ask     - AskReply
+POST /api/v1/actors/{namespace}/{actor_type}         - SendMessage
+PUT  /api/v1/actors/{namespace}/{actor_type}         - SendMessage
+POST /api/v1/actors/{namespace}/{actor_type}/ask     - AskReply
+PUT  /api/v1/actors/{namespace}/{actor_type}/ask     - AskReply
 ```
 
 ### NodeService
@@ -599,7 +603,7 @@ curl -X POST http://localhost:8080/v1/actors \
   -d '{"actor_type": "counter", "namespace": "default"}'
 
 # Invoke actor (FaaS-style)
-curl http://localhost:8080/api/v1/actors/my-tenant/default/counter
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/actors/default/counter
 ```
 
 ---

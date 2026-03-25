@@ -271,7 +271,7 @@ impl VirtualActorManager {
     /// ## State After Registration
     /// - Actor is registered (always addressable)
     /// - Metadata stored in VirtualActorManager (persists across suspension)
-    /// - For lazy actors: Not active until first local invocation
+    /// - For lazy actors: Not active until first local message
     /// - For eager actors: Active immediately (ActorRef in registry, message loop running)
     pub async fn register(
         &self,

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
 
-//! Unit and Integration Tests for InvokeActor RPC
+//! Unit and integration tests for AskReply and SendMessage.
 //!
-//! Tests FaaS-style actor invocation via HTTP GET/POST requests.
+//! Tests FaaS-style actor ask/tell handling via HTTP GET/POST/PUT routes.
 //! Covers:
 //! - GET requests (ask pattern)
 //! - POST requests (tell pattern)
@@ -22,7 +22,10 @@ use plexspaces_core::{
 };
 use plexspaces_mailbox::new_message;
 use plexspaces_object_registry::{ObjectRegistry, SqliteObjectRegistryRepository};
-use plexspaces_proto::actor::v1::{actor_service_server::ActorService, InvokeActorRequest};
+use plexspaces_proto::actor::v1::{
+    actor_service_server::ActorService, AskReplyRequest, AskReplyResponse, SendMessageRequest,
+    SendMessageResponse,
+};
 use plexspaces_proto::object_registry::v1::ObjectRegistration;
 use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_services::ServiceLocatorImpl;
@@ -279,7 +282,7 @@ async fn create_test_registry_with_actors(
         FacetManager::new(),
     )));
     service_locator
-        .register_service(virtual_actor_manager)
+        .register_service(virtual_actor_manager.clone())
         .await;
     service_locator.register_service(facet_manager).await;
 
@@ -287,6 +290,10 @@ async fn create_test_registry_with_actors(
     service_locator
         .register_service(actor_factory.clone())
         .await;
+    actor_registry
+        .set_virtual_actor_manager(virtual_actor_manager.clone())
+        .await;
+    actor_registry.set_actor_factory(actor_factory.clone()).await;
 
     let registry = BehaviorRegistry::new();
     let module_name = actor_type.to_string();
@@ -374,11 +381,11 @@ async fn register_counter_behavior(service_locator: &Arc<ServiceLocatorImpl>, ac
         .await;
 }
 
-async fn invoke_actor_request(
+async fn ask_reply_request(
     service: &ActorServiceImpl,
-    request: InvokeActorRequest,
+    request: AskReplyRequest,
     tenant_id: &str,
-) -> Result<tonic::Response<plexspaces_proto::actor::v1::InvokeActorResponse>, tonic::Status> {
+) -> Result<tonic::Response<AskReplyResponse>, tonic::Status> {
     let namespace_header = if request.namespace.is_empty() {
         "default".to_string()
     } else {
@@ -391,73 +398,96 @@ async fn invoke_actor_request(
     request
         .metadata_mut()
         .insert("x-namespace", namespace_header.parse().unwrap());
-    service.invoke_actor(request).await
+    service.ask_reply(request).await
+}
+
+async fn send_message_request(
+    service: &ActorServiceImpl,
+    request: SendMessageRequest,
+    tenant_id: &str,
+) -> Result<tonic::Response<SendMessageResponse>, tonic::Status> {
+    let namespace_header = if request.namespace.is_empty() {
+        "default".to_string()
+    } else {
+        request.namespace.clone()
+    };
+    let mut request = Request::new(request);
+    request
+        .metadata_mut()
+        .insert("x-tenant-id", tenant_id.parse().unwrap());
+    request
+        .metadata_mut()
+        .insert("x-namespace", namespace_header.parse().unwrap());
+    ActorService::send_message(service, request).await
+}
+
+fn build_ask_request(
+    actor_type: &str,
+    method: &str,
+    payload: Vec<u8>,
+    query_params: HashMap<String, String>,
+) -> AskReplyRequest {
+    AskReplyRequest {
+        namespace: "default".to_string(),
+        actor_type: actor_type.to_string(),
+        http_method: method.to_string(),
+        payload,
+        headers: HashMap::new(),
+        query_params,
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "call".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
+        timeout: None,
+    }
+}
+
+fn build_send_request(actor_type: &str, payload: Vec<u8>) -> SendMessageRequest {
+    SendMessageRequest {
+        namespace: "default".to_string(),
+        actor_type: actor_type.to_string(),
+        http_method: "POST".to_string(),
+        payload,
+        headers: HashMap::new(),
+        query_params: HashMap::new(),
+        path: String::new(),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "cast".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
+    }
 }
 
 #[tokio::test]
-async fn test_invoke_actor_get_success() {
-    // Test: GET request successfully invokes actor with ask pattern
+async fn test_ask_reply_get_success() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 1).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: "counter".to_string(),
-        http_method: "GET".to_string(),
-        payload: vec![],
-        headers: HashMap::new(),
-        query_params: {
-            let mut params = HashMap::new();
-            params.insert("action".to_string(), "get".to_string());
-            params
-        },
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
+    let request = build_ask_request(
+        "counter",
+        "GET",
+        vec![],
+        HashMap::from([("action".to_string(), "get".to_string())]),
+    );
+    let response = ask_reply_request(&service, request, "default")
+        .await
+        .expect("ask_reply should succeed")
+        .into_inner();
 
-    // Actor registration is synchronous - no wait needed
-
-    let result = invoke_actor_request(&service, request, "default").await;
-
-    // Should succeed and get a reply with count
-    match result {
-        Ok(response) => {
-            let resp = response.into_inner();
-            assert!(resp.success, "InvokeActor should succeed");
-            // Verify payload contains JSON with count
-            if !resp.payload.is_empty() {
-                let payload_str = String::from_utf8_lossy(&resp.payload);
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&payload_str) {
-                    assert!(json.get("count").is_some(), "Response should contain count");
-                }
-            }
-        }
-        Err(e) => {
-            // Allow various error codes (actor might not be fully initialized, timeout, etc.)
-            // The test should ideally succeed, but we allow errors for now
-            assert!(
-                matches!(
-                    e.code(),
-                    tonic::Code::Internal
-                        | tonic::Code::NotFound
-                        | tonic::Code::Unavailable
-                        | tonic::Code::DeadlineExceeded
-                ),
-                "Unexpected error code: {:?}, message: {}",
-                e.code(),
-                e.message()
-            );
-        }
-    }
+    assert!(response.success);
+    let payload: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+    assert!(payload.get("count").is_some());
 }
 
 #[tokio::test]
-async fn test_invoke_actor_ignores_stale_actor_type_index_entries() {
+async fn test_ask_reply_ignores_stale_actor_type_index_entries() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 1).await;
     let service =
@@ -468,39 +498,25 @@ async fn test_invoke_actor_ignores_stale_actor_type_index_entries() {
     let key = ("".to_string(), "default".to_string(), "counter".to_string());
     {
         let mut index = actor_registry.actor_type_index().write().await;
-        index
-            .entry(key)
-            .or_default()
-            .insert(0, stale_actor_id.clone());
+        index.entry(key).or_default().insert(0, stale_actor_id);
     }
 
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: "counter".to_string(),
-        http_method: "GET".to_string(),
-        payload: vec![],
-        headers: HashMap::new(),
-        query_params: {
-            let mut params = HashMap::new();
-            params.insert("action".to_string(), "get".to_string());
-            params
-        },
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
-
-    let result = invoke_actor_request(&service, request, "default").await;
-    assert!(
-        result.is_ok(),
-        "invoke_actor should ignore stale type index entries"
-    );
+    let result = ask_reply_request(
+        &service,
+        build_ask_request(
+            "counter",
+            "GET",
+            vec![],
+            HashMap::from([("action".to_string(), "get".to_string())]),
+        ),
+        "default",
+    )
+    .await;
+    assert!(result.is_ok(), "ask_reply should ignore stale type index entries");
 }
 
 #[tokio::test]
-async fn test_invoke_actor_activates_virtual_actor_type_with_instance_id() {
+async fn test_ask_reply_activates_virtual_actor_type_with_instance_id() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "virtual-counter", "default", 0).await;
     register_counter_behavior(&service_locator, "virtual-counter").await;
@@ -527,24 +543,19 @@ async fn test_invoke_actor_activates_virtual_actor_type_with_instance_id() {
         create_test_actor_service(actor_registry.clone(), service_locator, "node1".to_string())
             .await;
 
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: "virtual-counter:user-1".to_string(),
-        http_method: "GET".to_string(),
-        payload: vec![],
-        headers: HashMap::new(),
-        query_params: HashMap::from([("action".to_string(), "get".to_string())]),
-        path: String::new(),
-        subpath: String::new(),
-        ask: true,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
-
-    let response = invoke_actor_request(&service, request, "default")
-        .await
-        .expect("virtual actor invoke should activate the actor")
-        .into_inner();
+    let response = ask_reply_request(
+        &service,
+        build_ask_request(
+            "virtual-counter:user-1",
+            "GET",
+            vec![],
+            HashMap::from([("action".to_string(), "get".to_string())]),
+        ),
+        "default",
+    )
+    .await
+    .expect("ask_reply should activate the virtual actor")
+    .into_inner();
 
     let expected_actor_id = plexspaces_core::actor_id::build_actor_id(
         "user-1",
@@ -553,17 +564,11 @@ async fn test_invoke_actor_activates_virtual_actor_type_with_instance_id() {
         "node1",
     );
     assert_eq!(response.actor_id, expected_actor_id);
-    assert!(
-        actor_registry
-            .lookup_actor(&response.actor_id)
-            .await
-            .is_some(),
-        "virtual actor should be active after invoke_actor"
-    );
+    assert!(actor_registry.lookup_actor(&response.actor_id).await.is_some());
 }
 
 #[tokio::test]
-async fn test_invoke_actor_post_uses_tell_after_virtual_activation() {
+async fn test_send_message_activates_virtual_actor_type_with_instance_id() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "virtual-counter", "default", 0).await;
     register_counter_behavior(&service_locator, "virtual-counter").await;
@@ -590,25 +595,13 @@ async fn test_invoke_actor_post_uses_tell_after_virtual_activation() {
         create_test_actor_service(actor_registry.clone(), service_locator, "node1".to_string())
             .await;
 
-    let response = invoke_actor_request(
+    let response = send_message_request(
         &service,
-        InvokeActorRequest {
-            namespace: "default".to_string(),
-            actor_type: "virtual-counter:user-2".to_string(),
-            http_method: "POST".to_string(),
-            payload: br#"{"action":"increment"}"#.to_vec(),
-            headers: HashMap::new(),
-            query_params: HashMap::new(),
-            path: String::new(),
-            subpath: String::new(),
-            ask: false,
-            msg_type_override: String::new(),
-            timeout: None,
-        },
+        build_send_request("virtual-counter:user-2", br#"{"action":"increment"}"#.to_vec()),
         "default",
     )
     .await
-    .expect("tell path should succeed after internal activation")
+    .expect("send_message should activate the virtual actor")
     .into_inner();
 
     let expected_actor_id = plexspaces_core::actor_id::build_actor_id(
@@ -619,453 +612,169 @@ async fn test_invoke_actor_post_uses_tell_after_virtual_activation() {
     );
     assert!(response.success);
     assert_eq!(response.actor_id, expected_actor_id);
-    assert!(
-        actor_registry
-            .lookup_actor(&response.actor_id)
-            .await
-            .is_some(),
-        "tell path should leave the virtual actor active"
-    );
+    assert!(actor_registry.lookup_actor(&response.actor_id).await.is_some());
 }
 
 #[tokio::test]
-async fn test_invoke_actor_post_success() {
-    // Test: POST request successfully invokes actor with tell pattern
+async fn test_send_message_post_success() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 1).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: "counter".to_string(),
-        http_method: "POST".to_string(),
-        payload: b"{\"action\":\"increment\"}".to_vec(),
-        headers: {
-            let mut headers = HashMap::new();
-            headers.insert("Content-Type".to_string(), "application/json".to_string());
-            headers
-        },
-        query_params: HashMap::new(),
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
+    let response = send_message_request(
+        &service,
+        build_send_request("counter", br#"{"action":"increment"}"#.to_vec()),
+        "default",
+    )
+    .await
+    .expect("send_message should succeed")
+    .into_inner();
 
-    // Actor registration is synchronous - no wait needed
-
-    let result = invoke_actor_request(&service, request, "default").await;
-
-    // Should succeed (fire-and-forget); POST without invocation=call uses tell (cast)
-    match result {
-        Ok(response) => {
-            let resp = response.into_inner();
-            assert!(resp.success, "POST invoke should succeed");
-            assert_eq!(resp.actor_id, "counter-0@node1");
-        }
-        Err(e) => {
-            // Allow internal errors for now
-            assert!(matches!(
-                e.code(),
-                tonic::Code::Internal | tonic::Code::Unavailable
-            ));
-        }
-    }
+    assert!(response.success);
+    assert_eq!(response.actor_id, "counter-0@node1");
 }
 
-#[tokio::test]
-async fn test_invoke_actor_post_invocation_call_uses_ask() {
-    // POST with msg_type_override=call (HTTP: invocation=call) must use ask pattern (request-reply)
+#[tokio::test(flavor = "multi_thread")]
+async fn test_send_message_instance_style_target_falls_back_to_type_lookup() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 1).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: "counter".to_string(),
-        http_method: "POST".to_string(),
-        payload: b"{\"action\":\"get\"}".to_vec(),
-        headers: HashMap::new(),
-        query_params: HashMap::new(),
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: "call".to_string(),
-        timeout: None,
-    };
+    let response = send_message_request(
+        &service,
+        build_send_request("counter:default", br#"{"action":"increment"}"#.to_vec()),
+        "default",
+    )
+    .await
+    .expect("send_message should resolve instance-style target via type lookup")
+    .into_inner();
 
-    let result = invoke_actor_request(&service, request, "default").await;
-
-    // Ask path: service waits for reply; counter responds to "get" with count
-    match result {
-        Ok(response) => {
-            let resp = response.into_inner();
-            assert!(
-                resp.success,
-                "POST with invocation=call should succeed (ask path)"
-            );
-            assert!(
-                !resp.payload.is_empty(),
-                "Ask path should return reply payload"
-            );
-        }
-        Err(e) => {
-            assert!(
-                matches!(
-                    e.code(),
-                    tonic::Code::Internal
-                        | tonic::Code::Unavailable
-                        | tonic::Code::DeadlineExceeded
-                ),
-                "Unexpected error: {:?}",
-                e.code()
-            );
-        }
-    }
+    assert!(response.success);
+    assert_eq!(response.actor_id, "counter-0@node1");
 }
 
 #[tokio::test]
-async fn test_invoke_actor_missing_actor_type() {
-    // Test: Missing actor_type returns InvalidArgument
+async fn test_ask_reply_missing_actor_type() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 1).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: String::new(), // Empty actor_type
-        http_method: "GET".to_string(),
-        payload: vec![],
-        headers: HashMap::new(),
-        query_params: HashMap::new(),
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
-
-    let result = invoke_actor_request(&service, request, "default").await;
-
+    let result = ask_reply_request(
+        &service,
+        build_ask_request("", "GET", vec![], HashMap::new()),
+        "default",
+    )
+    .await;
     assert!(matches!(result, Err(e) if e.code() == tonic::Code::InvalidArgument));
 }
 
 #[tokio::test]
-async fn test_invoke_actor_not_found() {
-    // Test: Actor type not found returns NotFound
+async fn test_ask_reply_not_found() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 0).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: "nonexistent".to_string(),
-        http_method: "GET".to_string(),
-        payload: vec![],
-        headers: HashMap::new(),
-        query_params: HashMap::new(),
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
-
-    let result = invoke_actor_request(&service, request, "default").await;
-
+    let result = ask_reply_request(
+        &service,
+        build_ask_request("nonexistent", "GET", vec![], HashMap::new()),
+        "default",
+    )
+    .await;
     assert!(matches!(result, Err(e) if e.code() == tonic::Code::NotFound));
 }
 
 #[tokio::test]
-async fn test_invoke_actor_multiple_actors_random_selection() {
-    // Test: Multiple actors of same type - random selection works
+async fn test_ask_reply_multiple_actors_random_selection() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 3).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: "counter".to_string(),
-        http_method: "GET".to_string(),
-        payload: vec![],
-        headers: HashMap::new(),
-        query_params: HashMap::new(),
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
-
-    // Actor registration is synchronous - no wait needed
-
-    // Call multiple times - should select different actors (or same, but should work)
-    for i in 0..10 {
-        let result = invoke_actor_request(&service, request.clone(), "default").await;
-        // Should not return NotFound (at least one actor should be found)
-        match result {
-            Ok(_) => {
-                // Success - actor was found and invoked
-            }
-            Err(e) => {
-                // Allow internal/unavailable errors but not NotFound
-                assert!(
-                    !matches!(e.code(), tonic::Code::NotFound),
-                    "Should not return NotFound when actors exist (attempt {})",
-                    i
-                );
-            }
-        }
+    for _ in 0..10 {
+        let result = ask_reply_request(
+            &service,
+            build_ask_request("counter", "GET", vec![], HashMap::new()),
+            "default",
+        )
+        .await;
+        assert!(
+            !matches!(&result, Err(e) if e.code() == tonic::Code::NotFound),
+            "ask_reply should resolve one of the matching actors"
+        );
     }
 }
 
 #[tokio::test]
-async fn test_invoke_actor_default_tenant_id() {
-    // Test: Empty tenant_id defaults to "default"
+async fn test_ask_reply_defaults_namespace_from_metadata() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 1).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    let request = InvokeActorRequest {
-        namespace: String::new(), // Empty - should default to "default"
-        actor_type: "counter".to_string(),
-        http_method: "GET".to_string(),
-        payload: vec![],
-        headers: HashMap::new(),
-        query_params: HashMap::new(),
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
-
-    // Actor registration is synchronous - no wait needed
-
-    let result = invoke_actor_request(&service, request, "default").await;
-
-    // Should not return NotFound (should find actor in default tenant)
-    match result {
-        Ok(_) => {
-            // Success - default tenant works
-        }
-        Err(e) => {
-            assert!(
-                !matches!(e.code(), tonic::Code::NotFound),
-                "Should find actor in default tenant"
-            );
-        }
-    }
+    let mut request = build_ask_request("counter", "GET", vec![], HashMap::new());
+    request.namespace = String::new();
+    let result = ask_reply_request(&service, request, "default").await;
+    assert!(
+        !matches!(&result, Err(e) if e.code() == tonic::Code::NotFound),
+        "ask_reply should use namespace from metadata when request namespace is empty"
+    );
 }
 
 #[tokio::test]
-async fn test_invoke_actor_get_query_params_to_json() {
-    // Test: GET request converts query params to JSON payload
+async fn test_ask_reply_get_query_params_to_json() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 1).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    let mut query_params = HashMap::new();
-    query_params.insert("key1".to_string(), "value1".to_string());
-    query_params.insert("key2".to_string(), "value2".to_string());
-
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: "counter".to_string(),
-        http_method: "GET".to_string(),
-        payload: vec![],
-        headers: HashMap::new(),
-        query_params: query_params.clone(),
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
-
-    // Actor registration is synchronous - no wait needed
-
-    // The handler should convert query_params to JSON
-    // We can't easily test the payload without mocking, but we can verify it doesn't error
-    let result = invoke_actor_request(&service, request, "default").await;
-
-    // Should not error on serialization
-    match result {
-        Ok(_) => {
-            // Success - serialization worked
-        }
-        Err(e) => {
-            assert!(
-                !e.message().contains("serialize") && !e.message().contains("serialization"),
-                "Should not error on query param serialization: {}",
-                e.message()
-            );
-        }
-    }
+    let request = build_ask_request(
+        "counter",
+        "GET",
+        vec![],
+        HashMap::from([
+            ("key1".to_string(), "value1".to_string()),
+            ("key2".to_string(), "value2".to_string()),
+        ]),
+    );
+    let result = ask_reply_request(&service, request, "default").await;
+    assert!(
+        !matches!(&result, Err(e) if e.message().contains("serialize")),
+        "ask_reply should serialize GET query parameters to JSON"
+    );
 }
 
 #[tokio::test]
-async fn test_invoke_actor_post_headers_preserved() {
-    // Test: POST request preserves HTTP headers
+async fn test_send_message_rejects_get() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 1).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    let mut headers = HashMap::new();
-    headers.insert("X-Custom-Header".to_string(), "custom-value".to_string());
-    headers.insert("Content-Type".to_string(), "application/json".to_string());
-
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: "counter".to_string(),
-        http_method: "POST".to_string(),
-        payload: br#"{"action":"increment"}"#.to_vec(),
-        headers: headers.clone(),
-        query_params: HashMap::new(),
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
-
-    // Actor registration is synchronous - no wait needed
-
-    let result = invoke_actor_request(&service, request, "default").await;
-
-    // Should succeed (headers are passed through)
-    match result {
-        Ok(response) => {
-            let resp = response.into_inner();
-            assert!(resp.success, "POST with headers should succeed");
-        }
-        Err(e) => {
-            // Allow internal/unavailable errors
-            assert!(matches!(
-                e.code(),
-                tonic::Code::Internal | tonic::Code::Unavailable | tonic::Code::DeadlineExceeded
-            ));
-        }
-    }
+    let mut request = build_send_request("counter", Vec::new());
+    request.http_method = "GET".to_string();
+    let result = send_message_request(&service, request, "default").await;
+    assert!(matches!(result, Err(e) if e.code() == tonic::Code::InvalidArgument));
 }
 
 #[tokio::test]
-async fn test_invoke_actor_with_namespace() {
-    // Test: Invoke actor with specific namespace
+async fn test_send_message_post_headers_preserved() {
     let (actor_registry, service_locator) =
         create_test_registry_with_actors("node1", "counter", "default", 1).await;
     let service =
         create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
 
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(), // Using default namespace
-        actor_type: "counter".to_string(),
-        http_method: "GET".to_string(),
-        payload: vec![],
-        headers: HashMap::new(),
-        query_params: {
-            let mut params = HashMap::new();
-            params.insert("action".to_string(), "get".to_string());
-            params
-        },
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
-
-    // Actor registration is synchronous - no wait needed
-
-    let result = invoke_actor_request(&service, request, "default").await;
-
-    // Should find actor in default namespace
-    match result {
-        Ok(response) => {
-            let resp = response.into_inner();
-            assert!(resp.success, "InvokeActor should succeed with namespace");
-        }
-        Err(e) => {
-            // Allow various error codes (actor might not be fully initialized, timeout, etc.)
-            assert!(
-                matches!(
-                    e.code(),
-                    tonic::Code::NotFound
-                        | tonic::Code::Internal
-                        | tonic::Code::Unavailable
-                        | tonic::Code::DeadlineExceeded
-                ),
-                "Unexpected error code: {:?}, message: {}",
-                e.code(),
-                e.message()
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn test_invoke_actor_without_tenant_id_in_path() {
-    // Test: Invoke actor without tenant_id in path (should default to "default")
-    // This tests the HTTP path /api/v1/actors/{namespace}/{actor_type} (without tenant_id)
-    let (actor_registry, service_locator) =
-        create_test_registry_with_actors("node1", "counter", "default", 1).await;
-    let service =
-        create_test_actor_service(actor_registry, service_locator, "node1".to_string()).await;
-
-    let request = InvokeActorRequest {
-        namespace: "default".to_string(),
-        actor_type: "counter".to_string(),
-        http_method: "GET".to_string(),
-        payload: vec![],
-        headers: HashMap::new(),
-        query_params: {
-            let mut params = HashMap::new();
-            params.insert("action".to_string(), "get".to_string());
-            params
-        },
-        path: String::new(),
-        subpath: String::new(),
-        ask: false,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
-
-    // Actor registration is synchronous - no wait needed
-
-    let result = invoke_actor_request(&service, request, "default").await;
-
-    // Should succeed with default tenant_id
-    match result {
-        Ok(response) => {
-            let resp = response.into_inner();
-            assert!(
-                resp.success,
-                "InvokeActor should succeed with default tenant_id"
-            );
-        }
-        Err(e) => {
-            // Allow various error codes (actor might not be fully initialized, timeout, etc.)
-            assert!(
-                matches!(
-                    e.code(),
-                    tonic::Code::Internal
-                        | tonic::Code::Unavailable
-                        | tonic::Code::DeadlineExceeded
-                        | tonic::Code::NotFound
-                ),
-                "Unexpected error code: {:?}, message: {}",
-                e.code(),
-                e.message()
-            );
-        }
-    }
+    let mut request = build_send_request("counter", br#"{"action":"increment"}"#.to_vec());
+    request.headers = HashMap::from([
+        ("X-Custom-Header".to_string(), "custom-value".to_string()),
+        ("Content-Type".to_string(), "application/json".to_string()),
+    ]);
+    let response = send_message_request(&service, request, "default")
+        .await
+        .expect("send_message with headers should succeed")
+        .into_inner();
+    assert!(response.success);
 }

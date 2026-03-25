@@ -630,25 +630,15 @@ PlexSpaces supports multiple channel providers (renamed from "backends"):
 PlexSpaces exposes HTTP endpoints via gRPC-Gateway on the same port as gRPC (default: 8000):
 
 **FaaS-Style Actor Invocation**:
-- `GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}?param1=value1` - Read operations (ask pattern)
-- `POST /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` - Update operations (tell pattern)
-- `GET /api/v1/actors/{namespace}/{actor_type}?param1=value1` - Read operations without tenant_id (uses default_tenant_id from node config)
-- `POST /api/v1/actors/{namespace}/{actor_type}` - Update operations without tenant_id (uses default_tenant_id from node config)
+- `GET /api/v1/actors/{namespace}/{actor_type}?param1=value1` - Read operations (tenant from JWT when auth is enabled)
+- `POST /api/v1/actors/{namespace}/{actor_type}` - Update operations (tenant from JWT when auth is enabled)
 
 **Example**:
 ```bash
-# Get counter value (with tenant_id and namespace)
-curl "http://localhost:8001/api/v1/actors/default/default/counter?action=get"
-
-# Get counter value (without tenant_id, uses default_tenant_id from node config)
+# Get counter value (tenant comes from JWT when auth is enabled)
 curl "http://localhost:8001/api/v1/actors/default/counter?action=get"
 
-# Increment counter (with tenant_id and namespace)
-curl -X POST "http://localhost:8001/api/v1/actors/default/default/counter" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"increment"}'
-
-# Increment counter (without tenant_id)
+# Increment counter (tenant comes from JWT when auth is enabled)
 curl -X POST "http://localhost:8001/api/v1/actors/default/counter" \
   -H "Content-Type: application/json" \
   -d '{"action":"increment"}'

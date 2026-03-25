@@ -27,6 +27,7 @@ cd examples/go/apps/migrating_aws_durable_lambda
 
 ## API
 
+- HTTP requests that expect a reply should use `POST /api/v1/actors/{namespace}/{actor_type}/ask`.
 - **webhook**: `{"op": "webhook", "idempotency_key": "key-1", "body": {...}}` or `event_id` instead of `idempotency_key`. First time: process and cache response. Duplicate key: return cached response (dedup hit).
 - **status**: `{"op": "status"}` — Returns total_processed, total_dedup_hits, keys_stored, total_compute_ms, total_coord_ms.
 

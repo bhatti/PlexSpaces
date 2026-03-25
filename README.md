@@ -73,8 +73,8 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
   - **ScatterGather**: Aggregation queries with fault tolerance (DPA Scatter-Gather)
   - **Unified SDK**: `ShardGroupClient` and `UnifiedShardGroupClient` for both WASM/internal and gRPC (optional feature)
   - **Resource-Based Routing**: Labels flow through to ActorResourceRequirements for intelligent node placement
-- **FaaS-Style Invocation**: HTTP-based actor invocation via `InvokeActor` RPC (GET for reads, POST/PUT for updates, DELETE for deletes)
-  - **RESTful API**: `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` endpoint (or `/api/v1/actors/{namespace}/{actor_type}` without tenant_id)
+- **FaaS-Style Invocation**: HTTP-based actor invocation via `AskReply` and `SendMessage`
+  - **RESTful API**: `GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/ask` for request-reply, `POST`/`PUT /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` for fire-and-forget (or `/api/v1/actors/{namespace}/{actor_type}` without tenant_id)
   - **Namespace Support**: Organize actors by namespace for better isolation (defaults to "default")
   - **Tenant Defaulting**: Tenant ID defaults to "default" if not provided in path
   - **AWS Lambda URL Support**: Ready for integration with AWS Lambda Function URLs
@@ -336,7 +336,7 @@ See [Examples](examples/README.md) for the complete list.
 - **[Getting Started](docs/getting-started.md)**: Quick start guide and tutorials
 - **[Concepts](docs/concepts.md)**: Core concepts explained (Actors, Behaviors, Facets, TupleSpace, FaaS-Style Invocation, etc.)
 - **[Architecture](docs/architecture.md)**: System design, abstractions, and primitives (including FaaS Invocation)
-- **[Detailed Design](docs/detailed-design.md)**: Comprehensive component documentation with all facets, behaviors, APIs, and primitives (including InvokeActor Service)
+- **[Detailed Design](docs/detailed-design.md)**: Comprehensive component documentation with all facets, behaviors, APIs, and primitives (including AskReply and SendMessage)
 - **[Security](docs/security.md)**: Authentication (JWT for HTTP, mTLS for gRPC), tenant isolation, JWT claims and CLI token creation, middleware, and local testing (`PLEXSPACES_DISABLE_AUTH`)
 - **[Installation](docs/installation.md)**: Docker, Kubernetes, and manual setup
 - **[Testing](docs/testing.md)**: How to run unit tests, integration tests, and example tests

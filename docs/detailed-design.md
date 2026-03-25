@@ -604,9 +604,9 @@ Orleans-style activation/deactivation with automatic instance creation:
    ```
 
 2. **Auto-Activation**: When message arrives for non-existent virtual actor:
-   - `invoke_actor()` discovers no actors match `actor_type`
+   - `AskReply` or `SendMessage` discovers no actors match `actor_type`
    - Checks `VirtualActorManager.is_virtual_actor_type(actor_type)`
-   - Performs internal activation inside `ActorServiceImpl::invoke_actor()` which:
+   - Performs internal activation inside `ActorServiceImpl::ask_reply()` or `ActorServiceImpl::send_message()` which:
      - Reuses suspended instance metadata when a virtual actor id is already known
      - Builds actor_id: `build_actor_id(base_id, actor_type, namespace, node_id)` for type-driven activation
      - Retrieves type metadata from `VirtualActorManager`
@@ -2147,9 +2147,12 @@ graph TD
     style Worker4 fill:#6b7280,stroke:#9ca3af,stroke-width:2px,color:#fff
 ```
 
-## InvokeActor Service
+## AskReply and SendMessage Services
 
-The `InvokeActor` RPC enables FaaS-style HTTP invocation of actors, treating them like serverless functions.
+The actor runtime exposes two explicit FaaS-style RPCs:
+
+- `AskReply` for request-reply delivery
+- `SendMessage` for fire-and-forget delivery
 
 ### Architecture
 
@@ -2157,23 +2160,22 @@ The `InvokeActor` RPC enables FaaS-style HTTP invocation of actors, treating the
 sequenceDiagram
     participant Client
     participant Gateway
-    participant InvokeActor
+    participant AskReply
     participant Registry
     participant Act as Actor
     participant ActorRef
     
-    Client->>Gateway: GET "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}?action=get"
-    Gateway->>InvokeActor: InvokeActorRequest
-    InvokeActor->>InvokeActor: Use default_tenant_id from node config if empty
-    InvokeActor->>InvokeActor: Use default_namespace from node config if empty
-    InvokeActor->>Registry: discover_actors_by_type(tenant_id, namespace, actor_type)
-    Registry-->>InvokeActor: [actor_id1, actor_id2, ...]
-    InvokeActor->>InvokeActor: Random selection
-    InvokeActor->>ActorRef: ask(message, timeout)
+    Client->>Gateway: GET "/api/v1/actors/{namespace}/{actor_type}?action=get"
+    Gateway->>AskReply: AskReplyRequest
+    AskReply->>AskReply: Read tenant_id from JWT claims
+    AskReply->>Registry: discover_actors_by_type(tenant_id, namespace, actor_type)
+    Registry-->>AskReply: [actor_id1, actor_id2, ...]
+    AskReply->>AskReply: Random selection
+    AskReply->>ActorRef: ask(message, timeout)
     ActorRef->>Act: handle_request(ctx, message)
     Act->>ActorRef: send_reply(reply)
-    ActorRef-->>InvokeActor: reply
-    InvokeActor-->>Gateway: InvokeActorResponse
+    ActorRef-->>AskReply: reply
+    AskReply-->>Gateway: AskReplyResponse
     Gateway-->>Client: HTTP 200 + JSON
 ```
 
@@ -2181,46 +2183,40 @@ sequenceDiagram
 
 **Proto Definition**:
 ```proto
-rpc InvokeActor(InvokeActorRequest) returns (InvokeActorResponse) {
+rpc SendMessage(SendMessageRequest) returns (SendMessageResponse) {
   option (google.api.http) = {
-    get: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
-    additional_bindings {
-      post: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
-      body: "*"
-    }
-    additional_bindings {
-      put: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
-      body: "*"
-    }
-    additional_bindings {
-      delete: "/api/v1/actors/{tenant_id}/{namespace}/{actor_type}"
-    }
-    # Alternative paths without tenant_id (uses default_tenant_id from node config)
-    additional_bindings {
-      get: "/api/v1/actors/{namespace}/{actor_type}"
-    }
-    additional_bindings {
-      post: "/api/v1/actors/{namespace}/{actor_type}"
-      body: "*"
-    }
+    post: "/api/v1/actors/{namespace}/{actor_type}"
     additional_bindings {
       put: "/api/v1/actors/{namespace}/{actor_type}"
       body: "*"
     }
+  };
+}
+
+rpc AskReply(AskReplyRequest) returns (AskReplyResponse) {
+  option (google.api.http) = {
+    get: "/api/v1/actors/{namespace}/{actor_type}"
     additional_bindings {
-      delete: "/api/v1/actors/{namespace}/{actor_type}"
+      get: "/api/v1/actors/{namespace}/{actor_type}/ask"
+    }
+    additional_bindings {
+      post: "/api/v1/actors/{namespace}/{actor_type}/ask"
+      body: "*"
+    }
+    additional_bindings {
+      put: "/api/v1/actors/{namespace}/{actor_type}/ask"
+      body: "*"
     }
   };
 }
 
-message InvokeActorRequest {
-  string tenant_id = 1;           // From path (optional, uses default_tenant_id from node config if empty)
-  string namespace = 2;           // From path (optional, uses default_namespace from node config if empty)
-  string actor_type = 3;          // From path (required)
-  string http_method = 4;         // GET, POST, PUT, or DELETE
-  bytes payload = 5;              // Query params (GET/DELETE) or body (POST/PUT)
-  map<string, string> headers = 6; // HTTP headers (POST/PUT)
-  map<string, string> query_params = 7; // Query parameters (GET/DELETE)
+message AskReplyRequest {
+  string namespace = 1;           // From path
+  string actor_type = 2;          // From path
+  string http_method = 4;         // GET, POST, or PUT
+  bytes payload = 5;              // Query params (GET) or body (POST/PUT)
+  map<string, string> headers = 6; // HTTP headers
+  map<string, string> query_params = 7; // Query parameters
   string path = 9;                // Full HTTP path (optional)
   string subpath = 10;            // Subpath after actor_type (optional)
 }
@@ -2228,7 +2224,7 @@ message InvokeActorRequest {
 
 ### HTTP Method Handling
 
-**GET/DELETE Requests (Ask Pattern)**:
+**AskReply Requests (Ask Pattern)**:
 1. Extract query parameters from URL
 2. Convert to JSON string: `{"param1": "value1", "param2": "value2"}`
 3. Create `Message` with JSON payload
@@ -2236,7 +2232,7 @@ message InvokeActorRequest {
 5. Call `actor_ref.ask(message, timeout)`
 6. Return actor's reply in response
 
-**POST/PUT Requests (Tell Pattern)**:
+**SendMessage Requests (Tell Pattern)**:
 1. Extract request body as payload
 2. Extract HTTP headers as metadata
 3. Create `Message` with body payload and headers
@@ -2244,7 +2240,7 @@ message InvokeActorRequest {
 5. Call `actor_ref.tell(message)`
 6. Return success immediately (fire-and-forget)
 
-**Query parameter: invocation** (Erlang-style). Allowed values only: **call**, **cast**, **info**. Use `?invocation=call` on POST/PUT/DELETE for request-reply; default is cast (fire-and-forget). Invalid values return 400.
+The endpoint determines semantics directly. There is no `invocation` compatibility switch.
 
 ### Actor Lookup
 
@@ -2273,8 +2269,8 @@ For advanced routing capabilities:
 - **Subpath**: `message.metadata["http_subpath"]` contains path after actor_type
 
 **Example**:
-- URL: `/api/v1/actors/default/default/counter/metrics/latest`
-- `http_path`: `/api/v1/actors/default/default/counter/metrics/latest`
+- URL: `/api/v1/actors/default/counter/metrics/latest`
+- `http_path`: `/api/v1/actors/default/counter/metrics/latest`
 - `http_subpath`: `metrics/latest`
 
 Actors can use this for custom routing (e.g., `/metrics`, `/health`, `/actions/{name}`).
@@ -2294,10 +2290,10 @@ tokio::spawn(async move {
     
     // Create Axum router
     let app = Router::new()
-        .route("/api/v1/actors/:tenant_id/:namespace/:actor_type", 
-            get(invoke_actor_http).post(invoke_actor_http))
         .route("/api/v1/actors/:namespace/:actor_type", 
-            get(invoke_actor_http).post(invoke_actor_http));
+            get(actor_http_request).post(actor_http_request).put(actor_http_request))
+        .route("/api/v1/actors/:namespace/:actor_type/ask",
+            get(actor_http_request).post(actor_http_request).put(actor_http_request));
     
     // Start HTTP server
     axum::Server::bind(&http_addr)
@@ -2327,15 +2323,15 @@ tokio::spawn(async move {
 
 3. **Direct Service Calls**: HTTP handlers invoke the service directly (not via gRPC):
    ```rust
-   async fn invoke_actor_http(...) -> Result<Json<Value>, StatusCode> {
+   async fn actor_http_request(...) -> Result<Json<Value>, StatusCode> {
        let grpc_req = Request::new(invoke_req);
-       let grpc_resp = ActorServiceTrait::invoke_actor(
+       let grpc_resp = ActorServiceTrait::ask_reply(
            &*actor_service_http, 
            grpc_req
        ).await?;
        // Convert response to JSON
    }
-   ```
+```
 
 #### Request Parsing and Translation
 
@@ -2489,27 +2485,26 @@ impl GrpcClientPool {
 ### Multi-Tenancy
 
 **Tenant and Namespace Isolation**:
-- All actors must have `tenant_id` (from JWT/auth, node config, or can be empty if auth disabled)
-- All actors have `namespace` (optional, can be empty, from RequestContext or node config)
-- Path parameters `{tenant_id}` and `{namespace}` extracted from URL
-- Supports paths with or without tenant_id: `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}`
+- All actors must have `tenant_id` (from JWT/auth, or caller-provided test context if auth is disabled)
+- All actors have `namespace` (optional, can be empty, from RequestContext)
+- Path parameters `{namespace}` and `{actor_type}` are extracted from the URL
+- Actor HTTP routes use `/api/v1/actors/{namespace}/{actor_type}` and `/ask`
 - JWT authentication extracts `tenant_id` from claims
-- Access control: JWT `tenant_id` must match path `tenant_id`
+- Access control uses the JWT-derived `tenant_id`
 - Admin/internal contexts with empty namespace bypass namespace filtering for cross-namespace queries
 
 **Default Behavior**:
-- If no authentication: `tenant_id` from node config `default_tenant_id` (can be empty)
+- If no authentication: local test clients may provide `tenant_id` out of band
 - If JWT provided: `tenant_id` from JWT claims
-- Validation: JWT `tenant_id` must match requested `tenant_id`
-- Namespace: Uses `default_namespace` from node config if not provided (can be empty)
+- Namespace comes from the request path
 
 ### Observability
 
 **Metrics**:
-- `plexspaces_actor_service_invoke_actor_total`: Total invocations (by method, pattern)
-- `plexspaces_actor_service_invoke_actor_duration_seconds`: Invocation duration histogram
-- `plexspaces_actor_service_invoke_actor_errors_total`: Error counts (by error type)
-- `plexspaces_actor_service_invoke_actor_lookup_duration_seconds`: Actor lookup duration
+- `plexspaces_actor_service_ask_reply_total`: Total ask requests
+- `plexspaces_actor_service_ask_reply_duration_seconds`: Ask duration histogram
+- `plexspaces_actor_service_send_message_total`: Total tell requests
+- `plexspaces_actor_service_actor_lookup_duration_seconds`: Actor lookup duration
 
 **Tracing**:
 - Structured logging with tenant_id, actor_type, method
@@ -2529,13 +2524,12 @@ impl GrpcClientPool {
 **Lambda Function URL Setup**:
 1. Deploy PlexSpaces Node as Lambda function
 2. Enable Function URL for HTTP access
-3. Route requests to `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}`
+3. Route requests to `/api/v1/actors/{namespace}/{actor_type}`
 4. Lambda automatically scales based on request volume
 
 **API Gateway Integration**:
 1. Create REST API or HTTP API
-2. Configure routes: `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` → Lambda
-3. Or configure routes: `/api/v1/actors/{namespace}/{actor_type}` → Lambda (tenant_id from node config)
+2. Configure routes: `/api/v1/actors/{namespace}/{actor_type}` → Lambda
 3. Add JWT authorizer for tenant isolation
 4. Enable CORS for web applications
 

@@ -118,9 +118,23 @@ impl RemoteActorClient {
     /// - Network errors
     pub async fn send_message(&mut self, message: ProtoMessage) -> Result<String, String> {
         let request = tonic::Request::new(SendMessageRequest {
-            message: Some(message),
-            wait_for_response: false,
-            timeout: None,
+            namespace: String::new(),
+            actor_type: message.receiver_id.clone(),
+            http_method: "POST".to_string(),
+            payload: message.payload,
+            headers: message.headers,
+            query_params: Default::default(),
+            path: String::new(),
+            subpath: String::new(),
+            sender_id: message.sender_id,
+            message_type: if message.message_type.is_empty() {
+                "cast".to_string()
+            } else {
+                message.message_type
+            },
+            correlation_id: message.correlation_id,
+            reply_to: message.reply_to,
+            message_id: message.id,
         });
 
         let response = self

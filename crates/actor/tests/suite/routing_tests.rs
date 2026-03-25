@@ -8,7 +8,10 @@
 //! - is_actor_local(): Determine if actor is local
 //! - ask_helper(): Generic ask pattern implementation
 
-use plexspaces_actor::routing::{extract_node_id, is_actor_local};
+use plexspaces_actor::{
+    routing::{extract_node_id, is_actor_local, route_message},
+    ActorRefError,
+};
 use plexspaces_core::{ActorRegistry, RequestContext, ServiceLocator};
 use plexspaces_node::NodeBuilder;
 use std::sync::Arc;
@@ -87,6 +90,59 @@ async fn test_is_actor_local_without_node_suffix() {
     // Should check if actor exists locally
     // Since actor doesn't exist, should return false
     assert!(!is_local, "Actor without node_id should check registry");
+}
+
+#[tokio::test]
+async fn test_route_message_without_node_suffix_stays_local() {
+    let node = NodeBuilder::new("test-node-1").build().await;
+    let service_locator: Arc<dyn ServiceLocator> = node.service_locator();
+    let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
+    let message = plexspaces_mailbox::new_message(br#"{"op":"status"}"#.to_vec());
+
+    let result = route_message(
+        ctx,
+        service_locator,
+        "webhook:default".to_string(),
+        message,
+        false,
+        None,
+    )
+    .await;
+
+    match result {
+        Err(ActorRefError::ActorNotFound(actor_id)) => {
+            assert!(
+                actor_id.starts_with("webhook:default@"),
+                "local routing should normalize the actor id with the local node suffix"
+            );
+        }
+        other => panic!("expected local ActorNotFound, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_route_message_with_explicit_local_node_suffix_stays_local() {
+    let node = NodeBuilder::new("test-node-1").build().await;
+    let service_locator: Arc<dyn ServiceLocator> = node.service_locator();
+    let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
+    let message = plexspaces_mailbox::new_message(br#"{"op":"status"}"#.to_vec());
+
+    let result = route_message(
+        ctx,
+        service_locator,
+        "webhook:default@test-node-1".to_string(),
+        message,
+        false,
+        None,
+    )
+    .await;
+
+    match result {
+        Err(ActorRefError::ActorNotFound(actor_id)) => {
+            assert_eq!(actor_id, "webhook:default@test-node-1");
+        }
+        other => panic!("expected local ActorNotFound, got {:?}", other),
+    }
 }
 
 #[tokio::test]

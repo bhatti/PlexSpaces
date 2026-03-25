@@ -4,8 +4,8 @@
 
 ## Overview
 
-- **POST** `/api/v1/actors/{tenant_id}/{namespace}/webhook_handler` — Deliver a webhook (body = payload). Returns `{ id, received_at, action: "delivered" }`.
-- **GET** `/api/v1/actors/{tenant_id}/{namespace}/webhook_handler?action=list` — List recent deliveries and total count.
+- **POST** `/api/v1/actors/{namespace}/webhook_handler` — Deliver a webhook (body = payload). Returns `{ id, received_at, action: "delivered" }`.
+- **GET** `/api/v1/actors/{namespace}/webhook_handler?action=list` — List recent deliveries and total count.
 
 ## APIs used
 
@@ -34,12 +34,12 @@ Or run the test script:
 ```bash
 # List (empty at start)
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "http://127.0.0.1:8002/api/v1/actors/acme-corp/webhooks/webhook_handler?action=list"
+  "http://127.0.0.1:8002/api/v1/actors/webhooks/webhook_handler?action=list"
 
 # Deliver a webhook
 curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"type":"github.push","repo":"acme/backend","commits":3}' \
-  "http://127.0.0.1:8002/api/v1/actors/acme-corp/webhooks/webhook_handler"
+  "http://127.0.0.1:8002/api/v1/actors/webhooks/webhook_handler"
 ```
 
 ## Use cases

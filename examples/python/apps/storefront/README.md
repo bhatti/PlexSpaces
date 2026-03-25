@@ -11,7 +11,7 @@ One WASM actor implementing a **storefront backend**: store configuration, shopp
 | **Durable, shared storage** | Store config, carts, and rate-limit counters go through `host.kv_get` / `host.kv_put` / `host.kv_delete` / `host.kv_list`. The node’s KV backend is the single source of truth. |
 | **Namespace isolation** | The host applies tenant/namespace to keys. Different apps or tenants get isolated key spaces. |
 | **One actor, full API** | Config, carts, and checkout limits use the same KV with prefixes (`config:`, `cart:`, `ratelimit:`). One deployment serves the full storefront API. |
-| **HTTP invocation** | Invoke over `POST /api/v1/actors/{namespace}/StorefrontService` with `msg_type` and JSON payload. |
+| **HTTP requests** | Use `POST /api/v1/actors/{namespace}/StorefrontService` for tell or `POST /api/v1/actors/{namespace}/StorefrontService/ask` for request-reply with JSON payload. |
 | **Portable WASM** | Same component runs wherever the node runs (server, edge, FaaS). |
 
 ## Use Cases

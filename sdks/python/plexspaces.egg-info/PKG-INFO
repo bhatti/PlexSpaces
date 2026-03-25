@@ -200,7 +200,7 @@ class ChatRoom:
 | `@fsm_actor` | GenStateMachine | State machine workflows | Auto `call` |
 | `@workflow_actor` | Workflow | Long-running orchestrations | Auto `call` |
 
-**GenServer Auto-Invocation**: When using `@actor` or `@gen_server_actor`, all handlers automatically use `invocation="call"` (request-reply). You don't need to specify it in `@handler()`.
+**GenServer Request-Reply Default**: When using `@actor` or `@gen_server_actor`, handlers default to the `call` invocation automatically. You do not need to specify that in `@handler()`.
 
 ### Facets
 

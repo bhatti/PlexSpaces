@@ -106,8 +106,8 @@
 //!    - **Why not ActorService?** ActorRef already knows it's remote (has node_id)
 //!    - **Why direct gRPC?** Avoids unnecessary indirection through ActorService
 //!
-//! 3. **Remote ask()**: Direct gRPC client call with `wait_for_response=true` (no ActorService)
-//!    - `ActorRefInner::Remote` → `ServiceLocator.get_node_client()` → `client.send_message(wait_for_response=true)`
+//! 3. **Remote ask()**: Direct request-reply routing through the node client
+//!    - `ActorRefInner::Remote` → `ServiceLocator.get_node_client()` → ask-style delivery
 //!    - **Why not ActorService?** Same reason as tell() - ActorRef already knows it's remote
 //!
 //! 4. **send_reply() helper**: Delegates to ActorService::send_reply() (ONLY exception)
@@ -236,7 +236,7 @@
 //! ### Ask Pattern Implementation
 //! - **Implemented**: ask() pattern with correlation IDs, timeouts, and reply routing
 //! - **Local actors**: Uses reply mailbox for correlation_id matching
-//! - **Remote actors**: Uses gRPC with wait_for_response=true
+//! - **Remote actors**: Uses ask-style remote delivery
 //! - **No ActorContext required**: ActorRef is self-contained
 //!
 //! ### Why not type-safe messages (generics)?
@@ -1002,9 +1002,19 @@ impl ActorRef {
 
                     // Create request
                     let request = tonic::Request::new(SendMessageRequest {
-                        message: Some(proto_message),
-                        wait_for_response: false,
-                        timeout: None,
+                        namespace: self.namespace().to_string(),
+                        actor_type: self.id.clone(),
+                        http_method: "POST".to_string(),
+                        payload: proto_message.payload,
+                        headers: proto_message.headers,
+                        query_params: Default::default(),
+                        path: proto_message.uri_path,
+                        subpath: String::new(),
+                        sender_id: proto_message.sender_id,
+                        message_type: proto_message.message_type,
+                        correlation_id: proto_message.correlation_id,
+                        reply_to: proto_message.reply_to,
+                        message_id: proto_message.id,
                     });
 
                     // Send via gRPC

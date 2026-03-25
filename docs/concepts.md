@@ -555,7 +555,7 @@ Actors are isolated - one actor's failure doesn't affect others.
 **FaaS-Style Invocation** enables HTTP-based actor invocation, treating actors like serverless functions:
 
 - **RESTful API**: Standard HTTP GET/POST methods for actor invocation
-- **Path-Based Routing**: `/api/v1/actors/{tenant_id}/{actor_type}` endpoint
+- **Path-Based Routing**: `/api/v1/actors/{namespace}/{actor_type}` endpoint
 - **GET for Reads**: Uses `ask()` pattern (request-reply) with query parameters
 - **POST for Updates**: Uses `tell()` pattern (fire-and-forget) with request body
 - **Multi-Tenant Isolation**: Built-in tenant-based access control
@@ -566,10 +566,6 @@ Actors are isolated - one actor's failure doesn't affect others.
 
 **GET - Read Operations (Ask Pattern)**:
 ```bash
-# Get counter value (with tenant_id and namespace)
-curl "http://localhost:8080/api/v1/actors/default/default/counter?action=get"
-
-# Get counter value (without tenant_id, uses default_tenant_id from node config)
 curl "http://localhost:8080/api/v1/actors/default/counter?action=get"
 ```
 
@@ -581,18 +577,12 @@ curl "http://localhost:8080/api/v1/actors/default/counter?action=get"
 
 **POST/PUT - Update Operations (Tell Pattern)**:
 ```bash
-# Increment counter (POST) - with tenant_id and namespace
-curl -X POST "http://localhost:8080/api/v1/actors/default/default/counter" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"increment"}'
-
-# Increment counter (POST) - without tenant_id
 curl -X POST "http://localhost:8080/api/v1/actors/default/counter" \
   -H "Content-Type: application/json" \
   -d '{"action":"increment"}'
 
 # Update counter (PUT)
-curl -X PUT "http://localhost:8080/api/v1/actors/default/default/counter" \
+curl -X PUT "http://localhost:8080/api/v1/actors/default/counter" \
   -H "Content-Type: application/json" \
   -d '{"action":"set","value":42}'
 ```
@@ -601,21 +591,6 @@ curl -X PUT "http://localhost:8080/api/v1/actors/default/default/counter" \
 - HTTP headers preserved as message metadata
 - Actor's `handle_message()` called (fire-and-forget)
 - Response returns immediately
-- `message.uri_path` and `message.uri_method` populated
-
-**DELETE - Delete Operations (Ask Pattern)**:
-```bash
-# Delete resource (with tenant_id and namespace)
-curl -X DELETE "http://localhost:8080/api/v1/actors/default/default/counter?confirm=true"
-
-# Delete resource (without tenant_id)
-curl -X DELETE "http://localhost:8080/api/v1/actors/default/counter?confirm=true"
-```
-
-- Query parameters converted to JSON payload
-- Actor's `handle_request()` called (GenServer pattern)
-- Actor sends reply via `ctx.send_reply()`
-- Response contains actor's reply payload
 - `message.uri_path` and `message.uri_method` populated
 
 ### Actor Lookup
@@ -642,20 +617,21 @@ PlexSpaces supports multiple routing patterns for actor invocation:
 
 #### 1. HTTP to gRPC Routing
 
-The HTTP gateway translates HTTP requests to gRPC `InvokeActor` calls:
+The HTTP gateway translates HTTP requests to gRPC `AskReply` or `SendMessage` calls:
 
 ```
-HTTP Request → HTTP Gateway (Axum) → gRPC InvokeActor → ActorService → Actor
+HTTP Request → HTTP Gateway (Axum) → gRPC AskReply/SendMessage → ActorService → Actor
 ```
 
 **Pattern Flow**:
-1. **HTTP Request**: Client sends HTTP GET/POST to `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}`
+1. **HTTP Request**: Client sends HTTP `GET`, `POST`, or `PUT` to `/api/v1/actors/{namespace}/{actor_type}` or `/ask`
 2. **HTTP Gateway**: Axum server parses path parameters, query params, and body
-3. **gRPC Translation**: Gateway constructs `InvokeActorRequest` with:
-   - `tenant_id`, `namespace`, `actor_type` from path
+3. **gRPC Translation**: Gateway constructs `AskReplyRequest` or `SendMessageRequest` with:
+   - `namespace`, `actor_type` from path
+   - `tenant_id` from JWT claims when authentication is enabled
    - `payload` from request body (POST/PUT) or query params (GET)
-   - `message_type` set to `"call"` for GET or when query param `invocation=call` (ask pattern), `"cast"` for POST/PUT/DELETE by default (tell pattern). Valid `invocation` values: **call**, **cast**, **info** (Erlang-style). Query param `msg_type` is the handler name (e.g. count, readings) and goes into payload.
-4. **Actor Service**: `ActorServiceImpl::invoke_actor` handles the gRPC request
+   - request metadata such as headers, path, and subpath
+4. **Actor Service**: `ActorServiceImpl::ask_reply` or `ActorServiceImpl::send_message` handles the gRPC request
 5. **Actor Discovery**: Service looks up actors by type using `ActorRegistry::discover_actors_by_type`
 6. **Message Delivery**: Selected actor receives message via mailbox
 7. **Response**: For ask pattern (GET), actor sends reply via `ctx.send_reply()`
@@ -672,7 +648,7 @@ When multiple actors of the same type exist, the system uses:
 **Example**:
 ```rust
 // Multiple counter actors registered
-// GET /api/v1/actors/default/default/counter
+// GET /api/v1/actors/default/counter
 // → ActorService discovers all actors with type="counter"
 // → Randomly selects one (e.g., "counter-1@node1")
 // → Routes message to selected actor
@@ -680,10 +656,10 @@ When multiple actors of the same type exist, the system uses:
 
 #### 3. Message Type Routing
 
-Different HTTP methods map to different message patterns:
+Different HTTP endpoints map to different message patterns:
 
-- **GET** (or any method with `?invocation=call`) → `MessageType::Call` (ask pattern, expects reply). Allowed `invocation` values: **call**, **cast**, **info**.
-- **POST/PUT/DELETE** → `MessageType::Cast` (tell pattern, fire-and-forget) by default
+- **`GET /api/v1/actors/...`** and **`GET|POST|PUT /api/v1/actors/.../ask`** → ask pattern, expects reply
+- **`POST|PUT /api/v1/actors/...`** → tell pattern, fire-and-forget
 
 **Behavior Handling**:
 - `GenServer::route_message` routes `Call` messages to `handle_request` (expects reply)
@@ -759,7 +735,7 @@ PlexSpaces implements **two-level isolation** for multi-tenancy:
 ### Example
 
 ```rust
-// Register actor with type, tenant_id, and namespace for InvokeActor lookup
+// Register actor with type, tenant_id, and namespace for AskReply/SendMessage lookup
 actor_registry.register_actor(
     actor_id.clone(),
     sender,
@@ -798,14 +774,14 @@ async fn handle_request(&mut self, ctx: &ActorContext, msg: Message) -> Result<(
 
 ### AWS Lambda Integration
 
-The `InvokeActor` endpoint is designed for AWS Lambda Function URLs:
+The actor HTTP endpoints are designed for AWS Lambda Function URLs:
 
 1. Deploy PlexSpaces Node as Lambda function
 2. Enable Lambda Function URL for HTTP access
-3. Route requests to `/api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}`
+3. Route requests to `/api/v1/actors/{namespace}/{actor_type}`
 4. Lambda automatically scales based on request volume
 
-See [Architecture](architecture.md#faas-invocation) and [Detailed Design](detailed-design.md#invokeactor-service) for more details.
+See [Architecture](architecture.md#faas-invocation) and [Detailed Design](detailed-design.md#askreply-and-sendmessage-services) for more details.
 
 ## Next Steps
 

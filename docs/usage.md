@@ -230,7 +230,7 @@ fn extract_context_from_request<T>(request: &Request<T>) -> Result<RequestContex
     // Extract tenant_id from headers (set by JWT middleware)
     let tenant_id = metadata.get("x-tenant-id")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| "Missing x-tenant-id header".to_string())?;
+        .ok_or_else(|| "Missing x-tenant-id metadata set by auth middleware".to_string())?;
     
     let namespace = metadata.get("x-namespace")
         .and_then(|v| v.to_str().ok())

@@ -643,6 +643,12 @@ mod tests {
         ) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>> {
             Err("Not implemented".into())
         }
+        async fn get_application_service_client(
+            &self,
+            _node_id: &str,
+        ) -> Result<tonic::transport::Channel, Box<dyn std::error::Error + Send + Sync>> {
+            Err("Not implemented".into())
+        }
 
         // WASM runtime
         async fn get_wasm_runtime(&self) -> Option<Arc<dyn plexspaces_core::WasmRuntimeTrait>> {
@@ -655,6 +661,10 @@ mod tests {
             None
         }
         async fn register_security_config(&self, _: plexspaces_proto::node::v1::SecurityConfig) {}
+        async fn get_runtime_config(&self) -> Option<plexspaces_proto::node::v1::RuntimeConfig> {
+            None
+        }
+        async fn register_runtime_config(&self, _: plexspaces_proto::node::v1::RuntimeConfig) {}
         async fn is_auth_disabled(&self) -> bool {
             false
         }

@@ -22,7 +22,7 @@ use plexspaces_core::{
 use plexspaces_journaling::{ReminderFacet, TimerFacet, VirtualActorFacet};
 use plexspaces_node::NodeBuilder;
 use plexspaces_proto::actor::v1::{
-    actor_service_server::ActorService as ActorServiceTrait, InvokeActorRequest,
+    actor_service_server::ActorService as ActorServiceTrait, AskReplyRequest, SendMessageRequest,
 };
 use plexspaces_services::actor_service::ActorServiceImpl;
 use serde::{Deserialize, Serialize};
@@ -278,32 +278,83 @@ async fn invoke_virtual_actor(
     payload: Vec<u8>,
     query_params: HashMap<String, String>,
     ask: bool,
-) -> Result<plexspaces_proto::actor::v1::InvokeActorResponse, tonic::Status> {
-    let request = InvokeActorRequest {
-        namespace: namespace.to_string(),
-        actor_type: actor_type.to_string(),
-        http_method: http_method.to_string(),
-        payload,
-        headers: HashMap::new(),
-        query_params,
-        path: String::new(),
-        subpath: String::new(),
-        ask,
-        msg_type_override: String::new(),
-        timeout: None,
-    };
+) -> Result<LocalInvokeResponse, tonic::Status> {
+    if ask {
+        let mut request = Request::new(AskReplyRequest {
+            namespace: namespace.to_string(),
+            actor_type: actor_type.to_string(),
+            http_method: http_method.to_string(),
+            payload,
+            headers: HashMap::new(),
+            query_params,
+            path: String::new(),
+            subpath: String::new(),
+            sender_id: String::new(),
+            message_type: "call".to_string(),
+            correlation_id: String::new(),
+            reply_to: String::new(),
+            message_id: String::new(),
+            timeout: None,
+        });
+        request
+            .metadata_mut()
+            .insert("x-tenant-id", tenant_id.parse().unwrap());
+        request
+            .metadata_mut()
+            .insert("x-namespace", namespace.parse().unwrap());
+        ActorServiceTrait::ask_reply(actor_service, request)
+            .await
+            .map(|response| {
+                let response = response.into_inner();
+                LocalInvokeResponse {
+                    success: response.success,
+                    payload: response.payload,
+                    actor_id: response.actor_id,
+                    error_message: response.error_message,
+                }
+            })
+    } else {
+        let mut request = Request::new(SendMessageRequest {
+            namespace: namespace.to_string(),
+            actor_type: actor_type.to_string(),
+            http_method: http_method.to_string(),
+            payload,
+            headers: HashMap::new(),
+            query_params,
+            path: String::new(),
+            subpath: String::new(),
+            sender_id: String::new(),
+            message_type: "cast".to_string(),
+            correlation_id: String::new(),
+            reply_to: String::new(),
+            message_id: String::new(),
+        });
+        request
+            .metadata_mut()
+            .insert("x-tenant-id", tenant_id.parse().unwrap());
+        request
+            .metadata_mut()
+            .insert("x-namespace", namespace.parse().unwrap());
+        ActorServiceTrait::send_message(actor_service, request)
+            .await
+            .map(|response| {
+                let response = response.into_inner();
+                LocalInvokeResponse {
+                    success: response.success,
+                    payload: Vec::new(),
+                    actor_id: response.actor_id,
+                    error_message: response.error_message,
+                }
+            })
+    }
+}
 
-    let mut request = Request::new(request);
-    request
-        .metadata_mut()
-        .insert("x-tenant-id", tenant_id.parse().unwrap());
-    request
-        .metadata_mut()
-        .insert("x-namespace", namespace.parse().unwrap());
-
-    ActorServiceTrait::invoke_actor(actor_service, request)
-        .await
-        .map(|response| response.into_inner())
+#[derive(Debug)]
+struct LocalInvokeResponse {
+    success: bool,
+    payload: Vec<u8>,
+    actor_id: String,
+    error_message: String,
 }
 
 async fn wait_for_actor_registration(
@@ -845,7 +896,7 @@ async fn test_virtual_actor_activation_with_http_format() {
     let http_actor_type = "read-state-tracker:user-1";
     let base_actor_type = "read-state-tracker";
 
-    // Extract instance ID from HTTP format (same logic as invoke_actor)
+    // Extract instance ID from HTTP actor-type format used by AskReply and SendMessage.
     let instance_id = if http_actor_type.contains(':') {
         http_actor_type
             .split_once(':')
@@ -1064,6 +1115,7 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
         initial_count, 7,
         "behavior should be rebuilt from init_config_template on first activation"
     );
+    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     service_locator
         .get_actor_factory()

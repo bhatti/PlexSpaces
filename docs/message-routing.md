@@ -147,7 +147,7 @@ Node1 → ActorRegistry lookup → Temporary Sender ActorRef::tell(reply) → Re
 5. `ask()` sets `message.sender = temporary_sender_id@node1`
 6. `ask()` extracts target node_id from `message.receiver` (e.g., `server@node2`)
 7. `ask()` gets gRPC client for Node2
-8. `ask()` sends request via gRPC `send_message` RPC with `wait_for_response=false`
+8. `ask()` sends request via gRPC `AskReply` on actor-runtime HTTP-style paths, or direct remote ask routing for actor refs
 9. Node2 receives request, looks up Actor B in `ActorRegistry`, sends to mailbox
 10. Actor B processes request, calls `ctx.send_reply()`
 11. `ActorContext::send_reply()` uses `ActorService::send()` to route the reply
@@ -590,4 +590,3 @@ All message routing should include:
 - [Akka Ask Pattern](https://doc.akka.io/docs/akka/current/typed/interaction-patterns.html#request-response)
 - [Erlang gen_server:call](https://www.erlang.org/doc/man/gen_server.html#call-2)
 - [Orleans Request-Response](https://dotnet.github.io/orleans/docs/grains/communication/index.html)
-

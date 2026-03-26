@@ -434,6 +434,13 @@ impl VirtualActorManager {
     ///
     /// ## Purpose
     /// Retrieves metadata for a virtual actor type, used when auto-activating actors.
+    /// Includes facet_config with all configured facets (virtual_actor, timer, reminder, workflow)
+    /// so that resurrection recreates every facet with its original config.
+    ///
+    /// ## Invariant
+    /// Type registrations are NEVER evicted on actor vacation (deactivation/LRU eviction).
+    /// They are only removed when an application is explicitly undeployed.
+    /// This means actors can always be resurrected by type even after long idle periods.
     ///
     /// ## Returns
     /// `Some(VirtualActorMetadata)` if actor type is virtual, `None` otherwise
@@ -1473,12 +1480,13 @@ mod tests {
         // This actor_id is virtual (type-level) but has no facet instance
         assert!(manager.is_virtual(&actor_id).await);
 
-        // get_facet() should fail for type-level registrations
+        // get_facet() should fail for type-level registrations — no facet instance exists yet,
+        // only type-level config. The registry returns ActorNotFound (not ActivationFailed).
         let result = manager.get_facet(&actor_id).await;
         assert!(result.is_err());
         match result.unwrap_err() {
-            VirtualActorError::ActivationFailed(_) => {}
-            _ => panic!("Expected ActivationFailed error for type-level registration"),
+            VirtualActorError::ActorNotFound(_) => {}
+            _ => panic!("Expected ActorNotFound error for type-level registration (no instance spawned yet)"),
         }
     }
 

@@ -13,6 +13,10 @@ PlexSpaces supports **polyglot development** - you can write actors, application
 
 > **📦 SDKs Available!** For Python, use the [PlexSpaces Python SDK](sdk.md) (decorator-based: `@actor`, `@handler`, `state()`). For TypeScript, use the [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) (inheritance-based: extend `PlexSpacesActor`, implement `on<Op>()` handlers). For Go, use the [PlexSpaces Go SDK](sdk.md#go-sdk) (interface-based: implement `Actor`, embed `BaseActor`). All target the same `plexspaces-simple-actor` WIT world.
 
+### Protocol buffers and typed SDK models
+
+At build time, **WIT** defines the WASM boundary (JSON payloads to host functions). Separately, **Protocol Buffers** under `proto/` define the framework’s RPC and shared data contracts. **`make proto`** generates Rust server/client code **and** optional typed models for Python, TypeScript, and Go under `sdks/` (see [SDK guide — Proto generation](sdk.md)). That keeps workflow and common types aligned across languages for tooling and non-WASM clients; WASM actors still speak JSON at the WIT layer unless you map to generated types in your own code.
+
 ## Supported Languages
 
 | Language | Compiler | WASM Size | Runtime Performance | Best For |

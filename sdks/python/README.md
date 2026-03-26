@@ -61,6 +61,12 @@ curl -X POST http://localhost:8094/api/v1/deploy \
   -F "wasm=@bank_account_actor.wasm"
 ```
 
+## Proto-generated types (optional)
+
+Workflow and common messages are defined in Protocol Buffers. After **`make proto`** or **`make proto-python`** at the repo root, typed classes appear under **`plexspaces/generated/`** (betterproto). The **`plexspaces.workflow`** module prefers importing **`RetryConfig`** (and related types) from generated code when available, with a small inline fallback for WASM guests that do not ship `generated/`.
+
+Install **`pip install -e ".[dev]"`** or **`pip install -e ".[proto]"`** to use betterproto locally. Regeneration uses local buf plugins; see **`make proto-install-deps`** in the root `Makefile`.
+
 ## Features
 
 ### State Persistence
@@ -95,7 +101,7 @@ class Calculator:
 
 ### Ask vs Tell (GET vs POST)
 
-The HTTP gateway maps **GET** to **ask** (request-reply) and **POST/PUT/DELETE** to **tell** (fire-and-forget). Design handlers accordingly:
+The HTTP gateway uses explicit actor-runtime endpoints: **GET** on `/api/v1/actors/{namespace}/{actor_type}` and **GET|POST|PUT** on `/ask` route to **AskReply** (request-reply), while **POST/PUT** on `/api/v1/actors/{namespace}/{actor_type}` route to **SendMessage** (fire-and-forget). Design handlers accordingly:
 
 - **Read handlers** (e.g. `count`, `get_readings`): Use **GET** so the client receives the reply. Query params are passed as payload, e.g. `?msg_type=readings&limit=10` → `{"msg_type": "readings", "limit": "10"}`.
 - **Write handlers** (e.g. `ingest`, `clear`): Use **POST** (tell); the client does not wait for a reply.
@@ -381,9 +387,13 @@ source ~/venv/bin/activate
 # Install in editable mode with dev deps
 pip install -e ".[dev]"
 
-# Run tests
+# Run tests (this directory)
 pytest
 
+# Or from repository root: make test runs pytest here when VENV_PATH (default ~/venv) has pytest
+```
+
+```bash
 # Build examples
 cd examples
 plexspaces-py build chat_room.py -v

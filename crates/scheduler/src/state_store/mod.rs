@@ -155,10 +155,10 @@ pub async fn create_state_store(
                 ":memory:".to_string()
             } else if db_url.starts_with("sqlite:///") {
                 // Format: "sqlite:///absolute/path" - preserve leading /
-                // Example: "sqlite:///Users/sbhatti/plexspaces/db/plexspaces.db?mode=rwc"
-                // After strip_prefix("sqlite:///"): "Users/sbhatti/plexspaces/db/plexspaces.db?mode=rwc"
-                // After split('?'): "Users/sbhatti/plexspaces/db/plexspaces.db" (no leading /)
-                // Result: "/Users/sbhatti/plexspaces/db/plexspaces.db"
+                // Example: "sqlite:///Users/bhatti/plexspaces/db/plexspaces.db?mode=rwc"
+                // After strip_prefix("sqlite:///"): "Users/bhatti/plexspaces/db/plexspaces.db?mode=rwc"
+                // After split('?'): "Users/bhatti/plexspaces/db/plexspaces.db" (no leading /)
+                // Result: "/Users/bhatti/plexspaces/db/plexspaces.db"
                 let extracted = db_url
                     .strip_prefix("sqlite:///")
                     .and_then(|s| s.split('?').next()) // Remove query parameters like ?mode=rwc

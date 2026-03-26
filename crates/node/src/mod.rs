@@ -4770,6 +4770,7 @@ mod tests {
         let actor_ref = ActorRef::remote(
             "test-actor@node2",
             "".to_string(),
+            "".to_string(),
             "node2",
             node2.service_locator(),
         );
@@ -4900,6 +4901,7 @@ mod tests {
         );
         let actor_ref = ActorRef::remote(
             "test-actor@node2",
+            "".to_string(),
             "".to_string(),
             "node2",
             node2.service_locator(),

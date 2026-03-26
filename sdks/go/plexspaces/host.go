@@ -554,11 +554,40 @@ func (h *Host) ApplicationGetStatus(applicationID, nodeID string) (map[string]an
 
 // HostError represents an error from a host function call.
 // The error message follows the WIT convention: "ERROR:<details>".
+// When the host returns a structured JSON error body, use ParseErrorDetail()
+// to extract the proto ErrorDetail fields (code, message, details).
 type HostError struct {
 	Message string
 }
 
 func (e *HostError) Error() string { return e.Message }
+
+// ErrorDetail holds structured error information matching proto ErrorDetail
+// (plexspaces.common.v1.ErrorDetail).  This is a local mirror so that host.go
+// has no external proto dependency (TinyGo WASM compatibility).
+// When sdks/go/plexspaces/proto/ is generated via `make proto-go`, callers
+// can convert: protoDetail := &proto.ErrorDetail{Code: d.Code, Message: d.Message}
+type ErrorDetail struct {
+	// Code is the error code string (e.g. "NOT_FOUND", "INTERNAL").
+	Code string `json:"code"`
+	// Message is the human-readable error description.
+	Message string `json:"message"`
+}
+
+// ParseErrorDetail attempts to parse a structured JSON error body from the HostError message.
+// Host functions may embed a JSON ErrorDetail after the "ERROR:" prefix.
+// Returns nil if the message is not structured JSON (plain text errors are common).
+//
+// Example host error: `ERROR:{"code":"NOT_FOUND","message":"actor not found"}`
+func (e *HostError) ParseErrorDetail() *ErrorDetail {
+	s := strings.TrimPrefix(e.Message, errorPrefix)
+	s = strings.TrimSpace(s)
+	var detail ErrorDetail
+	if err := json.Unmarshal([]byte(s), &detail); err != nil {
+		return nil
+	}
+	return &detail
+}
 
 // isHostError checks if a host function result is an error response.
 func isHostError(result string) bool {

@@ -13,6 +13,7 @@ plexspaces-core.workspace = true
 plexspaces-actor.workspace = true
 plexspaces-behavior.workspace = true
 plexspaces-journaling = { workspace = true, features = ["sqlite-backend"] }
+plexspaces-sdk.workspace = true
 plexspaces-node.workspace = true
 tokio.workspace = true
 serde.workspace = true

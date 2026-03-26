@@ -18,6 +18,16 @@ High-level API and annotations for building PlexSpaces actors in Rust, inspired 
 - [Best Practices](#best-practices)
 - [Examples](#examples)
 
+## Tests
+
+This crate is a **workspace member**. Full verification from the repository root:
+
+```bash
+make test   # includes plexspaces-sdk and plexspaces-sdk-macros with the rest of the workspace
+```
+
+For a fast loop on this crate only: `cargo test -p plexspaces-sdk --all-features`.
+
 ## Overview
 
 The PlexSpaces Rust SDK provides:
@@ -86,7 +96,7 @@ Actor annotations define the behavior type and optional facets:
 
 Facets add capabilities to actors:
 
-- `"virtual_actor"` - Virtual actor (suspends when idle, reactivates on message)
+- `"virtual_actor"` - Virtual actor (suspends when idle, reactivates on message). With `#[gen_server_actor(facets = ["virtual_actor", ...])]`, **`spawn_with_facets`** registers the actor type (including facet configs) so reactivation matches the original registration after vacation.
 - `"durability"` - Durable state (persisted to storage)
 - `"timer"` - Timer support (periodic tasks, timeouts)
 - `"supervisor"` - Supervisor tree (fault tolerance)

@@ -14,6 +14,7 @@
 use crate::models::*;
 use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
+use plexspaces_sdk::new_message;
 use tracing::info;
 
 pub struct AlignmentWorker {
@@ -56,22 +57,13 @@ impl ActorTrait for AlignmentWorker {
         self.samples_processed += 1;
 
         // Send reply if there's a sender
-        if msg.sender_id().is_some() {
-            let response_payload = serde_json::to_vec(&result)
+        if !msg.sender_id.is_empty() {
+            let response_value = serde_json::to_value(&result)
                 .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
-
-            let response = Message::new(response_payload);
-
-            if let Some(sender_id) = &msg.sender {
-                ctx.send_reply(
-                    msg.correlation_id.as_deref(),
-                    sender_id,
-                    msg.receiver.clone(),
-                    response,
-                ).await.map_err(|e| {
-                    BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
-                })?;
-            }
+            let response = new_message("reply", response_value);
+            let correlation_id = if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) };
+            ctx.send_reply(correlation_id, &msg.sender_id, msg.receiver_id.clone(), response).await
+                .map_err(|e| BehaviorError::ProcessingError(format!("Failed to send reply: {}", e)))?;
         }
 
         Ok(())

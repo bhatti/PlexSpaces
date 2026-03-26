@@ -2222,25 +2222,25 @@ message AskReplyRequest {
 }
 ```
 
-### HTTP Method Handling
+### HTTP Request Handling
 
-**AskReply Requests (Ask Pattern)**:
-1. Extract query parameters from URL
-2. Convert to JSON string: `{"param1": "value1", "param2": "value2"}`
-3. Create `Message` with JSON payload
-4. Set `message.uri_path` and `message.uri_method` from request
+**AskReply Requests**:
+1. Route `GET /api/v1/actors/{namespace}/{actor_type}` and `GET|POST|PUT /api/v1/actors/{namespace}/{actor_type}/ask` to `AskReply`
+2. For `GET`, convert query parameters to a JSON payload
+3. For `POST` and `PUT`, pass the request body through as payload
+4. Set `message.uri_path` and `message.uri_method` from the HTTP request
 5. Call `actor_ref.ask(message, timeout)`
-6. Return actor's reply in response
+6. Return the actor reply in the HTTP response
 
-**SendMessage Requests (Tell Pattern)**:
-1. Extract request body as payload
-2. Extract HTTP headers as metadata
-3. Create `Message` with body payload and headers
-4. Set `message.uri_path` and `message.uri_method` from request
+**SendMessage Requests**:
+1. Route `POST|PUT /api/v1/actors/{namespace}/{actor_type}` to `SendMessage`
+2. Extract the request body as payload
+3. Preserve HTTP headers and query parameters as message metadata
+4. Set `message.uri_path` and `message.uri_method` from the HTTP request
 5. Call `actor_ref.tell(message)`
-6. Return success immediately (fire-and-forget)
+6. Return acknowledgement immediately
 
-The endpoint determines semantics directly. There is no `invocation` compatibility switch.
+The endpoint determines semantics directly. There is no HTTP-level `invocation` switch and no `GET` route for `SendMessage`.
 
 ### Actor Lookup
 
@@ -2338,9 +2338,6 @@ tokio::spawn(async move {
 **Path Parameter Extraction**:
 ```rust
 // Extract from Axum path parameters
-let tenant_id = params.get("tenant_id")
-    .map(|s| s.to_string())
-    .unwrap_or_else(|| "default".to_string());
 let namespace = params.get("namespace")
     .map(|s| s.to_string())
     .unwrap_or_else(|| "default".to_string());
@@ -2365,14 +2362,18 @@ let body_bytes = hyper::body::to_bytes(req.into_body()).await?;
 let payload = body_bytes.to_vec();
 ```
 
-**Message Type Mapping**:
+**Endpoint-to-Service Mapping**:
 ```rust
-let message_type = match method {
-    "GET" | "DELETE" => "call",  // Ask pattern
-    "POST" | "PUT" => "cast",     // Tell pattern
-    _ => "call",
+let service = match (method.as_str(), path.ends_with("/ask")) {
+    ("GET", false) => "AskReply",
+    ("GET", true) => "AskReply",
+    ("POST", false) | ("PUT", false) => "SendMessage",
+    ("POST", true) | ("PUT", true) => "AskReply",
+    _ => return Err(StatusCode::METHOD_NOT_ALLOWED),
 };
 ```
+
+The HTTP gateway chooses the service from the route. The SDK-level `call` and `cast` message types are still used inside actor dispatch, but they are no longer inferred from a generic HTTP method mapping.
 
 #### Response Conversion
 

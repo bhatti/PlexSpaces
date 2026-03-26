@@ -13,8 +13,7 @@
 //! - Side effect caching for exactly-once semantics
 
 use async_trait::async_trait;
-use plexspaces_core::application::{Application, ApplicationNode, ApplicationError, HealthStatus};
-use plexspaces_core::ServiceLocator;
+use plexspaces_application::{Application, ApplicationNode, ApplicationError, HealthStatus};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
@@ -39,7 +38,7 @@ use plexspaces_actor::supervisor::{
 };
 use plexspaces_actor::{ChildSpec, child_spec::{RestartStrategy, ShutdownSpec, StartedChild}};
 use plexspaces_core::ActorRef as CoreActorRef;
-use plexspaces_mailbox::{Mailbox, mailbox_config_default, StorageStrategy, OrderingStrategy, DurabilityStrategy, BackpressureStrategy};
+use plexspaces_mailbox::{Mailbox, mailbox_config_default, OrderingStrategy, BackpressureStrategy};
 
 /// Genomics Pipeline Application
 ///
@@ -138,8 +137,9 @@ impl Application for GenomicsPipelineApplication {
         let mut supervisors = self.supervisors.write().await;
         let node_id = node.id().to_string();
 
-        // Create ServiceLocator for supervisors
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = Arc::new(ServiceLocator::new());
+        // Create ServiceLocator for supervisors (use node's or fallback to stub)
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = node.service_locator()
+            .unwrap_or_else(|| Arc::new(plexspaces_actor::TestServiceLocatorStub::new()));
 
         // Create supervisor for QC pool
         info!("Creating QC supervisor");
@@ -157,9 +157,7 @@ impl Application for GenomicsPipelineApplication {
                 actor_id.clone(),
                 Arc::new(move || {
                     let mut config = mailbox_config_default();
-                    config.storage_strategy = StorageStrategy::Memory as i32;
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
-                    config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
                     let mailbox = tokio::task::block_in_place(|| {
@@ -201,9 +199,7 @@ impl Application for GenomicsPipelineApplication {
                 actor_id.clone(),
                 Arc::new(move || {
                     let mut config = mailbox_config_default();
-                    config.storage_strategy = StorageStrategy::Memory as i32;
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
-                    config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
                     let mailbox = tokio::task::block_in_place(|| {
@@ -247,9 +243,7 @@ impl Application for GenomicsPipelineApplication {
                 actor_id.clone(),
                 Arc::new(move || {
                     let mut config = mailbox_config_default();
-                    config.storage_strategy = StorageStrategy::Memory as i32;
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
-                    config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
                     let mailbox = tokio::task::block_in_place(|| {
@@ -291,9 +285,7 @@ impl Application for GenomicsPipelineApplication {
                 actor_id.clone(),
                 Arc::new(move || {
                     let mut config = mailbox_config_default();
-                    config.storage_strategy = StorageStrategy::Memory as i32;
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
-                    config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
                     let mailbox = tokio::task::block_in_place(|| {
@@ -335,9 +327,7 @@ impl Application for GenomicsPipelineApplication {
                 actor_id.clone(),
                 Arc::new(move || {
                     let mut config = mailbox_config_default();
-                    config.storage_strategy = StorageStrategy::Memory as i32;
                     config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
-                    config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
                     config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
                     config.capacity = 1000;
                     let mailbox = tokio::task::block_in_place(|| {
@@ -415,7 +405,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl plexspaces_core::application::ApplicationNode for MockNode {
+    impl plexspaces_application::ApplicationNode for MockNode {
         fn id(&self) -> &str {
             &self.id
         }

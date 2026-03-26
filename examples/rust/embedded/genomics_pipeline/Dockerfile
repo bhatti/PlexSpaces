@@ -4,7 +4,7 @@
 # Dockerfile for Genomics Pipeline Node (Runtime-only)
 #
 # PREREQUISITE: Build the binary first with:
-#   cd /Users/sbhatti/workspace/PlexSpaces/examples/genomics-pipeline
+#   cd /Users/bhatti/workspace/PlexSpaces/examples/genomics-pipeline
 #   cargo build --release --bin genomics-node
 
 FROM debian:bookworm-slim

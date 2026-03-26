@@ -542,7 +542,15 @@ impl ActorFactory for ActorFactoryImpl {
             let config = metadata.config;
             let tenant_id = metadata.tenant_id;
             let namespace = metadata.namespace.clone();
-            let initial_state = metadata.initial_state;
+            // Use init_config_template as initial_state when initial_state is empty.
+            // init_config_template stores the JSON args used to initialize a new instance
+            // (e.g. {"initial_count":7}). For type-level registrations, initial_state is
+            // always empty so init_config_template is the correct source.
+            let initial_state = if metadata.initial_state.is_empty() {
+                metadata.init_config_template.unwrap_or_default()
+            } else {
+                metadata.initial_state
+            };
             let labels = metadata.labels;
             let tenant_id_clone = tenant_id.clone();
 
@@ -597,11 +605,29 @@ impl ActorFactory for ActorFactoryImpl {
                     VirtualActorFacet, VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY,
                 };
                 use std::time::Duration;
-                let idle_timeout_str =
-                    format_duration(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS));
+                // Look up the configured idle_timeout from type-level metadata so resurrection
+                // honors whatever value was set in annotations or app-config.toml, not just the default.
+                let idle_timeout_str = {
+                    let configured: Option<String> =
+                        if let Some(va_mgr) = self.service_locator.virtual_actor_manager().await {
+                            va_mgr.get_virtual_actor_type(&actor_type).await
+                                .and_then(|meta| meta.facet_config)
+                                .and_then(|fc| {
+                                    fc.get("virtual_actor")
+                                        .and_then(|v| v.get("idle_timeout"))
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.to_string())
+                                })
+                        } else {
+                            None
+                        };
+                    configured.unwrap_or_else(|| format_duration(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS)))
+                };
+                // Use to_config_str with the enum variant so this never drifts from the canonical string.
+                use plexspaces_common::ActivationStrategy;
                 let eager_config = serde_json::json!({
                     "idle_timeout": idle_timeout_str,
-                    "activation_strategy": "eager"
+                    "activation_strategy": plexspaces_journaling::to_config_str(&ActivationStrategy::ActivationStrategyEager)
                 });
                 // Remove any previously-created virtual_actor facet, then insert an EAGER one
                 facets_to_attach.retain(|f| f.facet_type() != "virtual_actor");

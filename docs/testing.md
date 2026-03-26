@@ -9,20 +9,26 @@ PlexSpaces has comprehensive test coverage including unit tests, integration tes
 ### Run All Tests
 
 ```bash
-# Run all unit tests and integration tests (recommended)
+# Full verification: Cargo workspace + polyglot SDK tests (recommended before commit)
 make test
 
 # Fast local Rust test loop (prefers cargo-nextest when installed)
+# Note: Rust crates only (does not run Python / TypeScript / Go SDK tests)
 make test-fast
 
 # Fast local compile verification without full linking/test execution
 make check
-
-# This runs:
-# - All unit tests (library tests)
-# - All WASM integration tests (offline, no AWS/MinIO)
-# - Excludes AWS/MinIO-dependent integration tests
 ```
+
+**What `make test` runs:**
+
+1. **Rust workspace** — `cargo nextest` when installed, otherwise `cargo test`: **`--lib`** and **`--tests`** for workspace members **except** embedded comparison crates listed in **`CARGO_EXCLUDE_EXAMPLES`** in the `Makefile` (currently `temporal-comparison`, `skypilot-comparison` under `examples/rust/embedded/`). Core crates and `plexspaces-sdk` / `plexspaces-sdk-macros` are included (`--all-features`), with ignored tests included (`--run-ignored all` / `--include-ignored`). Tuplespace and selected services integration tests use reduced parallelism via `nextest.toml`. To run tests for an excluded crate: `cargo test -p temporal-comparison`.
+2. **Polyglot SDKs** (not Cargo packages):
+   - **`sdks/go`**: `go test ./...`
+   - **`sdks/typescript`**: `npm test` (installs dependencies if needed)
+   - **`sdks/python`**: `pytest` in **`VENV_PATH`** (default `~/venv`) when that venv exists, else system `python3 -m pytest` if pytest is importable; otherwise prints a skip warning
+
+For Python SDK tests, install dev dependencies (e.g. `pip install -e sdks/python[dev]` or `make proto-install-deps` for the default venv).
 
 ### Run Unit Tests Only
 
@@ -76,7 +82,7 @@ make test-integration
 # - MinIO (for blob storage tests)
 # - Redis (for distributed tests)
 # - Kafka (for messaging tests)
-# These are excluded from `make test` by default
+# Workspace `make test` includes integration test binaries; tests that need live services usually skip until those services are up (see Test Guards below).
 ```
 
 ### Run Example Tests

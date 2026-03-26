@@ -12,6 +12,8 @@ npm install
 npm run build
 ```
 
+Proto **types** for workflows and common messages are generated into **`src/generated/proto/`** when you run **`make proto`** or **`make proto-typescript`** from the repository root. **`src/proto.ts`** re-exports selected types (for example `RetryConfig`, `ErrorDetail`) for application code; runtime host calls still use JSON at the WIT boundary.
+
 In an example or app, add a dependency:
 
 ```json
@@ -19,6 +21,10 @@ In an example or app, add a dependency:
   "@plexspaces/sdk": "file:../../../../sdks/typescript"
 }
 ```
+
+## Tests
+
+From the repo root, **`make test`** runs **`npm test`** here (`node --test`). Locally: `cd sdks/typescript && npm test`.
 
 ## Quick start
 

@@ -22,7 +22,7 @@
 
 use plexspaces_sdk::{
     workflow_actor, plexspaces_handlers,
-    ActorContext, BehaviorError, RequestContext, Message,
+    ActorContext, BehaviorError, RequestContext, Message, new_message,
     NodeBuilder, spawn_workflow_actor, WorkflowRef, TimerFacet,
 };
 // Note: run_handler, signal_handler, query_handler are used via #[plexspaces_handlers(workflow)]
@@ -433,16 +433,11 @@ impl DocumentApprovalWorkflow {
             escalation_count: self.state.escalation_count,
         };
         
-        let payload = serde_json::to_vec(&response)
+        let payload = serde_json::to_value(&response)
             .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
-        
-        Ok(Message {
-            id: ulid::Ulid::new().to_string(),
-            payload,
-            ..Default::default()
-        })
+        Ok(new_message("reply", payload))
     }
-    
+
     /// Query audit trail
     #[query_handler("audit_trail")]
     async fn get_audit_trail(
@@ -450,25 +445,15 @@ impl DocumentApprovalWorkflow {
         _ctx: &ActorContext,
         _params: Message,
     ) -> Result<Message, BehaviorError> {
-        let payload = serde_json::to_vec(&self.state.audit_trail)
+        let payload = serde_json::to_value(&self.state.audit_trail)
             .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
-        
-        Ok(Message {
-            id: ulid::Ulid::new().to_string(),
-            payload,
-            ..Default::default()
-        })
+        Ok(new_message("reply", payload))
     }
-    
+
     fn create_result_message(&self) -> Result<Message, BehaviorError> {
-        let payload = serde_json::to_vec(&self.state)
+        let payload = serde_json::to_value(&self.state)
             .map_err(|e| BehaviorError::ProcessingError(e.to_string()))?;
-        
-        Ok(Message {
-            id: ulid::Ulid::new().to_string(),
-            payload,
-            ..Default::default()
-        })
+        Ok(new_message("reply", payload))
     }
 }
 

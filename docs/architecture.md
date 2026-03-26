@@ -994,11 +994,12 @@ POST /api/v1/actors/{namespace}/{actor_type}/ask
 PUT  /api/v1/actors/{namespace}/{actor_type}/ask
 ```
 
-### HTTP Method Handling
+### HTTP Endpoint Handling
 
 - **GET** on `/api/v1/actors/{...}` or `/ask`: Query parameters become JSON payload for `AskReply`.
-- **POST/PUT** on `/api/v1/actors/{...}`: Request body is delivered through `SendMessage` using tell semantics.
-- **POST/PUT** on `/api/v1/actors/{...}/ask`: Request body is delivered through `AskReply` using ask semantics.
+- **POST/PUT** on `/api/v1/actors/{...}`: Request body is delivered through `SendMessage`.
+- **POST/PUT** on `/api/v1/actors/{...}/ask`: Request body is delivered through `AskReply`.
+- The route selects the service directly. The gateway does not infer ask vs tell from a generic `invocation` flag.
 
 ### Actor Discovery
 
@@ -1048,7 +1049,7 @@ graph TB
 
 1. **HTTP Request Parsing**: Axum router extracts path parameters (`namespace`, `actor_type`)
 2. **Query/Body Parsing**: GET requests parse query params, POST/PUT parse request body
-3. **gRPC Request Construction**: Build `AskReplyRequest` or `SendMessageRequest` with:
+3. **Request Construction**: Build `AskReplyRequest` or `SendMessageRequest` with:
    - Path parameters → `namespace`, `actor_type`
    - JWT claims → `tenant_id` when authentication is enabled
    - Query params or body → `payload` (JSON bytes)
@@ -1077,9 +1078,9 @@ let selected_actor = actors.choose(&mut rng)
 actor_ref.ask(message, timeout).await
 ```
 
-#### Message Type Routing
+#### Endpoint Routing
 
-HTTP methods map to actor message patterns:
+HTTP routes map to actor runtime services:
 
 | HTTP Endpoint | Pattern | Reply Expected |
 |------------|---------|----------------|

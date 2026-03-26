@@ -276,8 +276,8 @@ pub use plexspaces_workflow::DEFAULT_RUN_TIMEOUT;
 fn actor_ref_from_sender(
     sender: std::sync::Arc<dyn plexspaces_core::MessageSender>,
 ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
-    let any_sender = sender.as_ref() as &dyn std::any::Any;
-    any_sender
+    sender
+        .as_any()
         .downcast_ref::<ActorRef>()
         .cloned()
         .ok_or_else(|| "ActorFactory returned a MessageSender that is not a local ActorRef".into())
@@ -988,6 +988,10 @@ mod tests {
             _message: Message,
         ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Ok(())
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
 

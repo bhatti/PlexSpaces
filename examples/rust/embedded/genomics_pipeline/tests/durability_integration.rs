@@ -13,7 +13,7 @@
 use genomics_pipeline::workers::ChromosomeWorker;
 use genomics_pipeline::models::*;
 use plexspaces_actor::Actor;
-use plexspaces_mailbox::{Mailbox, MailboxConfig, StorageStrategy, OrderingStrategy, DurabilityStrategy, BackpressureStrategy, Message};
+use plexspaces_mailbox::{Mailbox, MailboxConfig, OrderingStrategy, BackpressureStrategy, Message};
 use plexspaces_journaling::{DurabilityFacet, DurabilityConfig, JournalBackend, SqliteJournalStorage, JournalStorage};
 use plexspaces_facet::Facet;
 use std::time::Instant;
@@ -42,9 +42,7 @@ async fn test_chromosome_worker_with_durability_facet() {
     let actor_id = "chr1-worker".to_string();
     let chromosome = "chr1".to_string();
     let mut mailbox_config = MailboxConfig::default();
-    mailbox_config.storage_strategy = StorageStrategy::Memory as i32;
     mailbox_config.ordering_strategy = OrderingStrategy::OrderingFifo as i32;
-    mailbox_config.durability_strategy = DurabilityStrategy::DurabilityNone as i32;
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy = BackpressureStrategy::DropOldest as i32;
     let mailbox = Mailbox::new(mailbox_config, format!("{}:mailbox", actor_id)).await.unwrap();

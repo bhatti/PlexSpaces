@@ -16,10 +16,14 @@ Classifier: Programming Language :: Python :: 3.12
 Classifier: Topic :: Software Development :: Libraries :: Application Frameworks
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
+Provides-Extra: proto
+Requires-Dist: betterproto>=2.0.0b7; extra == "proto"
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.21; extra == "dev"
 Requires-Dist: componentize-py>=0.12; extra == "dev"
+Requires-Dist: betterproto>=2.0.0b7; extra == "dev"
+Requires-Dist: grpcio-tools>=1.50; extra == "dev"
 
 # PlexSpaces Python SDK
 
@@ -118,7 +122,7 @@ class Calculator:
 
 ### Ask vs Tell (GET vs POST)
 
-The HTTP gateway maps **GET** to **ask** (request-reply) and **POST/PUT/DELETE** to **tell** (fire-and-forget). Design handlers accordingly:
+The HTTP gateway uses explicit actor-runtime endpoints: **GET** on `/api/v1/actors/{namespace}/{actor_type}` and **GET|POST|PUT** on `/ask` route to **AskReply** (request-reply), while **POST/PUT** on `/api/v1/actors/{namespace}/{actor_type}` route to **SendMessage** (fire-and-forget). Design handlers accordingly:
 
 - **Read handlers** (e.g. `count`, `get_readings`): Use **GET** so the client receives the reply. Query params are passed as payload, e.g. `?msg_type=readings&limit=10` → `{"msg_type": "readings", "limit": "10"}`.
 - **Write handlers** (e.g. `ingest`, `clear`): Use **POST** (tell); the client does not wait for a reply.
@@ -192,8 +196,8 @@ class ChatRoom:
 
 ### Behavior Types
 
-| Decorator | Behavior | Use Case | Invocation |
-|-----------|----------|----------|------------|
+| Decorator | Behavior | Use Case | Pattern |
+|-----------|----------|----------|---------|
 | `@actor` | GenServer | Request-reply actors (default) | Auto `call` |
 | `@gen_server_actor` | GenServer | Explicit GenServer | Auto `call` |
 | `@event_actor` | GenEvent | Fire-and-forget event handlers | `cast` |
@@ -285,6 +289,21 @@ PlexSpaces provides comprehensive host functions for WASM actors, following wasm
 | `host.blob_list(prefix)` | List blobs with prefix (returns JSON array) | `blobs = json.loads(host.blob_list("files/"))` |
 
 **Backends:** S3, Azure Blob, GCP Storage, MinIO, Filesystem
+
+#### ShardGroup / Application Metrics
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `host.create_shard_group(request)` | Create a shard group using framework/proto field names | `group = host.create_shard_group({"group_id": "g1", "actor_type": "worker", "shard_count": 4})` |
+| `host.bulk_update_shard_group(request)` | Bulk update shard members | `host.bulk_update_shard_group({"group_id": "g1", "updates": {"k1": {"op": "init"}}})` |
+| `host.map_shard_group(request)` | Map a query across shards | `resp = host.map_shard_group({"group_id": "g1", "query": {"op": "stats"}})` |
+| `host.scatter_gather(request)` | Scatter/gather across shards | `resp = host.scatter_gather({"group_id": "g1", "query": {"op": "compute"}, "aggregation": "concat"})` |
+| `host.application_metrics_add(application_id, metrics)` | Merge node-local application metrics delta | `host.application_metrics_add("heat-app", {"counter_metrics": {"worker_messages": 1}})` |
+| `host.application_get_status(application_id, node_id)` | Get per-node application status and metrics | `status = host.application_get_status("heat-app", "test-node-8093")` |
+
+These methods use the same simple-actor WIT host surface as Rust WASM apps. The SDK wrapper is
+thin: it serializes request/response JSON using the framework field names and delegates to the
+underlying framework `ActorService` and application manager.
 
 #### TupleSpace (Linda-style Coordination)
 

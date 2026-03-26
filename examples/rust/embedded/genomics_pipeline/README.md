@@ -310,7 +310,7 @@ plexspaces-cli release start --config node4.toml  # Annotation + Reports
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Build PlexSpaces workspace
-cd /Users/sbhatti/workspace/PlexSpaces
+cd /Users/bhatti/workspace/PlexSpaces
 cargo build --release
 ```
 

@@ -15,10 +15,9 @@ use genomics_pipeline::{
     models::Sample,
     GenomicsPipelineConfig,
 };
-use plexspaces_mailbox::Message;
 use plexspaces_node::{ConfigBootstrap, CoordinationComputeTracker, NodeBuilder};
-use plexspaces_actor::{ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
 use plexspaces_core::RequestContext;
+use plexspaces_sdk::{cast_message, spawn_with_facets};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{info, Level};
@@ -70,7 +69,6 @@ async fn main() -> Result<()> {
         NodeBuilder::new("genomics-pipeline-node")
             .with_listen_addr("0.0.0.0:9000")
             .build().await
-            .await,
     );
     info!("✅ Node created: genomics-pipeline-node");
     println!();
@@ -82,24 +80,17 @@ async fn main() -> Result<()> {
     info!("🎭 Spawning coordinator...");
     metrics_tracker.start_coordinate();
     let coordinator_id = format!("coordinator@{}", node.id().as_str());
-    let actor_factory: Arc<plexspaces_actor::actor_factory_impl::ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-        .ok_or_else(|| anyhow::anyhow!("ActorFactory not found in ServiceLocator"))?;
-    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
-    let _message_sender = actor_factory.spawn_actor(
+    let ctx = RequestContext::new_without_auth("genomics".to_string(), "pipeline".to_string());
+    let coordinator_ref = spawn_with_facets(
         &ctx,
-        &coordinator_id,
-        "GenServer", // actor_type
-        vec![], // initial_state
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![], // facets
-    ).await
-    .map_err(|e| anyhow::anyhow!("Failed to spawn coordinator: {}", e))?;
-    let coordinator_ref = plexspaces_actor::ActorRef::remote(
+        node.service_locator(),
         coordinator_id.clone(),
-        node.id().as_str().to_string(),
-        node.service_locator().clone(),
-    );
+        "pipeline",
+        GenomicsCoordinator::new(coordinator_id.clone()),
+        vec![],
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to spawn coordinator: {}", e))?;
     metrics_tracker.end_coordinate();
     info!("✅ Coordinator spawned: {}", coordinator_ref.id());
     println!();
@@ -113,8 +104,7 @@ async fn main() -> Result<()> {
         };
 
         let coordinator_msg = CoordinatorMessage::ProcessSample(sample);
-        let payload = serde_json::to_vec(&coordinator_msg)?;
-        let message = Message::new(payload);
+        let message = cast_message(serde_json::to_value(&coordinator_msg)?);
 
         metrics_tracker.start_coordinate();
         coordinator_ref.tell(message).await?;

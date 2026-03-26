@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: all build build-fast build-examples build-wasm run-examples test test-fast test-examples test-wasm clean clean-examples clean-all proto proto-build proto-buf fmt fmt-rust fmt-proto fmt-paths fmt-check lint doc install-tools coverage coverage-report test-coverage check-coverage coverage-crate bench help check
+.PHONY: all build build-fast build-examples build-wasm run-examples test test-fast test-examples test-wasm clean clean-examples clean-all proto proto-build proto-buf proto-python proto-typescript proto-go proto-polyglot proto-install-deps fmt fmt-rust fmt-proto fmt-paths fmt-check lint doc install-tools coverage coverage-report test-coverage check-coverage coverage-crate bench help check
 
 # Variables
 CARGO = cargo
@@ -15,6 +15,15 @@ CARGO_TEST_FEATURES ?= --all-features
 CARGO_BUILD_JOBS ?= 0
 CARGO_TEST_JOBS ?= $(CARGO_BUILD_JOBS)
 
+# Python virtual environment for proto generation (betterproto).
+# Override with: make proto-python VENV_PATH=/path/to/venv
+VENV_PATH ?= $(HOME)/venv
+
+# Workspace members under examples/ (path = true deps) — excluded from make build / make test.
+# Build them explicitly: cargo build -p temporal-comparison   or   cd examples/rust/embedded/<name> && cargo build
+# Clear to include them in those targets: make build CARGO_EXCLUDE_EXAMPLES=
+CARGO_EXCLUDE_EXAMPLES ?= --exclude temporal-comparison --exclude skypilot-comparison
+
 # Default target
 all: proto build build-examples test test-examples
 
@@ -23,11 +32,16 @@ help:
 	@echo "PlexSpaces Development Commands:"
 	@echo ""
 	@echo "🔧 Setup & Build:"
-	@echo "  make install-tools    - Install required development tools"
-	@echo "  make proto            - Generate code from proto files (uses buf)"
-	@echo "  make proto-buf        - Generate proto using buf (RECOMMENDED - handles deps)"
-	@echo "  make proto-build      - Generate proto using tonic-build (no external deps)"
-	@echo "  make build            - Build all crates (including wasm-runtime, firecracker, cli, dashboard)"
+	@echo "  make install-tools        - Install required Rust/cargo development tools"
+	@echo "  make proto-install-deps   - Install buf plugin deps (betterproto, ts-proto, protoc-gen-go)"
+	@echo "  make proto                - Generate ALL proto code: Rust + Python + TypeScript + Go"
+	@echo "  make proto-buf            - Generate Rust proto only (prost + tonic via buf)"
+	@echo "  make proto-polyglot       - Generate Python + TypeScript + Go proto typed models"
+	@echo "  make proto-python         - Generate Python models (buf + betterproto)"
+	@echo "  make proto-typescript     - Generate TypeScript models (buf + ts-proto)"
+	@echo "  make proto-go             - Generate Go models (buf + protoc-gen-go)"
+	@echo "  make proto-build          - Generate proto using tonic-build (no external deps)"
+	@echo "  make build            - Build workspace crates + polyglot SDKs (excludes examples/* workspace members)"
 	@echo "  make build-fast       - Fast Rust compile check for the workspace"
 	@echo "  make build-examples   - Build all examples"
 	@echo "  make build-wasm       - Build all WASM actors"
@@ -38,7 +52,7 @@ help:
 	@echo "  make release          - Build release version"
 	@echo ""
 	@echo "🧪 Testing:"
-	@echo "  make test             - Run all tests (unit + integration)"
+	@echo "  make test             - Run all tests: Cargo workspace (--lib + integration) + Go/TS/Python SDK tests"
 	@echo "  make test-fast        - Fast Rust test loop (nextest when available)"
 	@echo "  make test-filter FILTER='pattern' - Run tests matching pattern"
 	@echo "  make test-package PACKAGE='name' - Run tests for specific package"
@@ -194,12 +208,113 @@ proto-buf:
 	@echo "Proto generation complete! ✓"
 	@echo "Generated files: $$(ls -1 crates/proto/src/generated/*.rs 2>/dev/null | wc -l) Rust files"
 
-# Default proto generation (uses tonic-build via build.rs)
-proto: proto-buf
+# ── Proto generation ─────────────────────────────────────────────────────────
+# Single entry point: `make proto` generates ALL languages (Rust + Python + TypeScript + Go).
+# Run `make proto-install-deps` once to install local buf plugins for polyglot generation.
+# Individual language targets can be run independently: proto-python, proto-typescript, proto-go.
 
-# Build all crates (including wasm-runtime, firecracker, cli, dashboard)
+## Generate ALL proto code: Rust (prost/tonic) + Python + TypeScript + Go
+proto: proto-buf proto-polyglot
+
+## Install buf plugin binaries required for polyglot proto generation.
+## Must be run once before `make proto-polyglot` (or `make proto`).
+##
+##   Python:     betterproto[compiler] installed into VENV_PATH (default: ~/venv)
+##   TypeScript: ts-proto installed globally via npm
+##   Go:         protoc-gen-go installed via `go install`
+##
+## Override venv location: make proto-install-deps VENV_PATH=/path/to/venv
+proto-install-deps:
+	@echo "Installing buf plugin dependencies for polyglot proto generation..."
+	@echo ""
+	@echo "── Python (betterproto) ─────────────────────────────────────────────"
+	@if [ ! -f "$(VENV_PATH)/bin/activate" ]; then \
+		echo "  Creating Python venv at $(VENV_PATH)..."; \
+		python3 -m venv "$(VENV_PATH)"; \
+	else \
+		echo "  Using existing venv at $(VENV_PATH)"; \
+	fi
+	@bash -c 'source "$(VENV_PATH)/bin/activate" && pip install -q "betterproto[compiler]>=2.0.0b7" "grpcio-tools>=1.50"'
+	@echo "  ✓ protoc-gen-python_betterproto ready"
+	@echo ""
+	@echo "── TypeScript (ts-proto) ────────────────────────────────────────────"
+	@if ! command -v protoc-gen-ts_proto >/dev/null 2>&1; then \
+		npm install -g ts-proto; \
+	else \
+		echo "  ✓ protoc-gen-ts_proto already installed ($$(protoc-gen-ts_proto --version 2>/dev/null || echo 'ok'))"; \
+	fi
+	@echo ""
+	@echo "── Go (protoc-gen-go) ───────────────────────────────────────────────"
+	@if command -v go >/dev/null 2>&1; then \
+		go install google.golang.org/protobuf/cmd/protoc-gen-go@latest; \
+		echo "  ✓ protoc-gen-go installed at $$(go env GOPATH)/bin/protoc-gen-go"; \
+	else \
+		echo "  ⚠️  Go not found — skipping protoc-gen-go (needed for make proto-go)"; \
+	fi
+	@echo ""
+	@echo "All proto plugin dependencies installed. Run 'make proto' to generate."
+
+# ── Individual language targets ───────────────────────────────────────────────
+
+## Generate Python typed models via buf + betterproto → sdks/python/plexspaces/generated/
+## Plugin: protoc-gen-python_betterproto (install via: make proto-install-deps)
+## Uses VENV_PATH (default: ~/venv) to activate the venv where betterproto is installed.
+proto-python:
+	@echo "Generating Python proto models (buf + betterproto)..."
+	@if [ ! -f "$(VENV_PATH)/bin/activate" ]; then \
+		echo "ERROR: Python venv not found at $(VENV_PATH)."; \
+		echo "       Run: make proto-install-deps   (or: make proto-install-deps VENV_PATH=/path/to/venv)"; \
+		exit 1; \
+	fi
+	@bash -c 'source "$(VENV_PATH)/bin/activate" && $(BUF) generate --template buf.gen.python.yaml'
+	@touch sdks/python/plexspaces/generated/__init__.py
+	@echo "  ✓ Python: $$(find sdks/python/plexspaces/generated -name '*.py' 2>/dev/null | wc -l | tr -d ' ') files → sdks/python/plexspaces/generated/"
+
+## Generate TypeScript typed models via buf + ts-proto → sdks/typescript/src/generated/proto/
+## Plugin: protoc-gen-ts_proto (install via: make proto-install-deps)
+proto-typescript:
+	@echo "Generating TypeScript proto models (buf + ts-proto)..."
+	@if ! command -v protoc-gen-ts_proto >/dev/null 2>&1; then \
+		echo "ERROR: protoc-gen-ts_proto not found. Run: make proto-install-deps"; \
+		exit 1; \
+	fi
+	@$(BUF) generate --template buf.gen.typescript.yaml
+	@echo "  ✓ TypeScript: $$(find sdks/typescript/src/generated/proto -name '*.ts' 2>/dev/null | wc -l | tr -d ' ') files → sdks/typescript/src/generated/proto/"
+
+## Generate Go typed models via buf + protoc-gen-go → sdks/go/plexspaces/proto/
+## Plugin: protoc-gen-go (install via: make proto-install-deps)
+## Generates core SDK types (common, actor_runtime, workflow) + transitive imports only.
+## managed.go_package_prefix in buf.gen.go.yaml ensures import paths match the SDK module.
+proto-go:
+	@echo "Generating Go proto models (buf + protoc-gen-go)..."
+	@GOPATH=$$(go env GOPATH 2>/dev/null); \
+	if [ ! -x "$$GOPATH/bin/protoc-gen-go" ]; then \
+		echo "ERROR: protoc-gen-go not found at $$GOPATH/bin/. Run: make proto-install-deps"; \
+		exit 1; \
+	fi
+	@PATH="$(PATH):$$(go env GOPATH 2>/dev/null)/bin" $(BUF) generate proto --template buf.gen.go.yaml \
+		--path proto/plexspaces/v1/common.proto \
+		--path proto/plexspaces/v1/actors/actor_runtime.proto \
+		--path proto/plexspaces/v1/workflow/workflow.proto \
+		--include-imports
+	@cd sdks/go && go mod tidy > /dev/null 2>&1 || true
+	@echo "  ✓ Go: $$(find sdks/go/plexspaces/proto -name '*.go' 2>/dev/null | wc -l | tr -d ' ') files → sdks/go/plexspaces/proto/"
+
+## Generate proto models for all polyglot SDKs (Python + TypeScript + Go) via buf.
+proto-polyglot: proto-python proto-typescript proto-go
+	@echo ""
+	@echo "Polyglot proto generation complete (buf)."
+	@echo "  Python:     $$(find sdks/python/plexspaces/generated -name '*.py' 2>/dev/null | wc -l | tr -d ' ') files"
+	@echo "  TypeScript: $$(find sdks/typescript/src/generated/proto -name '*.ts' 2>/dev/null | wc -l | tr -d ' ') files"
+	@echo "  Go:         $$(find sdks/go/plexspaces/proto -name '*.go' 2>/dev/null | wc -l | tr -d ' ') files"
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Build workspace crates + sdks/ (TypeScript npm build, Python pip -e, go build); excludes examples/* workspace members
 build:
-	@echo "Building all crates..."
+	@echo "Building workspace crates and SDKs..."
 	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
@@ -212,7 +327,7 @@ build:
 	export CARGO_INCREMENTAL=1; \
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
-	$(CARGO) build $(CARGO_BUILD_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
+	$(CARGO) build $(CARGO_BUILD_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
 	@echo "Building SDKs..."
 	@if [ -d "sdks/typescript" ] && [ -f "sdks/typescript/package.json" ]; then \
 		echo "  Building TypeScript SDK..."; \
@@ -271,7 +386,7 @@ build-fast:
 	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
 	export CARGO_INCREMENTAL=1; \
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
-	$(CARGO) check $(CARGO_BUILD_FEATURES) --workspace --lib --bins --tests --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
+	$(CARGO) check $(CARGO_BUILD_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --lib --bins --tests --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
 
 check: build-fast
 
@@ -286,7 +401,7 @@ release:
 	export CARGO_INCREMENTAL=1; \
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
-	$(CARGO) build --release --all-features --workspace --jobs $$CARGO_JOBS --message-format=short
+	$(CARGO) build --release --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=short
 	@echo "Release build complete!"
 
 # Build all examples
@@ -303,7 +418,7 @@ build-examples:
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
 	echo "Pre-building workspace dependencies for faster example builds..."; \
-	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
+	$(CARGO) build --lib --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=short || true; \
 	echo ""; \
 	echo "Building examples with shared target directory..."; \
 	PROJECT_ROOT=$$(pwd); \
@@ -425,7 +540,7 @@ run-all-standalone-examples:
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
 	fi; \
 	echo "Pre-building workspace dependencies for faster example builds..."; \
-	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
+	$(CARGO) build --lib --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=short || true; \
 	echo ""; \
 	for example in byzantine heat_diffusion heat_diffusion_wasm wasm-calculator order-processing finance-risk genomics-pipeline genomic-workflow-pipeline matrix_multiply matrix_vector_mpi wasm_showcase; do \
 		if [ -d "examples/$$example" ] && [ -f "examples/$$example/Cargo.toml" ]; then \
@@ -494,7 +609,7 @@ test:
 		export RUSTC_WRAPPER=sccache; \
 	fi; \
 	echo "Building workspace first for faster test execution (incremental build enabled)..." | tee -a test-out; \
-	$(CARGO) build --lib $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
+	$(CARGO) build --lib $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
 	echo "Building node_runner binary (required by plexspaces-services integration_tests)..." | tee -a test-out; \
 	$(CARGO) build --bin node_runner $(CARGO_TEST_FEATURES) -p plexspaces-services --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
 	echo "" | tee -a test-out; \
@@ -503,7 +618,7 @@ test:
 		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
 		echo "Note: tuplespace tests run with single thread (configured in nextest.toml)" | tee -a test-out; \
 		echo "Running all tests including those marked #[ignore] (--run-ignored all)" | tee -a test-out; \
-		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --run-ignored all 2>&1 | tee -a test-out || exit 1; \
+		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --run-ignored all 2>&1 | tee -a test-out || exit 1; \
 	else \
 		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..." | tee -a test-out; \
 		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
@@ -517,13 +632,38 @@ test:
 		fi; \
 		if [ -n "$$TIMEOUT_CMD" ]; then \
 			$$TIMEOUT_CMD $(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
-			$$TIMEOUT_CMD $(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			$$TIMEOUT_CMD $(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
 				--exclude plexspaces-tuplespace -- --include-ignored 2>&1 | tee -a test-out || exit 1; \
 		else \
 			echo "Warning: timeout command not found, running without timeout (install coreutils for timeout: brew install coreutils)" | tee -a test-out; \
 			$(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
-			$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
 				--exclude plexspaces-tuplespace -- --include-ignored 2>&1 | tee -a test-out || exit 1; \
+		fi; \
+	fi; \
+	echo "" | tee -a test-out; \
+	echo "Polyglot SDK tests (not Cargo workspace packages)..." | tee -a test-out; \
+	if [ -d "sdks/go" ] && [ -f "sdks/go/go.mod" ] && command -v go >/dev/null 2>&1; then \
+		echo "  sdks/go: go test ./..." | tee -a test-out; \
+		(cd sdks/go && GOCACHE="$(WORKSPACE_ROOT)/target/go-build-cache" go test ./...) 2>&1 | tee -a test-out || exit 1; \
+	else \
+		echo "  ⚠️  Skipping Go SDK tests (go or sdks/go missing)" | tee -a test-out; \
+	fi; \
+	if [ -d "sdks/typescript" ] && [ -f "sdks/typescript/package.json" ] && command -v npm >/dev/null 2>&1; then \
+		echo "  sdks/typescript: npm test" | tee -a test-out; \
+		(cd sdks/typescript && ([ -d "node_modules" ] || npm install --no-audit --no-fund >/dev/null 2>&1) && npm test) 2>&1 | tee -a test-out || exit 1; \
+	else \
+		echo "  ⚠️  Skipping TypeScript SDK tests (npm or sdks/typescript missing)" | tee -a test-out; \
+	fi; \
+	if [ -d "sdks/python" ] && [ -f "sdks/python/pyproject.toml" ]; then \
+		if [ -f "$(VENV_PATH)/bin/activate" ]; then \
+			echo "  sdks/python: pytest (venv: $(VENV_PATH))" | tee -a test-out; \
+			bash -c 'source "$(VENV_PATH)/bin/activate" && cd sdks/python && python -m pytest tests/ -q' 2>&1 | tee -a test-out || exit 1; \
+		elif python3 -m pytest --version >/dev/null 2>&1; then \
+			echo "  sdks/python: pytest (system python3)" | tee -a test-out; \
+			(cd sdks/python && python3 -m pytest tests/ -q) 2>&1 | tee -a test-out || exit 1; \
+		else \
+			echo "  ⚠️  Skipping Python SDK tests: no pytest. Install: make proto-install-deps   or: pip install -e sdks/python[dev]" | tee -a test-out; \
 		fi; \
 	fi; \
 	echo "" | tee -a test-out; \
@@ -543,9 +683,9 @@ test-fast:
 	export CARGO_INCREMENTAL=1; \
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
+		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
 	else \
-		$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
+		$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
 	fi
 
 # Run tests matching a filter pattern
@@ -567,9 +707,9 @@ test-filter:
 	fi; \
 	echo "Running tests matching filter: $(FILTER) (including ignored)"; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS --run-ignored all --filter "$(FILTER)" || exit 1; \
+		cargo nextest run --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS --run-ignored all --filter "$(FILTER)" || exit 1; \
 	else \
-		$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS "$(FILTER)" -- --include-ignored || exit 1; \
+		$(CARGO) test --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS "$(FILTER)" -- --include-ignored || exit 1; \
 	fi; \
 	echo "Filtered tests completed!"
 
@@ -620,7 +760,7 @@ test-examples:
 	echo "Fail-fast: enabled (stops on first error)"; \
 	echo ""; \
 	echo "Pre-building workspace dependencies for faster example builds (incremental build enabled)..."; \
-	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
+	$(CARGO) build --lib --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=short || true; \
 	echo ""; \
 	PROJECT_ROOT=$$(pwd); \
 	# NOTE: Keep this list in sync with ~/.cursor/plans/reorganize_examples_structure_a51cf7c7.plan.md \

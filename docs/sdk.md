@@ -22,6 +22,26 @@ The SDK is a **thin decorator layer** over the core framework crates. Core funct
 | **Rust** | ✅ Available | `sdks/rust/plexspaces-sdk` | Native (embedded) actors; annotations + spawn / spawn_with_facets + facets |
 | **Go** | ✅ Available | `sdks/go/` | WASM actors (TinyGo) |
 
+### Proto generation and typed SDK models
+
+Contracts live under `proto/`. **`make proto`** regenerates **Rust** (prost/tonic via `buf`) **and** polyglot SDK outputs (Python, TypeScript, Go). Use **`make proto-install-deps`** once to install local plugins (`betterproto` in a Python venv, `ts-proto`, `protoc-gen-go`). Set **`VENV_PATH`** if the venv is not `~/venv`.
+
+| Target | Purpose |
+|--------|---------|
+| `make proto` | Rust + Python + TypeScript + Go (full pipeline) |
+| `make proto-buf` | Rust only |
+| `make proto-polyglot` | Python + TypeScript + Go only (`buf.gen.python.yaml`, `buf.gen.typescript.yaml`, `buf.gen.go.yaml`) |
+
+Generated code is **checked in** (same idea as `crates/proto/src/generated/`): e.g. `sdks/python/plexspaces/generated/`, `sdks/typescript/src/generated/proto/`, `sdks/go/plexspaces/proto/`.
+
+- **Python**: Optional betterproto models; `workflow` imports `RetryConfig` from generated modules when present, with a small dataclass fallback for WASM guests that do not bundle `generated/`.
+- **TypeScript**: `src/proto.ts` re-exports selected proto types for callers; the WIT JSON boundary at runtime is unchanged.
+- **Go**: `HostError.ParseErrorDetail()` parses structured JSON from host errors into `ErrorDetail` when the payload is JSON.
+
+### Virtual actor type registration (SDK parity)
+
+For native Rust, **`spawn_with_facets`** calls **`register_virtual_actor_type_consistent`** so virtual actor metadata (including all facet configs) is registered for reactivation. WASM application deploy does the same from `app-config.toml` / child specs. **`VirtualActorManager::get_virtual_actor_type`** returns type-level metadata; it **persists** when an instance is deactivated (vacation) and is removed when the application is **undeployed**.
+
 ### Cross-SDK consistency: TupleSpace and Process Groups
 
 All language SDKs expose the same semantics for TupleSpace and process groups so that examples and docs can be translated 1:1.
@@ -1691,8 +1711,6 @@ Remote access is provided by the framework's proto-first HTTP/gRPC APIs, not by 
 - **Remote clients** are generated or hand-authored against the proto contracts and call the thin HTTP/gRPC service layer when out-of-process access is required.
 
 This keeps local SDK use fast and consistent, preserves one implementation of the framework semantics, and lets Python, TypeScript, Go, and Rust share the same proto-first data model for remote interoperability.
-    order = await client.tuplespace.read("orders", {"id": "123"})
-```
 
 This allows external applications to interact with PlexSpaces without being WASM actors.
 
@@ -1718,35 +1736,40 @@ sdks/
 ├── README.md              # Overview
 ├── python/
 │   ├── plexspaces/        # SDK package
+│   │   ├── generated/     # Proto-generated (betterproto); from make proto / make proto-python
 │   │   ├── __init__.py    # Exports
 │   │   ├── decorators.py  # @actor, @handler, state()
+│   │   ├── workflow.py    # RetryConfig + helpers (uses generated when available)
 │   │   ├── runtime.py     # WIT wrapper generator
 │   │   └── host.py        # Host function wrappers
 │   ├── plexspaces_cli/    # CLI tool
 │   │   └── build.py       # plexspaces-py build
 │   ├── examples/          # SDK examples
-│   ├── tests/             # Unit tests
+│   ├── tests/             # Unit tests (pytest)
 │   ├── pyproject.toml     # Package config
 │   └── README.md          # Python SDK docs
 ├── typescript/            # TypeScript SDK (inheritance-based)
 │   ├── src/
+│   │   ├── generated/proto/  # ts-proto output; from make proto / make proto-typescript
+│   │   ├── proto.ts       # Re-exports selected proto types
 │   │   ├── actor.ts       # PlexSpacesActor base class
 │   │   ├── host.ts        # Host function wrappers
 │   │   └── index.ts       # Exports
 │   ├── package.json
 │   └── README.md          # TypeScript SDK docs
-├── rust/                  # Rust SDK (native and WASM actor decorators)
+├── rust/                  # Rust SDK (native and WASM actor decorators; workspace members)
 │   ├── plexspaces-sdk/    # Re-exports, spawn helpers, typed refs, WASM-safe SDK surface
 │   └── plexspaces-sdk-macros/  # #[actor], #[gen_server_actor], #[plexspaces_handlers], etc.
 └── go/                    # Go SDK (TinyGo WASM actors)
     └── plexspaces/
+        ├── proto/         # Generated Go packages (make proto / make proto-go)
         ├── actor.go       # Actor interface + BaseActor
-        ├── host.go        # Host function wrappers (Host singleton)
+        ├── host.go        # Host function wrappers (Host singleton); ParseErrorDetail
         ├── host_imports.go # WIT wasmimport directives (TinyGo)
         ├── host_stubs.go  # Native/test stub implementations
         ├── exports.go     # WASM Component Model canonical ABI exports
         ├── router.go      # ActorRouter for multi-actor modules
-        └── plexspaces_test.go # Comprehensive unit tests
+        └── plexspaces_test.go # Unit tests
 ```
 
 ---
@@ -1755,6 +1778,8 @@ sdks/
 
 - [Python SDK README](../sdks/python/README.md) - Python SDK details
 - [TypeScript SDK README](../sdks/typescript/README.md) - TypeScript SDK details
+- [Go SDK README](../sdks/go/README.md) - Go SDK entry point
+- [Testing Guide](testing.md) - `make test` (workspace + polyglot SDK tests)
 - [WASM Deployment Guide](wasm-deployment.md) - Deploying WASM actors (Python, TypeScript, Rust, Go)
 - [Polyglot Development Guide](polyglot.md) - WASM development in multiple languages
 - [Getting Started](getting-started.md) - Quick start guide

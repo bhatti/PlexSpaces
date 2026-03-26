@@ -214,6 +214,13 @@ pub fn actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - `const FACETS` with declared facets
 /// - Use `#[plexspaces_handlers]` on impl block to generate `impl GenServer` dispatch
 ///
+/// ## Automatic Virtual Actor Type Registration
+/// When `facets = ["virtual_actor"]` is included, calling `spawn_with_facets()` or `spawn()`
+/// automatically calls `register_virtual_actor_type_consistent()` so the actor type is registered
+/// for resurrection. The type registration persists across actor vacation (deactivation) and is
+/// only removed when explicitly unregistered. Subsequent spawns of the same actor ID will
+/// reuse the registered type metadata including all facet configs (timer, reminder, etc.).
+///
 /// ## Handler Semantics
 /// GenServer handlers default to "call" (request-reply):
 /// - Handler receives message, processes it, returns Result<Value, BehaviorError>

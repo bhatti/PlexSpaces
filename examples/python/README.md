@@ -301,12 +301,14 @@ curl -X POST "http://localhost:8091/api/v1/actors/{namespace}/{actor-type}" \
 
 ### HTTP API Patterns
 
-| Method | Pattern | Description |
+| Endpoint | Service | Description |
 |--------|---------|-------------|
-| GET | ask | Request-reply, returns response payload |
-| POST | tell | Fire-and-forget, returns success status |
-| DELETE | ask | Request-reply |
-| PUT | tell | Fire-and-forget |
+| `GET /api/v1/actors/{namespace}/{actor_type}` | `AskReply` | Request-reply, query params become payload |
+| `GET /api/v1/actors/{namespace}/{actor_type}/ask` | `AskReply` | Request-reply |
+| `POST /api/v1/actors/{namespace}/{actor_type}` | `SendMessage` | Fire-and-forget, body becomes payload |
+| `PUT /api/v1/actors/{namespace}/{actor_type}` | `SendMessage` | Fire-and-forget, body becomes payload |
+| `POST /api/v1/actors/{namespace}/{actor_type}/ask` | `AskReply` | Request-reply with request body |
+| `PUT /api/v1/actors/{namespace}/{actor_type}/ask` | `AskReply` | Request-reply with request body |
 
 ## Examples
 

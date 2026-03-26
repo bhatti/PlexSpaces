@@ -15,15 +15,18 @@
 //! - Aggregator actors (CPU-intensive)
 //!
 //! ## Design
-//! - Uses NodeBuilder/ActorBuilder for actor creation
+//! - Uses SDK spawn helpers (not actor-factory directly)
 //! - Resource-aware scheduling via actor groups
 //! - Tracks coordination vs compute metrics
 
 use async_trait::async_trait;
-use plexspaces_core::application::{Application, ApplicationNode, ApplicationError};
+use plexspaces_application::{Application, ApplicationError, ApplicationNode};
 use plexspaces_node::CoordinationComputeTracker;
+use plexspaces_sdk::spawn_with_facets;
+use plexspaces_core::RequestContext;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::info;
 
 use crate::config::EntityRecognitionConfig;
 use crate::loader::LoaderBehavior;
@@ -39,7 +42,7 @@ use crate::aggregator::AggregatorBehavior;
 /// - Aggregator actors (CPU-intensive)
 ///
 /// ## Design
-/// - Uses NodeBuilder/ActorBuilder for actor creation
+/// - Uses SDK spawn helpers so core lifecycle logic stays in the framework
 /// - Resource-aware scheduling via actor groups
 /// - Tracks coordination vs compute metrics
 pub struct EntityRecognitionApplication {
@@ -47,8 +50,8 @@ pub struct EntityRecognitionApplication {
     config: EntityRecognitionConfig,
     /// Metrics tracker
     metrics_tracker: CoordinationComputeTracker,
-    /// Actor references (for cleanup)
-    actor_refs: Arc<RwLock<Vec<String>>>,
+    /// Actor IDs for cleanup
+    actor_ids: Arc<RwLock<Vec<String>>>,
 }
 
 impl EntityRecognitionApplication {
@@ -58,7 +61,7 @@ impl EntityRecognitionApplication {
         Self {
             config,
             metrics_tracker: CoordinationComputeTracker::new("entity-recognition".to_string()),
-            actor_refs: Arc::new(RwLock::new(Vec::new())),
+            actor_ids: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -79,138 +82,94 @@ impl Application for EntityRecognitionApplication {
     }
 
     async fn start(&mut self, node: Arc<dyn ApplicationNode>) -> Result<(), ApplicationError> {
-        println!("🚀 Starting Entity Recognition Application");
-        println!("   Loaders: {}", self.config.loader_count);
-        println!("   Processors: {}", self.config.processor_count);
-        println!("   Aggregators: {}", self.config.aggregator_count);
-        
+        let service_locator = node
+            .service_locator()
+            .ok_or_else(|| ApplicationError::StartupFailed(
+                "ServiceLocator not available from ApplicationNode".to_string(),
+            ))?;
+
+        let ctx = RequestContext::new_without_auth(
+            "entity-recognition".to_string(),
+            "entity-recognition".to_string(),
+        );
+
         self.metrics_tracker.start_coordinate();
 
-        // Use ActorFactory directly
-        use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl, Actor};
-        use plexspaces_mailbox::{mailbox_config_default, Mailbox};
-        
-        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-            .ok_or_else(|| ApplicationError::StartupFailed("ActorFactory not found in ServiceLocator".to_string()))?;
-        
-        // Create mailbox config
-        let mut mailbox_config = mailbox_config_default();
-        mailbox_config.storage_strategy = plexspaces_mailbox::StorageStrategy::Memory as i32;
-        mailbox_config.ordering_strategy = plexspaces_mailbox::OrderingStrategy::OrderingFifo as i32;
-        mailbox_config.durability_strategy = plexspaces_mailbox::DurabilityStrategy::DurabilityNone as i32;
-        mailbox_config.capacity = 1000;
-        mailbox_config.backpressure_strategy = plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
-        
-        // Spawn loader actors (CPU-intensive)
+        // Spawn loader actors (CPU-intensive) via SDK helper
         for i in 0..self.config.loader_count {
             let actor_id = format!("loader-{}@{}", i, node.id());
-            let behavior = Box::new(LoaderBehavior::new(vec![]));
-            
-            let mailbox = Mailbox::new(mailbox_config.clone(), format!("{}:mailbox", actor_id))
-                .await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to create mailbox: {}", e)))?;
-            
-            let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
-            
-            let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
-            actor_factory.spawn_actor(
+            spawn_with_facets(
                 &ctx,
-                &actor_id,
-                "entity-recognition", // actor_type
-                vec![], // initial_state
-                None, // config
-                std::collections::HashMap::new(), // labels
-                vec![], // facets
-            ).await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
-            
-            self.actor_refs.write().await.push(actor_id.clone());
-            println!("   ✅ Spawned {}", actor_id);
+                service_locator.clone(),
+                actor_id.clone(),
+                "entity-recognition",
+                LoaderBehavior::new(vec![]),
+                vec![],
+            )
+            .await
+            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), e.to_string()))?;
+            self.actor_ids.write().await.push(actor_id.clone());
+            info!(actor_id = %actor_id, "spawned loader actor");
         }
 
-        // Spawn processor actors (GPU-intensive)
+        // Spawn processor actors (GPU-intensive) via SDK helper
         for i in 0..self.config.processor_count {
             let actor_id = format!("processor-{}@{}", i, node.id());
-            let behavior = Box::new(ProcessorBehavior::new());
-            
-            let mailbox = Mailbox::new(mailbox_config.clone(), format!("{}:mailbox", actor_id))
-                .await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to create mailbox: {}", e)))?;
-            
-            let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
-            
-            let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
-            actor_factory.spawn_actor(
+            spawn_with_facets(
                 &ctx,
-                &actor_id,
-                "entity-recognition", // actor_type
-                vec![], // initial_state
-                None, // config
-                std::collections::HashMap::new(), // labels
-                vec![], // facets
-            ).await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
-            
-            self.actor_refs.write().await.push(actor_id.clone());
-            println!("   ✅ Spawned {}", actor_id);
+                service_locator.clone(),
+                actor_id.clone(),
+                "entity-recognition",
+                ProcessorBehavior::new(),
+                vec![],
+            )
+            .await
+            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), e.to_string()))?;
+            self.actor_ids.write().await.push(actor_id.clone());
+            info!(actor_id = %actor_id, "spawned processor actor");
         }
 
-        // Spawn aggregator actors (CPU-intensive)
+        // Spawn aggregator actors (CPU-intensive) via SDK helper
         for i in 0..self.config.aggregator_count {
             let actor_id = format!("aggregator-{}@{}", i, node.id());
-            let behavior = Box::new(AggregatorBehavior::new(0)); // Expected count set later
-            
-            let mailbox = Mailbox::new(mailbox_config.clone(), format!("{}:mailbox", actor_id))
-                .await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Failed to create mailbox: {}", e)))?;
-            
-            let actor = Actor::new(actor_id.clone(), behavior, mailbox, "entity-recognition".to_string(), None);
-            
-            let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
-            actor_factory.spawn_actor(
+            spawn_with_facets(
                 &ctx,
-                &actor_id,
-                "entity-recognition", // actor_type
-                vec![], // initial_state
-                None, // config
-                std::collections::HashMap::new(), // labels
-                vec![], // facets
-            ).await
-                .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("{}", e)))?;
-            
-            self.actor_refs.write().await.push(actor_id.clone());
-            println!("   ✅ Spawned {}", actor_id);
+                service_locator.clone(),
+                actor_id.clone(),
+                "entity-recognition",
+                AggregatorBehavior::new(0),
+                vec![],
+            )
+            .await
+            .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.clone(), e.to_string()))?;
+            self.actor_ids.write().await.push(actor_id.clone());
+            info!(actor_id = %actor_id, "spawned aggregator actor");
         }
 
         self.metrics_tracker.end_coordinate();
-        
-        // Report metrics
+
         let metrics = std::mem::replace(
             &mut self.metrics_tracker,
-            CoordinationComputeTracker::new("entity-recognition".to_string())
-        ).finalize();
-        
-        println!("📊 Metrics:");
-        println!("   Coordination time: {:.2}ms", metrics.coordinate_duration_ms);
-        println!("   Compute time: {:.2}ms", metrics.compute_duration_ms);
-        println!("   Granularity ratio: {:.2}", metrics.granularity_ratio);
+            CoordinationComputeTracker::new("entity-recognition".to_string()),
+        )
+        .finalize();
+
+        info!(
+            coordinate_ms = metrics.coordinate_duration_ms,
+            compute_ms = metrics.compute_duration_ms,
+            ratio = metrics.granularity_ratio,
+            "entity recognition startup metrics"
+        );
 
         Ok(())
     }
 
     async fn stop(&mut self) -> Result<(), ApplicationError> {
-        println!("🛑 Stopping Entity Recognition Application");
-        
-        // Stop all actors
-        let actor_ids = self.actor_refs.read().await.clone();
-        for actor_id in actor_ids {
-            // Note: ApplicationNode doesn't have stop_actor, so we'll just log
-            println!("   ⏹️  Stopping {}", actor_id);
+        let ids = self.actor_ids.read().await.clone();
+        for actor_id in &ids {
+            info!(actor_id = %actor_id, "stopping actor");
         }
-        
-        self.actor_refs.write().await.clear();
-        
+        self.actor_ids.write().await.clear();
         Ok(())
     }
 }
-

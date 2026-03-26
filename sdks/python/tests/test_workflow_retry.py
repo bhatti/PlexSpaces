@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from plexspaces.workflow import default_retry_config, with_retry
+from plexspaces.workflow import default_retry_config, with_retry, RetryConfig, RetryConfigDict
 
 
 class TestDefaultRetryConfig:
@@ -74,3 +74,43 @@ class TestWithRetry:
         with pytest.raises(ValueError, match="once"):
             with_retry(fn, {"max_attempts": 1})
         assert calls[0] == 1
+
+
+class TestRetryConfigType:
+    """RetryConfig is importable and usable as a typed object (fallback or betterproto)."""
+
+    def test_retry_config_importable(self):
+        # Must always be importable regardless of whether betterproto generated code exists
+        assert RetryConfig is not None
+
+    def test_retry_config_instantiable_with_defaults(self):
+        # When betterproto-generated: proto3 zero values (0, 0.0, []).
+        # When fallback dataclass: explicit defaults (1, 100, 2.0, 30000, []).
+        # In both cases the object must be instantiable with no arguments.
+        cfg = RetryConfig()
+        # Only assert fields that are consistent across both representations:
+        # max_attempts is either 0 (proto3 unset) or 1 (fallback default) — both valid.
+        assert cfg.max_attempts >= 0
+        assert cfg.initial_interval_ms >= 0
+        assert cfg.backoff_rate >= 0.0
+        assert cfg.max_interval_ms >= 0
+        assert cfg.retryable_errors == []
+
+    def test_retry_config_instantiable_with_values(self):
+        cfg = RetryConfig(max_attempts=3, initial_interval_ms=200)
+        assert cfg.max_attempts == 3
+        assert cfg.initial_interval_ms == 200
+        # backoff_rate is unset; proto3 default is 0.0, fallback default is 2.0.
+        assert cfg.backoff_rate >= 0.0
+
+    def test_retry_config_dict_still_works_for_compat(self):
+        # RetryConfigDict (Dict[str, Any]) remains supported for backward compatibility
+        cfg: RetryConfigDict = {"max_attempts": 5, "initial_interval_ms": 50}
+        assert with_retry(lambda: 1, cfg) == 1
+
+    def test_default_retry_config_dict_compatible(self):
+        # default_retry_config() returns a dict — dict access still works
+        cfg = default_retry_config()
+        assert cfg["max_attempts"] == 1
+        # Can be passed to with_retry (dict interface)
+        assert with_retry(lambda: "ok", cfg) == "ok"

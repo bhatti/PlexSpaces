@@ -36,11 +36,11 @@ cd plexspaces
 make build
 
 # Run tests
-make test  # See docs/testing.md for detailed testing guide
+make test  # Rust workspace + optional polyglot SDK tests — see docs/testing.md
 ```
 
 See [Installation Guide](installation.md) for detailed setup instructions.
-See [Testing Guide](testing.md) for how to run unit tests, integration tests, and example tests.
+See [Testing Guide](testing.md) for how to run unit tests, integration tests, Rust SDK crates, and Python/TypeScript/Go SDK tests.
 
 **Note**: For actors using non-memory channels (Redis, Kafka, SQLite, NATS), graceful shutdown is automatically handled. When an actor stops, it completes all in-progress messages before terminating. See [Durability Guide](durability.md) for details on graceful shutdown and message recovery.
 

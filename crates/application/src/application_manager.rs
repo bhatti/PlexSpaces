@@ -1768,7 +1768,8 @@ mod tests {
         assert!(app_info.metrics.is_some());
         let metrics = app_info.metrics.unwrap();
         assert!(metrics.uptime_seconds >= 0); // May be 0 if very fast, but should be calculated
-        assert_eq!(metrics.actor_counts.get("total"), Some(&0));
+        // tracked_actor_count is 0, so "total" key is absent (only inserted when count > 0)
+        assert_eq!(metrics.actor_counts.get("total"), None);
     }
 
     /// Test: Get application info for non-existent application

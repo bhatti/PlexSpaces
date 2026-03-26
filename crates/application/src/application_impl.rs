@@ -350,17 +350,29 @@ impl SpecApplication {
                         actor_ids.push(actor_id);
                     }
                     Err(e) => {
-                        error!(
-                            application = %self.spec.name,
-                            child_id = %child.id,
-                            actor_type = %actor_type,
-                            error = %e,
-                            "Failed to spawn actor"
-                        );
-                        return Err(ApplicationError::StartupFailed(format!(
-                            "Failed to spawn actor '{}': {}",
-                            child.id, e
-                        )));
+                        let err_str = e.to_string();
+                        if err_str.contains("No BehaviorRegistry registered") {
+                            // Native Rust applications don't use BehaviorRegistry for spec-based spawning.
+                            // Actors are spawned directly via spawn_with_facets(). Log warning and skip.
+                            warn!(
+                                application = %self.spec.name,
+                                child_id = %child.id,
+                                actor_type = %actor_type,
+                                "Skipping spec-based spawn: no BehaviorRegistry (native Rust actors are spawned directly)"
+                            );
+                        } else {
+                            error!(
+                                application = %self.spec.name,
+                                child_id = %child.id,
+                                actor_type = %actor_type,
+                                error = %e,
+                                "Failed to spawn actor"
+                            );
+                            return Err(ApplicationError::StartupFailed(format!(
+                                "Failed to spawn actor '{}': {}",
+                                child.id, e
+                            )));
+                        }
                     }
                 }
             }
@@ -823,123 +835,6 @@ impl SpecApplication {
         Ok(())
     }
 
-    /// Create supervisor hierarchy from SupervisorSpec (Phase 5/6)
-    ///
-    /// ## Purpose
-    /// Creates a Supervisor from SupervisorSpec structure.
-    /// Note: Children are added via initialize_supervisor_tree which spawns actors.
-    ///
-    /// ## Returns
-    /// Tuple of (root_supervisor, supervisor_handle)
-    ///
-    /// ## Note
-    /// This is a placeholder for future enhancement. Currently, actors are spawned
-    /// directly via initialize_supervisor_tree. In a full implementation, we would:
-    /// 1. Create supervisor structure
-    /// 2. Spawn actors and add them to supervisor
-    /// 3. Call Supervisor::start() for bottom-up startup
-    #[allow(dead_code)] // Placeholder for future enhancement
-    async fn create_supervisor_hierarchy(
-        &self,
-        node: Arc<dyn ApplicationNode>,
-        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
-        supervisor_spec: &SupervisorSpec,
-    ) -> Result<
-        (
-            Arc<tokio::sync::RwLock<Supervisor>>,
-            tokio::task::JoinHandle<()>,
-        ),
-        ApplicationError,
-    > {
-        // Convert ApplicationSpec SupervisorSpec to Supervisor
-        // Note: ApplicationSpec uses application.proto::SupervisorSpec
-        // Supervisor::from_config() expects supervision.proto::SupervisorConfig
-        // We'll create Supervisor directly from SupervisorSpec
-
-        // Convert supervision strategy (simplified - use OneForOne as default)
-        // Note: Full conversion would use try_from, but for now we use a simple approach
-        let strategy = SupervisionStrategy::OneForOne {
-            max_restarts: supervisor_spec.max_restarts,
-            within_seconds: supervisor_spec
-                .max_restart_window
-                .as_ref()
-                .map(|d| d.seconds as u64)
-                .unwrap_or(60),
-        };
-
-        // Create root supervisor
-        let supervisor_id = format!("{}@{}", self.spec.name, node.id());
-        let (mut supervisor, _event_rx) =
-            Supervisor::new(supervisor_id.clone(), strategy, service_locator.clone());
-
-        // Note: Node reference for linking would be added here if ApplicationNode exposed Node
-        // For now, links will be established when children are added via Supervisor::add_child()
-        // which uses the node field if available
-
-        // Add children from spec (recursively for nested supervisors)
-        // Note: For now, we'll use the existing initialize_supervisor_tree logic
-        // which spawns actors directly. In a future enhancement, we could
-        // use Supervisor::start_child() for each child, but that requires
-        // start_fn factories which are not serializable in proto.
-        //
-        // For production-grade implementation, we:
-        // 1. Validate all specs (done in validate_supervisor_spec)
-        // 2. Create supervisor structure
-        // 3. Spawn actors using behavior factory (existing logic)
-        // 4. Add actors to supervisor as children
-        // 5. Call Supervisor::start() for bottom-up startup
-
-        // Use existing initialize_supervisor_tree to spawn actors
-        // This spawns actors directly using behavior factory
-        // After spawning, we can add them to supervisor if needed
-        // For now, we create the supervisor structure and start it
-        // The actual actor spawning happens in initialize_supervisor_tree
-        // which is called separately. The supervisor is created for future
-        // integration when we can use Supervisor::add_child() properly.
-
-        // For production-grade implementation with full Supervisor::start() integration:
-        // 1. Spawn actors using behavior factory (existing initialize_supervisor_tree)
-        // 2. Add spawned actors to supervisor via Supervisor::add_child()
-        // 3. Call Supervisor::start() for bottom-up startup
-        //
-        // Current approach: Use existing initialize_supervisor_tree
-        // which handles actor spawning. Supervisor structure is created
-        // for future enhancement.
-
-        // Start supervisor (Phase 4: Bottom-up startup with rollback)
-        // Note: Supervisor::start() requires children to be added first
-        // For now, we create the supervisor but don't start it yet
-        // as children need to be added via initialize_supervisor_tree first
-        let supervisor_arc = Arc::new(tokio::sync::RwLock::new(supervisor));
-
-        // TODO: After initialize_supervisor_tree spawns actors, add them to supervisor
-        // and then call Supervisor::start(). For now, we'll use the existing
-        // approach where actors are spawned directly.
-
-        // Create a placeholder handle (supervisor structure is created but not started yet)
-        // In a full implementation with Supervisor::start() integration:
-        // 1. Spawn actors via initialize_supervisor_tree
-        // 2. Add them to supervisor via Supervisor::add_child()
-        // 3. Call supervisor.start() for bottom-up startup
-        //
-        // For now, we create the supervisor structure for future enhancement.
-        // The actual actor spawning happens in initialize_supervisor_tree.
-        let handle = tokio::spawn(async {
-            // Supervisor monitoring task (placeholder for future enhancement)
-            loop {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-        });
-
-        // OBSERVABILITY: Log supervisor hierarchy creation
-        debug!(
-            application = %self.spec.name,
-            supervisor_id = %supervisor_id,
-            "Supervisor hierarchy structure created (actors spawned via initialize_supervisor_tree)"
-        );
-
-        Ok((supervisor_arc, handle))
-    }
 }
 
 #[cfg(test)]
@@ -1006,6 +901,10 @@ mod tests {
 
         fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
             Some(self.service_locator.clone())
+        }
+
+        async fn actor_factory(&self) -> Option<Arc<dyn plexspaces_actor::ActorFactory>> {
+            self.service_locator.get_actor_factory().await
         }
     }
 

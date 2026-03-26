@@ -744,6 +744,92 @@ async fn test_spawn_built_actor_virtual_facet_not_found() {
     assert!(result.is_ok(), "Regular actor should spawn successfully");
 }
 
+/// WS5c: Verify that virtual actor rebuild (activate_virtual_actor) uses the configured
+/// idle_timeout from type-level metadata rather than the hard-coded DEFAULT_IDLE_TIMEOUT_SECONDS.
+///
+/// Before the WS3b fix, rebuild always created a VirtualActorFacet with the default 5-minute
+/// idle_timeout regardless of what was configured in annotations or app-config.toml.
+#[tokio::test]
+async fn test_rebuild_virtual_actor_preserves_idle_timeout() {
+    use plexspaces_core::VirtualActorManager;
+    use plexspaces_facet::Facet as FacetTrait;
+
+    let service_locator = create_test_service_locator().await;
+    let factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
+    let manager: Arc<VirtualActorManager> = service_locator.virtual_actor_manager().await.unwrap();
+
+    let actor_id = "idle-timeout-test@test-node".to_string();
+    let actor_type = "GenServer";
+
+    // Step 1: Register type-level metadata with idle_timeout="10m" (non-default).
+    manager
+        .register_virtual_actor_type(
+            actor_type.to_string(),
+            None,
+            "default".to_string(),
+            serde_json::json!({
+                "virtual_actor": {
+                    "idle_timeout": "10m",
+                    "activation_strategy": "lazy"
+                }
+            }),
+            Some("default".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Step 2: Register an instance-level virtual actor entry (simulates a registered-but-deactivated actor).
+    use plexspaces_journaling::virtual_actor_facet_to_lifecycle_facet;
+    let facet_box = {
+        let f = virtual_actor_facet_to_lifecycle_facet(VirtualActorFacet::new(
+            serde_json::json!({"idle_timeout": "5m", "activation_strategy": "lazy"}),
+            100,
+        ));
+        Arc::new(tokio::sync::RwLock::new(f))
+    };
+    manager
+        .register(
+            actor_id.clone(),
+            facet_box,
+            actor_type.to_string(),
+            None,
+            "default".to_string(),
+            "default".to_string(),
+            vec![],
+            HashMap::new(),
+            plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
+        )
+        .await
+        .unwrap();
+
+    // Step 3: Activate (rebuild) — should pick up idle_timeout from type-level metadata.
+    let result = factory.activate_virtual_actor(&actor_id).await;
+    assert!(result.is_ok(), "Activation must succeed: {:?}", result);
+
+    // Step 4: Check the VirtualActorFacet config attached to the spawned actor.
+    let actor_registry = service_locator.actor_registry().await.unwrap();
+    let facet_manager = actor_registry.facet_manager();
+    let facet_container = facet_manager
+        .get_facets(&actor_id)
+        .await
+        .expect("actor should have facets after activation");
+    let container = facet_container.read().await;
+    let virtual_facet = container
+        .get_facet("virtual_actor")
+        .expect("VirtualActorFacet must exist after activation");
+    let facet_guard = virtual_facet.read().await;
+    let config = facet_guard.get_config();
+
+    // The rebuild must use type-level idle_timeout (10m), not the instance default (5m).
+    assert_eq!(
+        config["idle_timeout"].as_str().unwrap_or(""),
+        "10m",
+        "Rebuild must honor type-level idle_timeout=10m, not the 5m default; got config={:?}",
+        config
+    );
+}
+
 // Note: watch_actor_termination is a private method
 // It is tested indirectly through spawn_built_actor which calls it
 // This is acceptable for 95%+ coverage as it's an implementation detail

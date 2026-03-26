@@ -10,6 +10,7 @@ plexspaces-actor.workspace = true
 plexspaces-behavior.workspace = true
 plexspaces-node.workspace = true
 plexspaces-mailbox.workspace = true
+plexspaces-sdk.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

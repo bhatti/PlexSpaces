@@ -1439,14 +1439,17 @@ impl WasmApplication {
                 template_result.ok()
             };
 
-            // Use centralized helper for consistent registration
-            // Errors are logged but non-fatal (actor will still work, just no auto-activation)
+            // Register virtual actor type with ALL facet configs from app-config.toml.
+            // child_spec.facets includes virtual_actor + timer + reminder + workflow configs,
+            // so resurrection recreates every facet with the original configuration.
+            // Type registration persists until application is undeployed — it is NOT evicted
+            // when individual actor instances are deactivated/vacationed.
             let _ = plexspaces_core::register_virtual_actor_type_consistent(
                 &service_locator,
                 actor_type.clone(),
                 namespace_for_type,
                 None,                     // No facet trait objects for WASM (use proto facets)
-                Some(&child_spec.facets), // Proto facets from app-config.toml
+                Some(&child_spec.facets), // Proto facets from app-config.toml (all facet types)
                 config_for_type,
                 None,                 // tenant_id - None for type-level registration
                 init_config_template, // Init config template for WASM actors

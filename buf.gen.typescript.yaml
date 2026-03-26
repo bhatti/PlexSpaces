@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Proto generation config for TypeScript SDK.
+# Run via: make proto-typescript
+#
+# Generates typed TypeScript interfaces from proto definitions into
+# sdks/typescript/src/generated/proto/.
+#
+# ts-proto options:
+#   onlyTypes=true          — pure TypeScript interfaces, no gRPC service stubs
+#   outputServices=false    — skip service client/server generation (not needed in WASM SDK)
+#   esModuleInterop=true    — ESM-compatible imports
+#   useOptionals=messages   — message fields are optional (proto3 semantics)
+#
+# Generated types are committed (same convention as crates/proto/src/generated/).
+# The WIT JSON boundary is unchanged — these types are for TypeScript callers of the SDK.
+version: v2
+plugins:
+  # ts-proto local plugin: generates TypeScript interfaces from proto definitions.
+  # Install: npm install -g ts-proto (installs protoc-gen-ts_proto)
+  - local: protoc-gen-ts_proto
+    out: sdks/typescript/src/generated/proto
+    opt:
+      - esModuleInterop=true
+      - outputServices=false
+      - onlyTypes=true
+      - useOptionals=messages

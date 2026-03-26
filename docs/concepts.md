@@ -554,28 +554,29 @@ Actors are isolated - one actor's failure doesn't affect others.
 
 **FaaS-Style Invocation** enables HTTP-based actor invocation, treating actors like serverless functions:
 
-- **RESTful API**: Standard HTTP GET/POST methods for actor invocation
-- **Path-Based Routing**: `/api/v1/actors/{namespace}/{actor_type}` endpoint
-- **GET for Reads**: Uses `ask()` pattern (request-reply) with query parameters
-- **POST for Updates**: Uses `tell()` pattern (fire-and-forget) with request body
+- **Endpoint-Based Semantics**: `AskReply` handles request-reply and `SendMessage` handles fire-and-forget delivery
+- **Path-Based Routing**: `/api/v1/actors/{namespace}/{actor_type}` and `/api/v1/actors/{namespace}/{actor_type}/ask`
+- **GET for Ask**: `GET` routes to `AskReply` and converts query parameters into payload
+- **POST/PUT Split**: `POST` and `PUT` on the base actor path use `SendMessage`; `POST` and `PUT` on `/ask` use `AskReply`
 - **Multi-Tenant Isolation**: Built-in tenant-based access control
 - **Load Balancing**: Automatic distribution across actor instances
 - **AWS Lambda Ready**: Designed for integration with AWS Lambda Function URLs
 
-### HTTP Methods
+### HTTP Endpoints
 
-**GET - Read Operations (Ask Pattern)**:
+**GET - AskReply**:
 ```bash
 curl "http://localhost:8080/api/v1/actors/default/counter?action=get"
 ```
 
 - Query parameters converted to JSON payload
+- Delivered through `AskReply`
 - Actor's `handle_request()` called (GenServer pattern)
 - Actor sends reply via `ctx.send_reply()`
 - Response contains actor's reply payload
 - `message.uri_path` and `message.uri_method` populated
 
-**POST/PUT - Update Operations (Tell Pattern)**:
+**POST/PUT - SendMessage**:
 ```bash
 curl -X POST "http://localhost:8080/api/v1/actors/default/counter" \
   -H "Content-Type: application/json" \
@@ -589,9 +590,21 @@ curl -X PUT "http://localhost:8080/api/v1/actors/default/counter" \
 
 - Request body becomes message payload
 - HTTP headers preserved as message metadata
+- Delivered through `SendMessage`
 - Actor's `handle_message()` called (fire-and-forget)
 - Response returns immediately
 - `message.uri_path` and `message.uri_method` populated
+
+**POST/PUT /ask - AskReply With Body**:
+```bash
+curl -X POST "http://localhost:8080/api/v1/actors/default/counter/ask" \
+  -H "Content-Type: application/json" \
+  -d '{"action":"get"}'
+```
+
+- Request body becomes message payload
+- Delivered through `AskReply`
+- Actor replies in the HTTP response
 
 ### Actor Lookup
 
@@ -624,7 +637,7 @@ HTTP Request → HTTP Gateway (Axum) → gRPC AskReply/SendMessage → ActorServ
 ```
 
 **Pattern Flow**:
-1. **HTTP Request**: Client sends HTTP `GET`, `POST`, or `PUT` to `/api/v1/actors/{namespace}/{actor_type}` or `/ask`
+1. **HTTP Request**: Client sends `GET /api/v1/actors/{namespace}/{actor_type}`, `GET|POST|PUT /api/v1/actors/{namespace}/{actor_type}/ask`, or `POST|PUT /api/v1/actors/{namespace}/{actor_type}`
 2. **HTTP Gateway**: Axum server parses path parameters, query params, and body
 3. **gRPC Translation**: Gateway constructs `AskReplyRequest` or `SendMessageRequest` with:
    - `namespace`, `actor_type` from path
@@ -634,7 +647,7 @@ HTTP Request → HTTP Gateway (Axum) → gRPC AskReply/SendMessage → ActorServ
 4. **Actor Service**: `ActorServiceImpl::ask_reply` or `ActorServiceImpl::send_message` handles the gRPC request
 5. **Actor Discovery**: Service looks up actors by type using `ActorRegistry::discover_actors_by_type`
 6. **Message Delivery**: Selected actor receives message via mailbox
-7. **Response**: For ask pattern (GET), actor sends reply via `ctx.send_reply()`
+7. **Response**: For `AskReply`, actor sends reply via `ctx.send_reply()`
 8. **HTTP Response**: Gateway converts gRPC response back to HTTP/JSON
 
 #### 2. Actor Discovery and Selection
@@ -654,12 +667,12 @@ When multiple actors of the same type exist, the system uses:
 // → Routes message to selected actor
 ```
 
-#### 3. Message Type Routing
+#### 3. Endpoint Routing
 
-Different HTTP endpoints map to different message patterns:
+Different HTTP endpoints map directly to the actor runtime services:
 
-- **`GET /api/v1/actors/...`** and **`GET|POST|PUT /api/v1/actors/.../ask`** → ask pattern, expects reply
-- **`POST|PUT /api/v1/actors/...`** → tell pattern, fire-and-forget
+- **`GET /api/v1/actors/...`** and **`GET|POST|PUT /api/v1/actors/.../ask`** → `AskReply`
+- **`POST|PUT /api/v1/actors/...`** → `SendMessage`
 
 **Behavior Handling**:
 - `GenServer::route_message` routes `Call` messages to `handle_request` (expects reply)

@@ -24,6 +24,8 @@ plexspaces-mailbox = { path = "../../../../crates/mailbox" }
 plexspaces-journaling = { path = "../../../../crates/journaling" }
 plexspaces-facet = { path = "../../../../crates/facet" }
 plexspaces-node = { path = "../../../../crates/node" }
+plexspaces-application = { path = "../../../../crates/application" }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", features = ["native"] }
 
 # Async runtime
 tokio = { version = "1.44", features = ["full"] }
@@ -40,7 +42,6 @@ thiserror = "1.0"
 anyhow = "1.0"
 
 # Utilities
-ulid = { version = "1.1", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 chrono = "0.4"

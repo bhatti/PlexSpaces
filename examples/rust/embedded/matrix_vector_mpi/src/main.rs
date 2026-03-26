@@ -93,9 +93,7 @@ async fn main() -> Result<()> {
 
     // Create and spawn worker actors using SDK spawn helper
     info!("\n=== Creating Worker Actors ===");
-    let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string())
-        .with_internal(true)
-        .with_admin(true);
+    let ctx = RequestContext::new_without_auth("mpi".to_string(), "matrix-vector".to_string());
     let service_locator = node.service_locator().clone();
     let mut worker_refs = Vec::new();
     

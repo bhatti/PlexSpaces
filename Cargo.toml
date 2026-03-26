@@ -34,6 +34,7 @@ members = [
     "sdks/rust/plexspaces-sdk-macros",
     "sdks/rust/plexspaces-sdk",
     "examples/rust/embedded/migrating_temporal",
+    "examples/rust/embedded/migrating_skypilot",
 ]
 # Default members: Exclude rarely-changed or optional crates from default builds
 # This speeds up default `cargo build` and `cargo test` by only building frequently-changed crates
@@ -283,6 +284,7 @@ plexspaces-object-registry = { path = "crates/object-registry" }
 plexspaces-process-groups = { path = "crates/process-groups" }
 plexspaces-journaling = { path = "crates/journaling" }
 plexspaces-dashboard = { path = "crates/dashboard" }
+plexspaces-sdk = { path = "sdks/rust/plexspaces-sdk", features = ["native"] }
 
 # Add more workspace dependencies
 pretty_assertions = "1.4"

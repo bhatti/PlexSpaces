@@ -18,8 +18,9 @@ plexspaces-core = { path = "../../../../crates/core" }
 plexspaces-proto = { path = "../../../../crates/proto" }
 plexspaces-actor = { path = "../../../../crates/actor" }
 plexspaces-behavior = { path = "../../../../crates/behavior" }
-# plexspaces-supervisor merged into plexspaces-actor
 plexspaces-mailbox = { path = "../../../../crates/mailbox" }
+plexspaces-application = { path = "../../../../crates/application" }
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", features = ["native"] }
 plexspaces-node = { path = "../../../../crates/node" }
 plexspaces-channel = { path = "../../../../crates/channel", features = ["redis-backend"] }
 plexspaces-scheduler = { path = "../../../../crates/scheduler", features = ["sqlite-backend", "redis-backend"] }

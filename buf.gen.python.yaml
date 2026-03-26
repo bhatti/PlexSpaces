@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Proto generation config for Python SDK.
+# Run via: make proto-python
+#
+# Generates typed Python models from proto definitions into sdks/python/plexspaces/generated/.
+# betterproto produces idiomatic Python dataclasses with type annotations and no runtime
+# protobuf dependency, making it suitable for both native and (with fallback) WASM environments.
+#
+# NOTE: betterproto is an optional dev dependency — WASM guest builds do NOT bundle generated/.
+# The sdks/python/plexspaces/workflow.py uses a try/except ImportError fallback so that
+# actors running inside WASM still work without the generated code.
+version: v2
+plugins:
+  # betterproto local plugin: generates idiomatic Python dataclasses (no protobuf runtime required).
+  # Install: source ~/venv/bin/activate && pip install "betterproto[compiler]>=2.0.0b7"
+  # (activates the protoc-gen-python_betterproto binary in the venv)
+  - local: protoc-gen-python_betterproto
+    out: sdks/python/plexspaces/generated

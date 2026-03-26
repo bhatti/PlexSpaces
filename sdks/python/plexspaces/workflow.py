@@ -9,7 +9,27 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 T = TypeVar("T")
 
-# Align with proto RetryConfig
+# Use the proto-generated RetryConfig when available (native/server-side with betterproto).
+# Falls back to a plain dataclass for WASM guest environments where generated/ is not bundled.
+# The interface is identical in both cases: attribute access (cfg.max_attempts) works for
+# both the betterproto dataclass and the fallback dataclass.
+try:
+    # betterproto generates plexspaces/workflow/v1/__init__.py with RetryConfig as a dataclass
+    from plexspaces.generated.plexspaces.workflow.v1 import RetryConfig  # type: ignore[import]
+except ImportError:
+    from dataclasses import dataclass, field as _field
+
+    @dataclass
+    class RetryConfig:  # type: ignore[no-redef]
+        """Fallback RetryConfig matching proto plexspaces.workflow.v1.RetryConfig fields."""
+        max_attempts: int = 1
+        initial_interval_ms: int = 100
+        backoff_rate: float = 2.0
+        max_interval_ms: int = 30000
+        retryable_errors: List[str] = _field(default_factory=list)
+
+# RetryConfigDict is a type alias kept for backward compatibility with callers that pass dicts.
+# New code should use RetryConfig directly (attribute access instead of dict key access).
 RetryConfigDict = Dict[str, Any]
 
 

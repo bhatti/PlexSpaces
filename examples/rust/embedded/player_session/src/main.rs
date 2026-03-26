@@ -29,6 +29,7 @@ use plexspaces_sdk::{
     NodeBuilder, ActorRef,
     // Simplified spawn functions - facets come from annotations!
     spawn, spawn_with_storage,
+    call_message,
     // Storage for durable actors
     JournalStorage,
     json, Value,
@@ -403,12 +404,7 @@ async fn send_call(actor_ref: &ActorRef, op: &str, payload: Value) -> Result<Val
     let mut merged = payload.as_object().cloned().unwrap_or_default();
     merged.insert("op".to_string(), json!(op));
     
-    let msg = Message {
-        id: ulid::Ulid::new().to_string(),
-        message_type: "call".to_string(),
-        payload: serde_json::to_vec(&merged)?,
-        ..Default::default()
-    };
+    let msg = call_message(serde_json::Value::Object(merged));
     
     let response = actor_ref.ask(msg, Duration::from_secs(5)).await?;
     let result: Value = serde_json::from_slice(&response.payload)?;

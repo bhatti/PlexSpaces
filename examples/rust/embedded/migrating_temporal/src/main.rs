@@ -2,25 +2,14 @@
 // Comparison: Temporal Durable Workflows
 
 use plexspaces_behavior::Workflow;
-use plexspaces_core::{
-    Actor, ActorContext, BehaviorError, BehaviorRegistry, BehaviorType, Message, ServiceLocator,
-};
+use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType, Message};
 use plexspaces_journaling::{DurabilityFacet, SqliteJournalStorage};
 use plexspaces_node::NodeBuilder;
+use plexspaces_sdk::new_message;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
-
-/// Build a proto Message with payload and optional message_type.
-fn message_with(payload: Vec<u8>, message_type: &str) -> Message {
-    Message {
-        id: ulid::Ulid::new().to_string(),
-        payload,
-        message_type: message_type.to_string(),
-        ..Default::default()
-    }
-}
 
 /// Order data structure
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -168,9 +157,9 @@ impl Workflow for OrderWorkflow {
         self.state.status = WorkflowStatus::Completed;
         info!("Order workflow completed: {}", self.state.order.id);
 
-        let state_json = serde_json::to_vec(&self.state)
+        let state_value = serde_json::to_value(&self.state)
             .map_err(|e| BehaviorError::ProcessingError(format!("Serialization failed: {}", e)))?;
-        Ok(message_with(state_json, "workflow_run"))
+        Ok(new_message("workflow_run", state_value))
     }
 
     async fn signal(
@@ -200,16 +189,16 @@ impl Workflow for OrderWorkflow {
 
         match name.as_str() {
             "status" => {
-                let status_json = serde_json::to_string(&self.state.status).map_err(|e| {
+                let status_value = serde_json::to_value(&self.state.status).map_err(|e| {
                     BehaviorError::ProcessingError(format!("Serialization failed: {}", e))
                 })?;
-                Ok(message_with(status_json.into_bytes(), "query"))
+                Ok(new_message("query", status_value))
             }
             "state" => {
-                let state_json = serde_json::to_vec(&self.state).map_err(|e| {
+                let state_value = serde_json::to_value(&self.state).map_err(|e| {
                     BehaviorError::ProcessingError(format!("Serialization failed: {}", e))
                 })?;
-                Ok(message_with(state_json, "query"))
+                Ok(new_message("query", state_value))
             }
             _ => Err(BehaviorError::ProcessingError("Unknown query".to_string())),
         }
@@ -316,59 +305,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         50,
     ));
 
-    // Register BehaviorRegistry so spawn_actor can create "Workflow" behavior
-    let behavior_registry = BehaviorRegistry::new();
-    behavior_registry
-        .register("Workflow", |args: &[u8]| {
-            let order: Order = serde_json::from_slice(args).unwrap_or_default();
-            Box::pin(async move {
-                Ok(Box::new(OrderWorkflow::new(order)) as Box<dyn plexspaces_core::Actor>)
-            })
-        })
-        .await;
-    node.service_locator()
-        .register_behavior_registry(Arc::new(behavior_registry))
-        .await;
-
-    // Spawn using ActorFactory with facets
-    use plexspaces_actor::ActorFactory;
-    let actor_factory = node
-        .service_locator()
-        .actor_factory()
-        .await
-        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
     let actor_id = format!("order-workflow-{}@comparison-node-1", order.id);
     let ctx = plexspaces_core::RequestContext::new_without_auth(
-        "internal".to_string(),
-        "system".to_string(),
+        "workflows".to_string(),
+        "orders".to_string(),
+    );
+    let workflow_actor = plexspaces_sdk::spawn_with_facets(
+        &ctx,
+        node.service_locator(),
+        actor_id.clone(),
+        "orders",
+        OrderWorkflow::new(order.clone()),
+        vec![durability_facet],
     )
-    .with_internal(true)
-    .with_admin(true);
-    let initial_state = serde_json::to_vec(&order)?;
-    let _message_sender = actor_factory
-        .spawn_actor(
-            &ctx,
-            &actor_id,
-            "Workflow",
-            initial_state,
-            None,                             // config
-            std::collections::HashMap::new(), // labels
-            vec![durability_facet],           // facets
-        )
-        .await
-        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
+    .await
+    .map_err(|e| format!("Failed to spawn workflow actor: {}", e))?;
 
     info!("✅ DurabilityFacet attached - workflow journaling and checkpoints enabled");
     println!("✅ DurabilityFacet attached - workflow journaling and checkpoints enabled");
-
-    // Create ActorRef directly - no need to access mailbox
-    let workflow_actor = plexspaces_actor::ActorRef::remote(
-        actor_id.clone(),
-        "internal".to_string(),
-        "system".to_string(),
-        node.id().as_str().to_string(),
-        node.service_locator().clone(),
-    );
 
     info!("Workflow actor spawned: {}", workflow_actor.id());
     println!("📋 Order: {} | Total: ${:.2}", order.id, order.total);
@@ -380,8 +334,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let start_time = std::time::Instant::now();
 
-    // Start workflow (use workflow_run message type)
-    let input = message_with(serde_json::to_vec(&order)?, "workflow_run");
+    // Start workflow
+    let input = new_message("workflow_run", serde_json::to_value(&order)?);
     let result = workflow_actor.ask(input, Duration::from_secs(30)).await?;
 
     let elapsed = start_time.elapsed();
@@ -459,62 +413,25 @@ mod tests {
         let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
 
-        // Register BehaviorRegistry so spawn_actor can create "Workflow" behavior
-        let behavior_registry = BehaviorRegistry::new();
-        behavior_registry
-            .register("Workflow", |args: &[u8]| {
-                let order: Order = serde_json::from_slice(args).unwrap_or_default();
-                Box::pin(async move {
-                    Ok(Box::new(OrderWorkflow::new(order)) as Box<dyn plexspaces_core::Actor>)
-                })
-            })
-            .await;
-        node.service_locator()
-            .register_behavior_registry(Arc::new(behavior_registry))
-            .await;
-
-        // Spawn using ActorFactory with facets
-        use plexspaces_actor::ActorFactory;
-        let actor_factory = node
-            .service_locator()
-            .actor_factory()
-            .await
-            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))
-            .unwrap();
         let actor_id = "test-workflow@test-node".to_string();
         let ctx = plexspaces_core::RequestContext::new_without_auth(
-            "internal".to_string(),
-            "system".to_string(),
-        )
-        .with_internal(true)
-        .with_admin(true);
-        let initial_state = serde_json::to_vec(&order).unwrap();
-        let _message_sender = actor_factory
-            .spawn_actor(
-                &ctx,
-                &actor_id,
-                "Workflow",
-                initial_state,
-                None,                             // config
-                std::collections::HashMap::new(), // labels
-                vec![durability_facet],           // facets
-            )
-            .await
-            .map_err(|e| format!("Failed to spawn actor: {}", e))
-            .unwrap();
-
-        // Create ActorRef directly - no need to access mailbox
-        let workflow = plexspaces_actor::ActorRef::remote(
-            actor_id.clone(),
-            "internal".to_string(),
-            "system".to_string(),
-            node.id().as_str().to_string(),
-            node.service_locator().clone(),
+            "workflows".to_string(),
+            "orders".to_string(),
         );
+        let workflow = plexspaces_sdk::spawn_with_facets(
+            &ctx,
+            node.service_locator(),
+            actor_id.clone(),
+            "orders",
+            OrderWorkflow::new(order.clone()),
+            vec![durability_facet],
+        )
+        .await
+        .expect("Failed to spawn workflow actor");
 
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let input = message_with(serde_json::to_vec(&order).unwrap(), "workflow_run");
+        let input = new_message("workflow_run", serde_json::to_value(&order).unwrap());
         let result = workflow.ask(input, Duration::from_secs(10)).await.unwrap();
 
         let state: OrderWorkflowState = serde_json::from_slice(&result.payload).unwrap();

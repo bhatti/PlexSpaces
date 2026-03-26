@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
 // Comparison: SkyPilot (AI Workload Orchestration with Multi-Cloud Resource Scheduling)
 
-use plexspaces_actor::{ActorBuilder, ActorRef, ActorFactory, actor_factory_impl::ActorFactoryImpl};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{Actor, ActorContext, BehaviorType, BehaviorError, ActorId};
 use plexspaces_mailbox::Message;
 use plexspaces_node::NodeBuilder;
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::collections::HashMap;
@@ -171,48 +169,51 @@ impl Actor for SkyPilotSchedulerActor {
 impl GenServer for SkyPilotSchedulerActor {
     async fn handle_request(
         &mut self,
-        _ctx: &ActorContext,
+        ctx: &ActorContext,
         msg: Message,
-    ) -> Result<Message, BehaviorError> {
-        let sky_msg: SkyPilotMessage = serde_json::from_slice(msg.payload())
+    ) -> Result<(), BehaviorError> {
+        let sky_msg: SkyPilotMessage = serde_json::from_slice(&msg.payload)
             .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
-        
-        match sky_msg {
+
+        let reply = match sky_msg {
             SkyPilotMessage::SubmitTask { task } => {
-                info!("[SKYPILOT] Submitting AI task: {} (type: {}, gpu: {})", 
+                info!("[SKYPILOT] Submitting AI task: {} (type: {}, gpu: {})",
                     task.task_id, task.task_type, task.gpu_required);
-                
-                // Find best resources
+
                 if let Some(allocation) = self.find_best_resources(&task) {
                     self.running_tasks.insert(task.task_id.clone(), allocation.clone());
-                    info!("[SKYPILOT] Scheduled task on {} ({}) - cost: ${}/hr", 
+                    info!("[SKYPILOT] Scheduled task on {} ({}) - cost: ${}/hr",
                         allocation.cloud_provider, allocation.instance_type, allocation.cost_per_hour);
-                    
-                    let reply = SkyPilotMessage::TaskScheduled { allocation };
-                    Ok(Message::new(serde_json::to_vec(&reply).unwrap()))
+                    SkyPilotMessage::TaskScheduled { allocation }
                 } else {
-                    // Queue if no resources available
                     self.task_queue.push(task);
-                    Err(BehaviorError::ProcessingError("No resources available, queued".to_string()))
+                    return Err(BehaviorError::ProcessingError("No resources available, queued".to_string()));
                 }
             }
             SkyPilotMessage::GetBestResources { task } => {
                 if let Some(allocation) = self.find_best_resources(&task) {
-                    let reply = SkyPilotMessage::ResourceRecommendation { allocation };
-                    Ok(Message::new(serde_json::to_vec(&reply).unwrap()))
+                    SkyPilotMessage::ResourceRecommendation { allocation }
                 } else {
-                    Err(BehaviorError::ProcessingError("No suitable resources found".to_string()))
+                    return Err(BehaviorError::ProcessingError("No suitable resources found".to_string()));
                 }
             }
             SkyPilotMessage::GetStatus => {
-                let reply = SkyPilotMessage::Status {
+                SkyPilotMessage::Status {
                     queue_size: self.task_queue.len(),
                     running: self.running_tasks.len(),
-                };
-                Ok(Message::new(serde_json::to_vec(&reply).unwrap()))
+                }
             }
-            _ => Err(BehaviorError::ProcessingError("Unknown message".to_string())),
-        }
+            _ => return Err(BehaviorError::ProcessingError("Unknown message".to_string())),
+        };
+
+        let reply_payload = serde_json::to_value(&reply)
+            .map_err(|e| BehaviorError::ProcessingError(format!("Serialization failed: {}", e)))?;
+        let reply_msg = plexspaces_sdk::new_message("reply", reply_payload);
+        let correlation_id = if msg.correlation_id.is_empty() { None } else { Some(msg.correlation_id.as_str()) };
+        ctx.send_reply(correlation_id, &msg.sender_id, msg.receiver_id.clone(), reply_msg)
+            .await
+            .map_err(|e| BehaviorError::ProcessingError(format!("Reply failed: {}", e)))?;
+        Ok(())
     }
 }
 
@@ -235,29 +236,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Creating SkyPilot scheduler (multi-cloud resource scheduling)");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    // Spawn using ActorFactory with facets
-    use plexspaces_actor::{ActorFactory, actor_factory_impl::ActorFactoryImpl};
-    use std::sync::Arc;
-    let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-        .ok_or_else(|| format!("ActorFactory not found in ServiceLocator"))?;
-    let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
-    let _message_sender = actor_factory.spawn_actor(
-        &ctx,
-        &actor_id,
-        "GenServer",
-        vec![], // initial_state
-        None, // config
-        std::collections::HashMap::new(), // labels
-        vec![], // facets
-    ).await
-        .map_err(|e| format!("Failed to spawn actor: {}", e))?;
-    
-    // Create ActorRef directly - no need to access mailbox
-    let scheduler = plexspaces_actor::ActorRef::remote(
-        actor_id.clone(),
-        node.id().as_str().to_string(),
-        node.service_locator().clone(),
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "skypilot".to_string(),
+        "scheduling".to_string(),
     );
+    let scheduler = plexspaces_sdk::spawn_with_facets(
+        &ctx,
+        node.service_locator(),
+        actor_id.clone(),
+        "scheduling",
+        SkyPilotSchedulerActor::new(),
+        vec![],
+    )
+    .await
+    .map_err(|e| format!("Failed to spawn scheduler: {}", e))?;
 
     info!("✅ SkyPilot scheduler created: {}", scheduler.id());
     info!("✅ Multi-cloud catalog: AWS, GCP instances");
@@ -280,17 +272,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cloud_preference: None, // Find cheapest
     };
     
-    let msg = Message::new(serde_json::to_vec(&SkyPilotMessage::SubmitTask {
+    let msg = plexspaces_sdk::call_message(serde_json::to_value(&SkyPilotMessage::SubmitTask {
         task: training_task.clone(),
-    })?)
-        .with_message_type("call".to_string());
+    })?);
     let result = scheduler
         .ask(msg, Duration::from_secs(5))
         .await?;
-    let reply: SkyPilotMessage = serde_json::from_slice(result.payload())?;
+    let reply: SkyPilotMessage = serde_json::from_slice(&result.payload)?;
     if let SkyPilotMessage::TaskScheduled { allocation } = reply {
-        info!("✅ Training task scheduled: {} on {} ({}) - ${}/hr", 
-            allocation.task_id, allocation.cloud_provider, 
+        info!("✅ Training task scheduled: {} on {} ({}) - ${}/hr",
+            allocation.task_id, allocation.cloud_provider,
             allocation.instance_type, allocation.cost_per_hour);
     }
 
@@ -298,7 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("Test 2: Inference Task (CPU-only, cost-optimized)");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
+
     let inference_task = AITask {
         task_id: "inference-1".to_string(),
         task_type: "inference".to_string(),
@@ -308,18 +299,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         memory_gb: 15,
         cloud_preference: None, // Find cheapest
     };
-    
-    let msg = Message::new(serde_json::to_vec(&SkyPilotMessage::SubmitTask {
+
+    let msg = plexspaces_sdk::call_message(serde_json::to_value(&SkyPilotMessage::SubmitTask {
         task: inference_task.clone(),
-    })?)
-        .with_message_type("call".to_string());
+    })?);
     let result = scheduler
         .ask(msg, Duration::from_secs(5))
         .await?;
-    let reply: SkyPilotMessage = serde_json::from_slice(result.payload())?;
+    let reply: SkyPilotMessage = serde_json::from_slice(&result.payload)?;
     if let SkyPilotMessage::TaskScheduled { allocation } = reply {
-        info!("✅ Inference task scheduled: {} on {} ({}) - ${}/hr", 
-            allocation.task_id, allocation.cloud_provider, 
+        info!("✅ Inference task scheduled: {} on {} ({}) - ${}/hr",
+            allocation.task_id, allocation.cloud_provider,
             allocation.instance_type, allocation.cost_per_hour);
     }
 
@@ -327,15 +317,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("Test 3: Resource Recommendation (pre-flight check)");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    let msg = Message::new(serde_json::to_vec(&SkyPilotMessage::GetBestResources {
+
+    let msg = plexspaces_sdk::call_message(serde_json::to_value(&SkyPilotMessage::GetBestResources {
         task: training_task,
-    })?)
-        .with_message_type("call".to_string());
+    })?);
     let result = scheduler
         .ask(msg, Duration::from_secs(5))
         .await?;
-    let reply: SkyPilotMessage = serde_json::from_slice(result.payload())?;
+    let reply: SkyPilotMessage = serde_json::from_slice(&result.payload)?;
     if let SkyPilotMessage::ResourceRecommendation { allocation } = reply {
         info!("✅ Resource recommendation: {} ({}) - ${}/hr", 
             allocation.cloud_provider, allocation.instance_type, allocation.cost_per_hour);
@@ -360,27 +349,20 @@ mod tests {
             .build().await;
 
         let actor_id: ActorId = "skypilot-scheduler/test-1@test-node".to_string();
-        // Spawn using ActorFactory with facets
-        let actor_factory: Arc<ActorFactoryImpl> = node.service_locator().actor_factory_impl().await
-            .ok_or_else(|| format!("ActorFactory not found in ServiceLocator")).unwrap();
-        let ctx = plexspaces_core::RequestContext::new_without_auth("internal".to_string(), "system".to_string()).with_internal(true).with_admin(true);
-        let _message_sender = actor_factory.spawn_actor(
-            &ctx,
-            &actor_id,
-            "GenServer",
-            vec![], // initial_state
-            None, // config
-            std::collections::HashMap::new(), // labels
-            vec![], // facets
-        ).await
-            .map_err(|e| format!("Failed to spawn actor: {}", e)).unwrap();
-        
-        // Create ActorRef directly - no need to access mailbox
-        let scheduler = plexspaces_actor::ActorRef::remote(
-            actor_id.clone(),
-            node.id().as_str().to_string(),
-            node.service_locator().clone(),
+        let ctx = plexspaces_core::RequestContext::new_without_auth(
+            "skypilot".to_string(),
+            "scheduling".to_string(),
         );
+        let scheduler = plexspaces_sdk::spawn_with_facets(
+            &ctx,
+            node.service_locator(),
+            actor_id.clone(),
+            "scheduling",
+            SkyPilotSchedulerActor::new(),
+            vec![],
+        )
+        .await
+        .expect("Failed to spawn scheduler");
 
         tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -393,16 +375,15 @@ mod tests {
             memory_gb: 16,
             cloud_preference: None,
         };
-        let msg = Message::new(serde_json::to_vec(&SkyPilotMessage::SubmitTask {
+        let msg = plexspaces_sdk::call_message(serde_json::to_value(&SkyPilotMessage::SubmitTask {
             task,
-        }).unwrap())
-            .with_message_type("call".to_string());
+        }).unwrap());
         let result = scheduler
             .ask(msg, Duration::from_secs(5))
             .await
             .unwrap();
 
-        let reply: SkyPilotMessage = serde_json::from_slice(result.payload()).unwrap();
+        let reply: SkyPilotMessage = serde_json::from_slice(&result.payload).unwrap();
         if let SkyPilotMessage::TaskScheduled { allocation } = reply {
             assert!(!allocation.cloud_provider.is_empty());
             assert!(!allocation.instance_type.is_empty());

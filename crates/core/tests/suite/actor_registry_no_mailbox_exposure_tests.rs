@@ -65,6 +65,10 @@ impl MessageSender for TestMessageSender {
         self.messages.write().await.push(message);
         Ok(())
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 // Adapter to convert ObjectRegistryImpl to ObjectRegistry trait

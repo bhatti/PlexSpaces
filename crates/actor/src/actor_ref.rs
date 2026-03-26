@@ -894,24 +894,6 @@ impl ActorRef {
                     );
                 }
 
-                // VALIDATION: Check if actor is registered before sending (LOCAL ACTORS ONLY)
-                // tell() should fail immediately if actor is not registered (synchronous check)
-                // Note: For local actors, having a mailbox implies the actor was created, but we still
-                // validate registration to ensure the actor hasn't been unregistered since creation.
-                // Remote actors don't need this check - they're validated via gRPC.
-
-                if let Some(registry) = service_locator.actor_registry().await {
-                    if registry.lookup_actor(&actor_id).await.is_none() {
-                        tracing::warn!("[TELL] Local actor not registered: actor_id={}", actor_id);
-                        return Err(ActorRefError::ActorNotFound(format!(
-                            "Actor {} is not registered - cannot send message. Actor must be registered before tell() can be called.",
-                            actor_id
-                        )));
-                    }
-                }
-                // If registry is not available, proceed anyway (fallback for test scenarios)
-                // In production, registry should always be available
-
                 // REQUEST or normal message → send to mailbox
                 // (Reply routing to temporary sender is handled above before this match)
                 let msg_sender = message.sender_id.clone();
@@ -1418,6 +1400,10 @@ impl MessageSender for ActorRef {
     fn actor_id(&self) -> Option<String> {
         Some(self.id().to_string())
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 // =============================================================================
@@ -1698,8 +1684,9 @@ mod tests {
         let msg1 = create_test_message(b"from ref1".to_vec());
         let msg2 = create_test_message(b"from ref2".to_vec());
 
-        let msg1_id = msg1.id.clone();
-        let msg2_id = msg2.id.clone();
+        // tell_impl adds "req-" prefix to IDs that don't already have it
+        let msg1_id = format!("req-{}", msg1.id);
+        let msg2_id = format!("req-{}", msg2.id);
 
         actor_ref1.tell(msg1).await.unwrap();
         actor_ref2.tell(msg2).await.unwrap();

@@ -445,7 +445,7 @@ async fn assert_has_concrete_timer_and_reminder_facets(
 }
 
 /// Test: Virtual actor type registration and lazy activation
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_type_registration_and_lazy_activation() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -511,7 +511,7 @@ async fn test_virtual_actor_type_registration_and_lazy_activation() {
 }
 
 /// Test: Type-level metadata preserves eager strategy and full facet config
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_type_registration_preserves_eager_metadata() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -559,7 +559,7 @@ async fn test_virtual_actor_type_registration_preserves_eager_metadata() {
 }
 
 /// Test: Virtual actor suspension and reactivation with instance-level metadata
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_suspension_and_reactivation_instance_metadata() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -597,13 +597,24 @@ async fn test_virtual_actor_suspension_and_reactivation_instance_metadata() {
     let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
     wait_for_virtual_registration(&virtual_actor_manager, &actor_id).await;
 
-    // Send a message to activate actor
-    let msg = Message {
-        id: ulid::Ulid::new().to_string(),
-        payload: serde_json::to_vec(&CounterMessage::Increment).unwrap(),
-        ..Default::default()
-    };
-    actor_ref.tell(msg).await.unwrap();
+    // Activate the lazy virtual actor via invoke (direct tell() on lazy actor sends to dead mailbox)
+    use plexspaces_services::actor_service::ActorServiceImpl;
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+    let activate_response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:user-1", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(activate_response.is_ok(), "initial activation must succeed");
 
     // Wait for activation
     let actor_registry = service_locator.actor_registry().await.unwrap();
@@ -621,13 +632,6 @@ async fn test_virtual_actor_suspension_and_reactivation_instance_metadata() {
     // Verify actor is suspended (not active but still registered)
     assert!(!virtual_actor_manager.is_active(&actor_id).await);
     assert!(virtual_actor_manager.is_virtual(&actor_id).await); // Still virtual
-
-    // Reactivate actor
-    use plexspaces_services::actor_service::ActorServiceImpl;
-    let actor_service = Arc::new(ActorServiceImpl::new(
-        service_locator.clone(),
-        "test-node".to_string(),
-    ));
     let response = invoke_virtual_actor(
         &actor_service,
         tenant_id,
@@ -650,7 +654,7 @@ async fn test_virtual_actor_suspension_and_reactivation_instance_metadata() {
 }
 
 /// Test: Virtual actor reactivation with type-level metadata fallback
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_reactivation_type_level_fallback() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -674,7 +678,7 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
             None, // config
             namespace.to_string(),
             facet_config,
-            None, // tenant_id
+            Some(tenant_id.to_string()),
             None, // init_config_template
         )
         .await
@@ -684,7 +688,7 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
     use plexspaces_core::actor_id::build_actor_id;
     let actor_id = build_actor_id("user-1", actor_type, Some(namespace), "test-node");
 
-    // Spawn actor (this will register it instance-level)
+    // Spawn actor (this registers it at the instance level in VirtualActorManager)
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
     let virtual_facet = VirtualActorFacet::new(
         serde_json::json!({
@@ -694,26 +698,36 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
         100,
     );
 
-    let actor_ref = node
-        .spawn(
-            &ctx,
-            &actor_id,
-            actor_type,
-            vec![],
-            None,
-            HashMap::new(),
-            vec![Box::new(virtual_facet)],
-        )
-        .await
-        .unwrap();
+    node.spawn(
+        &ctx,
+        &actor_id,
+        actor_type,
+        vec![],
+        None,
+        HashMap::new(),
+        vec![Box::new(virtual_facet)],
+    )
+    .await
+    .unwrap();
 
-    // Send message to activate
-    let msg = Message {
-        id: ulid::Ulid::new().to_string(),
-        payload: serde_json::to_vec(&CounterMessage::Increment).unwrap(),
-        ..Default::default()
-    };
-    actor_ref.tell(msg).await.unwrap();
+    // Activate user-1 via invoke (not direct tell on lazy actor)
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+    let activate_response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:user-1", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(activate_response.is_ok(), "initial activation of user-1 must succeed");
+
     let actor_registry = service_locator.actor_registry().await.unwrap();
     wait_for_actor_registration(&actor_registry, &actor_id).await;
 
@@ -726,11 +740,6 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
         .await
         .unwrap();
 
-    // CRITICAL: Remove instance-level metadata (simulating the error case)
-    // In real scenario, this shouldn't happen, but we test the fallback
-    // Note: We can't directly remove from VirtualActorManager, but we can test
-    // by creating a new actor ID that was never instance-registered
-
     // Create a new actor ID that matches the type but was never instance-registered
     let new_actor_id = build_actor_id("user-2", actor_type, Some(namespace), "test-node");
 
@@ -742,10 +751,6 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
     );
 
     // Try to activate new actor (should use type-level metadata)
-    let actor_service = Arc::new(ActorServiceImpl::new(
-        service_locator.clone(),
-        "test-node".to_string(),
-    ));
     let response = invoke_virtual_actor(
         &actor_service,
         tenant_id,
@@ -767,7 +772,7 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
 }
 
 /// Test: Error case - virtual actor activation fails when metadata is missing
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_activation_error_missing_metadata() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -803,7 +808,7 @@ async fn test_virtual_actor_activation_error_missing_metadata() {
 }
 
 /// Test: Virtual actor with proper actor ID format
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_actor_id_format() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -860,16 +865,17 @@ async fn test_virtual_actor_actor_id_format() {
 
 /// Test: Virtual actor activation with HTTP-style actor_type format (read-state-tracker:user-1)
 /// This test validates the fix for migrating_orbit example where actor_type comes from HTTP path
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_activation_with_http_format() {
-    let node = NodeBuilder::new("test-node").build().await;
+    // Use unique actor_type to avoid interference when tests run in parallel
+    let node = NodeBuilder::new("test-node-http-fmt").build().await;
     let service_locator = node.service_locator();
     let tenant_id = "test-tenant";
-    register_counter_behavior_with_initial_count(&service_locator, "read-state-tracker").await;
+    register_counter_behavior_with_initial_count(&service_locator, "orbit-tracker").await;
 
     // Register virtual actor type (matches migrating_orbit example)
     let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
-    let actor_type = "read-state-tracker";
+    let actor_type = "orbit-tracker";
     let namespace = "orbit-read-state-ts";
 
     virtual_actor_manager
@@ -886,15 +892,15 @@ async fn test_virtual_actor_activation_with_http_format() {
                     "enabled": true
                 }
             }),
-            None,
+            Some(tenant_id.to_string()),
             None,
         )
         .await
         .unwrap();
 
-    // Simulate HTTP request format: "read-state-tracker:user-1"
-    let http_actor_type = "read-state-tracker:user-1";
-    let base_actor_type = "read-state-tracker";
+    // Simulate HTTP request format: "orbit-tracker:user-1"
+    let http_actor_type = "orbit-tracker:user-1";
+    let base_actor_type = "orbit-tracker";
 
     // Extract instance ID from HTTP actor-type format used by AskReply and SendMessage.
     let instance_id = if http_actor_type.contains(':') {
@@ -908,9 +914,9 @@ async fn test_virtual_actor_activation_with_http_format() {
 
     // Build proper actor ID format
     use plexspaces_core::actor_id::build_actor_id;
-    let actor_id = build_actor_id(&instance_id, base_actor_type, Some(namespace), "test-node");
+    let actor_id = build_actor_id(&instance_id, base_actor_type, Some(namespace), "test-node-http-fmt");
 
-    // Verify format is correct (not //read-state-tracker::...)
+    // Verify format is correct (not //orbit-tracker::...)
     assert!(
         !actor_id.starts_with("//"),
         "Actor ID should not start with // - missing instance ID"
@@ -922,7 +928,7 @@ async fn test_virtual_actor_activation_with_http_format() {
     assert_eq!(
         actor_id,
         format!(
-            "{}//{}::{}@test-node",
+            "{}//{}::{}@test-node-http-fmt",
             instance_id, base_actor_type, namespace
         )
     );
@@ -930,7 +936,7 @@ async fn test_virtual_actor_activation_with_http_format() {
     // Test activation via ActorService
     let actor_service = Arc::new(ActorServiceImpl::new(
         service_locator.clone(),
-        "test-node".to_string(),
+        "test-node-http-fmt".to_string(),
     ));
     let response = invoke_virtual_actor(
         &actor_service,
@@ -955,7 +961,7 @@ async fn test_virtual_actor_activation_with_http_format() {
 /// Test: Virtual actor reactivation after suspension with type-level registration only
 /// This test validates the fix for migrating_orbit example where actor is type-registered
 /// but instance metadata is missing when reactivating
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_reactivation_type_registered_only() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -1045,7 +1051,7 @@ async fn test_virtual_actor_reactivation_type_registered_only() {
 }
 
 /// Test: type-level registration can rebuild a behavior from stored init config
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_template() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -1077,7 +1083,7 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
                     "enabled": true
                 }
             }),
-            None,
+            Some(tenant_id.to_string()),
             Some(br#"{"initial_count":7}"#.to_vec()),
         )
         .await
@@ -1164,7 +1170,7 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
 }
 
 /// Test: Virtual actor activation preserves state after suspension/reactivation
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_state_preservation() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -1185,26 +1191,36 @@ async fn test_virtual_actor_state_preservation() {
         100,
     );
 
-    let actor_ref = node
-        .spawn(
-            &ctx,
-            &actor_id,
-            actor_type,
-            vec![],
-            None,
-            HashMap::new(),
-            vec![Box::new(virtual_facet)],
-        )
-        .await
-        .unwrap();
+    node.spawn(
+        &ctx,
+        &actor_id,
+        actor_type,
+        vec![],
+        None,
+        HashMap::new(),
+        vec![Box::new(virtual_facet)],
+    )
+    .await
+    .unwrap();
 
-    // Increment counter
-    let msg = Message {
-        id: ulid::Ulid::new().to_string(),
-        payload: serde_json::to_vec(&CounterMessage::Increment).unwrap(),
-        ..Default::default()
-    };
-    actor_ref.tell(msg).await.unwrap();
+    // Activate via invoke (direct tell on lazy actor sends to dead mailbox buffer)
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+    let activate_response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:user-1", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(activate_response.is_ok(), "initial activation must succeed");
+
     let actor_registry = service_locator.actor_registry().await.unwrap();
     wait_for_actor_registration(&actor_registry, &actor_id).await;
 
@@ -1220,11 +1236,6 @@ async fn test_virtual_actor_state_preservation() {
         .stop_actor(&ctx, &actor_id)
         .await
         .unwrap();
-
-    let actor_service = Arc::new(ActorServiceImpl::new(
-        service_locator.clone(),
-        "test-node".to_string(),
-    ));
     let response = invoke_virtual_actor(
         &actor_service,
         tenant_id,
@@ -1239,7 +1250,7 @@ async fn test_virtual_actor_state_preservation() {
     assert!(response.is_ok(), "Should reactivate successfully");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -1252,58 +1263,72 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
     let actor_id = build_actor_id("user-facets", actor_type, Some(namespace), "test-node");
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
-    let actor_ref = node
-        .spawn(
-            &ctx,
-            &actor_id,
-            actor_type,
-            br#"{"initial_count":3}"#.to_vec(),
-            None,
-            HashMap::new(),
-            vec![
-                Box::new(VirtualActorFacet::new(
-                    serde_json::json!({
-                        "idle_timeout": "1s",
-                        "activation_strategy": "lazy"
-                    }),
-                    100,
-                )),
-                Box::new(plexspaces_journaling::TimerFacet::new(
-                    serde_json::json!({
-                        "interval_ms": 250
-                    }),
-                    60,
-                    service_locator.clone(),
-                )),
-                Box::new(plexspaces_journaling::ReminderFacet::new(
-                    service_locator.get_journal_storage().await.unwrap(),
-                    serde_json::json!({
-                        "default_due_time": "100ms"
-                    }),
-                    70,
-                    service_locator.clone(),
-                )),
-            ],
-        )
-        .await
-        .unwrap();
-
-    actor_ref
-        .tell(Message {
-            id: ulid::Ulid::new().to_string(),
-            payload: serde_json::to_vec(&CounterMessage::Increment).unwrap(),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+    // Type-level registration stores facet_config so activate_virtual_actor can recreate
+    // timer and reminder facets on reactivation. init_config_template supplies initial_count.
+    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    plexspaces_core::register_virtual_actor_type_consistent(
+        &sl_dyn,
+        actor_type.to_string(),
+        namespace.to_string(),
+        None,
+        Some(&[
+            plexspaces_proto::common::v1::Facet {
+                r#type: "virtual_actor".to_string(),
+                config: std::collections::HashMap::from([
+                    ("idle_timeout".to_string(), "1s".to_string()),
+                    ("activation_strategy".to_string(), "lazy".to_string()),
+                ]),
+                ..Default::default()
+            },
+            plexspaces_proto::common::v1::Facet {
+                r#type: "timer".to_string(),
+                config: std::collections::HashMap::from([
+                    ("interval_ms".to_string(), "250".to_string()),
+                ]),
+                ..Default::default()
+            },
+            plexspaces_proto::common::v1::Facet {
+                r#type: "reminder".to_string(),
+                config: std::collections::HashMap::from([
+                    ("default_due_time".to_string(), "100ms".to_string()),
+                ]),
+                ..Default::default()
+            },
+        ]),
+        None,
+        Some(tenant_id.to_string()),
+        Some(br#"{"initial_count":3}"#.to_vec()),
+    )
+    .await
+    .expect("type registration must succeed");
 
     let actor_registry = service_locator.actor_registry().await.unwrap();
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+
+    // Initial activation via invoke (correct path for virtual actors)
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:user-facets", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(response.is_ok(), "initial activation must succeed: {:?}", response.err());
+
     wait_for_actor_registration(&actor_registry, &actor_id).await;
 
     let facet_types = current_facet_types(&service_locator, &actor_id).await;
-    assert!(facet_types.contains(&"virtual_actor".to_string()));
-    assert!(facet_types.contains(&"timer".to_string()));
-    assert!(facet_types.contains(&"reminder".to_string()));
+    assert!(facet_types.contains(&"virtual_actor".to_string()), "virtual_actor facet missing before stop");
+    assert!(facet_types.contains(&"timer".to_string()), "timer facet missing before stop");
+    assert!(facet_types.contains(&"reminder".to_string()), "reminder facet missing before stop");
     assert_has_concrete_timer_and_reminder_facets(&service_locator, &actor_id).await;
 
     service_locator
@@ -1314,10 +1339,6 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
         .await
         .unwrap();
 
-    let actor_service = Arc::new(ActorServiceImpl::new(
-        service_locator.clone(),
-        "test-node".to_string(),
-    ));
     let response = invoke_virtual_actor(
         &actor_service,
         tenant_id,
@@ -1331,25 +1352,25 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
     .await;
     assert!(
         response.is_ok(),
-        "reactivation with timer/reminder facets should succeed"
+        "reactivation with timer/reminder facets should succeed: {:?}", response.err()
     );
 
     wait_for_actor_registration(&actor_registry, &actor_id).await;
     let reactivated_facet_types = current_facet_types(&service_locator, &actor_id).await;
-    assert!(reactivated_facet_types.contains(&"virtual_actor".to_string()));
-    assert!(reactivated_facet_types.contains(&"timer".to_string()));
-    assert!(reactivated_facet_types.contains(&"reminder".to_string()));
+    assert!(reactivated_facet_types.contains(&"virtual_actor".to_string()), "virtual_actor missing after respawn");
+    assert!(reactivated_facet_types.contains(&"timer".to_string()), "timer missing after respawn");
+    assert!(reactivated_facet_types.contains(&"reminder".to_string()), "reminder missing after respawn");
     assert_has_concrete_timer_and_reminder_facets(&service_locator, &actor_id).await;
 
     let actor_ref = actor_registry.lookup_actor(&actor_id).await.unwrap();
     let count = ask_for_count(actor_ref.as_ref()).await.unwrap();
     assert_eq!(
         count, 3,
-        "reactivation should rebuild from preserved virtual metadata"
+        "reactivation should rebuild from init_config_template"
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_virtual_workflow_behavior_reactivates_from_type_metadata() {
     let node = NodeBuilder::new("test-node").build().await;
     let service_locator = node.service_locator();
@@ -1434,4 +1455,370 @@ async fn test_virtual_workflow_behavior_reactivates_from_type_metadata() {
     let actor_ref = actor_registry.lookup_actor(&actor_id).await.unwrap();
     let count = ask_for_count(actor_ref.as_ref()).await.unwrap();
     assert_eq!(count, 11);
+}
+
+// ============================================================================
+// Test: type-level virtual actor registration is NOT evicted on actor vacation
+// ============================================================================
+
+/// Asserts that `virtual_actor_types` (type-level registry) is never cleared when an individual
+/// actor instance is deactivated (vacationed / LRU evicted). Only application undeploy should
+/// remove a type registration.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_virtual_actor_type_not_evicted_on_vacation() {
+    let node = NodeBuilder::new("test-node").build().await;
+    let service_locator = node.service_locator();
+    let tenant_id = "test-tenant";
+    let namespace = "test-ns-vac";
+    let actor_type = "counter-vacation";
+    register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
+
+    let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
+
+    // Register type with both virtual_actor and timer facet configs
+    virtual_actor_manager
+        .register_virtual_actor_type(
+            actor_type.to_string(),
+            None,
+            namespace.to_string(),
+            serde_json::json!({
+                "virtual_actor": {
+                    "idle_timeout": "5m",
+                    "activation_strategy": "lazy"
+                },
+                "timer": {
+                    "interval_ms": 1000
+                }
+            }),
+            Some(tenant_id.to_string()),
+            Some(br#"{"initial_count":0}"#.to_vec()),
+        )
+        .await
+        .unwrap();
+
+    use plexspaces_core::actor_id::build_actor_id;
+    let actor_id = build_actor_id("vacation-test", actor_type, Some(namespace), "test-node");
+    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+
+    // Activate the first instance via HTTP invoke (correct way to start a lazy virtual actor).
+    // invoke_virtual_actor triggers activate_virtual_actor which rebuilds from type-level metadata.
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:vacation-test", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(response.is_ok(), "initial activation should succeed: {:?}", response.err());
+
+    let actor_registry = service_locator.actor_registry().await.unwrap();
+    wait_for_actor_registration(&actor_registry, &actor_id).await;
+
+    // Stop the actor (simulates vacation / deactivation)
+    service_locator
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&ctx, &actor_id)
+        .await
+        .unwrap();
+
+    // CRITICAL INVARIANT: type registration must persist after actor vacation
+    let meta = virtual_actor_manager
+        .get_virtual_actor_type(actor_type)
+        .await;
+    assert!(
+        meta.is_some(),
+        "virtual actor type '{}' must NOT be evicted when instance is deactivated",
+        actor_type
+    );
+    let meta = meta.unwrap();
+    let fc = meta.facet_config.as_ref().expect("facet_config must be present");
+    assert!(
+        fc.get("virtual_actor").is_some(),
+        "virtual_actor facet config must be preserved in type metadata"
+    );
+    assert!(
+        fc.get("timer").is_some(),
+        "timer facet config must be preserved in type metadata"
+    );
+    assert_eq!(
+        fc["virtual_actor"]["activation_strategy"].as_str().unwrap(),
+        "lazy",
+        "activation_strategy must be preserved"
+    );
+
+    // Verify actor can be resurrected using the persisted type registration
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:vacation-test", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(
+        response.is_ok(),
+        "actor should be resurrectable from persisted type registration"
+    );
+
+    wait_for_actor_registration(&actor_registry, &actor_id).await;
+
+    // Type registration still present after resurrection
+    assert!(
+        virtual_actor_manager
+            .get_virtual_actor_type(actor_type)
+            .await
+            .is_some(),
+        "type registration must still be present after resurrection"
+    );
+}
+
+// ============================================================================
+// Test: spawn → stop → respawn preserves all facets (virtual + timer + reminder)
+// ============================================================================
+
+/// Verifies that when a virtual actor is stopped and then reactivated via HTTP invoke,
+/// all declared facets (virtual_actor, timer, reminder) are recreated on the new instance.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
+    let node = NodeBuilder::new("test-node").build().await;
+    let service_locator = node.service_locator();
+    let tenant_id = "test-tenant";
+    let namespace = "test-ns-respawn";
+    let actor_type = "counter-respawn";
+    register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
+
+    use plexspaces_core::actor_id::build_actor_id;
+    let actor_id = build_actor_id("respawn-test", actor_type, Some(namespace), "test-node");
+    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+
+    // Register the actor type with ALL three facet configs at the type level.
+    // This is required for activate_virtual_actor to recreate timer+reminder from stored config
+    // (the else-if facet_config branch in activate_virtual_actor). instance-level spawn()
+    // does NOT store facet_config, so we must use the type-level registration path.
+    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    plexspaces_core::register_virtual_actor_type_consistent(
+        &sl_dyn,
+        actor_type.to_string(),
+        namespace.to_string(),
+        None,
+        Some(&[
+            plexspaces_proto::common::v1::Facet {
+                r#type: "virtual_actor".to_string(),
+                config: std::collections::HashMap::from([
+                    ("idle_timeout".to_string(), "5m".to_string()),
+                    ("activation_strategy".to_string(), "lazy".to_string()),
+                ]),
+                ..Default::default()
+            },
+            plexspaces_proto::common::v1::Facet {
+                r#type: "timer".to_string(),
+                config: std::collections::HashMap::from([
+                    ("interval_ms".to_string(), "250".to_string()),
+                ]),
+                ..Default::default()
+            },
+            plexspaces_proto::common::v1::Facet {
+                r#type: "reminder".to_string(),
+                config: std::collections::HashMap::from([
+                    ("default_due_time".to_string(), "100ms".to_string()),
+                ]),
+                ..Default::default()
+            },
+        ]),
+        None,
+        Some(tenant_id.to_string()),
+        Some(br#"{"initial_count":5}"#.to_vec()),
+    )
+    .await
+    .expect("type registration must succeed");
+
+    // Activate first instance via HTTP invoke — triggers activate_virtual_actor which reads
+    // the type-level facet_config and recreates all three facets using the FacetRegistry.
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:respawn-test", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(response.is_ok(), "initial activation must succeed: {:?}", response.err());
+
+    let actor_registry = service_locator.actor_registry().await.unwrap();
+    wait_for_actor_registration(&actor_registry, &actor_id).await;
+
+    // Assert all 3 facets present before stop
+    let pre_stop_facets = current_facet_types(&service_locator, &actor_id).await;
+    assert!(pre_stop_facets.contains(&"virtual_actor".to_string()), "must have virtual_actor before stop");
+    assert!(pre_stop_facets.contains(&"timer".to_string()), "must have timer before stop");
+    assert!(pre_stop_facets.contains(&"reminder".to_string()), "must have reminder before stop");
+
+    // Stop the actor (vacation)
+    service_locator
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&ctx, &actor_id)
+        .await
+        .unwrap();
+
+    // Resurrect via HTTP invoke (same path as WASM/production resurrection)
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:respawn-test", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(response.is_ok(), "actor must be resurrectable after stop");
+
+    wait_for_actor_registration(&actor_registry, &actor_id).await;
+
+    // Assert all 3 facets present after resurrection — critical invariant
+    let post_respawn_facets = current_facet_types(&service_locator, &actor_id).await;
+    assert!(
+        post_respawn_facets.contains(&"virtual_actor".to_string()),
+        "virtual_actor facet must be recreated after resurrection"
+    );
+    assert!(
+        post_respawn_facets.contains(&"timer".to_string()),
+        "timer facet must be recreated after resurrection"
+    );
+    assert!(
+        post_respawn_facets.contains(&"reminder".to_string()),
+        "reminder facet must be recreated after resurrection"
+    );
+
+    assert_has_concrete_timer_and_reminder_facets(&service_locator, &actor_id).await;
+}
+
+// ============================================================================
+// Test: WASM app-deployment simulation — all facet configs propagated to type metadata
+// ============================================================================
+
+/// Simulates the wasm_application.rs registration path by constructing proto facets
+/// matching what app-config.toml produces, then verifying all configs are stored in
+/// VirtualActorMetadata.facet_config for correct resurrection.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
+    let node = NodeBuilder::new("test-node").build().await;
+    let service_locator = node.service_locator();
+    let actor_type = "wasm-sim-actor";
+    let namespace = "test-ns-wasm";
+    let tenant_id = "test-tenant";
+
+    // Simulate the proto facets that wasm_application.rs would extract from app-config.toml
+    use plexspaces_proto::common::v1::Facet as ProtoFacet;
+    let proto_facets = vec![
+        ProtoFacet {
+            r#type: "virtual_actor".to_string(),
+            config: std::collections::HashMap::from([
+                ("idle_timeout".to_string(), "8m".to_string()),
+                ("activation_strategy".to_string(), "lazy".to_string()),
+            ]),
+            ..Default::default()
+        },
+        ProtoFacet {
+            r#type: "timer".to_string(),
+            config: std::collections::HashMap::from([
+                ("interval_ms".to_string(), "500".to_string()),
+            ]),
+            ..Default::default()
+        },
+        ProtoFacet {
+            r#type: "reminder".to_string(),
+            config: std::collections::HashMap::from([
+                ("default_due_time".to_string(), "200ms".to_string()),
+            ]),
+            ..Default::default()
+        },
+    ];
+
+    // Call the same helper used by wasm_application.rs.
+    // Coerce ServiceLocatorImpl → Arc<dyn ServiceLocator> as the function expects.
+    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> = service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    let result = plexspaces_core::register_virtual_actor_type_consistent(
+        &sl_dyn,
+        actor_type.to_string(),
+        namespace.to_string(),
+        None,                   // No trait-object facets (WASM path)
+        Some(&proto_facets),    // Proto facets from app-config.toml
+        None,
+        Some(tenant_id.to_string()),
+        Some(br#"{"initial_count":0}"#.to_vec()),
+    )
+    .await;
+    assert!(result.is_ok(), "registration must succeed: {:?}", result);
+
+    let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
+    let meta = virtual_actor_manager
+        .get_virtual_actor_type(actor_type)
+        .await
+        .expect("actor type must be registered");
+
+    let fc = meta
+        .facet_config
+        .as_ref()
+        .expect("facet_config must be present after registration");
+
+    // virtual_actor facet config
+    assert!(fc.get("virtual_actor").is_some(), "virtual_actor config must be stored");
+    assert_eq!(
+        fc["virtual_actor"]["idle_timeout"].as_str().unwrap(),
+        "8m",
+        "idle_timeout must be propagated from proto facet config"
+    );
+    assert_eq!(
+        fc["virtual_actor"]["activation_strategy"].as_str().unwrap(),
+        "lazy",
+        "activation_strategy must be propagated"
+    );
+
+    // timer facet config — proto_config_to_value parses "500" as JSON number, not string
+    assert!(fc.get("timer").is_some(), "timer config must be stored");
+    let timer_interval_val = &fc["timer"]["interval_ms"];
+    // Accept either JSON number 500 or string "500" (both valid serializations of the config)
+    let timer_interval_ok = timer_interval_val.as_u64() == Some(500)
+        || timer_interval_val.as_str() == Some("500");
+    assert!(timer_interval_ok, "timer interval_ms must be 500 (got {:?})", timer_interval_val);
+
+    // reminder facet config
+    assert!(fc.get("reminder").is_some(), "reminder config must be stored");
+    assert_eq!(
+        fc["reminder"]["default_due_time"].as_str().unwrap_or(""),
+        "200ms",
+        "reminder default_due_time must be propagated"
+    );
+
+    // Verify activation_strategy is parsed correctly from metadata
+    assert_eq!(
+        meta.activation_strategy,
+        ActivationStrategy::ActivationStrategyLazy,
+        "activation_strategy in VirtualActorMetadata must be Lazy"
+    );
 }

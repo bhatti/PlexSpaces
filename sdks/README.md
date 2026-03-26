@@ -8,7 +8,22 @@ Language SDKs for building PlexSpaces actors with minimal boilerplate.
 |----------|--------|---------------|
 | **Python** | ✅ Available | [sdks/python/README.md](python/README.md) |
 | **TypeScript** | ✅ Available | [sdks/typescript/README.md](typescript/README.md) |
-| **Go** | ✅ Available | `sdks/go/plexspaces` (see [docs/sdk.md](../docs/sdk.md)) |
+| **Rust** | ✅ Available | [sdks/rust/plexspaces-sdk/README.md](rust/plexspaces-sdk/README.md) (workspace crate; native + annotations) |
+| **Go** | ✅ Available | [sdks/go/README.md](go/README.md) |
+
+## Proto code generation
+
+SDK typed models are generated from the same `proto/` tree as the Rust crates. From the repository root:
+
+- **`make proto`** — Rust + Python + TypeScript + Go
+- **`make proto-polyglot`** — Python, TypeScript, Go only
+- **`make proto-install-deps`** — one-time local plugins (Python venv, `ts-proto`, `protoc-gen-go`)
+
+Details: [docs/sdk.md](../docs/sdk.md) (sections *Proto generation and typed SDK models* and *Virtual actor type registration*).
+
+## Tests
+
+Repository root **`make test`** runs the full Cargo workspace **and** `go test ./...` (under `sdks/go`), **`npm test`** (under `sdks/typescript`), and **`pytest`** for `sdks/python` when a suitable Python environment is configured (`VENV_PATH` / system pytest). See [docs/testing.md](../docs/testing.md).
 
 ## Design Philosophy
 
@@ -48,14 +63,10 @@ See [Python SDK README](python/README.md) for full documentation.
 ```
 sdks/
 ├── README.md           # This file
-├── python/             # Python SDK
-│   ├── plexspaces/     # SDK package
-│   ├── plexspaces_cli/ # CLI tools
-│   ├── examples/       # Example actors
-│   ├── tests/          # Unit tests
-│   └── README.md       # Python SDK docs
-├── typescript/         # TypeScript SDK (inheritance-based)
-└── go/                 # Go SDK (WASM via TinyGo)
+├── python/             # Python SDK (pytest; generated protos under plexspaces/generated/)
+├── typescript/         # TypeScript SDK (npm test; generated protos under src/generated/proto/)
+├── rust/               # Rust SDK (cargo, workspace members plexspaces-sdk + macros)
+└── go/                 # Go SDK (go test; generated protos under plexspaces/proto/)
 ```
 
 ## Contributing

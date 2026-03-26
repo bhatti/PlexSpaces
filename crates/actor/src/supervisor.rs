@@ -949,8 +949,11 @@ impl Supervisor {
                     .await?;
             }
             SupervisionStrategy::Custom { name } => {
-                // TODO: Call custom strategy handler
-                todo!("Custom strategy: {}", name);
+                return Err(SupervisorError::InvalidStrategy(format!(
+                    "Custom supervision strategy '{}' is not registered; \
+                     register a handler before using Custom strategy",
+                    name
+                )));
             }
         }
 

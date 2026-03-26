@@ -399,10 +399,11 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 # Clone and build
 git clone https://github.com/plexobject/plexspaces.git
 cd plexspaces
+# Workspace crates + polyglot SDK builds; excludes embedded comparison crates in examples/ (Makefile: CARGO_EXCLUDE_EXAMPLES)
 make build
 
 # Run tests
-make test  # Includes unit tests and integration tests (see docs/testing.md)
+make test  # Same workspace scope as make build + Go / TypeScript / Python SDK tests (see docs/testing.md)
 
 # Run examples
 make test-examples

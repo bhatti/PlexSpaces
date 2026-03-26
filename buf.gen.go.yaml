@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+# Proto generation config for Go SDK.
+# Run via: make proto-go
+#
+# Generates typed Go structs from proto definitions into sdks/go/plexspaces/proto/.
+# Output is placed inside the existing sdks/go module (not a separate module) to avoid
+# go.mod complexity. Generated package import path:
+#   github.com/bhatti/plexspaces/gen/plexspaces/<service>/v1
+#
+# Generated files are committed (same convention as crates/proto/src/generated/).
+# Non-WASM helpers (e.g., HostError.ParseErrorDetail) may import from this package;
+# TinyGo WASM files must NOT import it (keep host.go free of proto imports).
+version: v2
+managed:
+  enabled: true
+  # Keep the original go_package for third-party modules so their packages use standard paths.
+  # Override go_package_prefix for plexspaces protos so generated files import each other using
+  # the SDK module path (github.com/plexobject/plexspaces/sdks/go/plexspaces/proto/...).
+  disable:
+    - module: buf.build/googleapis/googleapis
+      file_option: go_package
+    - module: buf.build/grpc-ecosystem/grpc-gateway
+      file_option: go_package
+    - module: buf.build/bufbuild/protovalidate
+      file_option: go_package
+  override:
+    - file_option: go_package_prefix
+      value: github.com/plexobject/plexspaces/sdks/go/plexspaces/proto
+plugins:
+  # protoc-gen-go local plugin: generates typed Go structs from proto definitions.
+  # Install: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+  - local: protoc-gen-go
+    out: sdks/go/plexspaces/proto
+    opt:
+      - paths=source_relative

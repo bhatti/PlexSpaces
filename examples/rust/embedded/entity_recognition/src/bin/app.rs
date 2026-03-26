@@ -21,7 +21,7 @@ use entity_recognition::{
     processor::{ProcessorBehavior, ProcessorRequest, ProcessorResponse},
 };
 use plexspaces_core::ActorRef;
-use plexspaces_mailbox::Message;
+use plexspaces_sdk::cast_message;
 use plexspaces_node::{NodeBuilder, ConfigBootstrap, CoordinationComputeTracker};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -185,7 +185,7 @@ async fn main() -> Result<()> {
         let load_request = LoaderRequest::LoadDocument {
             document_id: document_id.clone(),
         };
-        let load_msg = Message::new(serde_json::to_vec(&load_request)?);
+        let load_msg = cast_message(serde_json::to_value(&load_request)?);
         loader_ref.tell(load_msg).await?;
         info!("Sent document {} to loader", document_id);
         

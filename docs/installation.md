@@ -399,7 +399,8 @@ cd plexspaces
 # Install dependencies (if using buf)
 buf --version || (echo "Install buf: https://buf.build/docs/installation" && exit 1)
 
-# Generate proto files
+# Generate proto files (Rust + Python + TypeScript + Go; first run may need plugins)
+# make proto-install-deps   # once: venv + betterproto, ts-proto, protoc-gen-go
 make proto
 
 # Build release version (recommended)

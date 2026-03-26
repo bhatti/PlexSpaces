@@ -109,4 +109,13 @@ pub trait MessageSender: Send + Sync + Any {
     fn actor_id(&self) -> Option<String> {
         None
     }
+
+    /// Returns a reference to `self` as `dyn Any`.
+    ///
+    /// Enables checked downcast to concrete types (e.g., `ActorRef`) without a
+    /// registry lookup. Every concrete `MessageSender` implementation must return
+    /// `self` here. The `Any` supertrait bound guarantees this is safe.
+    ///
+    /// Prefer `actor_ref_from_sender` in the SDK rather than calling this directly.
+    fn as_any(&self) -> &dyn Any;
 }

@@ -22,6 +22,9 @@
 //! Comprehensive test suite for SQS-based channel with 95%+ coverage.
 //! Tests verify message sending, receiving, ACK/NACK, DLQ, and all edge cases.
 //!
+//! When LocalStack is not running, tests skip quickly using the same TCP endpoint
+//! probe and AWS local env setup as DynamoDB integration tests (`plexspaces_common::test_helpers`).
+//!
 //! ## Test Coverage
 //! - Message send/receive
 //! - ACK/NACK operations
@@ -35,62 +38,33 @@
 mod tests {
     use plexspaces_channel::{Channel, SQSChannel};
     use plexspaces_proto::channel::v1::{
-        ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
+        ChannelConfig, DeliveryGuarantee, OrderingGuarantee,
     };
     use plexspaces_proto::common::v1::Message;
     use std::sync::Arc;
     use std::time::Duration;
+    use plexspaces_common::test_helpers::{
+        setup_aws_local_env, sqs_simulator_available, get_sqs_endpoint,
+    };
     use tokio::time::sleep;
 
-    /// Check if SQS simulator (LocalStack) is available
-    /// Uses cached check from test_helpers for fast availability check
+    /// Same runtime pattern as DynamoDB integration tests: short TCP check to
+    /// [`get_sqs_endpoint`], cached process-wide in `plexspaces_common::test_helpers`.
     async fn check_sqs_available() -> bool {
-        #[cfg(feature = "test-helpers")]
-        {
-            plexspaces_common::test_helpers::sqs_simulator_available().await
-        }
-        #[cfg(not(feature = "test-helpers"))]
-        {
-            // Fallback: check LocalStack health endpoint directly
-            use std::time::Duration;
-            use tokio::time::timeout;
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_millis(500))
-                .build()
-            {
-                Ok(c) => c,
-                Err(_) => return false,
-            };
-            match timeout(
-                Duration::from_millis(500),
-                client
-                    .get("http://localhost:4566/_localstack/health")
-                    .send(),
-            )
-            .await
-            {
-                Ok(Ok(resp)) => resp.status().is_success(),
-                _ => false,
-            }
-        }
+        sqs_simulator_available().await
     }
 
-    /// Create SQS channel for testing
-    /// Uses SQS Local if available, otherwise requires AWS credentials
+    /// Create SQS channel for testing (LocalStack or custom endpoint from env).
     async fn create_channel(channel_name: &str) -> SQSChannel {
-        let endpoint_url = std::env::var("SQS_ENDPOINT_URL")
-            .or_else(|_| std::env::var("PLEXSPACES_SQS_ENDPOINT_URL"))
-            .ok()
-            .filter(|s| !s.is_empty());
+        setup_aws_local_env();
+        let endpoint = get_sqs_endpoint();
+        std::env::set_var("SQS_ENDPOINT_URL", &endpoint);
+
         let region = std::env::var("AWS_REGION")
             .or_else(|_| std::env::var("PLEXSPACES_AWS_REGION"))
             .unwrap_or_else(|_| "us-east-1".to_string());
 
-        // Set environment variables for SQS config (since proto not regenerated yet)
         std::env::set_var("AWS_REGION", &region);
-        if let Some(endpoint) = &endpoint_url {
-            std::env::set_var("SQS_ENDPOINT_URL", endpoint);
-        }
         std::env::set_var("PLEXSPACES_SQS_QUEUE_PREFIX", "plexspaces-test-");
 
         let config = ChannelConfig {
@@ -214,6 +188,8 @@ mod tests {
             );
             return;
         }
+        // Use short visibility timeout so redelivery check doesn't take 35s
+        std::env::set_var("PLEXSPACES_SQS_VISIBILITY_TIMEOUT", "5");
         let channel = create_channel("test-nack-requeue").await;
 
         // Send message
@@ -232,14 +208,15 @@ mod tests {
         // NACK with requeue
         channel.nack(&received[0].id, true).await.unwrap();
 
-        // Message should be redelivered after visibility timeout
-        sleep(Duration::from_secs(35)).await; // Wait for visibility timeout + buffer
+        // Message should be redelivered after visibility timeout (5s + 2s buffer)
+        sleep(Duration::from_secs(7)).await;
         let redelivered = channel.receive(1).await.unwrap();
         assert_eq!(redelivered.len(), 1);
         assert_eq!(redelivered[0].payload, b"test");
 
         // ACK to clean up
         channel.ack(&redelivered[0].id).await.unwrap();
+        std::env::remove_var("PLEXSPACES_SQS_VISIBILITY_TIMEOUT");
     }
 
     #[tokio::test]
@@ -251,6 +228,8 @@ mod tests {
             );
             return;
         }
+        // Use short visibility timeout so each NACK cycle completes in seconds not 35s
+        std::env::set_var("PLEXSPACES_SQS_VISIBILITY_TIMEOUT", "5");
         let channel = create_channel("test-nack-dlq").await;
 
         // Send message
@@ -267,7 +246,7 @@ mod tests {
             let received = channel.receive(1).await.unwrap();
             assert_eq!(received.len(), 1);
             channel.nack(&received[0].id, false).await.unwrap();
-            sleep(Duration::from_secs(35)).await; // Wait for visibility timeout
+            sleep(Duration::from_secs(7)).await; // Wait for visibility timeout (5s + 2s buffer)
         }
 
         // After max receive count, message should be in DLQ
@@ -276,6 +255,7 @@ mod tests {
         let received = channel.try_receive(1).await.unwrap();
         // Message should not be in main queue (in DLQ)
         assert_eq!(received.len(), 0);
+        std::env::remove_var("PLEXSPACES_SQS_VISIBILITY_TIMEOUT");
     }
 
     #[tokio::test]
@@ -287,6 +267,8 @@ mod tests {
             );
             return;
         }
+        // Use short visibility timeout so the test completes in seconds not 35s
+        std::env::set_var("PLEXSPACES_SQS_VISIBILITY_TIMEOUT", "5");
         let channel = create_channel("test-visibility").await;
 
         // Send message
@@ -307,13 +289,14 @@ mod tests {
         let received_immediate = channel.try_receive(1).await.unwrap();
         assert_eq!(received_immediate.len(), 0);
 
-        // After visibility timeout, message should be redelivered
-        sleep(Duration::from_secs(35)).await;
+        // After visibility timeout (5s + 2s buffer), message should be redelivered
+        sleep(Duration::from_secs(7)).await;
         let redelivered = channel.receive(1).await.unwrap();
         assert_eq!(redelivered.len(), 1);
 
         // ACK to clean up
         channel.ack(&redelivered[0].id).await.unwrap();
+        std::env::remove_var("PLEXSPACES_SQS_VISIBILITY_TIMEOUT");
     }
 
     #[tokio::test]

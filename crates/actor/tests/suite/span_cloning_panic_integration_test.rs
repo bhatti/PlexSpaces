@@ -17,6 +17,7 @@
 // - Let the actor process a message and complete
 // - Verify no panic occurs when the actor task completes
 
+use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::Actor;
 use plexspaces_behavior::GenServer;
@@ -101,14 +102,14 @@ async fn test_span_cloning_panic_reproduction() {
         .await
         .unwrap();
 
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         format!("test-actor-{}@test-node", Ulid::new()),
         Box::new(actor_impl),
         mailbox,
         "test-tenant".to_string(),
         "test-namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     // Start actor (this spawns a tokio task that inherits the tracing context)
     let handle = actor.start().await.expect("Actor should start");
@@ -198,14 +199,14 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
         .await
         .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             format!("test-actor-{}-{}@test-node", i, Ulid::new()),
             Box::new(actor_impl),
             mailbox,
             "test-tenant".to_string(),
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         let handle = actor.start().await.expect("Actor should start");
 

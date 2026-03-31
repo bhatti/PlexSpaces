@@ -729,20 +729,47 @@ fn proto_timestamp_to_system_time(timestamp: &prost_types::Timestamp) -> SystemT
 mod tests {
     use super::*;
     use crate::SqliteJournalStorage;
-    use plexspaces_core::ActorRef;
+    use plexspaces_core::{ActorRef, ActorService, ServiceLocator};
     use prost_types;
     use std::sync::Arc;
+    use plexspaces_services::ServiceLocatorImpl;
+
+    struct MockActorService;
+
+    #[async_trait::async_trait]
+    impl ActorService for MockActorService {
+        async fn spawn_actor(
+            &self,
+            _actor_id: &str,
+            _actor_type: &str,
+            _initial_state: Vec<u8>,
+        ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
+            Err("Not implemented for tests".into())
+        }
+
+        async fn send(
+            &self,
+            _actor_id: &str,
+            _message: Message,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok("message-id".to_string())
+        }
+    }
+
+    async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
+        let service_locator = Arc::new(ServiceLocatorImpl::new());
+        service_locator
+            .register_actor_service(Arc::new(MockActorService))
+            .await;
+        service_locator
+    }
 
     /// Creates a test facet with SQLite :memory: backend.
     /// Uses in-memory SQLite for fast, isolated test execution.
     async fn create_test_facet() -> ReminderFacet {
-        use plexspaces_core::ServiceLocator;
-        use plexspaces_services::ServiceLocatorImpl;
-        use std::sync::Arc;
-
         let storage: Arc<dyn JournalStorage> =
             Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-        let service_locator: Arc<dyn ServiceLocator> = Arc::new(ServiceLocatorImpl::new());
+        let service_locator = create_test_service_locator().await;
         let facet = ReminderFacet::new(storage, serde_json::json!({}), 75, service_locator);
 
         facet
@@ -773,7 +800,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reminder_facet_creation() {
-        let (facet, _actor_ref) = create_test_facet().await;
+        let facet = create_test_facet().await;
         assert_eq!(facet.facet_type(), "reminder");
     }
 
@@ -781,19 +808,18 @@ mod tests {
     async fn test_reminder_facet_with_storage() {
         let storage: Arc<dyn JournalStorage> =
             Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-        let facet = ReminderFacet::with_storage(storage);
+        let facet = ReminderFacet::with_storage(storage, create_test_service_locator().await);
         assert_eq!(facet.facet_type(), "reminder");
         assert_eq!(facet.get_priority(), REMINDER_FACET_DEFAULT_PRIORITY);
     }
 
     #[tokio::test]
     async fn test_reminder_facet_attach() {
-        let (mut facet, actor_ref) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
 
         let actor_id = facet.actor_id.read().await.clone();
         assert_eq!(actor_id, Some("actor-1".to_string()));
@@ -801,7 +827,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_reminder_before_attach_fails() {
-        let (facet, _actor_ref) = create_test_facet().await;
+        let facet = create_test_facet().await;
 
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 0);
         let result = facet.register_reminder(registration).await;
@@ -812,12 +838,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_reminder_after_attach() {
-        let (mut facet, actor_ref) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
 
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 0);
         let reminder_id = facet.register_reminder(registration).await.unwrap();
@@ -834,12 +859,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_duplicate_reminder_fails() {
-        let (mut facet, actor_ref) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref.clone()).await;
 
         let registration1 = create_test_reminder_registration("reminder-1", 1, 0, 0);
         facet.register_reminder(registration1).await.unwrap();
@@ -856,12 +880,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_unregister_reminder() {
-        let (mut facet, actor_ref) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
 
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 0);
         facet.register_reminder(registration).await.unwrap();
@@ -874,7 +897,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unregister_nonexistent_reminder_fails() {
-        let (mut facet, _actor_ref) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
@@ -890,12 +913,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_reminder_with_max_occurrences() {
-        let (mut facet, actor_ref) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
 
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 3);
         facet.register_reminder(registration).await.unwrap();
@@ -910,12 +932,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_reminders() {
-        let (mut facet, actor_ref) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
 
         let registration1 = create_test_reminder_registration("reminder-1", 1, 0, 0);
         let registration2 = create_test_reminder_registration("reminder-2", 2, 0, 0);
@@ -931,12 +952,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_reminder_zero_interval_fails() {
-        let (mut facet, actor_ref) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
 
         let mut registration = create_test_reminder_registration("reminder-1", 0, 0, 0);
         registration.interval = Some(prost_types::Duration {
@@ -954,12 +974,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_reminder_detach_stops_background_task() {
-        let (mut facet, actor_ref) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
 
         let registration = create_test_reminder_registration("reminder-1", 1, 0, 0);
         facet.register_reminder(registration).await.unwrap();

@@ -10,6 +10,7 @@ repository = "https://github.com/plexobject/plexspaces"
 [dependencies]
 plexspaces-common = { path = "../common" }
 plexspaces-core = { path = "../core" }
+plexspaces-proto = { path = "../proto" }
 async-trait = "0.1"
 tokio = { version = "1.41", features = ["sync", "time", "macros", "rt-multi-thread"] }
 thiserror = "2.0"

@@ -25,6 +25,7 @@
 //! - State transition edge cases
 //! - Resource cleanup edge cases
 
+use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::Actor;
 use plexspaces_core::{
@@ -103,14 +104,14 @@ async fn test_stop_idempotent_multiple_calls() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -139,14 +140,14 @@ async fn test_stop_when_already_stopped() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -175,14 +176,14 @@ async fn test_stop_when_not_started() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     // Stop without starting (should be safe)
     let _ = actor.stop().await;
@@ -203,14 +204,14 @@ async fn test_start_after_stop_fails() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -253,14 +254,14 @@ async fn test_init_error_properly_handled() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(FailingInitActor),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     // Start should fail
     let result = actor.start().await;
@@ -309,14 +310,14 @@ async fn test_terminate_error_doesnt_prevent_shutdown() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(FailingTerminateActor),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;

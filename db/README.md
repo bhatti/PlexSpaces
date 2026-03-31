@@ -25,4 +25,4 @@ run_migrations("/path/to/db.sqlite").await?;  // normalized to sqlite URL
 - **PostgreSQL**: URL must start with `postgres://` or `postgresql://`. Runs `db/migrations/postgres/`.
 - **SQLite**: Any other string is treated as SQLite (path or `:memory:`). Runs `db/migrations/sqlite/`.
 
-The service locator runs migrations once at startup for the configured database; individual crates (keyvalue, journaling, object-registry, etc.) then connect without running their own migrations for file/Postgres DBs. For `:memory:`, migrations are skipped at startup and each store that uses `:memory:` applies its own schema.
+The service locator runs migrations once at startup for the configured database; individual crates (keyvalue, journaling, object-registry, tuplespace, workflow, scheduler, channel, blob, locks) then connect without running their own migrations for file/Postgres DBs. For `:memory:`, startup migrations are skipped and the in-memory backends apply their own equivalent schema inline.

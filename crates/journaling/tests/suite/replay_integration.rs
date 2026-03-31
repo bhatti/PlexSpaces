@@ -41,19 +41,13 @@ mod sqlite_integration_tests {
         checkpoint_interval: u64,
         replay_on_activation: bool,
     ) -> DurabilityConfig {
-        #[cfg(feature = "sqlite-backend")]
-        let backend = JournalBackend::JournalBackendSqlite as i32;
-        #[cfg(feature = "postgres-backend")]
-        let backend = JournalBackend::JournalBackendPostgres as i32;
 
         DurabilityConfig {
-            backend,
             checkpoint_interval,
             checkpoint_timeout: None,
             replay_on_activation,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         }
     }
@@ -61,7 +55,6 @@ mod sqlite_integration_tests {
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> Value {
         let mut value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,

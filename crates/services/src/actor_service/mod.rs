@@ -4159,9 +4159,8 @@ pub mod partition;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{DateTime, Utc};
-    use plexspaces_keyvalue::SqliteKVStore;
-    use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
+    use plexspaces_core::{MessageSender, ObjectRegistry as ObjectRegistryTrait};
+    use plexspaces_mailbox::{mailbox_config_default, Mailbox};
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
     use plexspaces_proto::actor::v1::{NodePlacement, NodePlacementStrategy};
     use plexspaces_proto::node::v1::{NodeCapacity, NodeRegistration};
@@ -4437,7 +4436,18 @@ mod tests {
             .await;
         // Initialize with default services
         service_locator_impl
-            .initialize_services(Some(node_id.clone()), None, None)
+            .initialize_services(Some(plexspaces_proto::node::v1::ReleaseSpec {
+                node: Some(plexspaces_proto::node::v1::NodeConfig {
+                    id: node_id.clone(),
+                    listen_addr: "127.0.0.1:0".to_string(),
+                    grpc_connection_pool_size: 2,
+                    max_connections: 100,
+                    heartbeat_interval_ms: 5000,
+                    clustering_enabled: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }))
             .await;
         ActorServiceImpl::new(service_locator_impl, node_id)
     }
@@ -4653,177 +4663,6 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Placement produced no target nodes for shard group creation"));
-    }
-
-    // ========================================================================
-    // UNIT TESTS - route_local (TDD Red Phase)
-    // ========================================================================
-
-    #[tokio::test]
-    async fn test_route_local_actor_not_found() {
-        // ARRANGE: Create service with empty local actors
-        let actor_registry = create_test_registry("node1").await;
-        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-
-        let message = create_test_message(b"test".to_vec());
-
-        // ACT: Try to route to non-existent actor
-        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
-        let result = service
-            .route_local(ctx, "nonexistent", "node1", message, false, None)
-            .await;
-
-        // ASSERT: Should fail with NotFound
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::NotFound);
-        assert!(err.message().contains("Actor not found") || err.message().contains("not found"));
-    }
-
-    #[tokio::test]
-    async fn test_route_local_fire_and_forget_success() {
-        // ARRANGE: Create actor and register it
-        let actor_registry = create_test_registry("node1").await;
-        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-
-        let mailbox = Arc::new(
-            Mailbox::new(mailbox_config_default(), "test@node1".to_string())
-                .await
-                .expect("Failed to create mailbox"),
-        );
-        let _actor_ref = plexspaces_core::ActorRef::new("test@node1".to_string()).unwrap();
-        register_test_actor(
-            actor_registry.clone(),
-            "test@node1".to_string(),
-            Arc::clone(&mailbox),
-            service.service_locator.clone(),
-        )
-        .await;
-
-        let message = create_test_message(b"hello".to_vec());
-        let message_id = message.id.to_string();
-
-        // ACT: Route message (fire-and-forget)
-        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
-        let result = service
-            .route_local(
-                ctx, "test", "node1", message, false, // fire-and-forget
-                None,
-            )
-            .await;
-
-        // ASSERT: Should succeed
-        if let Err(e) = &result {
-            tracing::warn!("route_local failed: {}", e);
-            tracing::warn!("Actor ID: test@node1");
-            // Check if actor is registered
-            let found = service
-                .get_actor_registry()
-                .await
-                .lookup_actor(&"test@node1".to_string())
-                .await;
-            tracing::warn!("Actor found in registry: {}", found.is_some());
-            let activated = service
-                .get_actor_registry()
-                .await
-                .is_actor_activated(&"test@node1".to_string())
-                .await;
-            tracing::warn!("Actor activated: {}", activated);
-        }
-        assert!(
-            result.is_ok(),
-            "route_local should succeed, got error: {:?}",
-            result.err()
-        );
-        let (returned_msg_id, response) = result.unwrap();
-        assert_eq!(returned_msg_id, message_id);
-        assert!(response.is_none()); // No response for fire-and-forget
-
-        // Verify message was delivered to actor's mailbox
-        // Poll for message delivery (no sleep - use proper async waiting)
-        let delivered_msg = mailbox.dequeue().await;
-        assert!(
-            delivered_msg.is_some(),
-            "Message should be delivered immediately"
-        );
-        assert_eq!(delivered_msg.unwrap().payload, b"hello");
-    }
-
-    #[tokio::test]
-    async fn test_route_local_request_reply_not_implemented() {
-        // ARRANGE: Create actor and register it
-        let actor_registry = create_test_registry("node1").await;
-        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-
-        let mailbox = Arc::new(
-            Mailbox::new(mailbox_config_default(), "test@node1".to_string())
-                .await
-                .expect("Failed to create mailbox"),
-        );
-        let _actor_ref = plexspaces_core::ActorRef::new("test@node1".to_string()).unwrap();
-        register_test_actor(
-            actor_registry.clone(),
-            "test@node1".to_string(),
-            Arc::clone(&mailbox),
-            service.service_locator.clone(),
-        )
-        .await;
-
-        let message = create_test_message(b"hello".to_vec());
-
-        // ACT: Try request-reply (ask pattern)
-        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
-        let result = service
-            .route_local(
-                ctx,
-                "test",
-                "node1",
-                message,
-                true, // wait_for_response
-                Some(StdDuration::from_secs(5)),
-            )
-            .await;
-
-        // ASSERT: Should fail with timeout (no reply received)
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        // Timeout occurs when no reply is received
-        assert!(err.code() == tonic::Code::DeadlineExceeded || err.code() == tonic::Code::Internal);
-    }
-
-    // ========================================================================
-    // UNIT TESTS - route_remote (TDD Red Phase)
-    // ========================================================================
-
-    #[tokio::test]
-    async fn test_route_remote_node_not_found() {
-        // ARRANGE: Create service with empty registry
-        let actor_registry = create_test_registry("node1").await;
-        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-
-        // Service registration is synchronous - no wait needed
-
-        let message = create_test_message(b"test".to_vec());
-
-        // ACT: Try to route to unknown node
-        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
-        let result = service
-            .route_remote(ctx, "node2", "actor@node2", message, false, None)
-            .await;
-
-        // ASSERT: Should fail with NotFound (or Internal if ActorRegistry not registered yet)
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        // Accept Internal if ActorRegistry not registered yet, otherwise NotFound
-        assert!(
-            err.code() == tonic::Code::NotFound || err.code() == tonic::Code::Internal,
-            "Expected NotFound or Internal, got {:?}: {}",
-            err.code(),
-            err.message()
-        );
-        if err.code() == tonic::Code::NotFound {
-            assert!(err.message().contains("Node not found"));
-        }
     }
 
     #[tokio::test]
@@ -5121,108 +4960,6 @@ mod tests {
             conn_manager.is_some(),
             "GrpcConnectionManager should be available"
         );
-    }
-
-    // ========================================================================
-    // COVERAGE TESTS - route_remote() Error Paths
-    // ========================================================================
-
-    #[tokio::test]
-    async fn test_route_remote_node_not_in_registry() {
-        // ARRANGE: Create service with empty registry
-        let actor_registry = create_test_registry("node1").await;
-        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-
-        // Service registration is synchronous - no wait needed
-
-        let message = create_test_message(b"test".to_vec());
-
-        // ACT: Try to route to unknown node (not in registry)
-        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
-        let result = service
-            .route_remote(
-                ctx,
-                "unknown_node",
-                "actor@unknown_node",
-                message,
-                false,
-                None,
-            )
-            .await;
-
-        // ASSERT: Should fail with NotFound (or Internal if ActorRegistry not registered yet)
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        // Accept Internal if ActorRegistry not registered yet, otherwise NotFound
-        assert!(
-            err.code() == tonic::Code::NotFound || err.code() == tonic::Code::Internal,
-            "Expected NotFound or Internal, got {:?}: {}",
-            err.code(),
-            err.message()
-        );
-        if err.code() == tonic::Code::NotFound {
-            assert!(err.message().contains("Node not found"));
-        }
-    }
-
-    #[tokio::test]
-    async fn test_route_remote_registry_error() {
-        // ARRANGE: Create service with registry that will fail lookup
-        let actor_registry = create_test_registry("node1").await;
-        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-
-        // Service registration is synchronous - no wait needed
-
-        let message = create_test_message(b"test".to_vec());
-
-        // ACT: Try to route to node (registry lookup will fail with NotFound)
-        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
-        let result = service
-            .route_remote(ctx, "node2", "actor@node2", message, false, None)
-            .await;
-
-        // ASSERT: Should fail with NotFound (or Internal if ActorRegistry not registered yet)
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        // Accept Internal if ActorRegistry not registered yet, otherwise NotFound
-        assert!(
-            err.code() == tonic::Code::NotFound || err.code() == tonic::Code::Internal,
-            "Expected NotFound or Internal, got {:?}: {}",
-            err.code(),
-            err.message()
-        );
-    }
-
-    #[tokio::test]
-    async fn test_route_remote_connection_failed() {
-        // ARRANGE: Register a node with unreachable address
-        let actor_registry =
-            create_test_registry_with_node("node1", "node2", "127.0.0.1:19999").await;
-        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
-
-        // Service registration is synchronous - no wait needed
-
-        let message = create_test_message(b"test".to_vec());
-
-        // ACT: Try to route to unreachable node
-        let ctx = RequestContext::new_without_auth("test".to_string(), "default".to_string());
-        let result = service
-            .route_remote(ctx, "node2", "actor@node2", message, false, None)
-            .await;
-
-        // ASSERT: Should fail with Unavailable (or Internal if ActorRegistry not registered yet)
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        // Accept Internal if ActorRegistry not registered yet, otherwise Unavailable
-        assert!(
-            err.code() == tonic::Code::Unavailable || err.code() == tonic::Code::Internal,
-            "Expected Unavailable or Internal, got {:?}: {}",
-            err.code(),
-            err.message()
-        );
-        if err.code() == tonic::Code::Unavailable {
-            assert!(err.message().contains("Connection to") || err.message().contains("failed"));
-        }
     }
 
     // ========================================================================

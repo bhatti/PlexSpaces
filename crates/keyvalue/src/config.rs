@@ -19,61 +19,41 @@
 //! Configuration support for KeyValue store backends.
 //!
 //! ## Purpose
-//! Provides environment-based configuration for selecting and configuring
-//! different KeyValue store backends (InMemory, SQLite, PostgreSQL, Redis).
+//! Provides proto-first configuration helpers for selecting and configuring
+//! different KeyValue store backends from `plexspaces.storage.v1` config types.
 //!
-//! ## Environment Variables
-//!
-//! ### Backend Selection
-//! - `PLEXSPACES_KV_BACKEND`: Backend type (default: "in-memory")
-//!   - "in-memory" | "memory" → InMemoryKVStore
-//!   - "sqlite" → SqliteKVStore
-//!   - "postgres" | "postgresql" → PostgreSQLKVStore
-//!   - "redis" → RedisKVStore
-//!
-//! ### SQLite Configuration
-//! - `PLEXSPACES_KV_SQLITE_PATH`: Database file path (default: ":memory:")
-//!
-//! ### PostgreSQL Configuration
-//! - `PLEXSPACES_KV_POSTGRES_URL`: Connection string
-//!   - Format: `postgres://user:password@host:port/database`
-//! - `PLEXSPACES_KV_POSTGRES_POOL_SIZE`: Connection pool size (default: 10)
-//!
-//! ### Redis Configuration
-//! - `PLEXSPACES_KV_REDIS_URL`: Redis server URL (default: "redis://localhost:6379")
-//! - `PLEXSPACES_KV_REDIS_NAMESPACE`: Key prefix for isolation (default: "plexspaces:")
+//! Runtime env var binding happens in `plexspaces_common::config_manager`; this module
+//! only consumes resolved `SharedDbConfig` / `StorageProviderConfig` values.
 //!
 //! ## Examples
 //!
-//! ### In-Memory (Default)
+//! ### Shared SQLite
 //! ```bash
-//! # No environment variables needed
-//! cargo run
-//! ```
-//!
-//! ### SQLite
-//! ```bash
-//! export PLEXSPACES_KV_BACKEND=sqlite
-//! export PLEXSPACES_KV_SQLITE_PATH=/tmp/plexspaces.db
-//! cargo run
+//! runtime:
+//!   db:
+//!     connection_string: sqlite:///tmp/plexspaces.db
 //! ```
 //!
 //! ### PostgreSQL
 //! ```bash
-//! export PLEXSPACES_KV_BACKEND=postgres
-//! export PLEXSPACES_KV_POSTGRES_URL=postgres://user:pass@localhost/plexspaces
-//! cargo run
+//! runtime:
+//!   db:
+//!     connection_string: postgres://user:pass@localhost/plexspaces
 //! ```
 //!
 //! ### Redis
 //! ```bash
-//! export PLEXSPACES_KV_BACKEND=redis
-//! export PLEXSPACES_KV_REDIS_URL=redis://localhost:6379
-//! export PLEXSPACES_KV_REDIS_NAMESPACE=myapp:
-//! cargo run
+//! provider: REDIS
+//! redis:
+//!   url: redis://localhost:6379
+//!   key_prefix: myapp:
 //! ```
 
 use crate::{KVError, KVResult, KeyValueStore};
+use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
+use plexspaces_proto::storage::v1::{
+    storage_provider_config, SharedDbConfig, StorageProvider, StorageProviderConfig,
+};
 use std::sync::Arc;
 
 /// Backend type configuration.
@@ -143,109 +123,6 @@ impl Default for KVConfig {
 }
 
 impl KVConfig {
-    /// Create configuration from environment variables.
-    ///
-    /// ## Environment Variables
-    /// See module documentation for complete list.
-    ///
-    /// ## Examples
-    /// ```rust
-    /// use plexspaces_keyvalue::KVConfig;
-    ///
-    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let config = KVConfig::from_env()?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn from_env() -> KVResult<Self> {
-        // Check if AWS should be used as default
-        #[cfg(feature = "ddb-backend")]
-        let default_backend = if plexspaces_common::AWSConfig::should_use_as_default() {
-            "dynamodb"
-        } else {
-            "in-memory"
-        };
-        #[cfg(not(feature = "ddb-backend"))]
-        let default_backend = "in-memory";
-
-        let backend_str = std::env::var("PLEXSPACES_KV_BACKEND")
-            .unwrap_or_else(|_| default_backend.to_string())
-            .to_lowercase();
-
-        let backend = match backend_str.as_str() {
-            "in-memory" | "memory" => BackendType::InMemory,
-
-            "sqlite" => {
-                let path = std::env::var("PLEXSPACES_KV_SQLITE_PATH")
-                    .unwrap_or_else(|_| ":memory:".to_string());
-                BackendType::Sqlite { path }
-            }
-
-            "postgres" | "postgresql" => {
-                let connection_string =
-                    std::env::var("PLEXSPACES_KV_POSTGRES_URL").map_err(|_| {
-                        KVError::ConfigError("PLEXSPACES_KV_POSTGRES_URL not set".to_string())
-                    })?;
-                let pool_size = std::env::var("PLEXSPACES_KV_POSTGRES_POOL_SIZE")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(10);
-                BackendType::PostgreSQL {
-                    connection_string,
-                    pool_size,
-                }
-            }
-
-            "redis" => {
-                let url = std::env::var("PLEXSPACES_KV_REDIS_URL")
-                    .unwrap_or_else(|_| "redis://localhost:6379".to_string());
-                let namespace = std::env::var("PLEXSPACES_KV_REDIS_NAMESPACE")
-                    .unwrap_or_else(|_| "plexspaces:".to_string());
-                BackendType::Redis { url, namespace }
-            }
-
-            #[cfg(feature = "ddb-backend")]
-            "dynamodb" | "ddb" => {
-                use plexspaces_common::DynamoDBConfig;
-                let ddb_config = DynamoDBConfig::from_env();
-                BackendType::DynamoDB {
-                    region: ddb_config.region,
-                    table_prefix: ddb_config.table_prefix,
-                    endpoint_url: ddb_config.endpoint_url,
-                }
-            }
-
-            #[cfg(feature = "blob-backend")]
-            "blob" => {
-                // Create blob keyvalue store from environment variables
-                // Uses object_store directly - no blob service or SQL dependency
-                use crate::blob::BlobKVConfig;
-                BackendType::BlobFromEnv {
-                    config: BlobKVConfig::from_env(),
-                }
-            }
-
-            other => {
-                let mut valid_options = vec!["in-memory", "sqlite", "postgres", "redis"];
-                #[cfg(feature = "ddb-backend")]
-                {
-                    valid_options.push("dynamodb");
-                }
-                #[cfg(feature = "blob-backend")]
-                {
-                    valid_options.push("blob");
-                }
-                return Err(KVError::ConfigError(format!(
-                    "Unknown backend type: {}. Valid options: {}",
-                    other,
-                    valid_options.join(", ")
-                )));
-            }
-        };
-
-        Ok(Self { backend })
-    }
-
     /// Create configuration with explicit backend.
     ///
     /// ## Examples
@@ -261,36 +138,128 @@ impl KVConfig {
     }
 }
 
-/// Create a KeyValue store from environment configuration.
-///
-/// ## Examples
-/// ```rust
-/// use plexspaces_keyvalue::create_keyvalue_from_env;
-///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let kv = create_keyvalue_from_env().await?;
-/// kv.put("key", b"value".to_vec()).await?;
-/// # Ok(())
-/// # }
-/// ```
-pub async fn create_keyvalue_from_env() -> KVResult<Arc<dyn KeyValueStore>> {
-    let config = KVConfig::from_env()?;
-    create_keyvalue_from_config(config).await
+fn kv_config_from_shared_db(config: &SharedDbConfig) -> KVResult<KVConfig> {
+    match resolve_shared_db_backend(config).map_err(KVError::ConfigError)? {
+        SharedDbBackend::Sqlite { database_path, .. } => Ok(KVConfig::new(BackendType::Sqlite {
+            path: database_path,
+        })),
+        SharedDbBackend::Postgres { connection_string } => {
+            let pool_size = if config.pool_size == 0 {
+                10
+            } else {
+                config.pool_size
+            };
+            Ok(KVConfig::new(BackendType::PostgreSQL {
+                connection_string,
+                pool_size,
+            }))
+        }
+    }
 }
 
-/// Create both rich and common KeyValue store trait objects from environment configuration.
-///
-/// Returns a tuple of:
-/// - `Arc<dyn KeyValueStore>` (rich trait for ProcessGroupRegistry and internal services)
-/// - `Arc<dyn plexspaces_common::KeyValueStore>` (common trait for WASM actors via ServiceLocator)
-///
-/// Each backend type implements both traits, so both Arc references point to the same underlying store.
-pub async fn create_keyvalue_stores_from_env() -> KVResult<(
+fn kv_config_from_storage_provider(
+    provider_config: &StorageProviderConfig,
+    shared_db: Option<&SharedDbConfig>,
+) -> KVResult<KVConfig> {
+    match StorageProvider::try_from(provider_config.provider).unwrap_or(StorageProvider::StorageProviderUnspecified) {
+        StorageProvider::StorageProviderSqlite => {
+            let sqlite = match provider_config.config.as_ref() {
+                Some(storage_provider_config::Config::Sqlite(sqlite)) => sqlite,
+                Some(storage_provider_config::Config::Postgres(postgres)) => {
+                    return kv_config_from_shared_db(postgres);
+                }
+                _ => {
+                    return Err(KVError::ConfigError(
+                        "sqlite keyvalue provider requires sqlite config".to_string(),
+                    ))
+                }
+            };
+            Ok(KVConfig::new(BackendType::Sqlite {
+                path: sqlite.database_path.clone(),
+            }))
+        }
+        StorageProvider::StorageProviderPostgres => {
+            let postgres = match provider_config.config.as_ref() {
+                Some(storage_provider_config::Config::Postgres(postgres)) => postgres,
+                _ => {
+                    return Err(KVError::ConfigError(
+                        "postgres keyvalue provider requires postgres config".to_string(),
+                    ))
+                }
+            };
+            kv_config_from_shared_db(postgres)
+        }
+        StorageProvider::StorageProviderRedis => {
+            let redis = match provider_config.config.as_ref() {
+                Some(storage_provider_config::Config::Redis(redis)) => redis,
+                _ => {
+                    return Err(KVError::ConfigError(
+                        "redis keyvalue provider requires redis config".to_string(),
+                    ))
+                }
+            };
+            Ok(KVConfig::new(BackendType::Redis {
+                url: redis.url.clone(),
+                namespace: if redis.key_prefix.is_empty() {
+                    "plexspaces:".to_string()
+                } else {
+                    redis.key_prefix.clone()
+                },
+            }))
+        }
+        #[cfg(feature = "ddb-backend")]
+        StorageProvider::StorageProviderDynamodb => {
+            let dynamodb = match provider_config.config.as_ref() {
+                Some(storage_provider_config::Config::Dynamodb(config)) => config,
+                _ => {
+                    return Err(KVError::ConfigError(
+                        "dynamodb keyvalue provider requires dynamodb config".to_string(),
+                    ))
+                }
+            };
+            Ok(KVConfig::new(BackendType::DynamoDB {
+                region: dynamodb.region.clone(),
+                table_prefix: dynamodb.table_prefix.clone(),
+                endpoint_url: (!dynamodb.endpoint_url.is_empty())
+                    .then(|| dynamodb.endpoint_url.clone()),
+            }))
+        }
+        StorageProvider::StorageProviderDynamodb => Err(KVError::ConfigError(
+            "dynamodb keyvalue provider requires 'ddb-backend' feature".to_string(),
+        )),
+        StorageProvider::StorageProviderUnspecified => shared_db
+            .ok_or_else(|| {
+                KVError::ConfigError(
+                    "keyvalue storage requires shared db when provider is unspecified".to_string(),
+                )
+            })
+            .and_then(kv_config_from_shared_db),
+    }
+}
+
+/// Create both rich and common KeyValue store trait objects from shared relational DB config.
+pub async fn create_keyvalue_stores_from_shared_db(
+    config: &SharedDbConfig,
+) -> KVResult<(
     Arc<dyn KeyValueStore>,
     Arc<dyn plexspaces_common::KeyValueStore>,
 )> {
-    let config = KVConfig::from_env()?;
-    create_keyvalue_stores_from_config(config).await
+    create_keyvalue_stores_from_config(kv_config_from_shared_db(config)?).await
+}
+
+/// Create both rich and common KeyValue store trait objects from proto storage config.
+pub async fn create_keyvalue_stores_from_storage_config(
+    provider_config: &StorageProviderConfig,
+    shared_db: Option<&SharedDbConfig>,
+) -> KVResult<(
+    Arc<dyn KeyValueStore>,
+    Arc<dyn plexspaces_common::KeyValueStore>,
+)> {
+    create_keyvalue_stores_from_config(kv_config_from_storage_provider(
+        provider_config,
+        shared_db,
+    )?)
+    .await
 }
 
 /// Create both rich and common KeyValue store trait objects from explicit configuration.
@@ -508,7 +477,7 @@ pub async fn create_keyvalue_from_config(config: KVConfig) -> KVResult<Arc<dyn K
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
+    use plexspaces_proto::storage::v1::SharedDbConfig;
 
     #[test]
     fn test_default_config() {
@@ -519,108 +488,6 @@ mod tests {
             BackendType::InMemory => {}
             _ => panic!("Default should be InMemory"),
         }
-    }
-
-    #[test]
-    #[serial]
-    fn test_config_from_env_default() {
-        // Use unique test to avoid env var conflicts
-        std::env::remove_var("PLEXSPACES_KV_BACKEND");
-
-        let config = KVConfig::from_env().unwrap();
-        // BackendType doesn't implement PartialEq, verify with pattern matching
-        match config.backend {
-            BackendType::InMemory => {}
-            _ => panic!("Default should be InMemory"),
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn test_config_from_env_sqlite() {
-        // Set specific vars for this test
-        std::env::set_var("PLEXSPACES_KV_BACKEND", "sqlite");
-        std::env::set_var("PLEXSPACES_KV_SQLITE_PATH", "/tmp/test.db");
-
-        let config = KVConfig::from_env().unwrap();
-        // BackendType doesn't implement PartialEq, verify with pattern matching
-        match config.backend {
-            BackendType::Sqlite { path } => {
-                assert_eq!(path, "/tmp/test.db".to_string());
-            }
-            _ => panic!("Expected Sqlite backend"),
-        }
-
-        // Cleanup
-        std::env::remove_var("PLEXSPACES_KV_BACKEND");
-        std::env::remove_var("PLEXSPACES_KV_SQLITE_PATH");
-    }
-
-    #[test]
-    #[serial]
-    fn test_config_from_env_postgres() {
-        std::env::set_var("PLEXSPACES_KV_BACKEND", "postgres");
-        std::env::set_var("PLEXSPACES_KV_POSTGRES_URL", "postgres://localhost/test");
-        std::env::set_var("PLEXSPACES_KV_POSTGRES_POOL_SIZE", "5");
-
-        let config = KVConfig::from_env().unwrap();
-        // BackendType doesn't implement PartialEq, verify with pattern matching
-        match config.backend {
-            BackendType::PostgreSQL {
-                connection_string,
-                pool_size,
-            } => {
-                assert_eq!(connection_string, "postgres://localhost/test".to_string());
-                assert_eq!(pool_size, 5);
-            }
-            _ => panic!("Expected PostgreSQL backend"),
-        }
-
-        std::env::remove_var("PLEXSPACES_KV_BACKEND");
-        std::env::remove_var("PLEXSPACES_KV_POSTGRES_URL");
-        std::env::remove_var("PLEXSPACES_KV_POSTGRES_POOL_SIZE");
-    }
-
-    #[test]
-    #[serial]
-    fn test_config_from_env_redis() {
-        std::env::set_var("PLEXSPACES_KV_BACKEND", "redis");
-        std::env::set_var("PLEXSPACES_KV_REDIS_URL", "redis://localhost:6379");
-        std::env::set_var("PLEXSPACES_KV_REDIS_NAMESPACE", "test:");
-
-        let config = KVConfig::from_env().unwrap();
-        // BackendType doesn't implement PartialEq, verify with pattern matching
-        match config.backend {
-            BackendType::Redis { url, namespace } => {
-                assert_eq!(url, "redis://localhost:6379".to_string());
-                assert_eq!(namespace, "test:".to_string());
-            }
-            _ => panic!("Expected Redis backend"),
-        }
-
-        std::env::remove_var("PLEXSPACES_KV_BACKEND");
-        std::env::remove_var("PLEXSPACES_KV_REDIS_URL");
-        std::env::remove_var("PLEXSPACES_KV_REDIS_NAMESPACE");
-    }
-
-    #[test]
-    #[serial]
-    fn test_config_from_env_invalid_backend() {
-        std::env::set_var("PLEXSPACES_KV_BACKEND", "invalid");
-
-        let result = KVConfig::from_env();
-        assert!(result.is_err());
-        // from_env returns KVResult<KVConfig>, which is Result<KVConfig, KVError>
-        // KVError implements Display via thiserror
-        match result {
-            Err(e) => {
-                let error_msg = format!("{}", e);
-                assert!(error_msg.contains("Unknown backend type"));
-            }
-            Ok(_) => panic!("Expected error for invalid backend"),
-        }
-
-        std::env::remove_var("PLEXSPACES_KV_BACKEND");
     }
 
     #[test]
@@ -652,11 +519,13 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial]
-    async fn test_create_keyvalue_from_env_default() {
-        std::env::remove_var("PLEXSPACES_KV_BACKEND");
+    async fn test_create_keyvalue_from_shared_db_sqlite() {
+        let shared_db = SharedDbConfig {
+            connection_string: "sqlite::memory:".to_string(),
+            ..Default::default()
+        };
 
-        let kv = create_keyvalue_from_env().await.unwrap();
+        let (kv, _) = create_keyvalue_stores_from_shared_db(&shared_db).await.unwrap();
         let ctx = plexspaces_common::RequestContext::new_without_auth(
             "test-tenant".to_string(),
             "default".to_string(),

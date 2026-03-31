@@ -132,8 +132,8 @@ impl plexspaces_core::Actor for TestActor {
 }
 
 async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None).await;
     Supervisor::new(
         "test-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -334,8 +334,8 @@ async fn test_startup_rollback_on_failure() {
 #[tokio::test]
 async fn test_top_down_shutdown_nested_supervisors() {
     // Create root supervisor
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None).await;
     let (root_supervisor, _root_event_rx) = Supervisor::new(
         "root".to_string(),
         SupervisionStrategy::OneForOne {

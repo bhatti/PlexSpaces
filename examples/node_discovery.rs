@@ -45,18 +45,6 @@
 //!
 //! ## Running This Example
 //! ```bash
-//! # Run with default configuration (in-memory KeyValueStore)
-//! cargo run --example node_discovery
-//!
-//! # Run with SQLite backend (for multi-process testing)
-//! PLEXSPACES_KV_BACKEND=sqlite \
-//! PLEXSPACES_KV_SQLITE_PATH=/tmp/plexspaces_registry.db \
-//! cargo run --example node_discovery
-//!
-//! # Run with Redis backend (for distributed cluster)
-//! PLEXSPACES_KV_BACKEND=redis \
-//! PLEXSPACES_KV_REDIS_URL=redis://localhost:6379 \
-//! PLEXSPACES_KV_REDIS_NAMESPACE=plexspaces: \
 //! cargo run --example node_discovery
 //! ```
 //!
@@ -64,7 +52,7 @@
 //! - NodeRegistry provides DNS-like service discovery for PlexSpaces nodes
 //! - Nodes automatically track health via heartbeats (every 10s recommended)
 //! - Capability-based selection enables heterogeneous clusters
-//! - Registry is backend-agnostic (InMemory, SQLite, Redis, PostgreSQL)
+//! - Registry storage comes from the node runtime configuration
 
 // TODO: Update this example to use ObjectRegistry instead of NodeRegistry
 // The old NodeRegistry has been removed as part of registry consolidation.
@@ -72,7 +60,6 @@
 // for node registration and discovery.
 
 /*
-use plexspaces::keyvalue::{create_keyvalue_from_env, KeyValueStore};
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 use std::collections::HashMap;
@@ -84,13 +71,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     println!("=== PlexSpaces NodeRegistry Example ===\n");
-
-    // Create shared KeyValueStore (simulates distributed registry)
-    let kv_store: Arc<dyn KeyValueStore> = create_keyvalue_from_env().await?;
-    println!(
-        "✓ KeyValueStore initialized (backend: {:?})\n",
-        std::env::var("PLEXSPACES_KV_BACKEND").unwrap_or_else(|_| "inmemory".to_string())
-    );
 
     // =========================================================================
     // SCENARIO 1: NODE REGISTRATION

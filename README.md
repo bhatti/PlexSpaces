@@ -74,9 +74,9 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
   - **Unified SDK**: `ShardGroupClient` and `UnifiedShardGroupClient` for both WASM/internal and gRPC (optional feature)
   - **Resource-Based Routing**: Labels flow through to ActorResourceRequirements for intelligent node placement
 - **FaaS-Style Invocation**: HTTP-based actor invocation via `AskReply` and `SendMessage`
-  - **RESTful API**: `GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/ask` for request-reply, `POST`/`PUT /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` for fire-and-forget (or `/api/v1/actors/{namespace}/{actor_type}` without tenant_id)
+  - **RESTful API**: `GET /api/v1/actors/{namespace}/{actor_type}` and `GET|POST|PUT /api/v1/actors/{namespace}/{actor_type}/ask` for request-reply, `POST`/`PUT /api/v1/actors/{namespace}/{actor_type}` for fire-and-forget
   - **Namespace Support**: Organize actors by namespace for better isolation (defaults to "default")
-  - **Tenant Defaulting**: Tenant ID defaults to "default" if not provided in path
+  - **Tenant Identity**: Tenant identity is derived from validated auth context when authentication is enabled
   - **AWS Lambda URL Support**: Ready for integration with AWS Lambda Function URLs
   - **Serverless Patterns**: Invoke actors like serverless functions with automatic load balancing
 - **Resource-Aware Scheduling**: Intelligent placement based on CPU, memory, and I/O profiles
@@ -260,7 +260,7 @@ PlexSpaces excels at:
 - **Game Servers**: Stateful game sessions with automatic migration and fault tolerance
 - **Edge Computing**: Deploy actors to edge locations with automatic synchronization
 - **FaaS Platforms**: Build serverless platforms with durable execution
-  - **HTTP-Based Invocation**: Invoke actors via REST API (`GET /api/v1/actors/{tenant_id}/{namespace}/{actor_type}` or `/api/v1/actors/{namespace}/{actor_type}`)
+  - **HTTP-Based Invocation**: Invoke actors via REST API (`GET /api/v1/actors/{namespace}/{actor_type}` for request-reply and `POST`/`PUT /api/v1/actors/{namespace}/{actor_type}` for fire-and-forget)
   - **Namespace Support**: Organize actors by namespace within tenants for better isolation
   - **AWS Lambda Integration**: Ready for AWS Lambda Function URLs and API Gateway
   - **Serverless Functions**: Treat actors as serverless functions with automatic scaling

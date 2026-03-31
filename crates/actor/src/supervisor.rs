@@ -38,7 +38,7 @@ use tokio::time::timeout as tokio_timeout;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{Actor, ActorRef as ActorActorRef};
-use plexspaces_core::{ActorError, ActorId, ActorRef, ServiceLocator as ServiceLocatorTrait};
+use plexspaces_core::{ActorContext, ActorError, ActorId, ActorRef, ServiceLocator as ServiceLocatorTrait};
 
 // Import proto types
 use plexspaces_proto::supervision::v1::{SupervisionError as ProtoError, SupervisorStats};
@@ -429,12 +429,25 @@ impl Supervisor {
         // Get mailbox reference before starting actor
         let mailbox = actor.mailbox().clone();
 
-        // Get ServiceLocator (required for ActorRef creation)
+        // Get ServiceLocator (required for ActorRef creation and registry injection)
         let service_locator = self.service_locator.as_ref()
             .ok_or_else(|| SupervisorError::ActorCreationFailed(
                 "ServiceLocator not set on Supervisor. Call with_service_locator() when creating Supervisor.".to_string()
             ))?
             .clone();
+
+        // Inject the supervisor's service_locator into the actor's context so that
+        // register_in_registry() can find the ActorRegistry. Actor::new() always
+        // starts with a TestServiceLocatorStub; we replace it here with the real one.
+        let existing_ctx = actor.context().clone();
+        let new_ctx = Arc::new(ActorContext::new(
+            existing_ctx.node_id.clone(),
+            existing_ctx.tenant_id.clone(),
+            existing_ctx.namespace.clone(),
+            service_locator.clone(),
+            existing_ctx.config.clone(),
+        ));
+        let mut actor = actor.set_context(new_ctx);
 
         // Create ActorRef from the actor crate (has tell() method) for return value.
         // Extract namespace from actor_id (format: "name:namespace@node") for proper isolation.
@@ -1517,6 +1530,20 @@ impl Supervisor {
                     );
                 }
             }
+        }
+
+        // Inject supervisor's service_locator into actor context before restarting
+        // so that register_in_registry can find ActorRegistry
+        if let Some(service_locator) = &self.service_locator {
+            let existing_ctx = new_actor.context().clone();
+            let new_ctx = Arc::new(ActorContext::new(
+                existing_ctx.node_id.clone(),
+                existing_ctx.tenant_id.clone(),
+                existing_ctx.namespace.clone(),
+                service_locator.clone(),
+                existing_ctx.config.clone(),
+            ));
+            new_actor = new_actor.set_context(new_ctx);
         }
 
         // Start the new actor
@@ -2740,7 +2767,7 @@ pub enum SupervisorError {
 /// let (supervisor, event_rx) = SupervisorBuilder::new("my-supervisor".to_string())
 ///     .with_strategy(SupervisionStrategy::OneForOne { max_restarts: 3, within_seconds: 60 })
 ///     .add_child(ChildSpec::worker_sync(...))
-///     .build_with_service_locator(service_locator)
+///     .build(service_locator)
 ///     .await?;
 /// ```
 pub struct SupervisorBuilder {
@@ -2796,22 +2823,11 @@ impl SupervisorBuilder {
         self
     }
 
-    /// Build the supervisor
+    /// Build the supervisor with the given ServiceLocator.
     ///
-    /// Uses a test ServiceLocator stub by default. For production, use
-    /// `build_with_service_locator()` instead.
+    /// The ServiceLocator is required so that actors started by this supervisor can
+    /// register in the ActorRegistry and access FacetRegistry during restarts.
     pub async fn build(
-        self,
-    ) -> Result<(Supervisor, mpsc::Receiver<SupervisorEvent>), SupervisorError> {
-        // For tests, create a minimal ServiceLocator stub
-        use crate::TestServiceLocatorStub;
-        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-            Arc::new(TestServiceLocatorStub::new());
-        self.build_with_service_locator(service_locator).await
-    }
-
-    /// Build the supervisor with a specific ServiceLocator
-    pub async fn build_with_service_locator(
         self,
         service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
     ) -> Result<(Supervisor, mpsc::Receiver<SupervisorEvent>), SupervisorError> {
@@ -2835,6 +2851,7 @@ mod tests {
     use super::*;
     use plexspaces_behavior::MockBehavior;
     use plexspaces_mailbox::{Mailbox, MailboxConfig};
+    use plexspaces_node::create_default_service_locator;
 
     /// Helper function to create a ChildSpec for tests
     /// Uses async factory pattern (ChildSpec standard)
@@ -2882,8 +2899,7 @@ mod tests {
         id: String,
         strategy: SupervisionStrategy,
     ) -> (Supervisor, mpsc::Receiver<SupervisorEvent>) {
-        use plexspaces_node::create_default_service_locator;
-        let service_locator = create_default_service_locator(None, None, None).await;
+        let service_locator = create_default_service_locator(None, None).await;
         Supervisor::new(id, strategy, service_locator)
     }
 
@@ -2975,13 +2991,14 @@ mod tests {
         let spec =
             create_child_spec_sync("worker-1@localhost".to_string(), RestartPolicy::Transient);
 
+        let service_locator = create_default_service_locator(None, None).await;
         let (_supervisor, _event_rx) = SupervisorBuilder::new("root".to_string())
             .with_strategy(SupervisionStrategy::OneForAll {
                 max_restarts: 5,
                 within_seconds: 30,
             })
             .add_child(spec)
-            .build()
+            .build(service_locator)
             .await
             .unwrap();
     }

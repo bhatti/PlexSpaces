@@ -24,13 +24,14 @@
 //! - Facet lifecycle hooks during supervisor operations
 //! - Multiple facets per actor in supervisor context
 
+use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::child_spec::StartedChild;
 use plexspaces_actor::supervisor::{SupervisionStrategy, Supervisor, SupervisorEvent};
-use plexspaces_actor::{Actor, ChildSpec, TestServiceLocatorStub};
+use plexspaces_actor::{Actor, ChildSpec};
 use plexspaces_core::{
     Actor as ActorTrait, ActorContext, ActorError, ActorRef as CoreActorRef, BehaviorError,
-    Message, ServiceLocator,
+    Message,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
@@ -66,8 +67,8 @@ impl plexspaces_core::Actor for TestActor {
 }
 
 async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None).await;
     Supervisor::new(
         "test-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -99,14 +100,14 @@ async fn test_supervisor_start_child_with_facets() {
                 )
                 .await
                 .unwrap();
-                let actor = Actor::new(
+                let actor = actor_with_default_service_locator(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
                     mailbox,
                     "tenant".to_string(),
                     "namespace".to_string(),
-                    None,
-                );
+                )
+                .await;
                 let actor_ref = CoreActorRef::new(actor_id.clone())
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                 Ok(StartedChild::Worker { actor, actor_ref })
@@ -148,17 +149,8 @@ async fn test_supervisor_start_child_with_facets() {
 /// the facets from the ChildSpec are preserved and reattached to the new actor.
 #[tokio::test]
 async fn test_supervisor_restart_preserves_facets() {
-    // Create supervisor
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-        Arc::new(TestServiceLocatorStub::new());
-    let (mut supervisor, mut event_rx) = Supervisor::new(
-        "test-supervisor".to_string(),
-        SupervisionStrategy::OneForOne {
-            max_restarts: 5,
-            within_seconds: 60,
-        },
-        service_locator,
-    );
+    // Create supervisor (default ServiceLocator so child actors can register on start)
+    let (mut supervisor, mut event_rx) = create_test_supervisor().await;
 
     // Create ChildSpec with facets
     let child_id = "faceted-worker".to_string();
@@ -178,14 +170,14 @@ async fn test_supervisor_restart_preserves_facets() {
                     )
                     .await
                     .unwrap();
-                    let actor = Actor::new(
+                    let actor = actor_with_default_service_locator(
                         actor_id.clone(),
                         Box::new(TestActor::new(actor_id.clone())),
                         mailbox,
                         "tenant".to_string(),
                         "namespace".to_string(),
-                        None,
-                    );
+                    )
+                    .await;
                     let actor_ref = CoreActorRef::new(actor_id.clone())
                         .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                     Ok(StartedChild::Worker { actor, actor_ref })

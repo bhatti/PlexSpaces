@@ -34,7 +34,9 @@
 //! - [`RedisJournalStorage`]: Redis (distributed, eventually consistent)
 //! - [`DynamoDBJournalStorage`]: DynamoDB (AWS managed)
 
+use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
 use plexspaces_core::{JournalError, JournalResult};
+use plexspaces_proto::storage::v1::SharedDbConfig;
 use std::sync::Arc;
 
 // Re-export reminder types from proto
@@ -66,34 +68,26 @@ mod ddb;
 #[cfg(feature = "ddb-backend")]
 pub use ddb::DynamoDBJournalStorage;
 
-/// Create journal storage backend from DurabilityConfig
+/// Create journal storage from shared database config.
 ///
-/// ## Purpose
-/// Factory function that creates appropriate journal storage backend based on
-/// JournalBackend enum from DurabilityConfig, following the same pattern as
-/// `create_channel` and `create_storage`.
-///
-/// ## Arguments
-/// - `config`: DurabilityConfig from proto
-///
-/// ## Returns
-/// Arc<dyn JournalStorage> for use with DurabilityFacet
-///
-/// ## Errors
-/// - `JournalError::Storage` if backend creation fails
-/// - `JournalError::InvalidConfiguration` if config is malformed
-///
-/// ## Example
-/// ```rust,no_run
-/// use plexspaces_journaling::*;
-///
-/// # async fn example() -> JournalResult<()> {
-/// let db_url = "sqlite:///tmp/journal.db";
-/// let storage = create_journal_storage(&db_url).await?;
-/// # Ok(())
-/// # }
-/// ```
-pub async fn create_journal_storage(db_url: &str) -> JournalResult<Arc<dyn JournalStorage>> {
+/// This is the canonical construction path for journal storage in runtime
+/// initialization and application setup.
+pub async fn create_journal_storage_from_shared_db(
+    config: &SharedDbConfig,
+) -> JournalResult<Arc<dyn JournalStorage>> {
+    match resolve_shared_db_backend(config).map_err(JournalError::InvalidConfiguration)? {
+        SharedDbBackend::Postgres { connection_string } => {
+            create_journal_storage_from_backend_url(&connection_string).await
+        }
+        SharedDbBackend::Sqlite { database_path, .. } => {
+            create_journal_storage_from_backend_url(&database_path).await
+        }
+    }
+}
+
+async fn create_journal_storage_from_backend_url(
+    db_url: &str,
+) -> JournalResult<Arc<dyn JournalStorage>> {
     // Determine backend type from connection string or plain path
     // Support both connection strings (sqlite:///path) and plain paths (/path/to/db or ~/path/to/db)
     if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {

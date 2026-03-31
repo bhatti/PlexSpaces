@@ -20,7 +20,7 @@ services by type/category (similar to Consul, Eureka, Kubernetes service discove
 - "register_object": Register an object in the registry
 - "unregister_object": Unregister an object
 - "lookup_object": Lookup an object by ID
-- "discover_objects": Discover objects with filters
+- "discover_objects": Discover objects with filters (payload: `offset`, then `limit`)
 
 ## SDK Features Used
 

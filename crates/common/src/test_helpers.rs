@@ -95,49 +95,54 @@ pub fn docker_compose_available() -> bool {
 
 /// Static variables to cache service availability checks
 /// This avoids checking services for every test, improving test performance
-static DDB_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
-static SQS_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
+static DDB_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<(String, bool)>>> = OnceLock::new();
+static SQS_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<(String, bool)>>> = OnceLock::new();
 static REDIS_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 static NATS_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 static KAFKA_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 static POSTGRES_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 static MINIO_AVAILABLE: OnceLock<tokio::sync::Mutex<Option<bool>>> = OnceLock::new();
 
-/// Check if DynamoDB Local is running on the default port
-/// Uses a static cache to avoid checking for every test
-/// Fast timeout (500ms) for quick failure when service is not available
+/// Check if the configured DynamoDB endpoint accepts TCP connections (DynamoDB Local or compatible).
+///
+/// Uses the same URL resolution as [`get_dynamodb_endpoint`], caches per endpoint string, and
+/// uses a short TCP connect so tests skip quickly when nothing is listening. Does not use HTTP
+/// `GET /` because DynamoDB Local often responds with non-success statuses on arbitrary paths.
 pub async fn dynamodb_local_available() -> bool {
+    let endpoint = get_dynamodb_endpoint();
+    let tcp_addr = http_endpoint_to_tcp_addr(&endpoint);
     let cache = DDB_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
-    let mut cached = cache.lock().await;
+    let mut guard = cache.lock().await;
 
-    if let Some(available) = *cached {
-        return available;
+    if let Some((ref cached_ep, available)) = *guard {
+        if cached_ep == &endpoint {
+            return available;
+        }
     }
 
-    // Fast timeout for quick failure when service is not available
-    let available = check_service_health("http://localhost:8000", Duration::from_millis(500)).await;
-    *cached = Some(available);
+    let available = check_tcp_port(&tcp_addr, Duration::from_millis(500)).await;
+    *guard = Some((endpoint, available));
     available
 }
 
-/// Check if LocalStack (SQS simulator) is running on the default port
-/// Uses a static cache to avoid checking for every test
-/// Fast timeout (500ms) for quick failure when service is not available
+/// Check if the configured LocalStack / SQS endpoint accepts TCP connections.
+///
+/// TCP is enough to decide whether to run integration tests; avoids HTTP overhead and does not
+/// depend on LocalStack's health JSON path. Cached per [`get_sqs_endpoint`] value.
 pub async fn localstack_available() -> bool {
+    let endpoint = get_sqs_endpoint();
+    let tcp_addr = http_endpoint_to_tcp_addr(&endpoint);
     let cache = SQS_AVAILABLE.get_or_init(|| tokio::sync::Mutex::new(None));
-    let mut cached = cache.lock().await;
+    let mut guard = cache.lock().await;
 
-    if let Some(available) = *cached {
-        return available;
+    if let Some((ref cached_ep, available)) = *guard {
+        if cached_ep == &endpoint {
+            return available;
+        }
     }
 
-    // Fast timeout for quick failure when service is not available
-    let available = check_service_health(
-        "http://localhost:4566/_localstack/health",
-        Duration::from_millis(500),
-    )
-    .await;
-    *cached = Some(available);
+    let available = check_tcp_port(&tcp_addr, Duration::from_millis(500)).await;
+    *guard = Some((endpoint, available));
     available
 }
 
@@ -164,20 +169,6 @@ pub async fn redis_available() -> bool {
     available
 }
 
-/// Check if a service is available by making an HTTP request
-/// Fast timeout for quick failure when service is not available
-async fn check_service_health(url: &str, timeout_duration: Duration) -> bool {
-    let client = match reqwest::Client::builder().timeout(timeout_duration).build() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-
-    match timeout(timeout_duration, client.get(url).send()).await {
-        Ok(Ok(resp)) => resp.status().is_success(),
-        _ => false,
-    }
-}
-
 /// Check if Redis is available by attempting a TCP connection
 /// Fast timeout for quick failure when service is not available
 async fn check_redis_port(addr: &str, timeout_duration: Duration) -> bool {
@@ -194,6 +185,30 @@ pub fn get_dynamodb_endpoint() -> String {
     std::env::var("DYNAMODB_ENDPOINT_URL")
         .or_else(|_| std::env::var("PLEXSPACES_DDB_ENDPOINT_URL"))
         .unwrap_or_else(|_| "http://localhost:8000".to_string())
+}
+
+/// Converts an HTTP(S) base URL to a `host:port` string for [`check_tcp_port`].
+///
+/// DynamoDB Local does not reliably return HTTP 2xx on `GET /`, so integration tests
+/// use a short TCP connect to the configured endpoint instead of an HTTP health probe.
+pub fn http_endpoint_to_tcp_addr(endpoint: &str) -> String {
+    let trimmed = endpoint.trim();
+    let lower = trimmed.to_lowercase();
+    let rest = lower
+        .strip_prefix("http://")
+        .or_else(|| lower.strip_prefix("https://"))
+        .unwrap_or(trimmed);
+    let host_part = rest.split('/').next().unwrap_or(rest).trim();
+    if host_part.is_empty() {
+        return "localhost:8000".to_string();
+    }
+    if host_part.contains(':') {
+        host_part.to_string()
+    } else if lower.starts_with("https://") {
+        format!("{host_part}:443")
+    } else {
+        format!("{host_part}:80")
+    }
 }
 
 /// Get SQS endpoint URL (from env or default)
@@ -224,6 +239,11 @@ pub fn setup_aws_local_env() {
         "AWS_SECRET_ACCESS_KEY",
         std::env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_else(|_| "test".to_string()),
     );
+
+    // Avoid long hangs in `aws_config::load()` when no cloud metadata is reachable (CI / laptops).
+    if std::env::var("AWS_EC2_METADATA_DISABLED").is_err() {
+        std::env::set_var("AWS_EC2_METADATA_DISABLED", "true");
+    }
 
     // Set endpoint URLs if not already set
     if std::env::var("DYNAMODB_ENDPOINT_URL").is_err() {
@@ -473,5 +493,36 @@ async fn check_tcp_port(addr: &str, timeout_duration: Duration) -> bool {
     match timeout(timeout_duration, TcpStream::connect(addr)).await {
         Ok(Ok(_)) => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod http_endpoint_parse_tests {
+    use super::http_endpoint_to_tcp_addr;
+
+    #[test]
+    fn parses_http_with_port() {
+        assert_eq!(
+            http_endpoint_to_tcp_addr("http://localhost:8000"),
+            "localhost:8000"
+        );
+    }
+
+    #[test]
+    fn parses_host_port_without_scheme() {
+        assert_eq!(http_endpoint_to_tcp_addr("127.0.0.1:8000"), "127.0.0.1:8000");
+    }
+
+    #[test]
+    fn adds_default_http_port() {
+        assert_eq!(http_endpoint_to_tcp_addr("http://ddb.local"), "ddb.local:80");
+    }
+
+    #[test]
+    fn adds_default_https_port() {
+        assert_eq!(
+            http_endpoint_to_tcp_addr("https://ddb.local"),
+            "ddb.local:443"
+        );
     }
 }

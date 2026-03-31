@@ -96,7 +96,9 @@ impl SchedulingService for SchedulingServiceImpl {
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .ok_or_else(|| {
-                Status::unauthenticated("Missing x-tenant-id header. JWT authentication required.")
+                Status::unauthenticated(
+                    "Missing x-tenant-id metadata set by auth middleware. JWT authentication required.",
+                )
             })?;
 
         let namespace = metadata
@@ -193,7 +195,9 @@ impl SchedulingService for SchedulingServiceImpl {
             .and_then(|v| v.to_str().ok())
             .filter(|s| !s.is_empty())
             .ok_or_else(|| {
-                Status::unauthenticated("Missing x-tenant-id header. JWT authentication required.")
+                Status::unauthenticated(
+                    "Missing x-tenant-id metadata set by auth middleware. JWT authentication required.",
+                )
             })?;
 
         // Namespace from gRPC metadata; empty if not provided

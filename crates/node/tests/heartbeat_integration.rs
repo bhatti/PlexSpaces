@@ -25,10 +25,9 @@
 //! 3. Heartbeat updates are visible across nodes in the same cluster
 //! 4. Cluster isolation works (nodes in different clusters don't see each other)
 
-use plexspaces_core::NodeRegistryTrait;
-use plexspaces_core::RequestContext;
+use plexspaces_core::{NodeRegistryTrait, RequestContext, ServiceLocator};
 use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_proto::object_registry::v1::ObjectType;
+use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -149,7 +148,7 @@ async fn test_heartbeat_across_nodes_same_cluster() {
     // Node1 should be able to see Node2's registration
     let object_registry1 = node1
         .service_locator()
-        .get_object_registry()
+        .object_registry()
         .await
         .expect("ObjectRegistry should be available");
 
@@ -159,7 +158,7 @@ async fn test_heartbeat_across_nodes_same_cluster() {
         .request_context_for_system_operations_with_namespace(cluster_name.to_string())
         .await;
 
-    let node2_registration = object_registry1
+    let node2_registration: ObjectRegistration = object_registry1
         .lookup_full(&ctx1, ObjectType::ObjectTypeNode, "node-2")
         .await
         .expect("Should be able to lookup node2")
@@ -176,7 +175,7 @@ async fn test_heartbeat_across_nodes_same_cluster() {
     sleep(Duration::from_millis(300)).await;
 
     // Node1 should see updated heartbeat for Node2
-    let updated_registration = object_registry1
+    let updated_registration: ObjectRegistration = object_registry1
         .lookup_full(&ctx1, ObjectType::ObjectTypeNode, "node-2")
         .await
         .expect("Should be able to lookup node2")
@@ -239,7 +238,7 @@ async fn test_cluster_isolation() {
     // Node1 should NOT be able to see Node2 (different cluster/namespace)
     let object_registry1 = node1
         .service_locator()
-        .get_object_registry()
+        .object_registry()
         .await
         .expect("ObjectRegistry should be available");
 
@@ -249,7 +248,7 @@ async fn test_cluster_isolation() {
         .request_context_for_system_operations_with_namespace(cluster1.to_string())
         .await;
 
-    let node2_lookup = object_registry1
+    let node2_lookup: Option<ObjectRegistration> = object_registry1
         .lookup_full(&ctx1, ObjectType::ObjectTypeNode, "node-cluster2")
         .await
         .expect("Lookup should succeed");
@@ -261,7 +260,7 @@ async fn test_cluster_isolation() {
     );
 
     // But Node1 should see itself
-    let node1_lookup = object_registry1
+    let node1_lookup: ObjectRegistration = object_registry1
         .lookup_full(&ctx1, ObjectType::ObjectTypeNode, "node-cluster1")
         .await
         .expect("Lookup should succeed")

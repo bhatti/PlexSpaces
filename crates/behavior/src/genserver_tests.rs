@@ -160,7 +160,7 @@ mod tests {
         use plexspaces_core::ObjectRegistry;
         use plexspaces_node::create_default_service_locator;
         let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None, None).await;
+            create_default_service_locator(Some("test-node".to_string()), None).await;
         // Create a stub ObjectRegistry for ActorRegistry (from actor_context module)
         // Note: We can't easily create a real ObjectRegistry in tests, so we'll skip ActorRegistry for now
         // and handle the case where envelope.send_reply() fails gracefully in tests

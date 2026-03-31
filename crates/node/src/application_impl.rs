@@ -829,7 +829,7 @@ mod tests {
                 addr: "0.0.0.0:8000".to_string(),
                 spawned_actors: Arc::new(RwLock::new(Vec::new())),
                 stopped_actors: Arc::new(RwLock::new(Vec::new())),
-                service_locator: create_default_service_locator(Some(id_str), None, None).await,
+                service_locator: create_default_service_locator(Some(id_str), None).await,
             }
         }
 

@@ -44,9 +44,8 @@ mod ddb_tests {
 
     /// Helper to create DynamoDB storage for testing
     async fn create_ddb_storage() -> DynamoDBWorkflowStorage {
-        let endpoint = std::env::var("DYNAMODB_ENDPOINT_URL")
-            .or_else(|_| std::env::var("PLEXSPACES_DDB_ENDPOINT_URL"))
-            .unwrap_or_else(|_| "http://localhost:8000".to_string());
+        plexspaces_common::test_helpers::setup_aws_local_env();
+        let endpoint = plexspaces_common::test_helpers::get_dynamodb_endpoint();
 
         DynamoDBWorkflowStorage::new(
             "us-east-1".to_string(),

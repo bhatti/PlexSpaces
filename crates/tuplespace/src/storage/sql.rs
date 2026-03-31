@@ -221,10 +221,9 @@ impl SqlStorage {
                 TupleSpaceError::ConnectionError(format!("SQLite connection failed: {}", e))
             })?;
 
-        // For :memory: create schema inline; file-based uses unified db/migrations at init.
-        if is_memory {
-            Self::run_tuplespace_memory_schema_sqlite(&sqlite_pool).await?;
-        }
+        // SQLite-backed tuplespace storage is used both with unified migrations and in
+        // standalone embedded/test contexts. Ensure the minimal schema exists in both cases.
+        Self::ensure_sqlite_schema(&sqlite_pool).await?;
 
         let storage = SqlStorage {
             pool: SqlPool::Sqlite(sqlite_pool),
@@ -237,8 +236,8 @@ impl SqlStorage {
         Ok(storage)
     }
 
-    /// Create schema for :memory: SQLite (tuples + barriers + watchers).
-    async fn run_tuplespace_memory_schema_sqlite(pool: &SqlitePool) -> Result<(), TupleSpaceError> {
+    /// Ensure the SQLite tuplespace schema exists (tuples + barriers + watchers).
+    async fn ensure_sqlite_schema(pool: &SqlitePool) -> Result<(), TupleSpaceError> {
         sqlx::query(
             r#"CREATE TABLE IF NOT EXISTS tuples (
                 id TEXT PRIMARY KEY, tuple_data TEXT NOT NULL, created_at TEXT NOT NULL,

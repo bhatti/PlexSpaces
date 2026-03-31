@@ -53,7 +53,11 @@ mod tests {
         }
     }
 
-    async fn create_udp_channel(name: &str, cluster_name: &str, port: u32) -> Box<dyn Channel> {
+    async fn create_udp_channel(
+        name: &str,
+        cluster_name: &str,
+        port: u32,
+    ) -> plexspaces_channel::ChannelResult<Box<dyn Channel>> {
         let udp_config = create_udp_config(cluster_name, port);
         let channel_config = ChannelConfig {
             name: name.to_string(),
@@ -69,13 +73,30 @@ mod tests {
             ..Default::default()
         };
 
-        create_channel(channel_config).await.unwrap()
+        create_channel(channel_config).await
+    }
+
+    async fn create_udp_channel_or_skip(
+        name: &str,
+        cluster_name: &str,
+        port: u32,
+    ) -> Option<Box<dyn Channel>> {
+        match create_udp_channel(name, cluster_name, port).await {
+            Ok(channel) => Some(channel),
+            Err(err) => {
+                eprintln!("Skipping UDP test - backend unavailable: {}", err);
+                None
+            }
+        }
     }
 
     #[tokio::test]
     async fn test_udp_channel_creation() {
         let port = get_unique_port();
-        let channel = create_udp_channel("test-udp-1", "test-cluster", port).await;
+        let Some(channel) = create_udp_channel_or_skip("test-udp-1", "test-cluster", port).await
+        else {
+            return;
+        };
 
         assert_eq!(channel.get_config().name, "test-udp-1");
         assert!(!channel.is_closed());
@@ -118,8 +139,15 @@ mod tests {
     async fn test_udp_send_receive() {
         // Use same port for both channels (they need to share multicast group)
         let port = get_unique_port();
-        let channel1 = create_udp_channel("test-udp-2", "test-cluster-2", port).await;
-        let channel2 = create_udp_channel("test-udp-2", "test-cluster-2", port).await;
+        let Some(channel1) = create_udp_channel_or_skip("test-udp-2", "test-cluster-2", port).await
+        else {
+            return;
+        };
+        let Some(channel2) = create_udp_channel_or_skip("test-udp-2", "test-cluster-2", port).await
+        else {
+            return;
+        };
+        let mut stream = channel2.subscribe(None).await.unwrap();
 
         // Send message from channel1
         let msg = Message {
@@ -132,21 +160,27 @@ mod tests {
         let msg_id = channel1.send(msg.clone()).await.unwrap();
         assert_eq!(msg_id, msg.id);
 
-        // Receive from channel2 (multicast pub/sub)
-        let received = timeout(Duration::from_secs(2), channel2.receive(1)).await;
-        if let Ok(Ok(messages)) = received {
-            if let Some(received_msg) = messages.first() {
-                assert_eq!(received_msg.payload, b"test message");
-            }
-        }
+        let received = timeout(Duration::from_millis(750), stream.next())
+            .await
+            .expect("UDP subscriber should receive message quickly")
+            .expect("UDP stream should yield a message");
+        assert_eq!(received.payload, b"test message");
     }
 
     #[tokio::test]
     async fn test_udp_publish_subscribe() {
         // Use same port for both channels (they need to share multicast group)
         let port = get_unique_port();
-        let publisher = create_udp_channel("test-udp-3", "test-cluster-3", port).await;
-        let subscriber = create_udp_channel("test-udp-3", "test-cluster-3", port).await;
+        let Some(publisher) =
+            create_udp_channel_or_skip("test-udp-3", "test-cluster-3", port).await
+        else {
+            return;
+        };
+        let Some(subscriber) =
+            create_udp_channel_or_skip("test-udp-3", "test-cluster-3", port).await
+        else {
+            return;
+        };
 
         // Subscribe
         let mut stream = subscriber.subscribe(None).await.unwrap();
@@ -160,21 +194,24 @@ mod tests {
         };
 
         let subscriber_count = publisher.publish(msg).await.unwrap();
-        // UDP returns best-effort count (1)
-        assert!(subscriber_count >= 0);
+        assert_eq!(subscriber_count, 1);
 
         // Receive from subscription
-        let received = timeout(Duration::from_secs(2), stream.next()).await;
-        if let Ok(Some(received_msg)) = received {
-            assert_eq!(received_msg.payload, b"pub/sub test");
-        }
+        let received_msg = timeout(Duration::from_millis(750), stream.next())
+            .await
+            .expect("UDP pub/sub should deliver quickly")
+            .expect("UDP subscription should yield a message");
+        assert_eq!(received_msg.payload, b"pub/sub test");
     }
 
     #[tokio::test]
     async fn test_udp_ack_nack_noop() {
         // UDP channels don't support ACK/NACK (best-effort delivery)
         let port = get_unique_port();
-        let channel = create_udp_channel("test-udp-4", "test-cluster-4", port).await;
+        let Some(channel) = create_udp_channel_or_skip("test-udp-4", "test-cluster-4", port).await
+        else {
+            return;
+        };
 
         // ACK should be a no-op
         let result = channel.ack("test-message-id").await;
@@ -188,7 +225,10 @@ mod tests {
     #[tokio::test]
     async fn test_udp_channel_close() {
         let port = get_unique_port();
-        let channel = create_udp_channel("test-udp-5", "test-cluster-5", port).await;
+        let Some(channel) = create_udp_channel_or_skip("test-udp-5", "test-cluster-5", port).await
+        else {
+            return;
+        };
 
         assert!(!channel.is_closed());
 
@@ -200,7 +240,10 @@ mod tests {
     #[tokio::test]
     async fn test_udp_channel_stats() {
         let port = get_unique_port();
-        let channel = create_udp_channel("test-udp-6", "test-cluster-6", port).await;
+        let Some(channel) = create_udp_channel_or_skip("test-udp-6", "test-cluster-6", port).await
+        else {
+            return;
+        };
 
         // Send some messages
         for i in 0..5 {

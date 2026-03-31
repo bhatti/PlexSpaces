@@ -47,4 +47,4 @@ pub use state_store::sql::SqliteSchedulingStateStore;
 #[cfg(feature = "ddb-backend")]
 pub use state_store::ddb::DynamoDBSchedulingStateStore;
 
-pub use state_store::{create_state_store, SchedulingStateStore};
+pub use state_store::{create_state_store_from_shared_db, SchedulingStateStore};

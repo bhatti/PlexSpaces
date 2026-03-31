@@ -35,7 +35,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-use plexspaces_core::TupleSpaceProvider;
+use plexspaces_core::{ServiceLocator, TupleSpaceProvider};
 use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_proto::{tuplespace::v1::*, TupleSpaceServiceClient};
 use plexspaces_tuplespace::{

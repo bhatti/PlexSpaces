@@ -21,7 +21,6 @@ mod sqlite_tests {
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
         let mut value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -204,13 +203,11 @@ mod sqlite_tests {
     async fn test_facet_before_method_writes() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: false, // Disable replay for this test
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -248,13 +245,11 @@ mod sqlite_tests {
     async fn test_facet_after_method_writes() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: false,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -298,13 +293,11 @@ mod sqlite_tests {
     async fn test_facet_multiple_cycles() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: false,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -346,13 +339,11 @@ mod sqlite_tests {
     async fn test_facet_attach_no_replay_with_entries() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: false,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -409,13 +400,11 @@ mod sqlite_tests {
     async fn test_facet_attach_with_replay_and_entries() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -472,13 +461,11 @@ mod sqlite_tests {
     async fn test_facet_detach_reattach() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: false,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -540,13 +527,11 @@ mod sqlite_tests {
     async fn test_facet_replay_missing_checkpoint_scenario() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 10,
             checkpoint_timeout: None,
             replay_on_activation: true, // This is the key difference
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 

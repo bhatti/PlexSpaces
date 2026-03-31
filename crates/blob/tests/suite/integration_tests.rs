@@ -33,6 +33,14 @@ use tokio::time::timeout;
 /// This avoids checking the service for every test, improving test performance
 static MINIO_ENDPOINT: OnceLock<tokio::sync::Mutex<Option<String>>> = OnceLock::new();
 
+fn build_test_http_client(timeout_secs: u64) -> Option<reqwest::Client> {
+    reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .ok()
+}
+
 /// Get MinIO endpoint (checks which port is available)
 /// Uses a static cache to avoid checking for every test
 async fn get_minio_endpoint() -> Option<String> {
@@ -43,15 +51,9 @@ async fn get_minio_endpoint() -> Option<String> {
         return Some(endpoint.clone());
     }
 
-    // Check service health
-    use reqwest::Client;
-
-    let client = match Client::builder()
-        .timeout(Duration::from_secs(1)) // Reduced timeout for faster skipping
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => {
+    let client = match build_test_http_client(1) {
+        Some(c) => c,
+        None => {
             *cached = None;
             return None;
         }
@@ -365,8 +367,7 @@ async fn test_presigned_url_get() {
     assert!(presigned_url.contains("http://") || presigned_url.contains("https://"));
 
     // Try to download using presigned URL
-    use reqwest::Client;
-    let client = Client::new();
+    let client = build_test_http_client(5).unwrap();
     let response = client.get(&presigned_url).send().await.unwrap();
     assert!(response.status().is_success());
 
@@ -415,8 +416,7 @@ async fn test_presigned_url_put() {
     assert!(presigned_url.contains("http://") || presigned_url.contains("https://"));
 
     // Try to upload using presigned URL
-    use reqwest::Client;
-    let client = Client::new();
+    let client = build_test_http_client(5).unwrap();
     let new_data = b"Updated content via presigned URL";
     let response = client
         .put(&presigned_url)
@@ -473,8 +473,7 @@ async fn test_presigned_url_expiration() {
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
     // Try to use expired URL - should fail
-    use reqwest::Client;
-    let client = Client::new();
+    let client = build_test_http_client(5).unwrap();
     let response = client.get(&presigned_url).send().await.unwrap();
     // Expired URLs typically return 403 Forbidden
     assert!(!response.status().is_success());

@@ -370,7 +370,7 @@ mod tests {
             .unwrap();
 
         // Test basic send/receive
-        let msg = crate::Message::new(b"test-sqlite".to_vec());
+        let msg = crate::new_message(b"test-sqlite".to_vec());
         mailbox.enqueue(msg.clone()).await.unwrap();
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;

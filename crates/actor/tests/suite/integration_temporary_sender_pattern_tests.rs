@@ -313,7 +313,7 @@ async fn create_test_actor_service(
     use plexspaces_node::create_default_service_locator;
     // create_default_service_locator initializes all services including:
     // - ActorRegistry, VirtualActorManager, ReplyWaiterRegistry
-    let service_locator = create_default_service_locator(Some(node_id.clone()), None, None).await;
+    let service_locator = create_default_service_locator(Some(node_id.clone()), None).await;
     ActorServiceImpl::new(service_locator, node_id)
 }
 

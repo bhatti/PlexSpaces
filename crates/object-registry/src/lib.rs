@@ -100,13 +100,15 @@
 //!
 //! ### Using Configuration
 //! ```rust,no_run
-//! use plexspaces_object_registry::{ObjectRegistryImpl, config::{ObjectRegistryConfig, create_repository_from_config}};
-//! use plexspaces_common::RequestContext;
+//! use plexspaces_object_registry::{ObjectRegistryImpl, create_repository_from_shared_db};
+//! use plexspaces_proto::storage::v1::SharedDbConfig;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Create repository from configuration
-//! let config = ObjectRegistryConfig::sqlite("/tmp/registry.db");
-//! let repo = create_repository_from_config(&config).await?;
+//! let config = SharedDbConfig {
+//!     connection_string: "sqlite:///tmp/registry.db".to_string(),
+//!     ..Default::default()
+//! };
+//! let repo = create_repository_from_shared_db(&config).await?;
 //! let registry = ObjectRegistryImpl::new(repo);
 //! # Ok(())
 //! # }
@@ -147,7 +149,7 @@ use std::sync::Arc;
 use tracing::instrument;
 
 // Re-export commonly used types
-pub use config::{create_repository_from_config, create_repository_from_env, ObjectRegistryConfig};
+pub use config::{create_repository_from_shared_db, create_repository_from_storage_config};
 
 #[cfg(feature = "sql-backend")]
 pub use repository::{PostgresObjectRegistryRepository, SqliteObjectRegistryRepository};

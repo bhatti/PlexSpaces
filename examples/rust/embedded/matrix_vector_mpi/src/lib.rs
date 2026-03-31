@@ -41,40 +41,33 @@ use plexspaces_proto::v1::tuplespace::TupleSpaceConfig;
 //
 // These functions create configured TupleSpace instances for MPI operations
 
-/// Create a TupleSpace instance from environment or default
+/// Create a TupleSpace instance from runtime-oriented defaults
 ///
 /// ## Purpose
-/// Provides a convenient way to create TupleSpace for MPI operations that respects
-/// environment configuration (for multi-process tests) or falls back to in-memory.
-///
-/// ## Environment Variables
-/// - `PLEXSPACES_TUPLESPACE_BACKEND`: Backend type ("in-memory", "sqlite", "redis", "postgres")
-/// - `PLEXSPACES_SQLITE_PATH`: SQLite database file path
-/// - Other vars per TupleSpace::from_env() documentation
+/// Provides a convenient way to create TupleSpace for MPI operations while
+/// keeping backend selection in the enclosing runtime configuration.
 ///
 /// ## Returns
 /// Configured TupleSpace wrapped in Arc for sharing across workers
 ///
 /// ## Examples
 /// ```rust
-/// # use matrix_vector_mpi::create_tuplespace_from_env;
+/// # use matrix_vector_mpi::create_tuplespace;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// // Uses env vars if set, otherwise in-memory
-/// let space = create_tuplespace_from_env().await?;
+/// let space = create_tuplespace().await?;
 /// # Ok(())
 /// # }
 /// ```
-pub async fn create_tuplespace_from_env() -> Result<Arc<TupleSpace>, Box<dyn std::error::Error>> {
-    // Try environment variables first, fall back to in-memory
-    let tuplespace = TupleSpace::from_env_or_default().await?;
+pub async fn create_tuplespace() -> Result<Arc<TupleSpace>, Box<dyn std::error::Error>> {
+    let tuplespace = TupleSpace::from_config(TupleSpaceConfig::default()).await?;
     Ok(Arc::new(tuplespace))
 }
 
 /// Create a TupleSpace instance from explicit configuration
 ///
 /// ## Purpose
-/// Allows explicit backend configuration instead of relying on env vars.
-/// Useful for integration tests that need specific backends.
+/// Allows explicit tuple-space configuration while backend selection remains
+/// owned by runtime-configured services.
 ///
 /// ## Arguments
 /// * `config` - TupleSpaceConfig protobuf message
@@ -85,13 +78,9 @@ pub async fn create_tuplespace_from_env() -> Result<Arc<TupleSpace>, Box<dyn std
 /// ## Examples
 /// ```rust
 /// # use matrix_vector_mpi::create_tuplespace_from_config;
-/// # use plexspaces_proto::v1::tuplespace::{TupleSpaceConfig, SqliteBackend};
+/// # use plexspaces_proto::tuplespace::v1::TupleSpaceConfig;
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 /// let config = TupleSpaceConfig {
-///     backend: Some(plexspaces_proto::v1::tuplespace::tuple_space_config::Backend::Sqlite(
-///         SqliteBackend { path: ":memory:".to_string() }
-///     )),
-///     pool_size: 1,
 ///     default_ttl_seconds: 0,
 ///     enable_indexing: false,
 /// };

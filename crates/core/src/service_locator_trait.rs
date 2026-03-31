@@ -201,9 +201,7 @@ pub trait ServiceLocator: Send + Sync {
     /// Safe to call multiple times - checks if services are already initialized and returns early.
     ///
     /// ## Arguments
-    /// * `node_id` - Node ID for services (defaults to "test-node" if None)
-    /// * `node_config` - Optional NodeConfig (if None, will be created from release_config.node or defaults)
-    /// * `release_config` - Optional ReleaseSpec (if provided, node_config will be extracted from release_config.node)
+    /// * `release_config` - Optional ReleaseSpec (if provided, node configuration is taken from `release_config.node`)
     ///
     /// ## Note
     /// This method creates all default services including:
@@ -213,8 +211,6 @@ pub trait ServiceLocator: Send + Sync {
     /// Services crate depends on actor crate, so it can create these directly without closures.
     async fn initialize_services(
         &self,
-        node_id: Option<String>,
-        node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
         release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
     );
 

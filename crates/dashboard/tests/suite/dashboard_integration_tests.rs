@@ -37,6 +37,44 @@ use tonic::Request;
 
 // Import trait to enable method calls
 
+/// Simple no-op actor behavior for test spawning
+struct NoopBehavior;
+
+#[async_trait::async_trait]
+impl plexspaces_core::Actor for NoopBehavior {
+    async fn handle_message(
+        &mut self,
+        _ctx: &plexspaces_core::ActorContext,
+        _message: plexspaces_proto::common::v1::Message,
+    ) -> Result<(), plexspaces_core::BehaviorError> {
+        Ok(())
+    }
+
+    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        plexspaces_core::BehaviorType::GenServer
+    }
+}
+
+/// Register a BehaviorRegistry with multiple actor types for testing
+async fn register_behavior_registry(node: &Node, types: &[&str]) {
+    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    use plexspaces_core::ServiceLocator;
+    let registry = BehaviorRegistry::new();
+    for actor_type in types {
+        let type_str = actor_type.to_string();
+        registry
+            .register_simple(&type_str, move || {
+                Box::pin(async move {
+                    Ok(Box::new(NoopBehavior) as Box<dyn plexspaces_core::Actor>)
+                })
+            })
+            .await;
+    }
+    node.service_locator()
+        .register_behavior_registry(Arc::new(registry))
+        .await;
+}
+
 // Mock Application for testing
 struct MockApplication {
     name: String,
@@ -76,10 +114,7 @@ async fn create_test_node(node_id: &str) -> Arc<Node> {
 async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
     let service_locator = node.service_locator();
 
-    // Initialize services (normally done in node.start())
-    node.initialize_services()
-        .await
-        .expect("Failed to initialize services");
+    // NodeBuilder::build() already called initialize_services(); avoid repeating it (slow + contends under parallel tests).
 
     // Register NodeMetricsAccessor
     use plexspaces_node::service_wrappers::NodeMetricsAccessorWrapper;
@@ -90,13 +125,8 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
         .register_node_metrics_accessor(metrics_accessor_trait)
         .await;
 
-    // Register ApplicationManager in ServiceLocator
-    use plexspaces_application::ApplicationManager;
-    let app_manager = Arc::new(ApplicationManager::new());
-    let app_manager_trait: Arc<dyn plexspaces_core::ApplicationManager> = app_manager.clone();
-    service_locator
-        .register_application_manager(app_manager_trait)
-        .await;
+    // ApplicationManager is already registered in service_locator by NodeBuilder::build()
+    // Do NOT create a new one here - that would overwrite the one apps are registered in
 
     // Ensure ObjectRegistry is registered (needed for query_remote_nodes)
     use plexspaces_object_registry::ObjectRegistry;
@@ -1063,16 +1093,7 @@ async fn test_dashboard_home_page_data() {
     let node = create_test_node("test-node-home").await;
     let service = create_dashboard_service(node.clone()).await;
 
-    // Start node programmatically
-    let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-            eprintln!("Node start error: {}", e);
-        }
-    });
-
-    // Wait for node to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    // Dashboard reads local state via ServiceLocator; full node.start() (tonic server) is not required.
 
     // Test summary
     let summary_req = Request::new(GetSummaryRequest {
@@ -1114,26 +1135,12 @@ async fn test_dashboard_home_page_data() {
         0,
         "Should have no applications initially"
     );
-
-    // Cleanup
-    start_handle.abort();
 }
 
 #[tokio::test]
 async fn test_dashboard_node_page_data() {
     let node = create_test_node("test-node-page").await;
     let service = create_dashboard_service(node.clone()).await;
-
-    // Start node programmatically
-    let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-            eprintln!("Node start error: {}", e);
-        }
-    });
-
-    // Wait for node to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Test node dashboard
     let node_dashboard_req = Request::new(GetNodeDashboardRequest {
@@ -1154,10 +1161,6 @@ async fn test_dashboard_node_page_data() {
     assert!(dashboard.node_metrics.is_some(), "Should have node metrics");
     let metrics = dashboard.node_metrics.unwrap();
     assert!(metrics.uptime_seconds >= 0, "Uptime should be non-negative");
-
-    // Cleanup
-    let _ = node.shutdown(tokio::time::Duration::from_secs(5)).await;
-    start_handle.abort();
 }
 
 #[tokio::test]
@@ -1165,16 +1168,7 @@ async fn test_dashboard_metrics_not_zero() {
     let node = create_test_node("test-node-metrics").await;
     let service = create_dashboard_service(node.clone()).await;
 
-    // Start node programmatically
-    let node_clone = node.clone();
-    let start_handle = tokio::spawn(async move {
-        if let Err(e) = node_clone.start().await {
-            eprintln!("Node start error: {}", e);
-        }
-    });
-
-    // Wait for node to start and metrics to update
-    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    // NodeMetricsAccessorWrapper refreshes CPU/memory from sysinfo without node.start().
 
     // Get node dashboard
     let node_dashboard_req = Request::new(GetNodeDashboardRequest {
@@ -1197,10 +1191,6 @@ async fn test_dashboard_metrics_not_zero() {
     } else {
         panic!("Node metrics should be present");
     }
-
-    // Cleanup
-    let _ = node.shutdown(tokio::time::Duration::from_secs(5)).await;
-    start_handle.abort();
 }
 
 // ============================================================================
@@ -1215,9 +1205,9 @@ async fn test_actors_by_type_on_home_page() {
     // ARRANGE: Create node and spawn actors with different types
     let node = create_test_node("test-node-actors-type").await;
     let service_locator = node.service_locator();
-    node.initialize_services()
-        .await
-        .expect("Failed to initialize services");
+
+    // Register behavior types so actor spawning works
+    register_behavior_registry(&node, &["Counter", "Worker"]).await;
 
     // Spawn actors with different types
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
@@ -1260,9 +1250,6 @@ async fn test_actors_by_type_on_home_page() {
             .expect("Should spawn worker actor");
     }
 
-    // Wait for actors to be registered
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
     // ACT: Get summary from dashboard
     let service = create_dashboard_service(node.clone()).await;
     let request = Request::new(GetSummaryRequest {
@@ -1304,9 +1291,9 @@ async fn test_actors_by_type_on_node_page() {
     // ARRANGE: Create node and spawn actors
     let node = create_test_node("test-node-actors-node-type").await;
     let service_locator = node.service_locator();
-    node.initialize_services()
-        .await
-        .expect("Failed to initialize services");
+
+    // Register behavior types so actor spawning works
+    register_behavior_registry(&node, &["Calculator"]).await;
 
     // Spawn actors
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
@@ -1331,9 +1318,6 @@ async fn test_actors_by_type_on_node_page() {
             .await
             .expect("Should spawn calculator actor");
     }
-
-    // Wait for actors to be registered
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // ACT: Get node dashboard
     let service = create_dashboard_service(node.clone()).await;

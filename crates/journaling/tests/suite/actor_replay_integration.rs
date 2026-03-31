@@ -21,7 +21,9 @@ mod actor_integration_tests {
     use async_trait::async_trait;
     use plexspaces_actor::Actor as ActorStruct;
     use plexspaces_core::Message;
-    use plexspaces_core::{Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType};
+    use plexspaces_core::{
+        Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, ServiceLocator,
+    };
     #[cfg(feature = "postgres-backend")]
     use plexspaces_journaling::sql::PostgresJournalStorage;
     #[cfg(feature = "sqlite-backend")]
@@ -31,6 +33,42 @@ mod actor_integration_tests {
     use serde_json::Value as JsonValue;
     use std::sync::Arc;
     use tokio::sync::RwLock;
+
+    /// `ActorStruct::new` uses a stub service locator without an actor registry.
+    /// `start` / facet attach register the actor and require a real `ServiceLocator` (same pattern as `plexspaces_actor` unit tests).
+    async fn actor_with_service_locator(
+        id: String,
+        behavior: Box<dyn plexspaces_core::Actor>,
+        mailbox: Mailbox,
+        tenant_id: String,
+        namespace: String,
+    ) -> ActorStruct {
+        let locator_impl =
+            plexspaces_node::service_locator_helpers::create_default_service_locator(None, None)
+                .await;
+        let node_id = ServiceLocator::get_node_config(locator_impl.as_ref())
+            .await
+            .map(|n| n.id)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "test-node".to_string());
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = locator_impl;
+        let context = Arc::new(ActorContext::new(
+            node_id,
+            tenant_id.clone(),
+            namespace.clone(),
+            service_locator,
+            None,
+        ));
+        ActorStruct::new(
+            id,
+            behavior,
+            mailbox,
+            tenant_id,
+            namespace,
+            None,
+        )
+        .set_context(context)
+    }
 
     /// Test actor: Counter with state
     struct CounterActor {
@@ -83,19 +121,13 @@ mod actor_integration_tests {
     async fn test_actor_replay_with_handler() {
         let storage: Arc<dyn JournalStorage> =
             Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-        #[cfg(feature = "sqlite-backend")]
-        let backend = JournalBackend::JournalBackendSqlite as i32;
-        #[cfg(feature = "postgres-backend")]
-        let backend = JournalBackend::JournalBackendPostgres as i32;
 
         let config = DurabilityConfig {
-            backend,
             checkpoint_interval: 1000, // No checkpointing for this test
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -106,18 +138,17 @@ mod actor_integration_tests {
         let actor_id = "counter-actor".to_string();
 
         // Create actor
-        let mut actor = ActorStruct::new(
+        let mut actor = actor_with_service_locator(
             actor_id.clone(),
             behavior,
             mailbox,
             "default".to_string(),
             "default".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Attach DurabilityFacet (this will set ReplayHandler automatically)
         let mut config_value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -160,18 +191,17 @@ mod actor_integration_tests {
         let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone())
             .await
             .unwrap();
-        let mut actor2 = ActorStruct::new(
+        let mut actor2 = actor_with_service_locator(
             actor_id.clone(),
             behavior2,
             mailbox2,
             "default".to_string(),
             "default".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Attach DurabilityFacet again (ReplayHandler will be set, replay will happen)
         let mut config_value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -206,19 +236,13 @@ mod actor_integration_tests {
     async fn test_actor_replay_with_checkpoint() {
         let storage: Arc<dyn JournalStorage> =
             Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-        #[cfg(feature = "sqlite-backend")]
-        let backend = JournalBackend::JournalBackendSqlite as i32;
-        #[cfg(feature = "postgres-backend")]
-        let backend = JournalBackend::JournalBackendPostgres as i32;
 
         let config = DurabilityConfig {
-            backend,
             checkpoint_interval: 10, // Checkpoint every 10 messages
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -228,17 +252,16 @@ mod actor_integration_tests {
             .unwrap();
         let actor_id = "counter-actor-2".to_string();
 
-        let mut actor = ActorStruct::new(
+        let mut actor = actor_with_service_locator(
             actor_id.clone(),
             behavior,
             mailbox,
             "default".to_string(),
             "default".to_string(),
-            None,
-        );
+        )
+        .await;
 
         let mut config_value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -294,17 +317,16 @@ mod actor_integration_tests {
         let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone())
             .await
             .unwrap();
-        let mut actor2 = ActorStruct::new(
+        let mut actor2 = actor_with_service_locator(
             actor_id.clone(),
             behavior2,
             mailbox2,
             "default".to_string(),
             "default".to_string(),
-            None,
-        );
+        )
+        .await;
 
         let mut config_value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -337,19 +359,13 @@ mod actor_integration_tests {
     async fn test_actor_replay_with_state_loader() {
         let storage: Arc<dyn JournalStorage> =
             Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-        #[cfg(feature = "sqlite-backend")]
-        let backend = JournalBackend::JournalBackendSqlite as i32;
-        #[cfg(feature = "postgres-backend")]
-        let backend = JournalBackend::JournalBackendPostgres as i32;
 
         let config = DurabilityConfig {
-            backend,
             checkpoint_interval: 1000,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -362,17 +378,16 @@ mod actor_integration_tests {
             .unwrap();
         let actor_id = "counter-actor-3".to_string();
 
-        let mut actor = ActorStruct::new(
+        let mut actor = actor_with_service_locator(
             actor_id.clone(),
             behavior,
             mailbox,
             "default".to_string(),
             "default".to_string(),
-            None,
-        );
+        )
+        .await;
 
         let mut config_value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -427,17 +442,16 @@ mod actor_integration_tests {
         let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone())
             .await
             .unwrap();
-        let mut actor2 = ActorStruct::new(
+        let mut actor2 = actor_with_service_locator(
             actor_id.clone(),
             behavior2,
             mailbox2,
             "default".to_string(),
             "default".to_string(),
-            None,
-        );
+        )
+        .await;
 
         let mut config_value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,

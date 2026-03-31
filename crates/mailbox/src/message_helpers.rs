@@ -116,7 +116,7 @@ pub fn new_message(payload: Vec<u8>) -> Message {
     Message {
         id: Ulid::new().to_string(),
         sender_id: String::new(),
-        receiver_id: "unknown".to_string(),
+        receiver_id: String::new(),
         channel: String::new(),
         message_type: String::new(),
         payload,
@@ -171,7 +171,7 @@ pub fn exit_message(from: String, reason_str: &str) -> Message {
     Message {
         id: Ulid::new().to_string(),
         sender_id: from,
-        receiver_id: "unknown".to_string(),
+        receiver_id: String::new(),
         channel: String::new(),
         message_type: "__EXIT__".to_string(),
         payload: b"__EXIT__".to_vec(),

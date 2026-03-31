@@ -123,7 +123,7 @@ async fn test_actor_ref_tell_with_ttl_message() {
     );
     use plexspaces_node::create_default_service_locator;
     let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        create_default_service_locator(Some("test-node".to_string()), None).await;
     let actor_ref = ActorRef::local(
         "test@node1".to_string(),
         "test".to_string(),

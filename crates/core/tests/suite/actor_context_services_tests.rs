@@ -583,7 +583,7 @@ async fn test_channel_service_receive_from_queue_no_timeout() {
     let channel_service = Arc::new(MockChannelService::with_return_none(false));
 
     use plexspaces_node::service_locator_helpers::create_default_service_locator;
-    let service_locator = create_default_service_locator(None, None, None).await;
+    let service_locator = create_default_service_locator(None, None).await;
     service_locator
         .register_channel_service(channel_service.clone())
         .await;
@@ -606,7 +606,7 @@ async fn test_channel_service_receive_from_queue_no_timeout_returns_none() {
     let channel_service = Arc::new(MockChannelService::with_return_none(true));
 
     use plexspaces_node::service_locator_helpers::create_default_service_locator;
-    let service_locator = create_default_service_locator(None, None, None).await;
+    let service_locator = create_default_service_locator(None, None).await;
     service_locator
         .register_channel_service(channel_service.clone())
         .await;

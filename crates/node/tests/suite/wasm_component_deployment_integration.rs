@@ -6,7 +6,7 @@
 // Integration test for WASM component deployment via HTTP API
 // This test reproduces the WASI binding issue and verifies the fix
 
-use plexspaces_core::ApplicationManager;
+use plexspaces_core::{ApplicationManager, ServiceLocator};
 use plexspaces_node::{Node, NodeBuilder};
 use reqwest::multipart;
 use std::path::PathBuf;
@@ -195,11 +195,11 @@ async fn test_wasm_component_deployment_reproduces_wasi_error() {
                 use plexspaces_core::ApplicationManager;
                 let app_manager: Arc<dyn ApplicationManager> = node
                     .service_locator()
-                    .application_manager()
+                    .get_application_manager()
                     .await
                     .expect("ApplicationManager should be available");
 
-                let apps = app_manager.list_applications().await;
+                let apps: Vec<String> = app_manager.list_applications().await;
                 assert!(
                     apps.contains(&"calculator-app".to_string()),
                     "Application should be registered after deployment"
@@ -325,11 +325,11 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
                 use plexspaces_core::ApplicationManager;
                 let app_manager: Arc<dyn ApplicationManager> = node
                     .service_locator()
-                    .application_manager()
+                    .get_application_manager()
                     .await
                     .expect("ApplicationManager should be available");
 
-                let apps = app_manager.list_applications().await;
+                let apps: Vec<String> = app_manager.list_applications().await;
                 assert!(
                     apps.contains(&"calculator-supervisor-app".to_string()),
                     "Application should be registered after deployment"
@@ -374,7 +374,7 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
                 sleep(Duration::from_millis(500)).await;
 
                 // Verify application is removed
-                let apps_after = app_manager.list_applications().await;
+                let apps_after: Vec<String> = app_manager.list_applications().await;
                 assert!(
                     !apps_after.contains(&"calculator-supervisor-app".to_string()),
                     "Application should be removed after undeploy"

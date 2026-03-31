@@ -87,7 +87,7 @@ mod tests {
         let mailbox = create_test_mailbox().await;
         use plexspaces_node::create_default_service_locator;
         let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None, None).await;
+            create_default_service_locator(Some("test-node".to_string()), None).await;
         let _actor_ref = ActorRef::local(
             "test@node1".to_string(),
             "test".to_string(),
@@ -111,7 +111,7 @@ mod tests {
         let mailbox = create_test_mailbox().await;
         use plexspaces_node::create_default_service_locator;
         let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None, None).await;
+            create_default_service_locator(Some("test-node".to_string()), None).await;
         let _actor_ref = ActorRef::local(
             "test@node1".to_string(),
             "test".to_string(),
@@ -132,7 +132,7 @@ mod tests {
         let mailbox = create_test_mailbox().await;
         use plexspaces_node::create_default_service_locator;
         let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None, None).await;
+            create_default_service_locator(Some("test-node".to_string()), None).await;
         let actor_ref = ActorRef::local(
             "test@node1".to_string(),
             "test".to_string(),

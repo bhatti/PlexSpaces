@@ -160,65 +160,7 @@ fn fatal_exit(message: &str) -> ! {
     }
 }
 
-/// Helper function to create SQLite lock manager using the shared database
-///
-/// Uses the same database URL as the main shared database, ensuring locks
-/// are stored in the same DB file for consistency and simplicity.
-#[cfg(feature = "sqlite-backend")]
-async fn create_sqlite_lock_manager(
-    db_url: &Option<String>,
-    node_id_str: &str,
-) -> Arc<dyn plexspaces_locks::LockManager> {
-    use plexspaces_locks::sql::SqliteLockManager;
-
-    // Use the shared database URL (same as KeyValue store)
-    let lock_db_url = if let Some(ref url) = db_url {
-        // Use the shared database URL directly (it already has mode=rwc)
-        url.clone()
-    } else {
-        // Fallback: use default path with node_id
-        let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
-        format!("sqlite:///tmp/plexspaces-{}.db?mode=rwc", sanitized_node_id)
-    };
-
-    tracing::info!(
-        backend = "SQLite",
-        db_url = %lock_db_url,
-        implementation = "SqliteLockManager",
-        "🔧 Lock manager initialized: SqliteLockManager (shared SQLite database)"
-    );
-
-    match SqliteLockManager::new(&lock_db_url).await {
-        Ok(manager) => Arc::new(manager),
-        Err(e) => {
-            let error_msg = format!(
-                "FATAL: Failed to initialize SQLite lock manager with shared DB '{}': {}. \
-                Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory.",
-                lock_db_url, e
-            );
-            tracing::error!(
-                db_url = %lock_db_url,
-                error = %e,
-                "FATAL: Failed to initialize SQLite lock manager with shared database"
-            );
-            fatal_exit(&error_msg);
-        }
-    }
-}
-
-/// Fallback for when sqlite-backend feature is not enabled
-#[cfg(not(feature = "sqlite-backend"))]
-async fn create_sqlite_lock_manager(
-    _db_url: &Option<String>,
-    _node_id_str: &str,
-) -> Arc<dyn plexspaces_locks::LockManager> {
-    let error_msg = "FATAL: SQLite backend not available. Enable 'sqlite-backend' feature for plexspaces-locks.";
-    tracing::error!("{}", error_msg);
-    fatal_exit(error_msg);
-}
-
 // Import ActorService and TupleSpaceProvider traits for trait object storage
-use plexspaces_actor::ActorRef;
 use plexspaces_core::actor_context::{
     ActorService, ChannelService, ObjectRegistry, TupleSpaceProvider,
 };
@@ -228,7 +170,6 @@ use plexspaces_core::facet_service_wrapper::{
 };
 use plexspaces_core::monitoring::{NodeConnectionInfo, NodeMetricsAccessor};
 use plexspaces_core::JournalStorage;
-use plexspaces_core::RequestContext;
 use plexspaces_core::ServiceLocator;
 use plexspaces_core::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
 
@@ -1639,8 +1580,6 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
 
     async fn initialize_services(
         &self,
-        node_id: Option<String>,
-        node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
         release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
     ) {
         // Check if already initialized (idempotent)
@@ -1655,7 +1594,7 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         // We'll clone self and create a new Arc pointing to the cloned instance
         // This is safe because ServiceLocatorImpl is just a container for services (all fields are Arc)
         let service_locator_impl = Arc::new(self.clone());
-        initialize_services_impl(service_locator_impl, node_id, node_config, release_config).await;
+        initialize_services_impl(service_locator_impl, release_config).await;
     }
 
     fn request_shutdown(&self) {
@@ -1955,217 +1894,89 @@ impl ServiceLocatorImpl {
 /// Panics if database initialization fails (fatal error).
 async fn initialize_services_impl(
     service_locator_impl: Arc<ServiceLocatorImpl>,
-    node_id: Option<String>,
-    node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
     release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
 ) {
-    // Get trait object for methods that need it (used implicitly via service_locator_impl)
     use plexspaces_core::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
-    use plexspaces_object_registry::SqliteObjectRegistryRepository;
     use plexspaces_process_groups::ProcessGroupRegistry;
     use std::collections::HashMap;
 
-    // LockManager imports (behind feature flags)
-    #[cfg(feature = "sqlite-backend")]
-    use plexspaces_locks::sql::SqliteLockManager;
-
-    // Determine NodeConfig: priority is node_config > release_config.node > default
-    let final_node_config = if let Some(config) = node_config {
-        config
-    } else if let Some(ref release) = release_config {
-        // Extract NodeConfig from ReleaseSpec.node if available
-        release.node.clone().unwrap_or_else(|| {
-            // Create default if release_config.node is None
-            let node_id_str = node_id.clone().unwrap_or_else(|| "test-node".to_string());
-            plexspaces_proto::node::v1::NodeConfig {
-                id: node_id_str,
-                listen_addr: "127.0.0.1:0".to_string(),
-                cluster_seed_nodes: vec![],
-                cluster_name: String::new(),
-                max_connections: 100,
-                heartbeat_interval_ms: 5000,
-                clustering_enabled: true,
-                grpc_connection_pool_size: 2,
-                metadata: HashMap::new(),
-                node_registry: None,
-                grpc_address: String::new(),
-            }
-        })
-    } else {
-        // Create default NodeConfig
-        let node_id_str = node_id.unwrap_or_else(|| "test-node".to_string());
-        plexspaces_proto::node::v1::NodeConfig {
-            id: node_id_str.clone(),
-            listen_addr: "127.0.0.1:0".to_string(),
-            cluster_seed_nodes: vec![],
-            cluster_name: String::new(),
-            grpc_connection_pool_size: 2,
-            max_connections: 100,
-            heartbeat_interval_ms: 5000,
-            clustering_enabled: true,
-            metadata: HashMap::new(),
-            node_registry: None,
-            grpc_address: String::new(),
-        }
+    let default_node_config = |node_id: String| plexspaces_proto::node::v1::NodeConfig {
+        id: node_id,
+        listen_addr: "127.0.0.1:0".to_string(),
+        cluster_seed_nodes: vec![],
+        cluster_name: String::new(),
+        grpc_connection_pool_size: 2,
+        max_connections: 100,
+        heartbeat_interval_ms: 5000,
+        clustering_enabled: true,
+        metadata: HashMap::new(),
+        node_registry: None,
+        grpc_address: String::new(),
     };
+
+    let mut final_node_config = release_config
+        .as_ref()
+        .and_then(|release| release.node.clone())
+        .unwrap_or_else(|| default_node_config("test-node".to_string()));
+
+    if final_node_config.id.is_empty() {
+        final_node_config.id = "test-node".to_string();
+    }
 
     let node_id_str = final_node_config.id.clone();
 
-    // Get database URL from RuntimeConfig.db (already initialized by config_manager with env overrides)
-    // Note: All env var handling is centralized in config_manager::initialize()
-    let db_url = release_config
+    let final_runtime_config = release_config
         .as_ref()
-        .and_then(|r| r.runtime.as_ref())
-        .and_then(|rt| rt.db.as_ref())
-        .map(|db| db.connection_string.clone())
-        .filter(|s| !s.is_empty());
+        .and_then(|r| r.runtime.clone())
+        .unwrap_or_else(|| plexspaces_proto::node::v1::RuntimeConfig {
+            db: Some(plexspaces_proto::storage::v1::SharedDbConfig {
+                connection_string: "sqlite::memory:".to_string(),
+                auto_migrate: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
 
-    // Use in-memory if URL contains ":memory:"
-    let use_memory = db_url
-        .as_ref()
-        .map(|s| s.contains(":memory:"))
-        .unwrap_or(false);
-
-    // Run unified migrations once (SQLite or PostgreSQL) before any store uses the DB.
-    // Skip for :memory: (each connection gets its own empty DB; stores run their own schema if needed).
-    let connection_string_for_migrations = db_url.clone().unwrap_or_else(|| {
-        let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
-        format!(
-            "sqlite:///tmp/plexspaces-kv-{}.db?mode=rwc",
-            sanitized_node_id
-        )
+    let shared_db = final_runtime_config.db.as_ref().unwrap_or_else(|| {
+        fatal_exit("FATAL: RuntimeConfig.db is required for storage-backed service initialization")
     });
-    let use_memory_for_migrations = connection_string_for_migrations.contains(":memory:");
-    if !use_memory_for_migrations {
-        if let Err(e) = plexspaces_db::run_migrations(&connection_string_for_migrations).await {
+
+    if shared_db.auto_migrate && !shared_db.connection_string.contains(":memory:") {
+        if let Err(e) = plexspaces_db::run_migrations(&shared_db.connection_string).await {
             let error_msg = format!(
-                "FATAL: Database migrations failed: {}. Ensure db/migrations/sqlite or db/migrations/postgres exist.",
-                e
+                "FATAL: Database migrations failed for '{}': {}",
+                shared_db.connection_string, e
             );
-            tracing::error!(error = %e, "FATAL: Database migrations failed.");
+            tracing::error!(error = %e, connection_string = %shared_db.connection_string, "FATAL: Database migrations failed.");
             fatal_exit(&error_msg);
         }
     }
 
-    // Extract db_path from URL (used for both KV store and Lock manager)
-    // SqliteKVStore::new() expects just a path (it adds sqlite: prefix and ?mode=rwc internally)
-    // We need to strip any existing scheme prefix and query params
-    let db_path = if let Some(ref url) = db_url {
-        // Extract path from URL: sqlite:///path?mode=rwc -> /path
-        let path_with_params = if url.starts_with("sqlite:///") {
-            url.strip_prefix("sqlite://").unwrap().to_string()
-        } else if url.starts_with("sqlite://") {
-            url.strip_prefix("sqlite://").unwrap().to_string()
-        } else if url.starts_with("sqlite:") {
-            url.strip_prefix("sqlite:").unwrap().to_string()
-        } else {
-            url.clone()
-        };
-        // Strip query parameters (e.g., ?mode=rwc) - SqliteKVStore::new() adds them
-        path_with_params
-            .split('?')
-            .next()
-            .unwrap_or(&path_with_params)
-            .to_string()
-    } else {
-        // Default: file-based SQLite with node_id in filename
-        let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
-        format!("/tmp/plexspaces-kv-{}.db", sanitized_node_id)
-    };
-
-    // Create KeyValueStore based on environment configuration.
-    // If PLEXSPACES_KV_BACKEND is set, use create_keyvalue_stores_from_env() to select the backend.
-    // Otherwise, use SQLite with the config-derived path.
-    // Each backend implements both plexspaces_keyvalue::KeyValueStore (rich) and
-    // plexspaces_common::KeyValueStore (consumer-facing for WASM actors).
-    let effective_db_path = if use_memory {
-        ":memory:".to_string()
-    } else {
-        db_path.clone()
-    };
     let (kv_store, kv_store_common): (
         Arc<dyn plexspaces_keyvalue::KeyValueStore>,
         Arc<dyn plexspaces_core::KeyValueStore>,
-    ) = if std::env::var("PLEXSPACES_KV_BACKEND").is_ok() {
-        // Use environment-configured backend (Redis, PostgreSQL, DynamoDB, Blob, etc.)
-        match plexspaces_keyvalue::create_keyvalue_stores_from_env().await {
-            Ok(stores) => {
-                tracing::info!(
-                    "KeyValue storage initialized from PLEXSPACES_KV_BACKEND environment variable"
-                );
-                stores
-            }
-            Err(e) => {
-                let error_msg = format!(
-                    "FATAL: Failed to initialize KeyValue store from environment: {}. \
-                    Check PLEXSPACES_KV_BACKEND and related environment variables.",
-                    e
-                );
-                tracing::error!(error = %e, "FATAL: Failed to initialize KeyValue store from environment.");
-                fatal_exit(&error_msg);
-            }
-        }
-    } else {
-        // Default: SQLite with config-derived path
-        let config = plexspaces_keyvalue::KVConfig::new(plexspaces_keyvalue::BackendType::Sqlite {
-            path: effective_db_path.clone(),
-        });
-        match plexspaces_keyvalue::create_keyvalue_stores_from_config(config).await {
-            Ok(stores) => {
-                if use_memory {
-                    tracing::info!(
-                        backend = "SQLite :memory:",
-                        "KeyValue storage using in-memory SQLite"
-                    );
-                } else {
-                    tracing::info!(backend = "SQLite", path = %effective_db_path, "KeyValue storage using file-based SQLite");
-                }
-                stores
-            }
-            Err(e) => {
-                let error_msg = format!(
-                    "FATAL: Failed to initialize SQLite KeyValue store at '{}': {}. \
-                    Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory.",
-                    effective_db_path, e
-                );
-                tracing::error!(
-                    db_path = %effective_db_path,
-                    error = %e,
-                    "FATAL: Failed to initialize SQLite KeyValue store."
-                );
-                fatal_exit(&error_msg);
-            }
+    ) = match plexspaces_keyvalue::create_keyvalue_stores_from_shared_db(shared_db).await {
+        Ok(stores) => stores,
+        Err(e) => {
+            let error_msg = format!(
+                "FATAL: Failed to initialize KeyValue store from RuntimeConfig.db: {}",
+                e
+            );
+            tracing::error!(error = %e, "FATAL: Failed to initialize KeyValue store");
+            fatal_exit(&error_msg);
         }
     };
 
-    // Create ObjectRegistry with its own repository backend (indexed columns for fast queries)
-    // Uses the same SQLite database path as KeyValueStore for simplicity, but with its own table
-    // Always use SQLite - use :memory: for in-memory mode
     let object_registry_repo: Arc<
         dyn plexspaces_object_registry::repository::ObjectRegistryRepository,
-    > = match SqliteObjectRegistryRepository::new(&effective_db_path).await {
-        Ok(repo) => {
-            if use_memory {
-                tracing::info!(
-                    backend = "SQLite :memory:",
-                    "Object Registry using in-memory SQLite"
-                );
-            } else {
-                tracing::info!(backend = "SQLite", path = %effective_db_path, "Object Registry using SQLite backend");
-            }
-            Arc::new(repo)
-        }
+    > = match plexspaces_object_registry::create_repository_from_shared_db(shared_db).await {
+        Ok(repo) => repo,
         Err(e) => {
             let error_msg = format!(
-                "FATAL: Failed to initialize SQLite Object Registry at '{}': {}. \
-                Set PLEXSPACES_DATABASE_URL=sqlite::memory: for in-memory.",
-                effective_db_path, e
+                "FATAL: Failed to initialize Object Registry from RuntimeConfig.db: {}",
+                e
             );
-            tracing::error!(
-                db_path = %effective_db_path,
-                error = %e,
-                "FATAL: Failed to initialize SQLite Object Registry."
-            );
+            tracing::error!(error = %e, "FATAL: Failed to initialize Object Registry");
             fatal_exit(&error_msg);
         }
     };
@@ -2179,79 +1990,18 @@ async fn initialize_services_impl(
         kv_store.clone(),
     ));
 
-    // Create LockManager based on locks_provider from config
-    // Config manager has already resolved this: Redis (if available) > Shared DB
-    // Use MemoryLockManager for in-memory SQLite (more efficient than SQLite :memory:)
-    let lock_manager: Arc<dyn plexspaces_locks::LockManager> = if use_memory {
-        // Use in-memory lock manager (tokio primitives) - more efficient than SQLite :memory:
-        use plexspaces_locks::factory::{create_lock_manager, LockBackend};
-        tracing::info!(
-            backend = "Memory",
-            implementation = "MemoryLockManager",
-            details = "tokio::sync::Semaphore + Mutex",
-            "🔧 Lock manager initialized: MemoryLockManager (in-memory tokio primitives)"
-        );
-        match create_lock_manager(LockBackend::Memory, None).await {
+    let lock_manager: Arc<dyn plexspaces_locks::LockManager> =
+        match plexspaces_locks::create_lock_manager_from_runtime(&final_runtime_config).await {
             Ok(manager) => manager,
             Err(e) => {
-                let error_msg = format!("FATAL: Failed to create in-memory lock manager: {}", e);
-                tracing::error!("{}", error_msg);
+                let error_msg = format!(
+                    "FATAL: Failed to initialize LockManager from RuntimeConfig: {}",
+                    e
+                );
+                tracing::error!(error = %e, "FATAL: Failed to initialize LockManager");
                 fatal_exit(&error_msg);
             }
-        }
-    } else {
-        // Read locks_provider from config (already resolved by config_manager)
-        let locks_provider = release_config
-            .as_ref()
-            .and_then(|r| r.runtime.as_ref())
-            .and_then(|rt| rt.locks_provider.as_ref());
-
-        match locks_provider {
-            Some(lp)
-                if lp.provider
-                    == plexspaces_proto::storage::v1::StorageProvider::StorageProviderRedis
-                        as i32 =>
-            {
-                // Use Redis for locks
-                use plexspaces_locks::factory::{create_lock_manager, LockBackend};
-                #[cfg(feature = "redis-backend")]
-                {
-                    let redis_url = lp.config.as_ref()
-                        .and_then(|c| match c {
-                            plexspaces_proto::storage::v1::storage_provider_config::Config::Redis(r) => Some(r.url.clone()),
-                            _ => None,
-                        })
-                        .unwrap_or_else(|| "redis://localhost:6379".to_string());
-
-                    tracing::info!(
-                        backend = "Redis",
-                        redis_url = %redis_url,
-                        implementation = "RedisLockManager",
-                        "🔧 Lock manager initialized: RedisLockManager (Redis backend)"
-                    );
-                    match create_lock_manager(LockBackend::Redis, Some(redis_url)).await {
-                        Ok(manager) => manager,
-                        Err(e) => {
-                            tracing::warn!(
-                                error = %e,
-                                "Failed to initialize Redis lock manager, falling back to shared database"
-                            );
-                            create_sqlite_lock_manager(&db_url, &node_id_str).await
-                        }
-                    }
-                }
-                #[cfg(not(feature = "redis-backend"))]
-                {
-                    tracing::warn!("Redis backend not available (feature disabled), using shared database for locks");
-                    create_sqlite_lock_manager(&db_url, &node_id_str).await
-                }
-            }
-            _ => {
-                // Use shared database for locks (SQLite or Postgres)
-                create_sqlite_lock_manager(&db_url, &node_id_str).await
-            }
-        }
-    };
+        };
 
     // Register LockManager in ServiceLocator (use locks::LockManager directly)
     let service_locator: &dyn plexspaces_core::ServiceLocator = service_locator_impl.as_ref();
@@ -2271,42 +2021,21 @@ async fn initialize_services_impl(
         )
         .await;
 
-    // Create and register JournalStorage for durability facets and event sourcing
-    // Use same database URL as KeyValueStore/ObjectRegistry for consistency
-    // CRITICAL: Migrations run automatically in SqliteJournalStorage::new() (same pattern as other repositories)
-    use plexspaces_journaling::{create_journal_storage, JournalStorage};
-    tracing::info!(
-        db_path = %effective_db_path,
-        use_memory = %use_memory,
-        "Creating JournalStorage (migrations will run automatically on startup)"
-    );
+    // Create and register JournalStorage for durability facets and event sourcing.
+    use plexspaces_journaling::{create_journal_storage_from_shared_db, JournalStorage};
     let journal_storage: Arc<dyn JournalStorage + Send + Sync> =
-        match create_journal_storage(&effective_db_path).await {
+        match create_journal_storage_from_shared_db(shared_db).await {
             Ok(storage) => storage,
             Err(e) => {
                 let error_msg = format!(
-                    "FATAL: Failed to create journal storage at '{}': {}. \
-                Journal storage is required for durability facets. \
-                Ensure the database path is correct and migrations can run.",
-                    effective_db_path, e
+                    "FATAL: Failed to create journal storage from RuntimeConfig.db '{}': {}. \
+                Journal storage is required for durability facets.",
+                    shared_db.connection_string, e
                 );
                 tracing::error!("{}", error_msg);
                 fatal_exit(&error_msg);
             }
         };
-
-    if use_memory {
-        tracing::info!(
-            backend = "SQLite :memory:",
-            "Journal storage using in-memory SQLite"
-        );
-    } else {
-        tracing::info!(
-            backend = "SQLite",
-            path = %effective_db_path,
-            "Journal storage using file-based SQLite (migrations completed - checkpoints table created)"
-        );
-    }
     service_locator
         .register_journal_storage(journal_storage)
         .await;
@@ -2516,33 +2245,24 @@ async fn initialize_services_impl(
         .register_node_config(final_node_config.clone())
         .await;
 
-    // Register RuntimeConfig and SecurityConfig from ReleaseSpec.runtime if available
-    if let Some(ref release) = release_config {
-        if let Some(ref runtime) = release.runtime {
-            // Register RuntimeConfig
-            service_locator
-                .register_runtime_config(runtime.clone())
-                .await;
+    service_locator
+        .register_runtime_config(final_runtime_config.clone())
+        .await;
 
-            // Update VirtualActorManager max_pool_per_actor_type from RuntimeConfig
-            if let Some(ref default_virtual_actor_config) = runtime.default_virtual_actor_config {
-                use plexspaces_common::virtual_actor_config::get_max_pool_per_actor_type;
-                let max_pool = get_max_pool_per_actor_type(Some(default_virtual_actor_config));
-                // Get VirtualActorManager from ServiceLocator (it was registered earlier)
-                if let Some(manager) = service_locator.virtual_actor_manager().await {
-                    manager.set_max_pool_per_actor_type(max_pool).await;
-                    tracing::info!(
-                        max_pool_per_actor_type = max_pool,
-                        "VirtualActorManager max_pool_per_actor_type set from RuntimeConfig"
-                    );
-                }
-            }
-
-            // Register SecurityConfig
-            if let Some(security) = runtime.security.clone() {
-                service_locator.register_security_config(security).await;
-            }
+    if let Some(ref default_virtual_actor_config) = final_runtime_config.default_virtual_actor_config {
+        use plexspaces_common::virtual_actor_config::get_max_pool_per_actor_type;
+        let max_pool = get_max_pool_per_actor_type(Some(default_virtual_actor_config));
+        if let Some(manager) = service_locator.virtual_actor_manager().await {
+            manager.set_max_pool_per_actor_type(max_pool).await;
+            tracing::info!(
+                max_pool_per_actor_type = max_pool,
+                "VirtualActorManager max_pool_per_actor_type set from RuntimeConfig"
+            );
         }
+    }
+
+    if let Some(security) = final_runtime_config.security.clone() {
+        service_locator.register_security_config(security).await;
     }
 
     // Create and register GrpcConnectionManager with connection pooling
@@ -2746,5 +2466,45 @@ mod tests {
 
         assert_eq!(connection_key, "http://localhost:8093");
         assert_eq!(node_address, "http://localhost:8093");
+    }
+
+    #[tokio::test]
+    async fn test_initialize_services_registers_effective_runtime_config_without_release_runtime() {
+        use plexspaces_core::ServiceLocator as _;
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec};
+
+        let locator = Arc::new(ServiceLocatorImpl::new());
+        let release = ReleaseSpec {
+            node: Some(NodeConfig {
+                id: "runtime-config-test".to_string(),
+                listen_addr: "127.0.0.1:0".to_string(),
+                grpc_connection_pool_size: 2,
+                max_connections: 100,
+                heartbeat_interval_ms: 5000,
+                clustering_enabled: true,
+                ..Default::default()
+            }),
+            runtime: None,
+            ..Default::default()
+        };
+
+        locator
+            .initialize_services(Some(release))
+            .await;
+
+        let runtime = locator
+            .get_runtime_config()
+            .await
+            .expect("runtime config should be registered");
+        let shared_db = runtime
+            .db
+            .expect("effective runtime config should include shared db");
+
+        assert_eq!(shared_db.connection_string, "sqlite::memory:");
+        assert!(locator.actor_registry().await.is_some());
+        assert!(locator.get_lock_manager().await.is_some());
+        assert!(locator.get_journal_storage().await.is_some());
+        assert!(locator.get_object_registry().await.is_some());
+        assert!(locator.get_keyvalue_store().await.is_some());
     }
 }

@@ -391,14 +391,17 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
     let node = Arc::new(NodeBuilder::new("test-node-unimpl").build().await);
     let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
-    let result = ActorServiceTrait::create_actor(
+    let result = ActorServiceTrait::spawn_actor(
         &service,
-        Request::new(plexspaces_proto::actor::v1::CreateActorRequest {
+        Request::new(plexspaces_proto::actor::v1::SpawnActorRequest {
+            actor_id: String::new(),
             actor_type: String::new(),
             initial_state: vec![],
             config: None,
             labels: std::collections::HashMap::new(),
+            facets: vec![],
             namespace: "default".to_string(),
+            instances_count: 1,
         }),
     )
     .await;
@@ -407,7 +410,7 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
     assert_eq!(
         err.code(),
         tonic::Code::InvalidArgument,
-        "create_actor is implemented and returns InvalidArgument for empty actor_type"
+        "spawn_actor returns InvalidArgument for empty actor_type"
     );
 
     let result = ActorServiceTrait::list_actors(
@@ -417,6 +420,7 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
             actor_type: String::new(),
             state: 0,
             node_id: String::new(),
+            namespace: String::new(),
         }),
     )
     .await;
@@ -433,6 +437,7 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
         Request::new(plexspaces_proto::actor::v1::DeleteActorRequest {
             actor_id: "test".to_string(),
             force: false,
+            namespace: String::new(),
         }),
     )
     .await;

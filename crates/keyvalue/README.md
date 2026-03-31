@@ -230,7 +230,7 @@ store.batch_put(batch).await?;
   - Simple, reliable design
 - **Configuration**:
   ```bash
-  export PLEXSPACES_KV_BACKEND=blob
+  configure `runtime.db` or a `StorageProviderConfig` with the blob-backed provider
   export BLOB_BACKEND=minio  # or s3, gcp, azure
   export BLOB_BUCKET=plexspaces-test
   export BLOB_ENDPOINT=http://localhost:9000  # for MinIO
@@ -264,4 +264,3 @@ metrics::gauge!("kv_index_hit_ratio",
 - Implementation: `crates/keyvalue/src/`
 - Performance Analysis: See performance benchmarks in code
 - Tests: `crates/keyvalue/src/` (unit tests)
-

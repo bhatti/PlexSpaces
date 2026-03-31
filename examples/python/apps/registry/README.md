@@ -41,7 +41,7 @@ Client sends message → RegistryFacet intercepts → ObjectRegistry → Respons
 - `"register_object"`: Register a service/actor in the registry
 - `"unregister_object"`: Unregister a service/actor
 - `"lookup_object"`: Lookup a specific service/actor by ID
-- `"discover_objects"`: Discover services/actors with filters
+- `"discover_objects"`: Discover services/actors with filters (`offset`, then `limit`)
 
 ## Quick Start
 
@@ -86,6 +86,7 @@ cd examples/python/apps/registry
   "payload": {
     "object_type": "Service",
     "labels": ["us-east"],
+    "offset": 0,
     "limit": 10
   }
 }

@@ -3,6 +3,7 @@
 //
 //! Integration tests for gRPC Health and Metrics endpoints
 
+use plexspaces_core::ServiceLocator;
 use plexspaces_node::{default_node_config, Node, NodeBuilder, NodeId};
 use plexspaces_proto::system::v1::ServingStatus;
 use std::sync::Arc;
@@ -378,15 +379,20 @@ async fn test_grpc_service_rejects_requests_during_shutdown() {
     service_locator.request_shutdown();
 
     // Try to create an actor - should be rejected
-    let request = tonic::Request::new(plexspaces_proto::actor::v1::CreateActorRequest {
-        actor_type: "TestActor".to_string(),
-        initial_state: vec![],
-        config: None,
-        labels: std::collections::HashMap::new(),
-        namespace: "default".to_string(),
-    });
-
-    let result = actor_service.create_actor(request).await;
+    let result = plexspaces_proto::actor::v1::actor_service_server::ActorService::spawn_actor(
+        actor_service.as_ref(),
+        tonic::Request::new(plexspaces_proto::actor::v1::SpawnActorRequest {
+            actor_id: String::new(),
+            actor_type: "TestActor".to_string(),
+            initial_state: vec![],
+            config: None,
+            labels: std::collections::HashMap::new(),
+            facets: vec![],
+            namespace: "default".to_string(),
+            instances_count: 1,
+        }),
+    )
+    .await;
 
     // Should return unavailable error
     assert!(result.is_err());
@@ -411,15 +417,20 @@ async fn test_grpc_service_accepts_requests_when_serving() {
     ));
 
     // Try to create an actor - should be accepted (may fail for other reasons, but not shutdown)
-    let request = tonic::Request::new(plexspaces_proto::actor::v1::CreateActorRequest {
-        actor_type: "TestActor".to_string(),
-        initial_state: vec![],
-        config: None,
-        labels: std::collections::HashMap::new(),
-        namespace: "default".to_string(),
-    });
-
-    let result = actor_service.create_actor(request).await;
+    let result = plexspaces_proto::actor::v1::actor_service_server::ActorService::spawn_actor(
+        actor_service.as_ref(),
+        tonic::Request::new(plexspaces_proto::actor::v1::SpawnActorRequest {
+            actor_id: String::new(),
+            actor_type: "TestActor".to_string(),
+            initial_state: vec![],
+            config: None,
+            labels: std::collections::HashMap::new(),
+            facets: vec![],
+            namespace: "default".to_string(),
+            instances_count: 1,
+        }),
+    )
+    .await;
 
     // Should not be unavailable due to shutdown
     if result.is_err() {

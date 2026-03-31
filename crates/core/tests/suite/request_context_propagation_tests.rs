@@ -15,7 +15,7 @@ use tonic::metadata::MetadataValue;
 
 #[tokio::test]
 async fn test_request_context_from_grpc_metadata_tenant_and_namespace() {
-    let locator = create_default_service_locator(None, None, None).await;
+    let locator = create_default_service_locator(None, None).await;
     let sl: Arc<dyn plexspaces_core::ServiceLocator> = locator;
 
     let mut metadata = tonic::metadata::MetadataMap::new();
@@ -39,7 +39,7 @@ async fn test_request_context_from_grpc_metadata_tenant_and_namespace() {
 
 #[tokio::test]
 async fn test_request_context_from_grpc_metadata_empty_fails_when_auth_enabled() {
-    let locator = create_default_service_locator(None, None, None).await;
+    let locator = create_default_service_locator(None, None).await;
     let sl: Arc<dyn plexspaces_core::ServiceLocator> = locator;
 
     let metadata = tonic::metadata::MetadataMap::new();
@@ -56,7 +56,7 @@ async fn test_request_context_from_grpc_metadata_empty_fails_when_auth_enabled()
 
 #[tokio::test]
 async fn test_request_context_from_grpc_labels_fallback() {
-    let locator = create_default_service_locator(None, None, None).await;
+    let locator = create_default_service_locator(None, None).await;
     let sl: Arc<dyn plexspaces_core::ServiceLocator> = locator;
 
     let metadata = tonic::metadata::MetadataMap::new();

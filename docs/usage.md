@@ -227,7 +227,8 @@ use plexspaces_core::RequestContext;
 fn extract_context_from_request<T>(request: &Request<T>) -> Result<RequestContext, String> {
     let metadata = request.metadata();
     
-    // Extract tenant_id from headers (set by JWT middleware)
+    // Extract tenant_id from middleware-populated metadata.
+    // Client requests must not supply tenant identity directly when auth is enabled.
     let tenant_id = metadata.get("x-tenant-id")
         .and_then(|v| v.to_str().ok())
         .ok_or_else(|| "Missing x-tenant-id metadata set by auth middleware".to_string())?;
@@ -497,10 +498,11 @@ tracing::info!(
 );
 ```
 
-### 7. Handle Missing Tenant ID Gracefully
+### 7. Handle Missing Middleware Tenant Context Gracefully
 
 **✅ Good:**
 ```rust
+// x-tenant-id must already have been set by auth middleware.
 let tenant_id = metadata.get("x-tenant-id")
     .and_then(|v| v.to_str().ok())
     .ok_or_else(|| Error::MissingTenantId)?;

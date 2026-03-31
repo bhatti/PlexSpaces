@@ -34,7 +34,7 @@
 //! - `"register_object"`: Register an object in the registry
 //! - `"unregister_object"`: Unregister an object
 //! - `"lookup_object"`: Lookup an object by ID
-//! - `"discover_objects"`: Discover objects with filters
+//! - `"discover_objects"`: Discover objects with filters (`offset`, then `limit`, same as ObjectRegistry)
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -99,7 +99,9 @@ pub trait ObjectRegistry: Send + Sync {
         object_type: Option<String>,
     ) -> Result<Option<ObjectRegistration>, String>;
 
-    /// Discover objects with filters
+    /// Discover objects with filters.
+    ///
+    /// Pagination matches `plexspaces_object_registry::ObjectRegistry::discover`: **`offset` first, then `limit`**.
     async fn discover(
         &self,
         ctx: &RequestContext,
@@ -107,8 +109,8 @@ pub trait ObjectRegistry: Send + Sync {
         name: Option<String>,
         labels: Option<Vec<String>>,
         health_status: Option<String>,
-        limit: usize,
         offset: usize,
+        limit: usize,
     ) -> Result<Vec<ObjectRegistration>, String>;
 }
 
@@ -426,12 +428,15 @@ impl RegistryFacet {
                     name: Option<String>,
                     labels: Option<Vec<String>>,
                     health_status: Option<String>,
-                    limit: Option<usize>,
                     offset: Option<usize>,
+                    limit: Option<usize>,
                 }
 
                 let args: DiscoverArgs = serde_json::from_slice(args)
                     .map_err(|e| FacetError::InvalidConfig(e.to_string()))?;
+
+                let offset = args.offset.unwrap_or(0);
+                let limit = args.limit.unwrap_or(100);
 
                 match self
                     .object_registry
@@ -441,8 +446,8 @@ impl RegistryFacet {
                         args.name,
                         args.labels,
                         args.health_status,
-                        args.limit.unwrap_or(100),
-                        args.offset.unwrap_or(0),
+                        offset,
+                        limit,
                     )
                     .await
                 {
@@ -634,11 +639,13 @@ mod tests {
             _name: Option<String>,
             _labels: Option<Vec<String>>,
             _health_status: Option<String>,
-            _limit: usize,
-            _offset: usize,
+            offset: usize,
+            limit: usize,
         ) -> Result<Vec<ObjectRegistration>, String> {
             let objects = self.objects.read().await;
-            Ok(objects.values().cloned().collect())
+            let mut v: Vec<ObjectRegistration> = objects.values().cloned().collect();
+            v.sort_by(|a, b| a.object_id.cmp(&b.object_id));
+            Ok(v.into_iter().skip(offset).take(limit).collect())
         }
     }
 
@@ -798,6 +805,7 @@ mod tests {
         // ACT: Discover all objects
         let discover_args = serde_json::json!({
             "object_type": "Service",
+            "offset": 0,
             "limit": 10
         });
 

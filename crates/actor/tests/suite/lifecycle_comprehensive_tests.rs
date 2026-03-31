@@ -26,6 +26,7 @@
 //! - EXIT message handling
 //! - Edge cases (concurrent calls, multiple calls, etc.)
 
+use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::Actor;
 use plexspaces_core::{
@@ -187,14 +188,14 @@ async fn test_init_called_before_message_loop() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -216,14 +217,14 @@ async fn test_init_called_only_once() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -246,14 +247,14 @@ async fn test_init_failure_prevents_start() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let result = actor.start().await;
     assert!(result.is_err(), "Actor start should fail if init() fails");
@@ -273,14 +274,14 @@ async fn test_init_success_allows_start() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let result = actor.start().await;
     assert!(
@@ -303,14 +304,14 @@ async fn test_init_called_before_any_messages() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -356,14 +357,14 @@ async fn test_terminate_called_on_graceful_shutdown() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -391,14 +392,14 @@ async fn test_terminate_called_only_once() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -425,14 +426,14 @@ async fn test_terminate_called_with_correct_reason() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -457,14 +458,14 @@ async fn test_terminate_called_before_state_terminated() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -505,7 +506,7 @@ async fn test_handle_exit_called_when_trap_exit_true() {
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
             .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
@@ -540,7 +541,7 @@ async fn test_handle_exit_propagate_action_terminates_actor() {
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
             .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
@@ -574,7 +575,7 @@ async fn test_handle_exit_handle_action_continues_actor() {
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
             .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
@@ -616,7 +617,7 @@ async fn test_handle_exit_receives_correct_parameters() {
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
             .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
@@ -660,14 +661,14 @@ async fn test_exit_message_terminates_actor_when_not_trapping() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     // Set trap_exit=false (default) - context is private, so we can't modify it directly
     // The test will work with default trap_exit=false
@@ -744,14 +745,14 @@ async fn test_exit_message_calls_handle_exit_when_trapping() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     // Set trap_exit=true - context is private, so we can't modify it directly
     // The test will work with default trap_exit=false, but we can test handle_exit directly
@@ -766,7 +767,7 @@ async fn test_exit_message_calls_handle_exit_when_trapping() {
     // Test handle_exit() directly
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
             .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
@@ -812,14 +813,14 @@ async fn test_init_called_even_if_actor_stopped_immediately() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     // Stop immediately
@@ -842,14 +843,14 @@ async fn test_terminate_not_called_if_init_fails() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let result = actor.start().await;
     assert!(result.is_err(), "Actor start should fail");
@@ -869,20 +870,20 @@ async fn test_multiple_exit_messages_handled_correctly() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     // Note: Since we can't modify context.trap_exit directly (it's private),
     // we test handle_exit() directly by calling it multiple times
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
             .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
@@ -923,7 +924,7 @@ async fn test_exit_message_with_linked_reason() {
     // Test handle_exit() with Linked reason directly (no need to create actor)
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None, None)
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
             .await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),

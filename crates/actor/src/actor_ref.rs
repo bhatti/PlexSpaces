@@ -1439,7 +1439,7 @@ mod tests {
     /// Helper to create a test ServiceLocator with default services
     pub(crate) async fn create_test_service_locator() -> Arc<dyn ServiceLocatorTrait> {
         use plexspaces_node::create_default_service_locator;
-        create_default_service_locator(Some("test-node".to_string()), None, None).await
+        create_default_service_locator(Some("test-node".to_string()), None).await
     }
 
     /// TEST 1: Can create a local ActorRef
@@ -1463,7 +1463,7 @@ mod tests {
     async fn test_create_remote_actor_ref() {
         use plexspaces_node::create_default_service_locator;
         let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None, None).await;
+            create_default_service_locator(Some("test-node".to_string()), None).await;
         let actor_ref =
             ActorRef::remote("remote-actor@node1", "", "test", "node1", service_locator);
 
@@ -1920,7 +1920,7 @@ mod tests {
         // Create remote ActorRef with ServiceLocator
         use plexspaces_node::create_default_service_locator;
         let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None, None).await;
+            create_default_service_locator(Some("test-node".to_string()), None).await;
         // Use actor crate's ActorRef for remote actors
         let actor_ref = ActorRef::remote(
             "target-actor@node2".to_string(),
@@ -2127,7 +2127,7 @@ mod tests {
         // Create remote ActorRef using actor crate's ActorRef
         use plexspaces_node::create_default_service_locator;
         let service_locator =
-            create_default_service_locator(Some("test-node".to_string()), None, None).await;
+            create_default_service_locator(Some("test-node".to_string()), None).await;
         let actor_ref = ActorRef::remote(
             "target-actor@node2".to_string(),
             "test".to_string(), // tenant_id

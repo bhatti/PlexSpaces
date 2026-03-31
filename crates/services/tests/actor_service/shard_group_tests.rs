@@ -415,7 +415,7 @@ async fn create_test_actor_service(
 
     // Use create_default_service_locator which doesn't call blocking code
     let service_locator =
-        create_default_service_locator(Some(node_id.to_string()), None, None).await;
+        create_default_service_locator(Some(node_id.to_string()), None).await;
     service_locator
         .register_service(actor_registry.clone())
         .await;

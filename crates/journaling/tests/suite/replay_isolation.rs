@@ -21,7 +21,6 @@ mod sqlite_tests {
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
         let mut value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -39,13 +38,11 @@ mod sqlite_tests {
     async fn test_replay_missing_checkpoint_scenario() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 10,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -115,13 +112,11 @@ mod sqlite_tests {
     async fn test_checkpoint_scenario() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 50,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -209,13 +204,11 @@ mod sqlite_tests {
     async fn test_replay_doesnt_lose_entries() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 1000,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 

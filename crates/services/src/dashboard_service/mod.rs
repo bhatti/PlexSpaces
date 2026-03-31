@@ -545,16 +545,14 @@ impl DashboardService for DashboardServiceImpl {
         let clusters: HashSet<String> = if total_nodes > 0 {
             let cluster_set: HashSet<String> = all_nodes
                 .iter()
-                .filter_map(|n| {
+                .map(|n| {
                     if n.cluster_name.is_empty() {
-                        None // Skip nodes without cluster_name (don't use "default")
+                        "default".to_string()
                     } else {
-                        Some(n.cluster_name.clone())
+                        n.cluster_name.clone()
                     }
                 })
                 .collect();
-            // If all nodes had empty cluster_name, we'll have {"default"}
-            // If some had names, we'll have those names
             cluster_set
         } else {
             HashSet::new() // No nodes = no clusters
@@ -594,7 +592,9 @@ impl DashboardService for DashboardServiceImpl {
                 }
             }
 
-            tenant_ids.len() as u32
+            // Always show at least 1 tenant if there are nodes running
+            let count = tenant_ids.len() as u32;
+            if count == 0 && total_nodes > 0 { 1 } else { count }
         } else if let Some(ref tid) = tenant_id {
             if tid.is_empty() {
                 // If no tenant_id but node is running, show 1 (current tenant)

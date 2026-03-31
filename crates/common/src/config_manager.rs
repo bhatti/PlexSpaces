@@ -134,8 +134,6 @@ pub const ENV_POOL_SIZE: &str = "PLEXSPACES_POOL_SIZE";
 // ============================================================================
 
 /// KeyValue backend type (sqlite, postgres, redis)
-pub const ENV_KV_BACKEND: &str = "PLEXSPACES_KV_BACKEND";
-
 /// KeyValue SQLite path
 pub const ENV_KV_SQLITE_PATH: &str = "PLEXSPACES_KV_SQLITE_PATH";
 
@@ -781,6 +779,7 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::env;
 
     #[test]
@@ -852,6 +851,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_config_from_env() {
         env::set_var("PLEXSPACES_NODE_ID", "test-node");
         env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
@@ -865,6 +865,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_config_database_url_default() {
         env::remove_var("PLEXSPACES_DATABASE_URL");
         let config = EnvConfig::from_env();
@@ -873,6 +874,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_initialize_sets_defaults() {
         use plexspaces_proto::node::v1::ReleaseSpec;
 
@@ -907,9 +909,7 @@ mod tests {
         assert!(db.pool_size > 0);
     }
 
-    // Note: Tests that modify environment variables need to be run serially
-    // as env vars are process-global. Use #[serial] from serial_test crate
-    // or use unique env var names per test if available.
+    // Tests that set/remove PLEXSPACES_* env vars use #[serial] — env is process-global.
 
     #[test]
     fn test_initialize_with_env_config() {
@@ -994,37 +994,39 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_initialize_creates_directories() {
         use plexspaces_proto::node::v1::ReleaseSpec;
         use std::path::Path;
 
-        // Use a unique temp directory for this test
-        let test_base_dir = format!("/tmp/plexspaces-test-{}", std::process::id());
-        env::set_var("PLEXSPACES_BASE_DIR", &test_base_dir);
-
-        // Clean up any existing directory
-        let _ = std::fs::remove_dir_all(&test_base_dir);
+        // Unique path that does not exist yet (process env is shared; #[serial] avoids races).
+        let parent = tempfile::tempdir().expect("temp parent dir");
+        let test_base_dir = parent.path().join("plexspaces-base");
+        let test_base_str = test_base_dir.to_string_lossy().to_string();
+        env::set_var("PLEXSPACES_BASE_DIR", &test_base_str);
 
         let mut spec = ReleaseSpec::default();
         initialize(&mut spec);
 
         // Verify directories were created
-        assert!(Path::new(&test_base_dir).exists(), "base_dir should exist");
         assert!(
-            Path::new(&format!("{}/db", test_base_dir)).exists(),
+            Path::new(&test_base_str).exists(),
+            "base_dir should exist"
+        );
+        assert!(
+            test_base_dir.join("db").exists(),
             "db dir should exist"
         );
         assert!(
-            Path::new(&format!("{}/apps", test_base_dir)).exists(),
+            test_base_dir.join("apps").exists(),
             "apps dir should exist"
         );
 
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&test_base_dir);
         env::remove_var("PLEXSPACES_BASE_DIR");
     }
 
     #[test]
+    #[serial]
     fn test_initialize_security_overrides() {
         use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig, SecurityConfig};
         use plexspaces_proto::security::v1::JwtConfig;
@@ -1090,6 +1092,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_initialize_locks_provider_uses_redis_when_available() {
         use plexspaces_proto::node::v1::ReleaseSpec;
         use plexspaces_proto::storage::v1::StorageProvider;
@@ -1129,6 +1132,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_initialize_preserves_explicit_locks_provider() {
         use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig};
         use plexspaces_proto::storage::v1::{

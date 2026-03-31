@@ -105,24 +105,16 @@ registry.register(&ctx, registration).await?;
 ### Using Configuration
 
 ```rust
-use plexspaces_object_registry::{ObjectRegistryImpl, ObjectRegistryConfig, create_repository_from_config};
+use plexspaces_object_registry::{ObjectRegistryImpl, create_repository_from_shared_db};
+use plexspaces_proto::storage::v1::SharedDbConfig;
 
-// SQLite backend
-let config = ObjectRegistryConfig::sqlite("/tmp/registry.db");
-let repo = create_repository_from_config(&config).await?;
-let registry = ObjectRegistryImpl::new(repo);
-
-// Or from environment variables
-let repo = plexspaces_object_registry::create_repository_from_env().await?;
+let config = SharedDbConfig {
+    connection_string: "sqlite:///tmp/registry.db".to_string(),
+    ..Default::default()
+};
+let repo = create_repository_from_shared_db(&config).await?;
 let registry = ObjectRegistryImpl::new(repo);
 ```
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PLEXSPACES_OBJECT_REGISTRY_BACKEND` | Backend type: `memory`, `sqlite`, `postgres`, `dynamodb` | `memory` |
-| `PLEXSPACES_OBJECT_REGISTRY_SQLITE_PATH` | SQLite database file path | `:memory:` |
 | `PLEXSPACES_OBJECT_REGISTRY_POSTGRES_URL` | PostgreSQL connection string | - |
 | `PLEXSPACES_OBJECT_REGISTRY_DDB_TABLE` | DynamoDB table name | `plexspaces-object-registry` |
 | `PLEXSPACES_OBJECT_REGISTRY_DDB_REGION` | DynamoDB AWS region | `us-east-1` |

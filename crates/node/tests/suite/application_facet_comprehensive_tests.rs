@@ -36,7 +36,7 @@ use async_trait::async_trait;
 use plexspaces_application::{
     Application, ApplicationError, ApplicationManagerImpl, ApplicationNode,
 };
-use plexspaces_core::{ActorId, ApplicationManager};
+use plexspaces_core::{ActorId, ApplicationManager, ServiceLocator};
 use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
@@ -51,7 +51,9 @@ use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
 /// Facet factory for TimerFacet
-struct TimerFacetFactory;
+struct TimerFacetFactory {
+    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+}
 
 #[async_trait]
 impl FacetFactory for TimerFacetFactory {
@@ -62,7 +64,11 @@ impl FacetFactory for TimerFacetFactory {
             .and_then(|v| v.as_i64())
             .map(|p| p as i32)
             .unwrap_or(50);
-        Ok(Box::new(TimerFacet::new(config, priority)))
+        Ok(Box::new(TimerFacet::new(
+            config,
+            priority,
+            self.service_locator.clone(),
+        )))
     }
 
     fn metadata(&self) -> FacetMetadata {
@@ -76,7 +82,9 @@ impl FacetFactory for TimerFacetFactory {
 }
 
 /// Facet factory for ReminderFacet
-struct ReminderFacetFactory;
+struct ReminderFacetFactory {
+    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+}
 
 #[async_trait]
 impl FacetFactory for ReminderFacetFactory {
@@ -90,7 +98,12 @@ impl FacetFactory for ReminderFacetFactory {
         // Create ReminderFacet with SQLite :memory: storage for tests
         // ReminderFacet::new() takes Arc<S> where S: JournalStorage
         let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
-        Ok(Box::new(ReminderFacet::new(storage, config, priority)))
+        Ok(Box::new(ReminderFacet::new(
+            storage,
+            config,
+            priority,
+            self.service_locator.clone(),
+        )))
     }
 
     fn metadata(&self) -> FacetMetadata {
@@ -163,8 +176,18 @@ async fn register_all_facet_factories(service_locator: Arc<dyn plexspaces_core::
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
 
     // Register all facet factories
-    new_registry.register("timer".to_string(), Arc::new(TimerFacetFactory));
-    new_registry.register("reminder".to_string(), Arc::new(ReminderFacetFactory));
+    new_registry.register(
+        "timer".to_string(),
+        Arc::new(TimerFacetFactory {
+            service_locator: service_locator.clone(),
+        }),
+    );
+    new_registry.register(
+        "reminder".to_string(),
+        Arc::new(ReminderFacetFactory {
+            service_locator: service_locator.clone(),
+        }),
+    );
     new_registry.register("durability".to_string(), Arc::new(DurabilityFacetFactory));
     new_registry.register(
         "virtual_actor".to_string(),
@@ -361,7 +384,12 @@ async fn test_application_with_timer_facet_only() {
     use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
 
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
-    new_registry.register("timer".to_string(), Arc::new(TimerFacetFactory));
+    new_registry.register(
+        "timer".to_string(),
+        Arc::new(TimerFacetFactory {
+            service_locator: service_locator.clone(),
+        }),
+    );
 
     let new_wrapper = Arc::new(FacetRegistryServiceWrapper::new(Arc::new(new_registry)));
     service_locator.register_facet_registry(new_wrapper).await;
@@ -448,7 +476,12 @@ async fn test_application_with_reminder_facet_only() {
     use plexspaces_core::facet_service_wrapper::FacetRegistryServiceWrapper;
 
     let mut new_registry = plexspaces_facet::FacetRegistry::new();
-    new_registry.register("reminder".to_string(), Arc::new(ReminderFacetFactory));
+    new_registry.register(
+        "reminder".to_string(),
+        Arc::new(ReminderFacetFactory {
+            service_locator: service_locator.clone(),
+        }),
+    );
 
     let new_wrapper = Arc::new(FacetRegistryServiceWrapper::new(Arc::new(new_registry)));
     service_locator.register_facet_registry(new_wrapper).await;
@@ -734,6 +767,7 @@ fn create_application_spec_with_multiple_facets(name: &str, version: &str) -> Ap
         shutdown_timeout: None,
         supervisor: None,
         facets: vec![timer_facet, reminder_facet, durability_facet, virtual_facet],
+        behavior_kind: None,
     };
 
     // Create SupervisorSpec with ChildSpec
@@ -747,6 +781,7 @@ fn create_application_spec_with_multiple_facets(name: &str, version: &str) -> Ap
     // Create ApplicationSpec
     ApplicationSpec {
         name: name.to_string(),
+        tenant_id: String::new(),
         namespace: String::new(),
         version: version.to_string(),
         description: format!("Test application {} with multiple facets", name),
@@ -761,6 +796,7 @@ fn create_application_spec_with_multiple_facets(name: &str, version: &str) -> Ap
             nanos: 0,
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
         metadata: None,
     }
 }
@@ -790,6 +826,7 @@ fn create_application_spec_with_single_facet(
         shutdown_timeout: None,
         supervisor: None,
         facets: vec![proto_facet],
+        behavior_kind: None,
     };
 
     let supervisor_spec = SupervisorSpec {
@@ -801,6 +838,7 @@ fn create_application_spec_with_single_facet(
 
     ApplicationSpec {
         name: name.to_string(),
+        tenant_id: String::new(),
         namespace: String::new(),
         version: version.to_string(),
         description: format!("Test application {} with {} facet", name, facet_type),
@@ -815,6 +853,7 @@ fn create_application_spec_with_single_facet(
             nanos: 0,
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
         metadata: None,
     }
 }

@@ -199,13 +199,11 @@ async fn test_event_sourcing_with_durability_facet() {
 
     // Create durability config
     let durability_config = DurabilityConfig {
-        backend: JournalBackend::JournalBackendMemory as i32,
         checkpoint_interval: 10,
         checkpoint_timeout: None,
         replay_on_activation: true,
         cache_side_effects: true,
         compression: CompressionType::CompressionTypeNone as i32,
-        backend_config: None,
         state_schema_version: 1,
     };
 
@@ -222,7 +220,6 @@ async fn test_event_sourcing_with_durability_facet() {
 
     // Both facets share the same storage
     let mut durability_config_value = serde_json::json!({
-        "backend": durability_config.backend,
         "checkpoint_interval": durability_config.checkpoint_interval,
         "replay_on_activation": durability_config.replay_on_activation,
         "cache_side_effects": durability_config.cache_side_effects,

@@ -23,10 +23,9 @@
 //! Uses protobuf-defined configuration types for type safety and consistency.
 //!
 //! ## Configuration Hierarchy
-//! 1. **CODE**: Explicit `TupleSpaceConfig` in application code (highest priority)
-//! 2. **ENV**: Environment variables (PLEXSPACES_TUPLESPACE_BACKEND, etc.)
-//! 3. **FILE**: YAML/TOML configuration files
-//! 4. **DEFAULT**: In-memory backend (lowest priority)
+//! 1. **CODE**: Explicit `TupleSpaceConfig` in application code
+//! 2. **FILE**: YAML/TOML configuration files
+//! 3. **RUNTIME**: Shared database and service defaults from `RuntimeConfig`
 //!
 //! ## Supported Backends
 //! - **InMemory**: Fast, single-process, no persistence
@@ -52,21 +51,6 @@
 //! # }
 //! ```
 //!
-//! ### From Environment Variables
-//! ```bash
-//! export PLEXSPACES_TUPLESPACE_BACKEND=sqlite
-//! export PLEXSPACES_SQLITE_PATH=/tmp/tuples.db
-//! ```
-//!
-//! ```rust
-//! use plexspaces_tuplespace::TupleSpace;
-//!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let space = TupleSpace::from_env().await?;
-//! # Ok(())
-//! # }
-//! ```
-//!
 //! ### From Config File (YAML)
 //! ```yaml
 //! backend:
@@ -86,17 +70,6 @@
 //! # }
 //! ```
 //!
-//! ### Smart Default (Multi-Source)
-//! ```rust
-//! use plexspaces_tuplespace::TupleSpace;
-//!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! // Tries env vars first, falls back to in-memory
-//! let space = TupleSpace::from_env_or_default().await?;
-//! # Ok(())
-//! # }
-//! ```
-
 use crate::{TupleSpace, TupleSpaceError};
 use plexspaces_proto::tuplespace::v1::TupleSpaceConfig;
 
@@ -132,58 +105,10 @@ impl TupleSpace {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn from_config(config: TupleSpaceConfig) -> Result<Self, TupleSpaceError> {
-        // TupleSpaceConfig no longer has backend field - uses shared database from RuntimeConfig.db
-        // For backward compatibility, use in-memory default
-        // Note: tenant_id/namespace should be provided by caller from node config
+    pub async fn from_config(_config: TupleSpaceConfig) -> Result<Self, TupleSpaceError> {
+        // TupleSpace instances resolve persistence via the enclosing runtime and service layer.
+        // The local handle itself only needs tenant/namespace context.
         Ok(Self::with_tenant_namespace("", ""))
-    }
-
-    /// Create TupleSpace from environment variables (ENV - medium priority)
-    ///
-    /// ## Purpose
-    /// Creates a TupleSpace instance from environment variables.
-    /// This allows runtime configuration without code changes.
-    ///
-    /// ## Environment Variables
-    /// - `PLEXSPACES_TUPLESPACE_BACKEND`: Backend type ("in-memory", "sqlite", "redis", "postgres")
-    /// - `PLEXSPACES_SQLITE_PATH`: SQLite database file path
-    /// - `PLEXSPACES_REDIS_URL`: Redis connection URL
-    /// - `PLEXSPACES_REDIS_NAMESPACE`: Redis key namespace
-    /// - `PLEXSPACES_POSTGRES_URL`: PostgreSQL connection string
-    /// - `PLEXSPACES_POSTGRES_TABLE`: PostgreSQL table name (default: "tuples")
-    /// - `PLEXSPACES_POOL_SIZE`: Connection pool size
-    ///
-    /// ## Returns
-    /// Configured TupleSpace instance
-    ///
-    /// ## Errors
-    /// - `TupleSpaceError::Configuration`: Missing required environment variables
-    /// - `TupleSpaceError::StorageError`: Backend connection failure
-    ///
-    /// ## Examples
-    /// ```bash
-    /// export PLEXSPACES_TUPLESPACE_BACKEND=sqlite
-    /// export PLEXSPACES_SQLITE_PATH=/tmp/tuples.db
-    /// export PLEXSPACES_POOL_SIZE=1
-    /// ```
-    ///
-    /// ```rust
-    /// use plexspaces_tuplespace::TupleSpace;
-    ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let space = TupleSpace::from_env().await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn from_env() -> Result<Self, TupleSpaceError> {
-        // TupleSpaceConfig no longer uses backend-specific env vars - uses shared database from RuntimeConfig.db
-        // All backend types now use the same default config
-        let config = TupleSpaceConfig {
-            default_ttl_seconds: 0,
-            enable_indexing: false,
-        };
-        Self::from_config(config).await
     }
 
     /// Create TupleSpace from configuration file (FILE - low priority)
@@ -271,40 +196,6 @@ impl TupleSpace {
         Self::from_config(config).await
     }
 
-    /// Create TupleSpace with smart defaults (Multi-source - fallback)
-    ///
-    /// ## Purpose
-    /// Tries environment variables first, falls back to in-memory default.
-    /// This is the recommended method for applications that want flexibility.
-    ///
-    /// ## Configuration Priority
-    /// 1. Environment variables (if `PLEXSPACES_TUPLESPACE_BACKEND` is set)
-    /// 2. In-memory default (if no env vars)
-    ///
-    /// ## Returns
-    /// Configured TupleSpace instance (never fails, uses in-memory as last resort)
-    ///
-    /// ## Examples
-    /// ```rust
-    /// use plexspaces_tuplespace::TupleSpace;
-    ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// // Uses env vars if available, otherwise in-memory
-    /// let space = TupleSpace::from_env_or_default().await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn from_env_or_default() -> Result<Self, TupleSpaceError> {
-        // Try env first
-        if std::env::var("PLEXSPACES_TUPLESPACE_BACKEND").is_ok() {
-            Self::from_env().await
-        } else {
-            // Fall back to in-memory default with empty tenant/namespace
-            // Note: tenant_id/namespace should be provided by caller from node config
-            // For backward compatibility, use empty strings
-            Ok(Self::with_tenant_namespace("", ""))
-        }
-    }
 }
 
 /// Helper function to parse JSON value into TupleSpaceConfig
@@ -326,8 +217,7 @@ fn parse_config_from_json(json: &serde_json::Value) -> Result<TupleSpaceConfig, 
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // TupleSpaceConfig no longer has backend field - uses shared database from RuntimeConfig.db
-    // Backend config in JSON files is ignored (for backward compatibility)
+    // TupleSpaceConfig uses runtime-managed storage selection; file-based backend hints are ignored.
     Ok(TupleSpaceConfig {
         default_ttl_seconds,
         enable_indexing,
@@ -337,6 +227,7 @@ fn parse_config_from_json(json: &serde_json::Value) -> Result<TupleSpaceConfig, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::TupleSpaceProvider;
 
     #[tokio::test]
     async fn test_from_config_in_memory() {
@@ -351,46 +242,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_from_env_or_default_without_env() {
-        // Clean up any env vars from other tests first (before setting)
-        std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
-        std::env::remove_var("PLEXSPACES_SQLITE_PATH");
-        std::env::remove_var("PLEXSPACES_REDIS_URL");
-        std::env::remove_var("PLEXSPACES_POSTGRES_URL");
-        std::env::remove_var("PLEXSPACES_POSTGRES_TABLE");
-        std::env::remove_var("PLEXSPACES_POOL_SIZE");
-        std::env::remove_var("PLEXSPACES_REDIS_NAMESPACE");
-
-        // Small delay to ensure env vars are cleared
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        let space = TupleSpace::from_env_or_default().await.unwrap();
-        drop(space);
-
-        // Clean up after test
-        std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
-    }
-
-    #[tokio::test]
-    async fn test_from_env_in_memory() {
-        // Clean up any env vars from other tests first (before setting)
-        std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
-        std::env::remove_var("PLEXSPACES_SQLITE_PATH");
-        std::env::remove_var("PLEXSPACES_REDIS_URL");
-        std::env::remove_var("PLEXSPACES_POSTGRES_URL");
-        std::env::remove_var("PLEXSPACES_POSTGRES_TABLE");
-        std::env::remove_var("PLEXSPACES_POOL_SIZE");
-
-        // Small delay to ensure env vars are cleared
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        std::env::set_var("PLEXSPACES_TUPLESPACE_BACKEND", "in-memory");
-
-        let space = TupleSpace::from_env().await.unwrap();
-        drop(space);
-
-        // Clean up after test
-        std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
+    async fn test_from_config_returns_default_tenant_namespace() {
+        let space = TupleSpace::from_config(TupleSpaceConfig::default())
+            .await
+            .unwrap();
+        assert_eq!(space.tenant(), "");
+        assert_eq!(space.namespace(), "");
     }
 
     #[tokio::test]
@@ -405,58 +262,4 @@ mod tests {
         drop(space);
     }
 
-    #[tokio::test]
-    #[cfg(feature = "sql-backend")]
-    async fn test_from_env_sqlite() {
-        // Use a mutex to ensure test isolation (prevents race conditions with env vars)
-        use std::sync::Mutex;
-        static ENV_LOCK: Mutex<()> = Mutex::new(());
-        let _guard = ENV_LOCK.lock().unwrap();
-
-        // Clean up first to avoid interference
-        std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
-        std::env::remove_var("PLEXSPACES_SQLITE_PATH");
-        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-
-        std::env::set_var("PLEXSPACES_TUPLESPACE_BACKEND", "sqlite");
-        std::env::set_var("PLEXSPACES_SQLITE_PATH", ":memory:");
-
-        let space = TupleSpace::from_env().await.unwrap();
-        drop(space);
-
-        // Clean up after test
-        std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
-        std::env::remove_var("PLEXSPACES_SQLITE_PATH");
-    }
-
-    #[tokio::test]
-    async fn test_from_env_sqlite_missing_path() {
-        // Clean up any env vars from other tests first (before setting)
-        std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
-        std::env::remove_var("PLEXSPACES_SQLITE_PATH");
-        std::env::remove_var("PLEXSPACES_REDIS_URL");
-        std::env::remove_var("PLEXSPACES_POSTGRES_URL");
-
-        // Small delay to ensure env vars are cleared
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-        std::env::set_var("PLEXSPACES_TUPLESPACE_BACKEND", "sqlite");
-        // Ensure SQLITE_PATH is not set
-        std::env::remove_var("PLEXSPACES_SQLITE_PATH");
-
-        let result = TupleSpace::from_env().await;
-        assert!(
-            result.is_err(),
-            "Should fail when SQLite backend is specified but path is missing"
-        );
-        if let Err(e) = result {
-            assert!(
-                e.to_string().contains("PLEXSPACES_SQLITE_PATH"),
-                "Error should mention PLEXSPACES_SQLITE_PATH"
-            );
-        }
-
-        // Clean up after test
-        std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
-    }
 }

@@ -108,6 +108,7 @@ pub async fn run_postgres_migrations(connection_string: &str) -> Result<(), Migr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_is_postgres() {
@@ -129,5 +130,77 @@ mod tests {
             normalize_sqlite_url("sqlite:///path?mode=rwc"),
             "sqlite:///path?mode=rwc"
         );
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_migrations_create_all_expected_tables() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let db_url = format!("sqlite://{}?mode=rwc", temp_file.path().display());
+
+        run_sqlite_migrations(&db_url).await.unwrap();
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&db_url)
+            .await
+            .unwrap();
+
+        let expected_tables = [
+            "kv_store",
+            "object_registrations",
+            "locks",
+            "journal_entries",
+            "checkpoints",
+            "actor_events",
+            "reminders",
+            "scheduling_requests",
+            "channel_messages",
+            "blob_metadata",
+            "workflow_definitions",
+            "workflow_executions",
+            "workflow_execution_labels",
+            "step_executions",
+            "signals",
+            "tuples",
+            "barriers",
+            "watchers",
+        ];
+
+        for table_name in expected_tables {
+            let row = sqlx::query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+            )
+            .bind(table_name)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+
+            assert!(
+                row.is_some(),
+                "expected unified SQLite migrations to create table '{}'",
+                table_name
+            );
+        }
+
+        let tuples_index = sqlx::query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_expires_at' LIMIT 1",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(tuples_index.is_some(), "expected tuples expiry index to exist");
+
+        let watcher_index = sqlx::query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_watchers_pattern' LIMIT 1",
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+        assert!(
+            watcher_index.is_some(),
+            "expected watcher pattern index to exist"
+        );
+
+        pool.close().await;
     }
 }

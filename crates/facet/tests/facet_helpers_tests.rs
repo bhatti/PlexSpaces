@@ -9,11 +9,10 @@
 use plexspaces_core::service_locator_trait::ServiceLocator;
 use plexspaces_facet::facet_helpers::create_facets_from_config;
 use plexspaces_node::{Node, NodeBuilder};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-// Initialize tracing for tests
 static TRACING_INIT: std::sync::Once = std::sync::Once::new();
 
 fn init_test_tracing() {
@@ -28,11 +27,10 @@ fn init_test_tracing() {
     });
 }
 
-/// Shared test node (created once, reused for all tests)
 static SHARED_NODE: OnceLock<Arc<Node>> = OnceLock::new();
 static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static SERVICES_READY: OnceLock<()> = OnceLock::new();
 
-/// Get or create shared test node
 async fn get_shared_node() -> Arc<Node> {
     if let Some(node) = SHARED_NODE.get() {
         return node.clone();
@@ -53,205 +51,124 @@ async fn get_shared_node() -> Arc<Node> {
             .await,
     );
 
-    use std::time::Duration;
-    use tokio::task::yield_now;
-    use tokio::time::sleep;
-    for _ in 0..5 {
-        yield_now().await;
-        sleep(Duration::from_millis(10)).await;
+    {
+        use std::time::Duration;
+        use tokio::task::yield_now;
+        use tokio::time::sleep;
+        for _ in 0..5 {
+            yield_now().await;
+            sleep(Duration::from_millis(10)).await;
+        }
     }
 
     SHARED_NODE.get_or_init(|| node.clone()).clone()
 }
 
-#[tokio::test]
-async fn test_create_facets_from_config_multi_facet() {
-    init_test_tracing();
+async fn ensure_facet_helpers_services(node: &Node) {
+    if SERVICES_READY.get().is_none() {
+        node.initialize_services()
+            .await
+            .expect("Failed to initialize services");
+        let _ = SERVICES_READY.set(());
+    }
+}
 
-    let node = get_shared_node().await;
-    node.initialize_services()
-        .await
-        .expect("Failed to initialize services");
+#[derive(Clone, Copy)]
+enum FacetHelpersCase {
+    MultiFacet,
+    SingleVirtualActor,
+    LegacyFlatObject,
+    EmptyObject,
+    NonObject,
+    UnknownFacetSkipped,
+}
 
-    let service_locator = node.service_locator();
-    let facet_registry = service_locator
-        .facet_registry()
-        .await
-        .expect("FacetRegistry should be registered");
-
-    // Multi-facet config: virtual_actor + durability
-    let facet_config = json!({
-        "virtual_actor": {
+fn case_config(case: FacetHelpersCase) -> Value {
+    match case {
+        FacetHelpersCase::MultiFacet => json!({
+            "virtual_actor": {
+                "idle_timeout": "5m",
+                "activation_strategy": "lazy"
+            },
+            "durability": {
+                "journal_storage": "memory"
+            }
+        }),
+        FacetHelpersCase::SingleVirtualActor => json!({
+            "virtual_actor": {
+                "idle_timeout": "10m",
+                "activation_strategy": "eager"
+            }
+        }),
+        FacetHelpersCase::LegacyFlatObject => json!({
             "idle_timeout": "5m",
             "activation_strategy": "lazy"
-        },
-        "durability": {
-            "journal_storage": "memory"
+        }),
+        FacetHelpersCase::EmptyObject => json!({}),
+        FacetHelpersCase::NonObject => json!(null),
+        FacetHelpersCase::UnknownFacetSkipped => json!({
+            "virtual_actor": {
+                "idle_timeout": "5m"
+            },
+            "unknown_facet_type": {
+                "some_config": "value"
+            }
+        }),
+    }
+}
+
+fn assert_facets(case: FacetHelpersCase, facets: &[Box<dyn plexspaces_facet::Facet>]) {
+    match case {
+        FacetHelpersCase::MultiFacet => {
+            assert_eq!(facets.len(), 2, "multi_facet");
+            let types: Vec<String> = facets.iter().map(|f| f.facet_type().to_string()).collect();
+            assert!(types.contains(&"virtual_actor".to_string()), "{types:?}");
+            assert!(types.contains(&"durability".to_string()), "{types:?}");
         }
-    });
-
-    let facets = create_facets_from_config(&facet_config, &facet_registry).await;
-
-    // Should create both facets
-    assert_eq!(
-        facets.len(),
-        2,
-        "Should create virtual_actor and durability facets"
-    );
-
-    let facet_types: Vec<String> = facets.iter().map(|f| f.facet_type().to_string()).collect();
-
-    assert!(
-        facet_types.contains(&"virtual_actor".to_string()),
-        "Should contain virtual_actor facet. Found: {:?}",
-        facet_types
-    );
-    assert!(
-        facet_types.contains(&"durability".to_string()),
-        "Should contain durability facet. Found: {:?}",
-        facet_types
-    );
-}
-
-#[tokio::test]
-async fn test_create_facets_from_config_single_virtual_actor() {
-    init_test_tracing();
-
-    let node = get_shared_node().await;
-    node.initialize_services()
-        .await
-        .expect("Failed to initialize services");
-
-    let service_locator = node.service_locator();
-    let facet_registry = service_locator
-        .facet_registry()
-        .await
-        .expect("FacetRegistry should be registered");
-
-    // Single virtual_actor key (keyed format)
-    let facet_config = json!({
-        "virtual_actor": {
-            "idle_timeout": "10m",
-            "activation_strategy": "eager"
+        FacetHelpersCase::SingleVirtualActor => {
+            assert_eq!(facets.len(), 1, "single virtual_actor");
+            assert_eq!(facets[0].facet_type(), "virtual_actor");
         }
-    });
-
-    let facets = create_facets_from_config(&facet_config, &facet_registry).await;
-
-    // Should create one facet
-    assert_eq!(facets.len(), 1, "Should create one virtual_actor facet");
-    assert_eq!(facets[0].facet_type(), "virtual_actor");
-}
-
-#[tokio::test]
-async fn test_create_facets_from_config_legacy_flat_object() {
-    init_test_tracing();
-
-    let node = get_shared_node().await;
-    node.initialize_services()
-        .await
-        .expect("Failed to initialize services");
-
-    let service_locator = node.service_locator();
-    let facet_registry = service_locator
-        .facet_registry()
-        .await
-        .expect("FacetRegistry should be registered");
-
-    // Legacy format: flat object (treated as virtual_actor config)
-    // This is a JSON object but not keyed by facet type
-    let facet_config = json!({
-        "idle_timeout": "5m",
-        "activation_strategy": "lazy"
-    });
-
-    let facets = create_facets_from_config(&facet_config, &facet_registry).await;
-
-    // Should create one virtual_actor facet (legacy backward compat)
-    assert_eq!(
-        facets.len(),
-        1,
-        "Should create one virtual_actor facet from legacy format"
-    );
-    assert_eq!(facets[0].facet_type(), "virtual_actor");
-}
-
-#[tokio::test]
-async fn test_create_facets_from_config_empty_object() {
-    init_test_tracing();
-
-    let node = get_shared_node().await;
-    node.initialize_services()
-        .await
-        .expect("Failed to initialize services");
-
-    let service_locator = node.service_locator();
-    let facet_registry = service_locator
-        .facet_registry()
-        .await
-        .expect("FacetRegistry should be registered");
-
-    // Empty object
-    let facet_config = json!({});
-
-    let facets = create_facets_from_config(&facet_config, &facet_registry).await;
-
-    // Should create no facets
-    assert_eq!(facets.len(), 0, "Empty config should create no facets");
-}
-
-#[tokio::test]
-async fn test_create_facets_from_config_non_object() {
-    init_test_tracing();
-
-    let node = get_shared_node().await;
-    node.initialize_services()
-        .await
-        .expect("Failed to initialize services");
-
-    let service_locator = node.service_locator();
-    let facet_registry = service_locator
-        .facet_registry()
-        .await
-        .expect("FacetRegistry should be registered");
-
-    // Non-object value (should be ignored)
-    let facet_config = json!(null);
-
-    let facets = create_facets_from_config(&facet_config, &facet_registry).await;
-
-    // Should create no facets
-    assert_eq!(facets.len(), 0, "Non-object config should create no facets");
-}
-
-#[tokio::test]
-async fn test_create_facets_from_config_unknown_facet_type() {
-    init_test_tracing();
-
-    let node = get_shared_node().await;
-    node.initialize_services()
-        .await
-        .expect("Failed to initialize services");
-
-    let service_locator = node.service_locator();
-    let facet_registry = service_locator
-        .facet_registry()
-        .await
-        .expect("FacetRegistry should be registered");
-
-    // Unknown facet type (should be skipped, not fail)
-    let facet_config = json!({
-        "virtual_actor": {
-            "idle_timeout": "5m"
-        },
-        "unknown_facet_type": {
-            "some_config": "value"
+        FacetHelpersCase::LegacyFlatObject => {
+            assert_eq!(facets.len(), 1, "legacy flat");
+            assert_eq!(facets[0].facet_type(), "virtual_actor");
         }
-    });
+        FacetHelpersCase::EmptyObject => {
+            assert_eq!(facets.len(), 0, "empty");
+        }
+        FacetHelpersCase::NonObject => {
+            assert_eq!(facets.len(), 0, "non-object");
+        }
+        FacetHelpersCase::UnknownFacetSkipped => {
+            assert_eq!(facets.len(), 1, "unknown skipped");
+            assert_eq!(facets[0].facet_type(), "virtual_actor");
+        }
+    }
+}
 
-    let facets = create_facets_from_config(&facet_config, &facet_registry).await;
+/// One node build and one `initialize_services` for all cases.
+#[tokio::test]
+async fn create_facets_from_config_table() {
+    init_test_tracing();
+    let node = get_shared_node().await;
+    ensure_facet_helpers_services(&node).await;
 
-    // Should create only virtual_actor facet (unknown type skipped)
-    assert_eq!(facets.len(), 1, "Should create only known facet types");
-    assert_eq!(facets[0].facet_type(), "virtual_actor");
+    let service_locator = node.service_locator();
+    let facet_registry = service_locator
+        .facet_registry()
+        .await
+        .expect("FacetRegistry should be registered");
+
+    for case in [
+        FacetHelpersCase::MultiFacet,
+        FacetHelpersCase::SingleVirtualActor,
+        FacetHelpersCase::LegacyFlatObject,
+        FacetHelpersCase::EmptyObject,
+        FacetHelpersCase::NonObject,
+        FacetHelpersCase::UnknownFacetSkipped,
+    ] {
+        let config = case_config(case);
+        let facets = create_facets_from_config(&config, &facet_registry).await;
+        assert_facets(case, &facets);
+    }
 }

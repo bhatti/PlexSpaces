@@ -65,18 +65,15 @@ mod tests {
             Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
 
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 100,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
             state_schema_version: 1,
-            backend_config: None,
         };
 
-        let mut config_value = serde_json::json!({
-            "backend": config.backend,
+        let config_value = serde_json::json!({
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -285,17 +282,14 @@ mod tests {
             // Create and attach DurabilityFacet
             let storage = SqliteJournalStorage::new(&journal_db_str).await.unwrap();
             let durability_config = DurabilityConfig {
-                backend: JournalBackend::JournalBackendSqlite as i32,
                 checkpoint_interval: 100,
                 checkpoint_timeout: None,
                 replay_on_activation: true,
                 cache_side_effects: true,
                 compression: CompressionType::CompressionTypeNone as i32,
                 state_schema_version: 1,
-                backend_config: None,
             };
             let config_value = serde_json::json!({
-                "backend": durability_config.backend,
                 "checkpoint_interval": durability_config.checkpoint_interval,
                 "replay_on_activation": durability_config.replay_on_activation,
                 "cache_side_effects": durability_config.cache_side_effects,
@@ -365,17 +359,14 @@ mod tests {
             use plexspaces_journaling::sql::SqliteJournalStorage;
             let storage = SqliteJournalStorage::new(&journal_db_str).await.unwrap();
             let durability_config = DurabilityConfig {
-                backend: JournalBackend::JournalBackendSqlite as i32,
                 checkpoint_interval: 100,
                 checkpoint_timeout: None,
                 replay_on_activation: true,
                 cache_side_effects: true,
                 compression: CompressionType::CompressionTypeNone as i32,
                 state_schema_version: 1,
-                backend_config: None,
             };
             let config_value = serde_json::json!({
-                "backend": durability_config.backend,
                 "checkpoint_interval": durability_config.checkpoint_interval,
                 "replay_on_activation": durability_config.replay_on_activation,
                 "cache_side_effects": durability_config.cache_side_effects,

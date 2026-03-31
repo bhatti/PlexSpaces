@@ -158,13 +158,11 @@ let storage = SqliteJournalStorage::new("/var/lib/plexspaces/journal.db").await?
 
 // Configure durability with checkpointing
 let config = DurabilityConfig {
-    backend: JournalBackend::JournalBackendSqlite as i32,
     checkpoint_interval: 1000,  // Checkpoint every 1000 messages
     checkpoint_timeout: None,
     replay_on_activation: true,
     cache_side_effects: true,
     compression: CompressionType::CompressionTypeZstd as i32,  // Enable compression
-    backend_config: None,
 };
 
 let facet = DurabilityFacet::new(storage, config);
@@ -182,13 +180,11 @@ let storage = SqliteJournalStorage::new(":memory:").await?;
 
 // Configure durability
 let config = DurabilityConfig {
-    backend: JournalBackend::JournalBackendSqlite as i32,
     checkpoint_interval: 100,  // Checkpoint every 100 messages
     checkpoint_timeout: None,
     replay_on_activation: true,  // Replay journal on restart
     cache_side_effects: true,
     compression: CompressionType::CompressionTypeNone as i32,
-    backend_config: None,
 };
 
 let durability_facet = DurabilityFacet::new(Arc::new(storage), config);

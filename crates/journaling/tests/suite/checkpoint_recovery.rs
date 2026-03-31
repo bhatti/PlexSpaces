@@ -20,7 +20,6 @@ mod sqlite_tests {
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
         let mut value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -42,13 +41,11 @@ mod sqlite_tests {
     async fn test_recovery_from_checkpoint_no_delta() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 10,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -125,13 +122,11 @@ mod sqlite_tests {
         // Use high checkpoint_interval to prevent automatic checkpointing
         // We'll manually create checkpoint at sequence 10
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 1000, // High interval, no automatic checkpointing
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -221,13 +216,11 @@ mod sqlite_tests {
     async fn test_recovery_missing_checkpoint_fallback() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 1000, // High interval, no checkpoint will be created
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -282,13 +275,11 @@ mod sqlite_tests {
     async fn test_recovery_multiple_checkpoints_pick_latest() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 10,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -389,13 +380,11 @@ mod sqlite_tests {
     async fn test_recovery_corrupted_checkpoint_fallback() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 10,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 

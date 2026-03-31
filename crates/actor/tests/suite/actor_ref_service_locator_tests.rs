@@ -148,7 +148,7 @@ async fn test_actor_ref_remote_uses_service_locator() {
     // Test: Remote ActorRef should use ServiceLocator for gRPC client caching
     use plexspaces_node::create_default_service_locator;
     let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        create_default_service_locator(Some("test-node".to_string()), None).await;
     let object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await
@@ -187,7 +187,7 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
     // Test: Remote ActorRef.tell() should use ServiceLocator to get gRPC client
     use plexspaces_node::create_default_service_locator;
     let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        create_default_service_locator(Some("test-node".to_string()), None).await;
     let object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await
@@ -267,7 +267,7 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
     // Test: Remote ActorRef.ask() should use ServiceLocator to get gRPC client
     use plexspaces_node::create_default_service_locator;
     let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        create_default_service_locator(Some("test-node".to_string()), None).await;
     let object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await
@@ -360,7 +360,7 @@ async fn test_actor_ref_local_unchanged() {
     );
     use plexspaces_node::create_default_service_locator;
     let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        create_default_service_locator(Some("test-node".to_string()), None).await;
     let actor_ref = ActorRef::local(
         "test-actor",
         "test",

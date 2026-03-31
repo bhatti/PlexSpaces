@@ -27,7 +27,7 @@
 //! 6. The entire tree is spawned when an application is deployed
 
 use super::test_helpers::app_request_with_tenant;
-use plexspaces_core::{service_names, ApplicationManager};
+use plexspaces_core::{service_names, ApplicationManager, ServiceLocator};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
@@ -278,6 +278,7 @@ fn create_simple_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
             ChildSpec {
                 id: "worker-2".to_string(),
@@ -287,6 +288,7 @@ fn create_simple_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
             ChildSpec {
                 id: "worker-3".to_string(),
@@ -296,6 +298,7 @@ fn create_simple_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
         ],
     }
@@ -317,6 +320,7 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
             ChildSpec {
                 id: "nested-worker-2".to_string(),
@@ -326,6 +330,7 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
         ],
     };
@@ -344,6 +349,7 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
             ChildSpec {
                 id: "child-supervisor".to_string(),
@@ -353,6 +359,7 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(child_supervisor),
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
         ],
     }
@@ -570,6 +577,7 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
         let supervisor_spec = create_simple_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "test-app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with simple supervisor tree".to_string(),
@@ -584,6 +592,7 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 
@@ -671,6 +680,7 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
         let supervisor_spec = create_nested_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "nested-app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with nested supervisor tree".to_string(),
@@ -685,6 +695,7 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 
@@ -953,6 +964,7 @@ async fn test_deeply_nested_supervisor_tree() {
         let supervisor_spec = create_deeply_nested_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "test-app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
@@ -967,6 +979,7 @@ async fn test_deeply_nested_supervisor_tree() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 
@@ -1047,6 +1060,7 @@ async fn test_actors_tracked_in_application() {
         let supervisor_spec = create_simple_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
@@ -1061,6 +1075,7 @@ async fn test_actors_tracked_in_application() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 
@@ -1123,6 +1138,7 @@ async fn test_complex_supervisor_hierarchy() {
         let supervisor_spec = create_complex_supervisor_hierarchy_spec();
         let app_spec = ApplicationSpec {
             name: "complex-app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with complex supervisor hierarchy".to_string(),
@@ -1137,6 +1153,7 @@ async fn test_complex_supervisor_hierarchy() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 
@@ -1295,6 +1312,7 @@ async fn test_multiple_sibling_supervisors() {
         let supervisor_spec = create_multiple_sibling_supervisors_spec();
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
@@ -1309,6 +1327,7 @@ async fn test_multiple_sibling_supervisors() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 
@@ -1394,6 +1413,7 @@ async fn test_auto_generated_supervisor_tree() {
         let supervisor_spec = create_simple_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "auto-app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with auto-generated supervisor".to_string(),
@@ -1408,6 +1428,7 @@ async fn test_auto_generated_supervisor_tree() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 
@@ -1481,6 +1502,7 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
         let supervisor_spec = create_nested_supervisor_tree();
         let app_spec = ApplicationSpec {
             name: "shutdown-app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app for graceful shutdown".to_string(),
@@ -1495,6 +1517,7 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 
@@ -1569,6 +1592,7 @@ async fn test_actor_type_tracking_complex_tree() {
         let supervisor_spec = create_complex_supervisor_hierarchy_spec();
         let app_spec = ApplicationSpec {
             name: "actors_tracked_in_-app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app".to_string(),
@@ -1583,6 +1607,7 @@ async fn test_actor_type_tracking_complex_tree() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 
@@ -1712,6 +1737,7 @@ async fn test_erlang_style_supervision_structure() {
         let supervisor_spec = create_erlang_style_supervision_structure();
         let app_spec = ApplicationSpec {
             name: "my_app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Erlang-style supervision structure test".to_string(),
@@ -1726,6 +1752,7 @@ async fn test_erlang_style_supervision_structure() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 
@@ -1878,6 +1905,7 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
             shutdown_timeout: None,
             supervisor: None,
             facets: vec![], // Phase 1: Unified Lifecycle - facets support
+            behavior_kind: None,
         }],
     };
 
@@ -1897,6 +1925,7 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
             shutdown_timeout: None,
             supervisor: Some(level3_supervisor), // level3_supervisor is the nested spec for level3-supervisor
             facets: vec![],                      // Phase 1: Unified Lifecycle - facets support
+            behavior_kind: None,
         }],
     };
 
@@ -1913,6 +1942,7 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(level2_supervisor_nested_spec), // level2-supervisor has level3-supervisor as a nested child
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
             ChildSpec {
                 id: "level2-worker".to_string(),
@@ -1922,6 +1952,7 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
         ],
     };
@@ -1940,6 +1971,7 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
             ChildSpec {
                 id: "level1-supervisor".to_string(),
@@ -1949,6 +1981,7 @@ fn create_complex_supervisor_hierarchy_spec() -> SupervisorSpec {
                 shutdown_timeout: None,
                 supervisor: Some(level2_supervisor_spec),
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
         ],
     }

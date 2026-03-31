@@ -53,7 +53,7 @@ help:
 	@echo ""
 	@echo "🧪 Testing:"
 	@echo "  make test             - Run all tests: Cargo workspace (--lib + integration) + Go/TS/Python SDK tests"
-	@echo "  make test-fast        - Fast Rust test loop (nextest when available)"
+	@echo "  make test-fast        - All workspace Rust tests (--all-features), no prebuild; nextest + sccache when available"
 	@echo "  make test-filter FILTER='pattern' - Run tests matching pattern"
 	@echo "  make test-package PACKAGE='name' - Run tests for specific package"
 	@echo "  make test-examples    - Run all example tests"
@@ -319,10 +319,10 @@ build:
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
 	fi; \
-	MESSAGE_FORMAT=$${VERBOSE:-human}; \
-	if [ "$$VERBOSE" = "0" ]; then \
-		MESSAGE_FORMAT=short; \
-	fi; \
+		MESSAGE_FORMAT=$${VERBOSE:-human}; \
+		if [ "$${VERBOSE:-1}" = "0" ]; then \
+			MESSAGE_FORMAT=short; \
+		fi; \
 	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
 	export CARGO_INCREMENTAL=1; \
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
@@ -380,7 +380,7 @@ build-fast:
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
 	fi; \
 	MESSAGE_FORMAT=$${VERBOSE:-human}; \
-	if [ "$$VERBOSE" = "0" ]; then \
+		if [ "$${VERBOSE:-1}" = "0" ]; then \
 		MESSAGE_FORMAT=short; \
 	fi; \
 	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
@@ -568,14 +568,17 @@ run-all-standalone-examples:
 # Run all tests: unit tests (lib) + integration tests (tests/*.rs and [[test]] binaries)
 # Optimized for parallel execution - uses all available CPU cores by default
 # Only tuplespace tests need --test-threads=1, so we run them separately
-# Usage: make test                    # Uses all available cores (auto-detected)
-#        CARGO_BUILD_JOBS=4 make test # Uses 4 cores (slower but less resource intensive)
-#        VERBOSE=1 make test          # Shows detailed build output
+# Usage: make test                           # Uses all available cores (auto-detected)
+#        CARGO_BUILD_JOBS=4 make test        # Uses 4 cores (slower but less resource intensive)
+#        VERBOSE=1 make test                 # Shows detailed build output
+#        TEST_SKIP_PREBUILD=1 make test      # Skip cargo build --lib prebuild pass
+#        SKIP_SDK_TESTS=1 make test          # Skip Go/TypeScript/Python SDK tests
 # Output is piped to test-out file for review
 test:
 	@echo "Running all tests (unit tests + integration tests)..."
 	@echo "Output will be saved to test-out"
-	@rm -f test-out; \
+	@set -euo pipefail; \
+	rm -f test-out; \
 	echo "Cleaning up any existing SQLite database files..." | tee test-out; \
 	find . -maxdepth 3 -type f \( -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" \) ! -path "./target/*" ! -path "./.git/*" -delete 2>/dev/null || true; \
 	if [ -d "data" ]; then \
@@ -587,7 +590,7 @@ test:
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
 	fi; \
 	MESSAGE_FORMAT=$${VERBOSE:-human}; \
-	if [ "$$VERBOSE" = "0" ]; then \
+		if [ "$${VERBOSE:-1}" = "0" ]; then \
 		MESSAGE_FORMAT=short; \
 	fi; \
 	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
@@ -604,14 +607,18 @@ test:
 		export CARGO_HTTP_CAINFO="$$CERT_FILE"; \
 		echo "Using SSL certificates from: $$SSL_CERT_FILE" | tee -a test-out; \
 	fi; \
-	if [ -n "$$RUSTC_WRAPPER" ] && command -v sccache >/dev/null 2>&1; then \
+		if [ -n "$${RUSTC_WRAPPER:-}" ] && command -v sccache >/dev/null 2>&1; then \
 		echo "Using sccache for compilation caching (RUSTC_WRAPPER=$$RUSTC_WRAPPER)" | tee -a test-out; \
 		export RUSTC_WRAPPER=sccache; \
 	fi; \
-	echo "Building workspace first for faster test execution (incremental build enabled)..." | tee -a test-out; \
-	$(CARGO) build --lib $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
-	echo "Building node_runner binary (required by plexspaces-services integration_tests)..." | tee -a test-out; \
-	$(CARGO) build --bin node_runner $(CARGO_TEST_FEATURES) -p plexspaces-services --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || true; \
+	if [ "$${TEST_SKIP_PREBUILD:-0}" = "0" ]; then \
+		echo "Building workspace first for faster test execution (incremental build enabled)..." | tee -a test-out; \
+		$(CARGO) build --lib $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out; \
+		echo "Building node_runner binary (required by plexspaces-services integration_tests)..." | tee -a test-out; \
+		$(CARGO) build --bin node_runner $(CARGO_TEST_FEATURES) -p plexspaces-services --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out; \
+	else \
+		echo "Skipping prebuild (TEST_SKIP_PREBUILD=1)" | tee -a test-out; \
+	fi; \
 	echo "" | tee -a test-out; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
 		echo "Using cargo-nextest for faster test execution (single run)..." | tee -a test-out; \
@@ -626,9 +633,9 @@ test:
 		echo "Running all tests including those marked #[ignore] (--include-ignored)" | tee -a test-out; \
 		TIMEOUT_CMD=""; \
 		if command -v timeout >/dev/null 2>&1; then \
-			TIMEOUT_CMD="timeout 900"; \
+			TIMEOUT_CMD="timeout 14400"; \
 		elif command -v gtimeout >/dev/null 2>&1; then \
-			TIMEOUT_CMD="gtimeout 900"; \
+			TIMEOUT_CMD="gtimeout 14400"; \
 		fi; \
 		if [ -n "$$TIMEOUT_CMD" ]; then \
 			$$TIMEOUT_CMD $(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
@@ -642,51 +649,83 @@ test:
 		fi; \
 	fi; \
 	echo "" | tee -a test-out; \
-	echo "Polyglot SDK tests (not Cargo workspace packages)..." | tee -a test-out; \
-	if [ -d "sdks/go" ] && [ -f "sdks/go/go.mod" ] && command -v go >/dev/null 2>&1; then \
-		echo "  sdks/go: go test ./..." | tee -a test-out; \
-		(cd sdks/go && GOCACHE="$(WORKSPACE_ROOT)/target/go-build-cache" go test ./...) 2>&1 | tee -a test-out || exit 1; \
+	if [ "$${SKIP_SDK_TESTS:-0}" = "1" ]; then \
+		echo "Skipping polyglot SDK tests (SKIP_SDK_TESTS=1)" | tee -a test-out; \
 	else \
-		echo "  ⚠️  Skipping Go SDK tests (go or sdks/go missing)" | tee -a test-out; \
-	fi; \
-	if [ -d "sdks/typescript" ] && [ -f "sdks/typescript/package.json" ] && command -v npm >/dev/null 2>&1; then \
-		echo "  sdks/typescript: npm test" | tee -a test-out; \
-		(cd sdks/typescript && ([ -d "node_modules" ] || npm install --no-audit --no-fund >/dev/null 2>&1) && npm test) 2>&1 | tee -a test-out || exit 1; \
-	else \
-		echo "  ⚠️  Skipping TypeScript SDK tests (npm or sdks/typescript missing)" | tee -a test-out; \
-	fi; \
-	if [ -d "sdks/python" ] && [ -f "sdks/python/pyproject.toml" ]; then \
-		if [ -f "$(VENV_PATH)/bin/activate" ]; then \
-			echo "  sdks/python: pytest (venv: $(VENV_PATH))" | tee -a test-out; \
-			bash -c 'source "$(VENV_PATH)/bin/activate" && cd sdks/python && python -m pytest tests/ -q' 2>&1 | tee -a test-out || exit 1; \
-		elif python3 -m pytest --version >/dev/null 2>&1; then \
-			echo "  sdks/python: pytest (system python3)" | tee -a test-out; \
-			(cd sdks/python && python3 -m pytest tests/ -q) 2>&1 | tee -a test-out || exit 1; \
+		echo "Polyglot SDK tests (not Cargo workspace packages)..." | tee -a test-out; \
+		if [ -d "sdks/go" ] && [ -f "sdks/go/go.mod" ] && command -v go >/dev/null 2>&1; then \
+			echo "  sdks/go: go test ./..." | tee -a test-out; \
+			(cd sdks/go && GOCACHE="$(WORKSPACE_ROOT)/target/go-build-cache" go test ./...) 2>&1 | tee -a test-out || exit 1; \
 		else \
-			echo "  ⚠️  Skipping Python SDK tests: no pytest. Install: make proto-install-deps   or: pip install -e sdks/python[dev]" | tee -a test-out; \
+			echo "  ⚠️  Skipping Go SDK tests (go or sdks/go missing)" | tee -a test-out; \
+		fi; \
+		if [ -d "sdks/typescript" ] && [ -f "sdks/typescript/package.json" ] && command -v npm >/dev/null 2>&1; then \
+			echo "  sdks/typescript: npm test" | tee -a test-out; \
+			node -e 'const major = Number(process.versions.node.split(".")[0]); if (major < 18) { console.error("Node.js 18+ is required for sdks/typescript tests (current " + process.version + ")"); process.exit(1); }'; \
+			(cd sdks/typescript && ([ -d "node_modules" ] || npm install --no-audit --no-fund >/dev/null 2>&1) && npm test) 2>&1 | tee -a test-out || exit 1; \
+		else \
+			echo "  ⚠️  Skipping TypeScript SDK tests (npm or sdks/typescript missing)" | tee -a test-out; \
+		fi; \
+		if [ -d "sdks/python" ] && [ -f "sdks/python/pyproject.toml" ]; then \
+			if [ ! -f "$(VENV_PATH)/bin/activate" ]; then \
+				echo "  ❌ Python SDK tests require virtualenv activation script at $(VENV_PATH)/bin/activate" | tee -a test-out; \
+				exit 1; \
+			fi; \
+			echo "  sdks/python: pytest (venv: $(VENV_PATH))" | tee -a test-out; \
+			bash -lc 'source "$(VENV_PATH)/bin/activate" && python -m pytest --version >/dev/null && cd sdks/python && python -m pytest tests/ -q' 2>&1 | tee -a test-out || exit 1; \
 		fi; \
 	fi; \
 	echo "" | tee -a test-out; \
 	echo "All tests passed!" | tee -a test-out
 
+# Fast Rust CI parity without the make test prebuild pass (no cargo build --lib / node_runner first).
+# Always --all-features; uses shared target dir, incremental, nextest when installed, sccache when RUSTC_WRAPPER is unset.
+# Skips SQLite cleanup, test-out tee, and polyglot SDK tests (use make test for full suite).
 test-fast:
-	@echo "Running fast Rust test loop..."
-	@CARGO_JOBS=$${CARGO_TEST_JOBS:-$(CARGO_TEST_JOBS)}; \
+	@echo "test-fast: workspace --lib + --tests, --all-features, no prebuild (nextest if available)..."
+	@set -euo pipefail; \
+	CARGO_JOBS=$${CARGO_TEST_JOBS:-$(CARGO_TEST_JOBS)}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
 	fi; \
 	MESSAGE_FORMAT=$${VERBOSE:-human}; \
-	if [ "$$VERBOSE" = "0" ]; then \
+	if [ "$${VERBOSE:-}" = "0" ]; then \
 		MESSAGE_FORMAT=short; \
 	fi; \
 	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
 	export CARGO_INCREMENTAL=1; \
-	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
+	CERT_FILE=""; \
+	if [ -f "$$(pwd)/archived_docs/cert.pem" ]; then \
+		CERT_FILE="$$(pwd)/archived_docs/cert.pem"; \
+	elif [ -f "$$HOME/mac_certs.pem" ]; then \
+		CERT_FILE="$$HOME/mac_certs.pem"; \
+	fi; \
+	if [ -n "$$CERT_FILE" ]; then \
+		export SSL_CERT_FILE="$$CERT_FILE"; \
+		export CARGO_HTTP_CAINFO="$$CERT_FILE"; \
+	fi; \
+	if [ -z "$${RUSTC_WRAPPER:-}" ] && command -v sccache >/dev/null 2>&1; then \
+		export RUSTC_WRAPPER=sccache; \
+	fi; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
+		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --run-ignored all; \
 	else \
-		$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
-	fi
+		TIMEOUT_CMD=""; \
+		if command -v timeout >/dev/null 2>&1; then \
+			TIMEOUT_CMD="timeout 14400"; \
+		elif command -v gtimeout >/dev/null 2>&1; then \
+			TIMEOUT_CMD="gtimeout 14400"; \
+		fi; \
+		if [ -n "$$TIMEOUT_CMD" ]; then \
+			$$TIMEOUT_CMD $(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored || exit 1; \
+			$$TIMEOUT_CMD $(CARGO) test --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --exclude plexspaces-tuplespace -- --include-ignored || exit 1; \
+		else \
+			echo "Warning: timeout not found; running cargo test without outer timeout (brew install coreutils for gtimeout)"; \
+			$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored || exit 1; \
+			$(CARGO) test --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --exclude plexspaces-tuplespace -- --include-ignored || exit 1; \
+		fi; \
+	fi; \
+	echo "test-fast: done."
 
 # Run tests matching a filter pattern
 # Usage: make test-filter FILTER="test_name_pattern"

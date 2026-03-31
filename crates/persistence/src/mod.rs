@@ -823,7 +823,7 @@ mod tests {
                     ProcessingResult::Error(err) => assert_eq!(err, "error occurred"),
                     _ => panic!("Expected Error result"),
                 }
-                assert_eq!(message_id, message.id());
+                assert_eq!(message_id, &message.id);
             }
             _ => panic!("Expected MessageProcessed entry"),
         }

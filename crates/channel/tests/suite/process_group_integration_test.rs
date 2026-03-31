@@ -34,12 +34,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use plexspaces_channel::{Channel, ChannelError};
+use plexspaces_channel::Channel;
 use plexspaces_proto::channel::v1::{
     ChannelConfig, ChannelProvider, DeliveryGuarantee, OrderingGuarantee,
 };
 use plexspaces_proto::common::v1::Message;
 use tokio::sync::RwLock;
+use tokio::time::timeout;
 
 /// Test guard for Kafka backend
 fn kafka_config_available() -> bool {
@@ -340,13 +341,9 @@ async fn test_sqs_channel_market_feed() {
 
 /// Run the market feed test scenario
 async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
-    println!(
-        "\n=== Running Market Feed Test with {} backend ===\n",
-        backend_name
-    );
-
-    // Stock symbols
-    let symbols = vec!["AAPL", "GOOG", "META", "AMZN", "MSFT"];
+    // Keep the integration scenario small and deterministic so the backend
+    // behavior is covered without turning the suite into a throughput benchmark.
+    let symbols = vec!["AAPL", "GOOG", "META"];
 
     // Create subscribers with different symbol sets
     let subscribers = vec![
@@ -357,10 +354,7 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
     ];
 
     // Message counts to send per symbol
-    let messages_per_symbol = 10;
-
-    // Subscribe all subscribers (simulated - in real test would use channel.subscribe())
-    // For this test, we'll publish messages and then receive them
+    let messages_per_symbol = 3;
 
     // Send messages for each symbol
     let mut sent_counts: HashMap<String, u64> = HashMap::new();
@@ -381,24 +375,11 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
         }
     }
 
-    println!("Sent messages per symbol:");
-    for (symbol, count) in &sent_counts {
-        println!("  {}: {}", symbol, count);
-    }
-
-    // Wait for messages to be delivered
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // Receive messages and distribute to subscribers
-    let received_messages = match channel.receive(100).await {
-        Ok(messages) => messages,
-        Err(e) => {
-            eprintln!("Failed to receive messages: {}", e);
-            vec![]
-        }
-    };
-
-    println!("\nReceived {} messages total", received_messages.len());
+    let total_sent = sent_counts.values().sum::<u64>() as u32;
+    let received_messages = timeout(Duration::from_secs(2), channel.receive(total_sent))
+        .await
+        .expect("market feed receive should complete quickly")
+        .unwrap_or_else(|e| panic!("Failed to receive market feed messages: {}", e));
 
     // Process messages through subscribers
     for message in &received_messages {
@@ -407,26 +388,7 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
         }
     }
 
-    // Verify subscriber counts
-    println!("\nSubscriber message counts:");
-    for subscriber in &subscribers {
-        println!(
-            "  {} (subscribed to {:?}):",
-            subscriber.name, subscriber.subscribed_symbols
-        );
-        for symbol in &subscriber.subscribed_symbols {
-            let count = subscriber.get_count(symbol).await;
-            println!("    {}: {}", symbol, count);
-        }
-        println!("    Total: {}", subscriber.get_total());
-    }
-
-    // Get channel stats
     let stats = channel.get_stats().await.unwrap_or_default();
-    println!("\nChannel stats:");
-    println!("  Messages sent: {}", stats.messages_sent);
-    println!("  Messages received: {}", stats.messages_received);
-    println!("  Messages pending: {}", stats.messages_pending);
 
     // Assertions
     let total_sent: u64 = sent_counts.values().sum();
@@ -444,8 +406,12 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
         received_messages.len() as u64,
         "Analyst should have processed all received messages"
     );
-
-    println!("\n=== {} backend test passed! ===\n", backend_name);
+    assert_eq!(
+        stats.messages_sent,
+        total_sent,
+        "{} backend should record all sent messages",
+        backend_name
+    );
 }
 
 // ============================================================================
@@ -454,8 +420,6 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
 
 #[tokio::test]
 async fn test_multi_node_market_feed() {
-    println!("\n=== Multi-Node Market Feed Test ===\n");
-
     // This test simulates multiple nodes with actors subscribing to different quotes
     // Uses in-memory channels for simplicity
 
@@ -499,29 +463,22 @@ async fn test_multi_node_market_feed() {
         node2_channel.send(amzn_msg).await.unwrap();
     }
 
-    // Wait for messages
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
     // Receive and process on each node
-    let node1_messages = node1_channel.receive(100).await.unwrap();
+    let node1_messages = timeout(Duration::from_secs(1), node1_channel.receive(10))
+        .await
+        .expect("node 1 should receive market feed quickly")
+        .unwrap();
     for msg in &node1_messages {
         node1_subscriber.process_message(msg).await;
     }
 
-    let node2_messages = node2_channel.receive(100).await.unwrap();
+    let node2_messages = timeout(Duration::from_secs(1), node2_channel.receive(10))
+        .await
+        .expect("node 2 should receive market feed quickly")
+        .unwrap();
     for msg in &node2_messages {
         node2_subscriber.process_message(msg).await;
     }
-
-    // Verify counts
-    println!(
-        "Node 1 subscriber received {} messages",
-        node1_subscriber.get_total()
-    );
-    println!(
-        "Node 2 subscriber received {} messages",
-        node2_subscriber.get_total()
-    );
 
     assert_eq!(
         node1_subscriber.get_total(),
@@ -533,8 +490,6 @@ async fn test_multi_node_market_feed() {
         10,
         "Node 2 should receive 10 messages (5 META + 5 AMZN)"
     );
-
-    println!("\n=== Multi-Node Market Feed Test Passed! ===\n");
 }
 
 // ============================================================================
@@ -598,8 +553,6 @@ async fn test_channel_backend_priority_selection() {
 
 #[tokio::test]
 async fn test_high_throughput_market_feed() {
-    println!("\n=== High-Throughput Market Feed Test ===\n");
-
     let config = create_channel_config("high-throughput", ChannelProvider::ChannelProviderInMemory);
     let channel = Arc::new(
         plexspaces_channel::InMemoryChannel::new(config)
@@ -607,58 +560,31 @@ async fn test_high_throughput_market_feed() {
             .unwrap(),
     );
 
-    let symbols = vec![
-        "AAPL", "GOOG", "META", "AMZN", "MSFT", "NFLX", "TSLA", "NVDA",
-    ];
-    let messages_per_symbol = 100;
+    let symbols = vec!["AAPL", "GOOG", "META", "AMZN"];
+    let messages_per_symbol = 20;
+    let total_messages = (symbols.len() * messages_per_symbol) as u64;
 
-    let start = std::time::Instant::now();
-
-    // Send many messages concurrently
-    let mut handles = vec![];
     for symbol in &symbols {
-        let channel_clone = channel.clone();
-        let symbol = symbol.to_string();
-        let handle = tokio::spawn(async move {
-            for i in 0..messages_per_symbol {
-                let msg = create_quote_message(&symbol, 100.0 + i as f64, 1000);
-                channel_clone.send(msg).await.unwrap();
-            }
-        });
-        handles.push(handle);
+        for i in 0..messages_per_symbol {
+            let msg = create_quote_message(symbol, 100.0 + i as f64, 1000);
+            channel.send(msg).await.unwrap();
+        }
     }
-
-    // Wait for all sends to complete
-    for handle in handles {
-        handle.await.unwrap();
-    }
-
-    let send_duration = start.elapsed();
-    let total_messages = symbols.len() * messages_per_symbol;
-
-    println!("Sent {} messages in {:?}", total_messages, send_duration);
-    println!(
-        "Throughput: {:.2} messages/second",
-        total_messages as f64 / send_duration.as_secs_f64()
-    );
-
-    // Receive all messages
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let received = channel.receive(1000).await.unwrap();
-
-    println!("Received {} messages", received.len());
+    let received = timeout(Duration::from_secs(2), channel.receive(total_messages as u32))
+        .await
+        .expect("high-throughput receive should complete quickly")
+        .unwrap();
 
     let stats = channel.get_stats().await.unwrap_or_default();
-    println!(
-        "Channel stats: sent={}, received={}, pending={}",
-        stats.messages_sent, stats.messages_received, stats.messages_pending
-    );
 
     assert_eq!(
-        stats.messages_sent, total_messages as u64,
+        stats.messages_sent, total_messages,
         "Should have sent {} messages",
         total_messages
     );
-
-    println!("\n=== High-Throughput Market Feed Test Passed! ===\n");
+    assert_eq!(
+        received.len() as u64,
+        total_messages,
+        "Should receive every in-memory market feed message"
+    );
 }

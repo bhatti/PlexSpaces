@@ -358,7 +358,7 @@ When authentication is **enabled**:
 - **HTTP**: The gateway validates the `Authorization: Bearer <token>` header and derives `tenant_id` (and optionally `roles`, `groups`, `is_admin`) from the JWT only. Path parameters or headers like `x-tenant-id` from the client are **not** used for tenant identity.
 - **gRPC**: The auth middleware (when used) validates JWT or mTLS and sets `x-tenant-id` (and related headers) from the token or certificate only. Downstream code reads these headers; they are never taken from the raw client request.
 
-When authentication is **disabled** (e.g. `PLEXSPACES_DISABLE_AUTH=1`), the gateway may accept `tenant_id` from the path or from `x-tenant-id` for local testing.
+When authentication is **disabled** (e.g. `PLEXSPACES_DISABLE_AUTH=1`), the gateway may use a local default tenant for testing. Client-supplied tenant headers are not part of the public contract.
 
 The middleware sets (from JWT only when auth on):
 

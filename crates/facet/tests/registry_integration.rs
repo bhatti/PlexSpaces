@@ -8,14 +8,15 @@
 // the ObjectRegistry from ServiceLocator (based on node config).
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId};
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, ServiceLocator,
+};
 use plexspaces_facet::capabilities::registry::RegistryFacet;
-use plexspaces_mailbox::Mailbox;
-use plexspaces_mailbox::Message;
+use plexspaces_mailbox::{new_message, Mailbox, Message};
 use plexspaces_node::{Node, NodeBuilder};
 use serde_json::json;
-use std::sync::Arc;
-use std::sync::OnceLock;
+use std::collections::HashSet;
+use std::sync::{Arc, OnceLock};
 
 // Initialize tracing for tests (if not already initialized)
 static TRACING_INIT: std::sync::Once = std::sync::Once::new();
@@ -32,40 +33,46 @@ fn init_test_tracing() {
     });
 }
 
-/// Shared test node (created once, reused for all tests)
-static SHARED_NODE: OnceLock<Arc<Node>> = OnceLock::new();
-static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// Minimal GenServer behavior; facet pipeline handles registry JSON request/reply.
+struct EchoBehavior;
 
-/// Get or create shared test node
-///
-/// ## Purpose
-/// Creates a test node with services initialized but without gRPC server.
-/// This is sufficient for facet integration tests that don't need network communication.
-///
-/// ## Pattern
-/// Follows the same pattern as other integration tests in the codebase:
-/// - Build node with in-memory backends
-/// - Initialize services (already done in build())
-/// - Wait briefly for services to be ready
-/// - Reuse node across tests for efficiency
-async fn get_shared_node() -> Arc<Node> {
-    if let Some(node) = SHARED_NODE.get() {
-        return node.clone();
+#[async_trait::async_trait]
+impl ActorTrait for EchoBehavior {
+    async fn handle_message(
+        &mut self,
+        _ctx: &ActorContext,
+        _message: plexspaces_proto::common::v1::Message,
+    ) -> Result<(), BehaviorError> {
+        Ok(())
     }
 
-    // Use a lock to ensure only one thread initializes
-    // Handle poison errors gracefully (if a test panicked while holding the lock)
-    let _guard = INIT_LOCK
+    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        plexspaces_core::BehaviorType::GenServer
+    }
+}
+
+fn json_message(value: &serde_json::Value, message_type: &str) -> Message {
+    let mut message =
+        new_message(serde_json::to_vec(value).expect("Failed to serialize JSON message"));
+    message.message_type = message_type.to_string();
+    message
+}
+
+static SHARED_REGISTRY_NODE: OnceLock<Arc<Node>> = OnceLock::new();
+static SHARED_REGISTRY_NODE_INIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// One shared node for all registry facet table cases (`NodeBuilder` + in-memory backends are costly).
+async fn shared_registry_test_node() -> Arc<Node> {
+    if let Some(n) = SHARED_REGISTRY_NODE.get() {
+        return n.clone();
+    }
+    let _g = SHARED_REGISTRY_NODE_INIT
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-    // Double-check after acquiring lock
-    if let Some(node) = SHARED_NODE.get() {
-        return node.clone();
+        .unwrap_or_else(|p| p.into_inner());
+    if let Some(n) = SHARED_REGISTRY_NODE.get() {
+        return n.clone();
     }
 
-    // Create node with in-memory backends (for testing)
-    // build() already initializes services, so we don't need to call initialize_services()
     let node = Arc::new(
         NodeBuilder::new("test-node-registry")
             .with_in_memory_backends()
@@ -73,7 +80,19 @@ async fn get_shared_node() -> Arc<Node> {
             .await,
     );
 
-    // Wait for services to be ready with polling (no gRPC server startup needed)
+    use plexspaces_core::behavior_factory::BehaviorRegistry;
+    let registry = BehaviorRegistry::new();
+    registry
+        .register_simple("GenServer", || {
+            Box::pin(async move {
+                Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>)
+            })
+        })
+        .await;
+    node.service_locator()
+        .register_behavior_registry(Arc::new(registry))
+        .await;
+
     use std::time::Duration;
     use tokio::task::yield_now;
     use tokio::time::sleep;
@@ -82,7 +101,218 @@ async fn get_shared_node() -> Arc<Node> {
         sleep(Duration::from_millis(10)).await;
     }
 
-    SHARED_NODE.get_or_init(|| node.clone()).clone()
+    SHARED_REGISTRY_NODE.get_or_init(|| node.clone()).clone()
+}
+
+const ASK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Spawn a GenServer with [`RegistryFacet`] backed by this node's object registry.
+async fn spawn_registry_facet_actor(node: &Arc<Node>) -> (ActorRef, ActorId) {
+    let object_registry = node
+        .service_locator()
+        .get_object_registry()
+        .await
+        .expect("ObjectRegistry should be registered");
+
+    let registry_facet = RegistryFacet::new(
+        Arc::new(ObjectRegistryAdapter {
+            inner: object_registry,
+        }),
+        json!({}),
+        50,
+    );
+
+    let node_id = node.id();
+    let actor_name = format!("reg-tbl-{}", ulid::Ulid::new());
+    let actor_id = ActorId::from(format!("{actor_name}@{node_id}"));
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        "test-tenant".to_string(),
+        "test-namespace".to_string(),
+    );
+
+    node.spawn(
+        &ctx,
+        &actor_id,
+        "GenServer",
+        vec![],
+        None,
+        std::collections::HashMap::new(),
+        vec![Box::new(registry_facet) as Box<dyn plexspaces_facet::Facet>],
+    )
+    .await
+    .expect("Failed to spawn registry facet actor");
+
+    let actor_ref = get_actor_ref_after_spawn(node, &actor_id).await;
+    (actor_ref, actor_id)
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RegistryFacetCase {
+    RegisterLookup,
+    Unregister,
+    DiscoverThree,
+}
+
+const REGISTRY_FACET_CASES: &[RegistryFacetCase] = &[
+    RegistryFacetCase::RegisterLookup,
+    RegistryFacetCase::Unregister,
+    RegistryFacetCase::DiscoverThree,
+];
+
+async fn run_registry_facet_case(node: &Arc<Node>, case: RegistryFacetCase, case_ulid: &str) {
+    let (actor_ref, _) = spawn_registry_facet_actor(node).await;
+
+    match case {
+        RegistryFacetCase::RegisterLookup => {
+            let object_id = format!("tbl-{case_ulid}-lookup");
+            let grpc_address = format!("http://tbl-{case_ulid}-lookup:50051");
+
+            let register_msg = json_message(
+                &json!({
+                    "object_id": object_id,
+                    "object_type": "Service",
+                    "grpc_address": grpc_address,
+                    "metadata": {"version": "1.0.0"}
+                }),
+                "register_object",
+            );
+            let reply = actor_ref
+                .ask(register_msg, ASK_TIMEOUT)
+                .await
+                .unwrap_or_else(|e| panic!("case={case:?} register: {e}"));
+            let response: serde_json::Value =
+                serde_json::from_slice(&reply.payload).expect("parse register reply");
+            assert_eq!(response["status"], "ok", "case={case:?}");
+
+            let lookup_msg = json_message(
+                &json!({
+                    "object_id": object_id,
+                    "object_type": "Service"
+                }),
+                "lookup_object",
+            );
+            let reply = actor_ref
+                .ask(lookup_msg, ASK_TIMEOUT)
+                .await
+                .unwrap_or_else(|e| panic!("case={case:?} lookup: {e}"));
+            let response: serde_json::Value =
+                serde_json::from_slice(&reply.payload).expect("parse lookup reply");
+            assert_eq!(response["object_id"], object_id, "case={case:?}");
+            assert_eq!(response["grpc_address"], grpc_address, "case={case:?}");
+        }
+        RegistryFacetCase::Unregister => {
+            let object_id = format!("tbl-{case_ulid}-unreg");
+            let grpc_address = format!("http://tbl-{case_ulid}-unreg:50051");
+
+            let register_msg = json_message(
+                &json!({
+                    "object_id": object_id,
+                    "object_type": "Service",
+                    "grpc_address": grpc_address
+                }),
+                "register_object",
+            );
+            actor_ref
+                .ask(register_msg, ASK_TIMEOUT)
+                .await
+                .unwrap_or_else(|e| panic!("case={case:?} register: {e}"));
+
+            let unregister_msg = json_message(
+                &json!({
+                    "object_id": object_id,
+                    "object_type": "Service"
+                }),
+                "unregister_object",
+            );
+            let reply = actor_ref
+                .ask(unregister_msg, ASK_TIMEOUT)
+                .await
+                .unwrap_or_else(|e| panic!("case={case:?} unregister: {e}"));
+            let response: serde_json::Value =
+                serde_json::from_slice(&reply.payload).expect("parse unregister reply");
+            assert_eq!(response["status"], "ok", "case={case:?}");
+
+            let lookup_msg = json_message(
+                &json!({
+                    "object_id": object_id,
+                    "object_type": "Service"
+                }),
+                "lookup_object",
+            );
+            let reply = actor_ref
+                .ask(lookup_msg, ASK_TIMEOUT)
+                .await
+                .unwrap_or_else(|e| panic!("case={case:?} lookup after unregister: {e}"));
+            let response: serde_json::Value =
+                serde_json::from_slice(&reply.payload).expect("parse lookup reply");
+            assert!(
+                response.get("found").is_none() || response["found"] == false,
+                "case={case:?} expected not found, got {response}"
+            );
+        }
+        RegistryFacetCase::DiscoverThree => {
+            let prefix = format!("tbl-{case_ulid}-disc-");
+            let mut expected: Vec<String> = Vec::new();
+            for i in 1..=3 {
+                let object_id = format!("{prefix}{i}");
+                expected.push(object_id.clone());
+                let register_msg = json_message(
+                    &json!({
+                        "object_id": object_id,
+                        "object_type": "Service",
+                        "grpc_address": format!("http://tbl-{case_ulid}-disc-{i}:50051")
+                    }),
+                    "register_object",
+                );
+                actor_ref
+                    .ask(register_msg, ASK_TIMEOUT)
+                    .await
+                    .unwrap_or_else(|e| panic!("case={case:?} register {object_id}: {e}"));
+            }
+
+            let discover_msg = json_message(
+                &json!({
+                    "object_type": "Service",
+                    "offset": 0,
+                    "limit": 50
+                }),
+                "discover_objects",
+            );
+            let reply = actor_ref
+                .ask(discover_msg, ASK_TIMEOUT)
+                .await
+                .unwrap_or_else(|e| panic!("case={case:?} discover: {e}"));
+            let response: serde_json::Value =
+                serde_json::from_slice(&reply.payload).expect("parse discover reply");
+            let objects: Vec<serde_json::Value> =
+                serde_json::from_value(response["objects"].clone()).expect("parse objects array");
+
+            let matching: Vec<&serde_json::Value> = objects
+                .iter()
+                .filter(|o| {
+                    o["object_id"]
+                        .as_str()
+                        .is_some_and(|id| id.starts_with(&prefix))
+                })
+                .collect();
+            assert_eq!(
+                matching.len(),
+                3,
+                "case={case:?} want 3 objects under prefix {prefix}, got {} total services",
+                objects.len()
+            );
+            let found: HashSet<String> = matching
+                .iter()
+                .filter_map(|o| o["object_id"].as_str().map(String::from))
+                .collect();
+            for id in &expected {
+                assert!(
+                    found.contains(id),
+                    "case={case:?} missing {id}, found={found:?}"
+                );
+            }
+        }
+    }
 }
 
 /// Helper to get ActorRef after spawning an actor
@@ -115,6 +345,7 @@ async fn get_actor_ref_after_spawn(node: &Node, actor_id: &ActorId) -> ActorRef 
             );
             return ActorRef::local(
                 actor_id.clone(),
+                "test-tenant",
                 String::new(), // Test namespace
                 mailbox_for_ref,
                 node.service_locator().clone(),
@@ -201,8 +432,8 @@ impl plexspaces_facet::capabilities::registry::ObjectRegistry for ObjectRegistry
         name: Option<String>,
         labels: Option<Vec<String>>,
         health_status: Option<String>,
-        limit: usize,
         offset: usize,
+        limit: usize,
     ) -> Result<Vec<plexspaces_proto::object_registry::v1::ObjectRegistration>, String> {
         let object_type_enum = object_type.as_ref().map(|s| match s.as_str() {
             "Actor" | "actor" => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor,
@@ -233,268 +464,27 @@ impl plexspaces_facet::capabilities::registry::ObjectRegistry for ObjectRegistry
                 ctx,
                 object_type_enum,
                 name,
+                None,
                 labels,
-                None, // exclude_labels
                 health_status_enum,
-                limit,
                 offset,
+                limit,
             )
             .await
             .map_err(|e| e.to_string())
     }
 }
 
-/// Test: Rust actor with RegistryFacet - register and lookup
+/// Rust [`RegistryFacet`] scenarios on **one** shared node (table-driven; cheap to add rows).
+///
+/// Each row gets a fresh ULID prefix for `object_id`s and a dedicated actor so cases stay
+/// independent without `#[serial]` or cross-test races.
 #[tokio::test]
-async fn test_rust_actor_registry_facet_register_lookup() {
+async fn registry_facet_rust_object_registry_table() {
     init_test_tracing();
-    let node = get_shared_node().await;
-
-    let service_locator = node.service_locator();
-    let object_registry = service_locator
-        .get_object_registry()
-        .await
-        .expect("ObjectRegistry should be registered");
-
-    let registry_facet = RegistryFacet::new(
-        Arc::new(ObjectRegistryAdapter {
-            inner: object_registry,
-        }),
-        json!({}),
-        50,
-    );
-
-    let node_id = node.id();
-    let actor_name = format!("test-actor-{}", ulid::Ulid::new());
-    let actor_id = format!("{}@{}", actor_name, node_id);
-    let actor_id_typed = ActorId::from(actor_id.clone());
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
-        "test-tenant".to_string(),
-        "test-namespace".to_string(),
-    );
-
-    node.spawn(
-        &ctx,
-        &actor_id_typed,
-        "GenServer",
-        vec![],
-        None,
-        std::collections::HashMap::new(),
-        vec![Box::new(registry_facet) as Box<dyn plexspaces_facet::Facet>],
-    )
-    .await
-    .expect("Failed to spawn actor");
-
-    let actor_ref = get_actor_ref_after_spawn(&node, &actor_id_typed).await;
-
-    // ACT: Register object
-    let register_msg = Message::json(&json!({
-        "object_id": "service-1",
-        "object_type": "Service",
-        "grpc_address": "http://service-1:50051",
-        "metadata": {"version": "1.0.0"}
-    }))
-    .expect("Failed to create message")
-    .with_message_type("register_object");
-
-    let reply = actor_ref
-        .ask(register_msg.to_proto(), std::time::Duration::from_secs(5))
-        .await
-        .expect("Failed to register object");
-
-    // ASSERT: Should receive success
-    let response: serde_json::Value =
-        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
-    assert_eq!(response["status"], "ok");
-
-    // ACT: Lookup object
-    let lookup_msg = Message::json(&json!({
-        "object_id": "service-1",
-        "object_type": "Service"
-    }))
-    .expect("Failed to create message")
-    .with_message_type("lookup_object");
-
-    let reply = actor_ref
-        .ask(lookup_msg.to_proto(), std::time::Duration::from_secs(5))
-        .await
-        .expect("Failed to lookup object");
-
-    // ASSERT: Should return object
-    let response: serde_json::Value =
-        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
-    assert_eq!(response["object_id"], "service-1");
-    assert_eq!(response["grpc_address"], "http://service-1:50051");
-}
-
-/// Test: Rust actor with RegistryFacet - unregister
-#[tokio::test]
-async fn test_rust_actor_registry_facet_unregister() {
-    init_test_tracing();
-    let node = get_shared_node().await;
-
-    let service_locator = node.service_locator();
-    let object_registry = service_locator
-        .get_object_registry()
-        .await
-        .expect("ObjectRegistry should be registered");
-
-    let registry_facet = RegistryFacet::new(
-        Arc::new(ObjectRegistryAdapter {
-            inner: object_registry,
-        }),
-        json!({}),
-        50,
-    );
-
-    let node_id = node.id();
-    let actor_name = format!("test-actor-{}", ulid::Ulid::new());
-    let actor_id = format!("{}@{}", actor_name, node_id);
-    let actor_id_typed = ActorId::from(actor_id.clone());
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
-        "test-tenant".to_string(),
-        "test-namespace".to_string(),
-    );
-
-    node.spawn(
-        &ctx,
-        &actor_id_typed,
-        "GenServer",
-        vec![],
-        None,
-        std::collections::HashMap::new(),
-        vec![Box::new(registry_facet) as Box<dyn plexspaces_facet::Facet>],
-    )
-    .await
-    .expect("Failed to spawn actor");
-
-    let actor_ref = get_actor_ref_after_spawn(&node, &actor_id_typed).await;
-
-    // ARRANGE: Register object first
-    let register_msg = Message::json(&json!({
-        "object_id": "service-2",
-        "object_type": "Service",
-        "grpc_address": "http://service-2:50051"
-    }))
-    .expect("Failed to create message")
-    .with_message_type("register_object");
-    actor_ref
-        .ask(register_msg.to_proto(), std::time::Duration::from_secs(5))
-        .await
-        .expect("Failed to register object");
-
-    // ACT: Unregister object
-    let unregister_msg = Message::json(&json!({
-        "object_id": "service-2",
-        "object_type": "Service"
-    }))
-    .expect("Failed to create message")
-    .with_message_type("unregister_object");
-
-    let reply = actor_ref
-        .ask(unregister_msg.to_proto(), std::time::Duration::from_secs(5))
-        .await
-        .expect("Failed to unregister object");
-
-    // ASSERT: Should receive success
-    let response: serde_json::Value =
-        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
-    assert_eq!(response["status"], "ok");
-
-    // ASSERT: Lookup should return None
-    let lookup_msg = Message::json(&json!({
-        "object_id": "service-2",
-        "object_type": "Service"
-    }))
-    .expect("Failed to create message")
-    .with_message_type("lookup_object");
-
-    let reply = actor_ref
-        .ask(lookup_msg.to_proto(), std::time::Duration::from_secs(5))
-        .await
-        .expect("Failed to lookup object");
-
-    let response: serde_json::Value =
-        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
-    assert!(response.get("found").is_none() || response["found"] == false);
-}
-
-/// Test: Rust actor with RegistryFacet - discover
-#[tokio::test]
-async fn test_rust_actor_registry_facet_discover() {
-    init_test_tracing();
-    let node = get_shared_node().await;
-
-    let service_locator = node.service_locator();
-    let object_registry = service_locator
-        .get_object_registry()
-        .await
-        .expect("ObjectRegistry should be registered");
-
-    let registry_facet = RegistryFacet::new(
-        Arc::new(ObjectRegistryAdapter {
-            inner: object_registry,
-        }),
-        json!({}),
-        50,
-    );
-
-    let node_id = node.id();
-    let actor_name = format!("test-actor-{}", ulid::Ulid::new());
-    let actor_id = format!("{}@{}", actor_name, node_id);
-    let actor_id_typed = ActorId::from(actor_id.clone());
-    let ctx = plexspaces_core::RequestContext::new_without_auth(
-        "test-tenant".to_string(),
-        "test-namespace".to_string(),
-    );
-
-    node.spawn(
-        &ctx,
-        &actor_id_typed,
-        "GenServer",
-        vec![],
-        None,
-        std::collections::HashMap::new(),
-        vec![Box::new(registry_facet) as Box<dyn plexspaces_facet::Facet>],
-    )
-    .await
-    .expect("Failed to spawn actor");
-
-    let actor_ref = get_actor_ref_after_spawn(&node, &actor_id_typed).await;
-
-    // ARRANGE: Register multiple objects
-    for i in 1..=3 {
-        let register_msg = Message::json(&json!({
-            "object_id": format!("service-{}", i),
-            "object_type": "Service",
-            "grpc_address": format!("http://service-{}:50051", i)
-        }))
-        .expect("Failed to create message")
-        .with_message_type("register_object");
-        actor_ref
-            .ask(register_msg.to_proto(), std::time::Duration::from_secs(5))
-            .await
-            .expect(&format!("Failed to register service-{}", i));
+    let node = shared_registry_test_node().await;
+    for case in REGISTRY_FACET_CASES {
+        let case_ulid = ulid::Ulid::new().to_string();
+        run_registry_facet_case(&node, *case, &case_ulid).await;
     }
-
-    // ACT: Discover objects
-    let discover_msg = Message::json(&json!({
-        "object_type": "Service",
-        "limit": 10,
-        "offset": 0
-    }))
-    .expect("Failed to create message")
-    .with_message_type("discover_objects");
-
-    let reply = actor_ref
-        .ask(discover_msg.to_proto(), std::time::Duration::from_secs(5))
-        .await
-        .expect("Failed to discover objects");
-
-    // ASSERT: Should return multiple objects
-    let response: serde_json::Value =
-        serde_json::from_slice(&reply.payload).expect("Failed to parse response");
-    let objects: Vec<serde_json::Value> =
-        serde_json::from_value(response["objects"].clone()).expect("Failed to parse objects");
-    assert!(objects.len() >= 3);
 }

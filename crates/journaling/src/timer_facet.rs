@@ -734,29 +734,12 @@ fn proto_duration_to_std(duration: &Option<prost_types::Duration>) -> Option<Dur
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::ActorRef;
-    use plexspaces_mailbox::{Mailbox, MailboxConfig};
+    use plexspaces_core::{ActorRef, ActorService, ServiceLocator};
     use prost_types;
     use std::sync::Arc;
+    use plexspaces_services::ServiceLocatorImpl;
 
-    async fn create_test_facet() -> (TimerFacet, ActorRef, Arc<Mailbox>) {
-        let test_actor_id = "test-actor";
-        let mailbox_id = format!("timer-mailbox-{}", test_actor_id);
-        let mailbox = Arc::new(
-            Mailbox::new(MailboxConfig::default(), mailbox_id)
-                .await
-                .expect("Failed to create timer mailbox"),
-        );
-        let actor_ref = ActorRef::new("test-actor@test-node".to_string()).unwrap();
-
-        let facet = TimerFacet::new(serde_json::json!({}), 75);
-        (facet, actor_ref, mailbox)
-    }
-
-    // Create a mock ActorService for tests
-    struct MockActorService {
-        mailbox: Arc<Mailbox>,
-    }
+    struct MockActorService;
     #[async_trait::async_trait]
     impl ActorService for MockActorService {
         async fn spawn_actor(
@@ -770,18 +753,22 @@ mod tests {
         async fn send(
             &self,
             _actor_id: &str,
-            message: Message,
+            _message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-            // Convert proto Message to mailbox Message
-            let mailbox_message = plexspaces_mailbox::Message::from_proto(&message);
-            self.mailbox.send(mailbox_message).await.map_err(|e| {
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    e.to_string(),
-                )) as Box<dyn std::error::Error + Send + Sync>
-            })?;
             Ok("msg-id".to_string())
         }
+    }
+
+    async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
+        let service_locator = Arc::new(ServiceLocatorImpl::new());
+        service_locator
+            .register_actor_service(Arc::new(MockActorService))
+            .await;
+        service_locator
+    }
+
+    async fn create_test_facet() -> TimerFacet {
+        TimerFacet::new(serde_json::json!({}), 75, create_test_service_locator().await)
     }
 
     fn create_test_timer_registration(
@@ -808,18 +795,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_timer_facet_creation() {
-        let (facet, _actor_ref, _rx) = create_test_facet().await;
+        let facet = create_test_facet().await;
         assert_eq!(facet.facet_type(), "timer");
     }
 
     #[tokio::test]
     async fn test_timer_facet_attach() {
-        let (mut facet, actor_ref, mailbox) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
 
         let actor_id = facet.actor_id.read().await.clone();
         assert_eq!(actor_id, Some("actor-1".to_string()));
@@ -827,7 +813,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_timer_before_attach_fails() {
-        let (facet, _actor_ref, _rx) = create_test_facet().await;
+        let facet = create_test_facet().await;
 
         let registration = create_test_timer_registration("timer-1", 1, 0, false);
         let result = facet.register_timer(registration).await;
@@ -838,17 +824,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_timer_after_attach() {
-        let (mut facet, actor_ref, mailbox) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
-        facet
-            .set_actor_service(Arc::new(MockActorService {
-                mailbox: mailbox.clone(),
-            }))
-            .await;
 
         let registration = create_test_timer_registration("timer-1", 1, 0, false);
         let timer_id = facet.register_timer(registration).await.unwrap();
@@ -862,17 +842,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_duplicate_timer_fails() {
-        let (mut facet, actor_ref, mailbox) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref.clone()).await;
-        facet
-            .set_actor_service(Arc::new(MockActorService {
-                mailbox: mailbox.clone(),
-            }))
-            .await;
 
         let registration1 = create_test_timer_registration("timer-1", 1, 0, false);
         facet.register_timer(registration1).await.unwrap();
@@ -886,17 +860,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_unregister_timer() {
-        let (mut facet, actor_ref, mailbox) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
-        facet
-            .set_actor_service(Arc::new(MockActorService {
-                mailbox: mailbox.clone(),
-            }))
-            .await;
 
         let registration = create_test_timer_registration("timer-1", 1, 0, false);
         facet.register_timer(registration).await.unwrap();
@@ -909,7 +877,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unregister_nonexistent_timer_fails() {
-        let (mut facet, _actor_ref, _mailbox) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
@@ -926,12 +894,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_periodic_timer_zero_interval_fails() {
-        let (mut facet, actor_ref, mailbox) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
 
         let registration = create_test_timer_registration("timer-1", 0, 0, true);
         let result = facet.register_timer(registration).await;
@@ -945,17 +912,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_timers() {
-        let (mut facet, actor_ref, mailbox) = create_test_facet().await;
+        let mut facet = create_test_facet().await;
         facet
             .on_attach("actor-1", serde_json::json!({}))
             .await
             .unwrap();
-        facet.set_actor_ref(actor_ref).await;
-        facet
-            .set_actor_service(Arc::new(MockActorService {
-                mailbox: mailbox.clone(),
-            }))
-            .await;
 
         let registration1 = create_test_timer_registration("timer-1", 1, 0, false);
         let registration2 = create_test_timer_registration("timer-2", 2, 0, false);

@@ -34,7 +34,6 @@ use std::sync::Arc;
 /// - This is production-grade and type-safe
 pub async fn create_default_service_locator(
     node_id: Option<String>,
-    node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
     release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
 ) -> Arc<plexspaces_services::ServiceLocatorImpl> {
     use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
@@ -42,12 +41,37 @@ pub async fn create_default_service_locator(
     use plexspaces_services::ServiceLocatorImpl;
 
     let service_locator_impl = Arc::new(ServiceLocatorImpl::new());
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = service_locator_impl.clone();
+    let mut effective_release = release_config.unwrap_or_default();
+    let original_node = effective_release.node.clone();
+    let mut effective_node = original_node.clone().unwrap_or_default();
+    if let Some(node_id) = node_id {
+        effective_node.id = node_id;
+    }
+    if effective_node.id.is_empty() {
+        effective_node.id = "test-node".to_string();
+    }
+    if effective_node.listen_addr.is_empty() {
+        effective_node.listen_addr = "127.0.0.1:0".to_string();
+    }
+    if effective_node.grpc_connection_pool_size == 0 {
+        effective_node.grpc_connection_pool_size = 2;
+    }
+    if effective_node.max_connections == 0 {
+        effective_node.max_connections = 100;
+    }
+    if effective_node.heartbeat_interval_ms == 0 {
+        effective_node.heartbeat_interval_ms = 5000;
+    }
+    effective_node.clustering_enabled = original_node
+        .as_ref()
+        .map(|node| node.clustering_enabled)
+        .unwrap_or(true);
+    effective_release.node = Some(effective_node);
 
     // Initialize services using ServiceLocator trait
     // ServiceLocator now creates all default services including facet factories, ActorFactoryImpl, ActorServiceImpl, and TupleSpaceProvider
     service_locator_impl
-        .initialize_services(node_id, node_config, release_config)
+        .initialize_services(Some(effective_release))
         .await;
 
     // Note: ActorFactoryImpl, facet factories, ActorServiceImpl, and TupleSpaceProvider are now

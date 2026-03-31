@@ -36,6 +36,7 @@ use super::test_helpers::spawn_actor_helper;
 
 use plexspaces_actor::Actor;
 use plexspaces_behavior::MockBehavior;
+use plexspaces_core::ServiceLocator;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeBuilder, NodeId};
 use plexspaces_persistence::MemoryJournal;
@@ -626,7 +627,7 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
         object_category: "Node".to_string(),
         ..Default::default()
     };
-    if let Some(object_registry) = node1.service_locator().get_object_registry().await {
+    if let Some(object_registry) = node1.service_locator().object_registry().await {
         let _ = object_registry.register(&ctx, registration).await;
     }
 

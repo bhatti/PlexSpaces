@@ -34,11 +34,11 @@
 //! cargo test --test shutdown_restart_test --features test-utils
 //! ```
 
-use plexspaces_channel::*;
 use plexspaces_proto::channel::v1::*;
 use plexspaces_proto::common::v1::Message;
-use std::time::Duration;
-use tokio::time::sleep;
+
+#[cfg(feature = "test-utils")]
+use plexspaces_channel::ChannelResult;
 
 // Helper to create test config
 fn create_test_config_with_retry_dlq(
@@ -201,8 +201,9 @@ async fn test_mock_restart_recover_unacked() {
 #[cfg(feature = "sqlite-backend")]
 mod sqlite_tests {
     use super::*;
-    use plexspaces_channel::SqliteChannel;
-    use tempfile::TempDir;
+    use plexspaces_channel::{ChannelResult, SqliteChannel};
+    use std::time::Duration;
+    use tokio::time::sleep;
 
     async fn create_sqlite_channel(name: &str, db_path: &str) -> SqliteChannel {
         let config = ChannelConfig {
@@ -360,7 +361,9 @@ mod sqlite_tests {
 #[cfg(feature = "redis-backend")]
 mod redis_tests {
     use super::*;
-    use plexspaces_channel::RedisChannel;
+    use plexspaces_channel::{ChannelResult, RedisChannel};
+    use std::time::Duration;
+    use tokio::time::sleep;
 
     async fn is_redis_available() -> bool {
         #[cfg(feature = "test-helpers")]

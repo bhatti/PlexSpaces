@@ -18,7 +18,6 @@ mod sqlite_tests {
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
         let mut value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -34,13 +33,11 @@ mod sqlite_tests {
     async fn test_promise_creation_and_persistence() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: false,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -92,13 +89,11 @@ mod sqlite_tests {
     async fn test_promise_resolution_and_persistence() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: false,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -180,13 +175,11 @@ mod sqlite_tests {
     async fn test_promise_recovery_after_restart() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -225,13 +218,11 @@ mod sqlite_tests {
     async fn test_promise_completion_during_replay() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -290,13 +281,11 @@ mod sqlite_tests {
     async fn test_promise_timeout_handling() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: false,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -361,13 +350,11 @@ mod sqlite_tests {
     async fn test_multiple_promises_isolation() {
         let storage = create_test_storage().await;
         let config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 0,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 

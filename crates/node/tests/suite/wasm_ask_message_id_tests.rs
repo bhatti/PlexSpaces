@@ -119,6 +119,7 @@ async fn test_wasm_ask_single_message_id_flow() {
             nanos: 0,
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
         metadata: None,
     };
     let wasm_module = WasmModule {

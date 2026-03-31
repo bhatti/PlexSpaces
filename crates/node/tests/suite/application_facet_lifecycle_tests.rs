@@ -27,7 +27,7 @@
 
 use async_trait::async_trait;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_core::{ActorId, ApplicationManager};
+use plexspaces_core::{ActorId, ApplicationManager, ServiceLocator};
 use plexspaces_facet::{ExitReason, Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
@@ -373,6 +373,7 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
         shutdown_timeout: None,
         supervisor: None,
         facets: vec![proto_facet], // Facets from ChildSpec
+        behavior_kind: None,
     };
 
     // Create SupervisorSpec with ChildSpec
@@ -386,6 +387,7 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
     // Create ApplicationSpec
     ApplicationSpec {
         name: name.to_string(),
+        tenant_id: String::new(),
         namespace: String::new(),
         version: version.to_string(),
         description: format!("Test application {}", name),
@@ -400,6 +402,7 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
             nanos: 0,
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
         metadata: None,
     }
 }

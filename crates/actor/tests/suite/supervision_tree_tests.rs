@@ -45,13 +45,14 @@ use plexspaces_core::{ActorError, ActorId, ActorRef as CoreActorRef, ServiceLoca
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_persistence::MemoryJournal;
 
-/// Helper function to create a supervisor with ServiceLocator
-fn create_supervisor_with_locator(
+/// Helper function to create a supervisor with a fully-initialized ServiceLocator.
+/// Uses create_default_service_locator so ActorRegistry is available for register_in_registry.
+async fn create_supervisor_with_locator(
     id: String,
     strategy: SupervisionStrategy,
 ) -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None).await;
     Supervisor::new(id, strategy, service_locator)
 }
 
@@ -62,25 +63,27 @@ fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
     let sync_factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync> =
         Arc::new(move || {
             let actor_id = id_for_factory.clone();
-            // Create mailbox on a separate thread to avoid blocking async runtime
-            let mailbox = std::thread::spawn(move || {
+            // Create mailbox and actor on a dedicated thread with a single current-thread runtime
+            // so we can await create_default_service_locator for ActorRegistry-backed start().
+            let actor = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
-                    .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(MailboxConfig::default(), actor_id.clone()))
+                    .expect("Failed to create runtime for child factory");
+                let mailbox = rt
+                    .block_on(Mailbox::new(MailboxConfig::default(), actor_id.clone()))
+                    .expect("Failed to create mailbox in factory");
+                rt.block_on(super::test_actor_helpers::actor_with_default_service_locator(
+                    actor_id.clone(),
+                    Box::new(MockBehavior::new()),
+                    mailbox,
+                    "test-tenant".to_string(),
+                    "test".to_string(),
+                ))
             })
             .join()
-            .expect("Thread panicked")
-            .expect("Failed to create mailbox in factory");
-            Ok(Actor::new(
-                id_for_factory.clone(),
-                Box::new(MockBehavior::new()),
-                mailbox,
-                "test-tenant".to_string(),
-                "test".to_string(),
-                None,
-            ))
+            .expect("Thread panicked");
+            Ok(actor)
         });
 
     // Create core ActorRef (now accepted by ChildSpec::worker_sync)
@@ -118,8 +121,8 @@ fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
 #[tokio::test]
 async fn test_two_level_supervision_tree() {
     // Create root supervisor (OneForOne)
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None).await;
     let (mut root_supervisor, mut root_events) = Supervisor::new(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -199,7 +202,7 @@ async fn test_three_level_supervision_tree() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    );
+    ).await;
 
     // Create 2 mid-level supervisors
     let (mid1_supervisor, mid1_events) = create_supervisor_with_locator(
@@ -208,7 +211,7 @@ async fn test_three_level_supervision_tree() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    );
+    ).await;
 
     let (mid2_supervisor, mid2_events) = create_supervisor_with_locator(
         "mid-supervisor-2".to_string(),
@@ -216,7 +219,7 @@ async fn test_three_level_supervision_tree() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    );
+    ).await;
 
     let journal = Arc::new(MemoryJournal::new());
 
@@ -314,7 +317,7 @@ async fn test_failure_isolation_across_branches() {
             max_restarts: 5,
             within_seconds: 60,
         },
-    );
+    ).await;
 
     // Create Branch1 with OneForAll strategy (restarts all children on failure)
     let (branch1_supervisor, branch1_events) = create_supervisor_with_locator(
@@ -323,7 +326,7 @@ async fn test_failure_isolation_across_branches() {
             max_restarts: 5,
             within_seconds: 60,
         },
-    );
+    ).await;
 
     // Create Branch2 with OneForOne strategy (only restarts failed child)
     let (branch2_supervisor, branch2_events) = create_supervisor_with_locator(
@@ -332,7 +335,7 @@ async fn test_failure_isolation_across_branches() {
             max_restarts: 5,
             within_seconds: 60,
         },
-    );
+    ).await;
 
     let journal = Arc::new(MemoryJournal::new());
 
@@ -431,7 +434,7 @@ async fn test_cascading_shutdown() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    );
+    ).await;
 
     // Create 2 mid-level supervisors
     let (mid1_supervisor, mid1_events) = create_supervisor_with_locator(
@@ -440,7 +443,7 @@ async fn test_cascading_shutdown() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    );
+    ).await;
 
     let (mid2_supervisor, mid2_events) = create_supervisor_with_locator(
         "mid-supervisor-2".to_string(),
@@ -448,7 +451,7 @@ async fn test_cascading_shutdown() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    );
+    ).await;
 
     let journal = Arc::new(MemoryJournal::new());
 
@@ -623,8 +626,8 @@ async fn test_failure_escalation_to_parent() {
 #[tokio::test]
 async fn test_dynamic_tree_modification() {
     // Create root supervisor
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-        Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None).await;
     let (root_supervisor, mut root_events) = Supervisor::new(
         "root-supervisor".to_string(),
         SupervisionStrategy::OneForOne {

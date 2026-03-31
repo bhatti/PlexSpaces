@@ -59,10 +59,14 @@
 //!     state_schema_version: 1,
 //! };
 //!
-//! // Create storage backend using shared database URL
-//! use plexspaces_journaling::storage::create_journal_storage;
-//! let db_url = "sqlite:///tmp/journal.db";
-//! let storage = create_journal_storage(&db_url).await?;
+//! // Create storage backend using shared database config
+//! use plexspaces_journaling::storage::create_journal_storage_from_shared_db;
+//! use plexspaces_proto::storage::v1::SharedDbConfig;
+//! let shared_db = SharedDbConfig {
+//!     connection_string: "sqlite:///tmp/journal.db".to_string(),
+//!     ..Default::default()
+//! };
+//! let storage = create_journal_storage_from_shared_db(&shared_db).await?;
 //!
 //! // Create durability facet
 //! let config_value = serde_json::json!({

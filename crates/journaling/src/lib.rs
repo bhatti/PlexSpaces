@@ -128,7 +128,6 @@
 //! };
 //!
 //! let config_value = serde_json::json!({
-//!     "backend": config.backend,
 //!     "checkpoint_interval": config.checkpoint_interval,
 //!     "replay_on_activation": config.replay_on_activation,
 //! });
@@ -288,8 +287,8 @@ pub use plexspaces_proto::timer::v1::{ReminderRegistration, ReminderState, Timer
 // Core modules
 mod storage;
 pub use storage::*;
-// Re-export create_journal_storage for convenience
-pub use storage::create_journal_storage;
+// Re-export factory helpers for convenience
+pub use storage::create_journal_storage_from_shared_db;
 // Re-export JournalStorage trait from core (trait is defined in core to avoid circular dependencies)
 pub use plexspaces_core::{JournalError, JournalResult, JournalStorage};
 

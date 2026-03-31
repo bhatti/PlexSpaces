@@ -110,8 +110,10 @@ async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
 
     // Try to send to remote actor (will fail because actor doesn't exist or remote not implemented)
     let message = create_test_message(b"hello".to_vec());
+    let ctx =
+        plexspaces_core::RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let result = actor_service
-        .send("remote-actor@remote-node", message, false, None)
+        .send(ctx, "remote-actor@remote-node", message, false, None)
         .await;
 
     // Should fail - either "Actor not found", "Node not found", or "not yet implemented"

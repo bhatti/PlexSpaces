@@ -22,7 +22,12 @@
 //! Provides a unified way to create lock managers based on configuration,
 //! automatically choosing the best implementation for the deployment scenario.
 
-use crate::{LockManager, LockResult};
+use crate::{LockError, LockManager, LockResult};
+use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
+use plexspaces_proto::node::v1::RuntimeConfig;
+use plexspaces_proto::storage::v1::{
+    storage_provider_config, SharedDbConfig, StorageProvider, StorageProviderConfig,
+};
 use std::sync::Arc;
 
 /// Lock manager backend type
@@ -38,6 +43,128 @@ pub enum LockBackend {
     Redis,
     /// DynamoDB backend (AWS managed)
     DynamoDB,
+}
+
+/// Create a lock manager from runtime storage configuration.
+pub async fn create_lock_manager_from_runtime(runtime: &RuntimeConfig) -> LockResult<Arc<dyn LockManager>> {
+    create_lock_manager_from_storage_config(runtime.locks_provider.as_ref(), runtime.db.as_ref()).await
+}
+
+/// Create a lock manager from storage provider config with shared-db fallback.
+pub async fn create_lock_manager_from_storage_config(
+    provider_config: Option<&StorageProviderConfig>,
+    shared_db: Option<&SharedDbConfig>,
+) -> LockResult<Arc<dyn LockManager>> {
+    match provider_config {
+        Some(provider_config) => {
+            match StorageProvider::try_from(provider_config.provider)
+                .unwrap_or(StorageProvider::StorageProviderUnspecified)
+            {
+                StorageProvider::StorageProviderRedis => {
+                    let redis = match provider_config.config.as_ref() {
+                        Some(storage_provider_config::Config::Redis(redis)) => redis,
+                        _ => {
+                            return Err(LockError::ConfigError(
+                                "redis lock provider requires redis config".to_string(),
+                            ))
+                        }
+                    };
+                    create_lock_manager(
+                        LockBackend::Redis,
+                        Some(if redis.url.is_empty() {
+                            "redis://localhost:6379".to_string()
+                        } else {
+                            redis.url.clone()
+                        }),
+                    )
+                    .await
+                }
+                StorageProvider::StorageProviderDynamodb => {
+                    let dynamodb = match provider_config.config.as_ref() {
+                        Some(storage_provider_config::Config::Dynamodb(config)) => config,
+                        _ => {
+                            return Err(LockError::ConfigError(
+                                "dynamodb lock provider requires dynamodb config".to_string(),
+                            ))
+                        }
+                    };
+                    let table_name = if dynamodb.table_prefix.is_empty() {
+                        "plexspaces-locks".to_string()
+                    } else {
+                        format!("{}locks", dynamodb.table_prefix)
+                    };
+                    let provider_payload = format!(
+                        "{}:{}{}",
+                        dynamodb.region,
+                        table_name,
+                        if dynamodb.endpoint_url.is_empty() {
+                            String::new()
+                        } else {
+                            format!(":{}", dynamodb.endpoint_url)
+                        }
+                    );
+                    create_lock_manager(LockBackend::DynamoDB, Some(provider_payload)).await
+                }
+                StorageProvider::StorageProviderSqlite
+                | StorageProvider::StorageProviderPostgres
+                | StorageProvider::StorageProviderUnspecified => {
+                    create_lock_manager_from_shared_db(
+                        provider_config
+                            .config
+                            .as_ref()
+                            .and_then(|cfg| match cfg {
+                                storage_provider_config::Config::Postgres(config) => Some(config),
+                                _ => None,
+                            })
+                            .or(shared_db),
+                        provider_config.config.as_ref().and_then(|cfg| match cfg {
+                            storage_provider_config::Config::Sqlite(config) => Some(config.database_path.clone()),
+                            _ => None,
+                        }),
+                    )
+                    .await
+                }
+            }
+        }
+        None => create_lock_manager_from_shared_db(shared_db, None).await,
+    }
+}
+
+async fn create_lock_manager_from_shared_db(
+    shared_db: Option<&SharedDbConfig>,
+    sqlite_override_path: Option<String>,
+) -> LockResult<Arc<dyn LockManager>> {
+    let shared_db = shared_db.ok_or_else(|| {
+        LockError::ConfigError(
+            "lock manager requires runtime.db when no explicit locks provider is configured"
+                .to_string(),
+        )
+    })?;
+
+    match resolve_shared_db_backend(shared_db).map_err(LockError::ConfigError)? {
+        SharedDbBackend::Sqlite {
+            connection_string,
+            database_path,
+        } => {
+            let path = sqlite_override_path.unwrap_or(database_path);
+            if path == ":memory:" {
+                create_lock_manager(LockBackend::Memory, None).await
+            } else {
+                create_lock_manager(
+                    LockBackend::Sqlite,
+                    Some(if connection_string.contains(":memory:") {
+                        path
+                    } else {
+                        connection_string
+                    }),
+                )
+                .await
+            }
+        }
+        SharedDbBackend::Postgres { connection_string } => {
+            create_lock_manager(LockBackend::Postgres, Some(connection_string)).await
+        }
+    }
 }
 
 /// Create a lock manager based on backend type and configuration.
@@ -153,5 +280,53 @@ pub async fn create_lock_manager(
         LockBackend::DynamoDB => Err(crate::LockError::BackendError(
             "DynamoDB backend not available. Enable 'ddb-backend' feature.".to_string(),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_lock_manager_from_runtime;
+    use plexspaces_proto::node::v1::RuntimeConfig;
+    use plexspaces_proto::storage::v1::{
+        storage_provider_config, RedisBackendConfig, SharedDbConfig, StorageProvider,
+        StorageProviderConfig,
+    };
+
+    #[tokio::test]
+    async fn test_create_lock_manager_from_runtime_shared_db_memory() {
+        let runtime = RuntimeConfig {
+            db: Some(SharedDbConfig {
+                connection_string: "sqlite::memory:".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let result = create_lock_manager_from_runtime(&runtime).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_create_lock_manager_from_runtime_redis_provider_without_feature_errors() {
+        let runtime = RuntimeConfig {
+            db: Some(SharedDbConfig {
+                connection_string: "sqlite::memory:".to_string(),
+                ..Default::default()
+            }),
+            locks_provider: Some(StorageProviderConfig {
+                provider: StorageProvider::StorageProviderRedis as i32,
+                config: Some(storage_provider_config::Config::Redis(RedisBackendConfig {
+                    url: "redis://localhost:6379".to_string(),
+                    ..Default::default()
+                })),
+            }),
+            ..Default::default()
+        };
+
+        let result = create_lock_manager_from_runtime(&runtime).await;
+        #[cfg(feature = "redis-backend")]
+        assert!(result.is_ok());
+        #[cfg(not(feature = "redis-backend"))]
+        assert!(result.is_err());
     }
 }

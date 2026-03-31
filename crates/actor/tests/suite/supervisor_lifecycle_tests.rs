@@ -27,6 +27,7 @@
 //! - get_childspec() - get child specification
 //! - Parent-child registration integration
 
+use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::child_spec::{
     ChildType as CSChildType, RestartStrategy, ShutdownSpec, StartedChild,
@@ -39,7 +40,6 @@ use plexspaces_core::{
     Actor as ActorTrait, ActorContext, ActorError, ActorRef as CoreActorRef, BehaviorError, Message,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
-use plexspaces_services::ServiceLocatorImpl;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use tokio::time::{sleep, Duration};
@@ -106,8 +106,8 @@ impl plexspaces_core::Actor for TestActor {
 }
 
 async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
-    let service_locator: Arc<dyn plexspaces_core::ServiceLocator> =
-        Arc::new(ServiceLocatorImpl::new());
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None).await;
     Supervisor::new(
         "test-supervisor".to_string(),
         SupervisionStrategy::OneForOne {
@@ -138,14 +138,14 @@ async fn test_start_child() {
                 )
                 .await
                 .unwrap();
-                let actor = Actor::new(
+                let actor = actor_with_default_service_locator(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
                     mailbox,
                     "tenant".to_string(),
                     "namespace".to_string(),
-                    None,
-                );
+                )
+                .await;
                 let actor_ref = CoreActorRef::new(actor_id.clone())
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                 Ok(StartedChild::Worker { actor, actor_ref })
@@ -184,14 +184,14 @@ async fn test_delete_child() {
                 )
                 .await
                 .unwrap();
-                let actor = Actor::new(
+                let actor = actor_with_default_service_locator(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
                     mailbox,
                     "tenant".to_string(),
                     "namespace".to_string(),
-                    None,
-                );
+                )
+                .await;
                 let actor_ref = CoreActorRef::new(actor_id.clone())
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                 Ok(StartedChild::Worker { actor, actor_ref })
@@ -235,14 +235,14 @@ async fn test_which_children() {
                     )
                     .await
                     .unwrap();
-                    let actor = Actor::new(
+                    let actor = actor_with_default_service_locator(
                         actor_id.clone(),
                         Box::new(TestActor::new(actor_id.clone())),
                         mailbox,
                         "tenant".to_string(),
                         "namespace".to_string(),
-                        None,
-                    );
+                    )
+                    .await;
                     let actor_ref = CoreActorRef::new(actor_id.clone())
                         .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                     Ok(StartedChild::Worker { actor, actor_ref })
@@ -294,14 +294,14 @@ async fn test_count_children() {
                     )
                     .await
                     .unwrap();
-                    let actor = Actor::new(
+                    let actor = actor_with_default_service_locator(
                         actor_id.clone(),
                         Box::new(TestActor::new(actor_id.clone())),
                         mailbox,
                         "tenant".to_string(),
                         "namespace".to_string(),
-                        None,
-                    );
+                    )
+                    .await;
                     let actor_ref = CoreActorRef::new(actor_id.clone())
                         .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                     Ok(StartedChild::Worker { actor, actor_ref })
@@ -341,14 +341,14 @@ async fn test_get_childspec() {
                 )
                 .await
                 .unwrap();
-                let actor = Actor::new(
+                let actor = actor_with_default_service_locator(
                     actor_id.clone(),
                     Box::new(TestActor::new(actor_id.clone())),
                     mailbox,
                     "tenant".to_string(),
                     "namespace".to_string(),
-                    None,
-                );
+                )
+                .await;
                 let actor_ref = CoreActorRef::new(actor_id.clone())
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                 Ok(StartedChild::Worker { actor, actor_ref })
@@ -386,28 +386,29 @@ async fn test_restart_child() {
         Arc::new({
             let actor_id = actor_id.clone();
             move || {
-                let actor_id_clone = actor_id.clone();
-                let mailbox = std::thread::spawn(move || {
+                let actor_id_for_thread = actor_id.clone();
+                let actor = std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(Mailbox::new(
-                        MailboxConfig::default(),
-                        format!("mailbox-{}", actor_id_clone.clone()),
+                    let mailbox = rt
+                        .block_on(Mailbox::new(
+                            MailboxConfig::default(),
+                            format!("mailbox-{}", actor_id_for_thread.clone()),
+                        ))
+                        .expect("Failed to create mailbox in factory");
+                    rt.block_on(actor_with_default_service_locator(
+                        actor_id_for_thread.clone(),
+                        Box::new(TestActor::new(actor_id_for_thread.clone())),
+                        mailbox,
+                        "tenant".to_string(),
+                        "namespace".to_string(),
                     ))
                 })
                 .join()
-                .expect("Thread panicked")
-                .expect("Failed to create mailbox in factory");
-                Ok(Actor::new(
-                    actor_id.clone(),
-                    Box::new(TestActor::new(actor_id.clone())),
-                    mailbox,
-                    "tenant".to_string(),
-                    "namespace".to_string(),
-                    None,
-                ))
+                .expect("Thread panicked");
+                Ok(actor)
             }
         }),
         RestartPolicy::Permanent,

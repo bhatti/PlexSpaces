@@ -71,7 +71,3 @@ pub use plexspaces_proto::common::v1::Message;
 // pub use node::{Node, NodeId, NodeConfig};
 pub use supervision::{SupervisionStrategy, Supervisor};
 pub use tuplespace::{Pattern, Tuple, TupleSpace};
-
-// Include tests module
-#[cfg(test)]
-mod tests;

@@ -1368,9 +1368,12 @@ impl Actor {
         // Call on_terminate_start() for ALL facets (in priority order, descending)
         // This allows facets to perform cleanup before actor terminates (e.g., cancel timers, flush journal)
         let exit_reason = ExitReason::Shutdown;
+        let mut facet_count = 0_usize;
+        let mut facets_terminate_start_duration_ms = 0_u128;
         let facets_terminate_start_time = std::time::Instant::now();
         {
             let mut facets = self.facets.write().await;
+            facet_count = facets.list_facets().len();
             // Convert ExitReason to facet's ExitReason
             // Manual conversion to avoid circular dependency
             let facet_exit_reason = match &exit_reason {
@@ -1416,23 +1419,17 @@ impl Actor {
             }
 
             let facets_terminate_start_duration = facets_terminate_start_time.elapsed();
+            facets_terminate_start_duration_ms = facets_terminate_start_duration.as_millis();
             metrics::histogram!("plexspaces_facet_terminate_start_duration_seconds",
                 "actor_id" => self.id.clone()
             )
             .record(facets_terminate_start_duration.as_secs_f64());
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    actor_id = %self.id,
-                    facet_count = facets.list_facets().len(),
-                    duration_ms = facets_terminate_start_duration.as_millis(),
-                    "Facet on_terminate_start() called for all facets"
-                );
-            }
         }
 
         // Step 5: Behavior pre-facet-detachment cleanup (Phase 1: Unified Lifecycle)
         // Call on_facets_detaching() to allow behavior to clean up before facets are detached
         let facets_detaching_start = std::time::Instant::now();
+        let mut facets_detaching_duration_ms = 0_u128;
         {
             let mut behavior = self.behavior.write().await;
             match behavior
@@ -1441,21 +1438,16 @@ impl Actor {
             {
                 Ok(()) => {
                     let facets_detaching_duration = facets_detaching_start.elapsed();
+                    facets_detaching_duration_ms = facets_detaching_duration.as_millis();
                     metrics::histogram!("plexspaces_actor_facets_detaching_duration_seconds",
                         "actor_id" => self.id.clone()
                     )
                     .record(facets_detaching_duration.as_secs_f64());
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            actor_id = %self.id,
-                            duration_ms = facets_detaching_duration.as_millis(),
-                            "Actor on_facets_detaching() completed successfully"
-                        );
-                    }
                 }
                 Err(e) => {
                     // Log error but don't fail shutdown (behavior may have non-critical errors)
                     let facets_detaching_duration = facets_detaching_start.elapsed();
+                    facets_detaching_duration_ms = facets_detaching_duration.as_millis();
                     metrics::counter!("plexspaces_actor_facets_detaching_errors_total",
                         "actor_id" => self.id.clone(),
                         "error_type" => format!("{:?}", e)
@@ -1492,6 +1484,9 @@ impl Actor {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                             actor_id = %self.id,
+                            facet_count,
+                            facets_terminate_start_duration_ms,
+                            facets_detaching_duration_ms,
                             duration_ms = terminate_duration.as_millis(),
                             "Actor terminate() completed successfully"
                         );
@@ -1513,6 +1508,17 @@ impl Actor {
                         "error_type" => format!("{:?}", e)
                     )
                     .increment(1);
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
+                            actor_id = %self.id,
+                            facet_count,
+                            facets_terminate_start_duration_ms,
+                            facets_detaching_duration_ms,
+                            duration_ms = terminate_duration.as_millis(),
+                            error = %e,
+                            "Actor terminate() completed with non-fatal behavior error"
+                        );
+                    }
                     tracing::warn!(
                         actor_id = %self.id,
                         error = %e,
@@ -1968,8 +1974,6 @@ impl Actor {
         );
         let _guard = span.enter();
 
-        tracing::info!("Actor deactivating");
-
         // 1. Set state to Deactivating
         *self.state.write().await = ActorState::Deactivating;
 
@@ -2072,12 +2076,9 @@ impl Actor {
                 )
                 .await;
         } else {
-            // Registry not available - log warning but don't fail
-            // This allows actors to be created in test environments without full service setup
-            tracing::warn!(
-                actor_id = %self.id,
-                "ActorRegistry not available in ServiceLocator - actor not registered"
-            );
+            return Err(ActorError::InvalidState(
+                "ActorRegistry not available in ServiceLocator".to_string(),
+            ));
         }
 
         Ok(())
@@ -2217,28 +2218,31 @@ impl Actor {
         // Update last message time for health monitoring
         *last_message_time.write().await = std::time::Instant::now();
 
-        // Apply before-method facet interceptors
-        let facets = facets.read().await;
+        // Apply before-method facet interceptors.
+        // Do not hold facets.read() across send_reply (ShortCircuit) or other awaits that may
+        // need facets.write() on this actor — that deadlocks (e.g. registry discover then reply).
         let method_name = message.message_type.clone();
-        let facet_count = facets.get_facet_count();
-        if tracing::enabled!(tracing::Level::TRACE) && facet_count > 0 {
-            tracing::trace!(actor_id = %actor_id_owned, method = %method_name, facet_count = facet_count, "Checking facets for interception");
-        }
         use plexspaces_facet::BeforeInterceptOutcome;
-        let intercept_outcome = facets
-            .intercept_before(method_name.as_str(), &message.payload)
-            .await
-            .map_err(|e| {
-                // OBSERVABILITY: Track facet interception errors
-                let error_str = e.to_string();
-                metrics::counter!("plexspaces_actor_facet_intercept_errors_total",
-                    "actor_id" => actor_id_owned.clone(),
-                    "facet_error" => error_str.clone()
-                )
-                .increment(1);
-                tracing::error!(error = %e, "Facet interception error");
-                ActorError::FacetError(error_str)
-            })?;
+        let intercept_outcome = {
+            let facets_guard = facets.read().await;
+            let facet_count = facets_guard.get_facet_count();
+            if tracing::enabled!(tracing::Level::TRACE) && facet_count > 0 {
+                tracing::trace!(actor_id = %actor_id_owned, method = %method_name, facet_count = facet_count, "Checking facets for interception");
+            }
+            facets_guard
+                .intercept_before(method_name.as_str(), &message.payload)
+                .await
+        }
+        .map_err(|e| {
+            let error_str = e.to_string();
+            metrics::counter!("plexspaces_actor_facet_intercept_errors_total",
+                "actor_id" => actor_id_owned.clone(),
+                "facet_error" => error_str.clone()
+            )
+            .increment(1);
+            tracing::error!(error = %e, "Facet interception error");
+            ActorError::FacetError(error_str)
+        })?;
 
         // Handle interception outcome explicitly
         match intercept_outcome {
@@ -2324,8 +2328,8 @@ impl Actor {
 
                 // Apply after-method facet interceptors if successful
                 if result.is_ok() {
-                    // TODO: Capture actual result and apply after interceptors
-                    let _ = facets
+                    let facets_guard = facets.read().await;
+                    let _ = facets_guard
                         .intercept_after(
                             &method_name,
                             &message.payload,
@@ -2388,8 +2392,47 @@ impl Actor {
 mod tests {
     use super::*;
     use plexspaces_behavior::MockBehavior;
+    use plexspaces_core::{ActorContext, ServiceLocator};
     use plexspaces_mailbox::MailboxConfig;
+    use std::sync::Arc;
     use ulid::Ulid;
+
+    /// Builds an [`Actor`] whose [`ActorContext`] uses the same default [`ServiceLocator`] as
+    /// production (`create_default_service_locator`), including a registered [`ActorRegistry`].
+    /// Required for [`Actor::start`] / [`Actor::stop`] paths that register and unregister actors.
+    async fn actor_with_default_service_locator(
+        id: ActorId,
+        behavior: Box<dyn plexspaces_core::Actor>,
+        mailbox: Mailbox,
+        tenant_id: String,
+        namespace: String,
+    ) -> Actor {
+        let locator_impl =
+            plexspaces_node::service_locator_helpers::create_default_service_locator(None, None)
+                .await;
+        let node_id = ServiceLocator::get_node_config(locator_impl.as_ref())
+            .await
+            .map(|n| n.id)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "test-node".to_string());
+        let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = locator_impl;
+        let context = Arc::new(ActorContext::new(
+            node_id,
+            tenant_id.clone(),
+            namespace.clone(),
+            service_locator,
+            None,
+        ));
+        Actor::new(
+            id,
+            behavior,
+            mailbox,
+            tenant_id,
+            namespace,
+            None,
+        )
+        .set_context(context)
+    }
 
     /// Helper to create a test message
     fn create_test_message(payload: Vec<u8>) -> Message {
@@ -2418,14 +2461,14 @@ mod tests {
             .await
             .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             id.clone(),
             behavior,
             mailbox,
             String::new(),
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Test initial state
         assert_eq!(actor.state().await, ActorState::Creating);
@@ -2456,14 +2499,14 @@ mod tests {
             .await
             .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             "test-actor".to_string(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Start actor - on_activate should ALWAYS run (transitions to Active state)
         actor.start().await.unwrap();
@@ -2481,14 +2524,14 @@ mod tests {
             .await
             .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             "test-actor".to_string(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         actor.start().await.unwrap();
         actor.stop().await.unwrap();
@@ -2505,14 +2548,14 @@ mod tests {
             .await
             .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             "test-actor".to_string(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Initial state
         assert_eq!(actor.state().await, ActorState::Creating);
@@ -2537,14 +2580,14 @@ mod tests {
             .await
             .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             "test-actor".to_string(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Should work even if behavior doesn't implement lifecycle extensions
         actor.start().await.unwrap();
@@ -2725,14 +2768,14 @@ mod tests {
             .await
             .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             "test-actor".to_string(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Start actor
         actor.start().await.unwrap();
@@ -2751,14 +2794,14 @@ mod tests {
             .await
             .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             "test-actor".to_string(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Start then stop
         actor.start().await.unwrap();
@@ -3053,14 +3096,14 @@ mod tests {
             .await
             .expect("Failed to create mailbox");
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             "test-actor".to_string(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Start actor (message loop begins)
         let _handle = actor.start().await.unwrap();
@@ -3089,14 +3132,14 @@ mod tests {
             .await
             .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             "test-actor".to_string(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Start actor
         let handle = actor.start().await.unwrap();
@@ -3149,14 +3192,14 @@ mod tests {
             .await
             .expect("Failed to create mailbox");
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             "receiver".to_string(),
             behavior,
             mailbox,
             "test-tenant".to_string(),
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Start actor
         let _handle = actor.start().await.unwrap();
@@ -3208,14 +3251,14 @@ mod tests {
             .await
             .unwrap();
 
-        let mut actor = Actor::new(
+        let mut actor = actor_with_default_service_locator(
             "failing-actor".to_string(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
             "test-namespace".to_string(),
-            None,
-        );
+        )
+        .await;
 
         // Start actor
         let _handle = actor.start().await.unwrap();

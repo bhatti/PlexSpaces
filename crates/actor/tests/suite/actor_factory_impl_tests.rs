@@ -189,7 +189,7 @@ async fn create_test_service_locator() -> Arc<dyn plexspaces_core::ServiceLocato
     use plexspaces_core::{Actor as ActorTrait2, BehaviorRegistry};
     use plexspaces_node::create_default_service_locator;
     // Use create_default_service_locator which sets up all required services
-    let sl = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let sl = create_default_service_locator(Some("test-node".to_string()), None).await;
     // Register a BehaviorRegistry with test actor types so spawn_actor can create behaviors
     let registry = Arc::new(BehaviorRegistry::new());
     registry
@@ -314,6 +314,17 @@ async fn test_activate_virtual_actor_already_active() {
         .await
         .unwrap();
 
+    // Same ServiceLocator as the factory so Actor::start can register in ActorRegistry
+    let node_id = registry.local_node_id().to_string();
+    let actor_ctx = Arc::new(ActorContext::new(
+        node_id,
+        "default".to_string(),
+        "default".to_string(),
+        service_locator.clone(),
+        actor.context().config.clone(),
+    ));
+    actor = actor.set_context(actor_ctx);
+
     // Start the actor (this registers it and sets state to Active)
     actor.start().await.unwrap();
 
@@ -322,8 +333,8 @@ async fn test_activate_virtual_actor_already_active() {
     let actor_id = "test-actor@test-node".to_string();
     let actor_ref = ActorRef::local(
         actor_id.clone(),
-        "test".to_string(), // tenant_id
-        "test".to_string(), // namespace
+        "default".to_string(),
+        "default".to_string(),
         actor.mailbox().clone(),
         service_locator.clone(),
     );

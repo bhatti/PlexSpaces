@@ -310,7 +310,7 @@ async fn create_test_context_with_services_custom(
 ) -> ActorContext {
     use plexspaces_node::service_locator_helpers::create_default_service_locator;
     // Create a ServiceLocator with all default services for testing
-    let service_locator = create_default_service_locator(None, None, None).await;
+    let service_locator = create_default_service_locator(None, None).await;
 
     // Register services in ServiceLocator (if needed for tests)
     // For now, just create context with ServiceLocator

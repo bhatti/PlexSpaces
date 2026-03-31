@@ -310,8 +310,8 @@ impl plexspaces_facet::capabilities::registry::ObjectRegistry for ObjectRegistry
         name: Option<String>,
         labels: Option<Vec<String>>,
         health_status: Option<String>,
-        limit: usize,
         offset: usize,
+        limit: usize,
     ) -> Result<Vec<ObjectRegistration>, String> {
         let object_type_enum = object_type.as_ref().map(|s| match s.as_str() {
             "Actor" | "actor" => plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor,
@@ -342,11 +342,11 @@ impl plexspaces_facet::capabilities::registry::ObjectRegistry for ObjectRegistry
                 ctx,
                 object_type_enum,
                 name,
+                None,
                 labels,
-                None, // exclude_labels
                 health_status_enum,
-                limit,
                 offset,
+                limit,
             )
             .await
             .map_err(|e| e.to_string())
@@ -994,8 +994,6 @@ mod tests {
 
         async fn initialize_services(
             &self,
-            _node_id: Option<String>,
-            _node_config: Option<NodeConfig>,
             _release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
         ) {
         }

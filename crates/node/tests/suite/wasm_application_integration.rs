@@ -26,7 +26,7 @@
 //! - Error handling (invalid modules, missing runtime, etc.)
 
 use super::test_helpers::app_request_with_tenant;
-use plexspaces_core::ApplicationManager;
+use plexspaces_core::{ApplicationManager, ServiceLocator};
 use plexspaces_node::{Node, NodeId};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
@@ -95,6 +95,7 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
                 }),
                 supervisor: None,
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
             ChildSpec {
                 id: "worker-2".to_string(),
@@ -107,12 +108,14 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
                 }),
                 supervisor: None,
                 facets: vec![], // Phase 1: Unified Lifecycle - facets support
+                behavior_kind: None,
             },
         ],
     };
 
     let app_spec = ApplicationSpec {
         name: "test-app".to_string(),
+        tenant_id: String::new(),
         namespace: String::new(),
         version: "1.0.0".to_string(),
         description: "Test application with supervisor tree".to_string(),
@@ -127,6 +130,7 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
             nanos: 0,
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
         metadata: None,
     };
 
@@ -594,7 +598,8 @@ async fn test_wasm_undeploy_cleanup_instances_and_module() {
         .get_wasm_runtime()
         .await
         .expect("WASM runtime");
-    let cached_before = wasm_runtime.get_module(&module_hash).await;
+    let cached_before: Option<Arc<dyn std::any::Any + Send + Sync>> =
+        wasm_runtime.get_module(&module_hash).await;
     assert!(
         cached_before.is_some(),
         "Module should be in cache after deploy"
@@ -631,7 +636,8 @@ async fn test_wasm_undeploy_cleanup_instances_and_module() {
     );
 
     // 2. Module must be evicted from cache (no leak)
-    let cached_after = wasm_runtime.get_module(&module_hash).await;
+    let cached_after: Option<Arc<dyn std::any::Any + Send + Sync>> =
+        wasm_runtime.get_module(&module_hash).await;
     assert!(
         cached_after.is_none(),
         "Module should be evicted from cache after undeploy (cleanup)"
@@ -687,11 +693,13 @@ fn create_wasm_module_from_fixture_with_supervisor(
             }),
             supervisor: None,
             facets: vec![],
+            behavior_kind: None,
         }],
     };
 
     let app_spec = ApplicationSpec {
         name: actor_name.to_string(),
+        tenant_id: String::new(),
         namespace: String::new(),
         version: "1.0.0".to_string(),
         description: format!("WASM application with supervisor: {}", actor_name),
@@ -706,6 +714,7 @@ fn create_wasm_module_from_fixture_with_supervisor(
             nanos: 0,
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
         metadata: None,
     };
 
@@ -793,6 +802,7 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
                 }),
                 supervisor: None,
                 facets: vec![],
+                behavior_kind: None,
             },
             ChildSpec {
                 id: "worker-2".to_string(),
@@ -805,6 +815,7 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
                 }),
                 supervisor: None,
                 facets: vec![],
+                behavior_kind: None,
             },
         ],
     };
@@ -819,6 +830,7 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
 
     let app_spec = ApplicationSpec {
         name: "multi-worker-app".to_string(),
+        tenant_id: String::new(),
         namespace: String::new(),
         version: "1.0.0".to_string(),
         description: "App with multiple supervised workers".to_string(),
@@ -833,6 +845,7 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
             nanos: 0,
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
         metadata: None,
     };
 

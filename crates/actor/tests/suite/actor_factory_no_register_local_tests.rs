@@ -64,7 +64,7 @@ impl ActorTrait for TestBehavior {
 async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {
     use plexspaces_core::BehaviorRegistry;
     use plexspaces_node::create_default_service_locator;
-    let sl = create_default_service_locator(Some("test-node".to_string()), None, None).await;
+    let sl = create_default_service_locator(Some("test-node".to_string()), None).await;
     // Register a BehaviorRegistry with test actor types so spawn_actor can create behaviors
     let registry = Arc::new(BehaviorRegistry::new());
     registry

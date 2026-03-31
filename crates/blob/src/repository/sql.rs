@@ -55,7 +55,7 @@ impl SqlBlobRepository {
     /// Detects database type and uses appropriate migration path
     /// For in-memory SQLite, uses a single connection for all operations to ensure consistency
     async fn migrate(pool: &Pool<sqlx::Any>) -> Result<(), sqlx::Error> {
-        use tracing::{debug, error, info};
+        use tracing::{error, info};
 
         // Detect database type
         let (is_sqlite, db_version) =
@@ -140,11 +140,15 @@ impl SqlBlobRepository {
     }
 }
 
+fn should_skip_blob_namespace_filter(ctx: &RequestContext) -> bool {
+    ctx.should_skip_namespace_filter() || ctx.namespace().is_empty()
+}
+
 #[async_trait]
 impl BlobRepository for SqlBlobRepository {
     async fn get(&self, ctx: &RequestContext, blob_id: &str) -> BlobResult<Option<BlobMetadata>> {
-        // For admin/internal contexts with empty namespace, skip namespace filter
-        let row = if ctx.should_skip_namespace_filter() {
+        // Blob lookups treat an empty namespace as tenant-wide scope.
+        let row = if should_skip_blob_namespace_filter(ctx) {
             sqlx::query(
                 r#"
                 SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
@@ -187,8 +191,8 @@ impl BlobRepository for SqlBlobRepository {
         ctx: &RequestContext,
         sha256: &str,
     ) -> BlobResult<Option<BlobMetadata>> {
-        // For admin/internal contexts with empty namespace, skip namespace filter
-        let row = if ctx.should_skip_namespace_filter() {
+        // Blob lookups treat an empty namespace as tenant-wide scope.
+        let row = if should_skip_blob_namespace_filter(ctx) {
             sqlx::query(
                 r#"
                 SELECT blob_id, tenant_id, namespace, name, sha256, content_type,
@@ -380,18 +384,19 @@ impl BlobRepository for SqlBlobRepository {
         page_size: i64,
         offset: i64,
     ) -> BlobResult<(Vec<BlobMetadata>, i64)> {
+        // Blob listing treats an empty namespace as tenant-wide scope.
+        let skip_namespace_filter = should_skip_blob_namespace_filter(ctx);
+
         // Build WHERE clause - filter by tenant_id always
-        // For admin/internal contexts with empty namespace, skip namespace filter
         let mut where_clauses: Vec<String> = vec!["tenant_id = $1".to_string()];
         let mut bind_index = 2;
 
-        // Add namespace filter only if not admin/internal with empty namespace
-        if !ctx.should_skip_namespace_filter() {
+        if !skip_namespace_filter {
             where_clauses.push(format!("namespace = ${}", bind_index));
             bind_index += 1;
         }
 
-        if let Some(ref name_prefix) = filters.name_prefix {
+        if filters.name_prefix.is_some() {
             where_clauses.push(format!("name LIKE ${}", bind_index));
             bind_index += 1;
         }
@@ -414,8 +419,7 @@ impl BlobRepository for SqlBlobRepository {
         let count_query = format!("SELECT COUNT(*) FROM blob_metadata WHERE {}", where_clause);
         let mut count_query = sqlx::query(&count_query).bind(ctx.tenant_id());
 
-        // Bind namespace only if not admin/internal with empty namespace
-        if !ctx.should_skip_namespace_filter() {
+        if !skip_namespace_filter {
             count_query = count_query.bind(ctx.namespace());
         }
 
@@ -452,8 +456,7 @@ impl BlobRepository for SqlBlobRepository {
 
         let mut list_query = sqlx::query(&list_query).bind(ctx.tenant_id());
 
-        // Bind namespace only if not admin/internal with empty namespace
-        if !ctx.should_skip_namespace_filter() {
+        if !skip_namespace_filter {
             list_query = list_query.bind(ctx.namespace());
         }
 
@@ -489,8 +492,8 @@ impl BlobRepository for SqlBlobRepository {
     ) -> BlobResult<Vec<BlobMetadata>> {
         let now_str = Utc::now().to_rfc3339();
 
-        // For admin/internal contexts with empty namespace, skip namespace filter
-        let rows = if ctx.should_skip_namespace_filter() {
+        // Blob expiration scans treat an empty namespace as tenant-wide scope.
+        let rows = if should_skip_blob_namespace_filter(ctx) {
             sqlx::query(
                 r#"
                 SELECT blob_id, tenant_id, namespace, name, sha256, content_type,

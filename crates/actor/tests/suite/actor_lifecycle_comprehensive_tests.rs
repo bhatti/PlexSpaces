@@ -24,6 +24,7 @@
 //! - unified_lifecycle_tests.rs (5 tests)
 //! Total: 13 tests
 
+use super::test_actor_helpers::actor_with_default_service_locator;
 use async_trait::async_trait;
 use plexspaces_actor::Actor;
 use plexspaces_core::{
@@ -264,14 +265,14 @@ async fn test_init_called_before_message_loop() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -292,14 +293,14 @@ async fn test_init_failure_prevents_start() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let result = actor.start().await;
     assert!(result.is_err(), "Actor start should fail if init() fails");
@@ -321,14 +322,14 @@ async fn test_terminate_called_on_stop() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -399,14 +400,14 @@ async fn test_metrics_emitted_on_init_success() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -426,14 +427,14 @@ async fn test_metrics_emitted_on_init_failure() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(FailingInitActor),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let result = actor.start().await;
     assert!(result.is_err(), "Actor start should fail");
@@ -452,14 +453,14 @@ async fn test_metrics_emitted_on_terminate() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -482,14 +483,14 @@ async fn test_logging_on_lifecycle_events() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         "test-actor".to_string(),
         Box::new(actor_impl),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     let handle = actor.start().await.expect("Actor should start");
     sleep(Duration::from_millis(100)).await;
@@ -560,14 +561,14 @@ async fn test_multiple_facets_attachment_order() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         format!("test-actor-{}", Ulid::new()),
         Box::new(SimpleActor),
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     actor.attach_facet(Box::new(facet1)).await.unwrap();
     actor.attach_facet(Box::new(facet2)).await.unwrap();
@@ -699,7 +700,7 @@ async fn test_multiple_facets_detachment_order() {
     let mailbox = Mailbox::new(MailboxConfig::default(), format!("mailbox-{}", Ulid::new()))
         .await
         .unwrap();
-    let mut actor = Actor::new(
+    let mut actor = actor_with_default_service_locator(
         format!("test-actor-{}", Ulid::new()),
         Box::new(SimpleActorWithTerminate {
             terminate_called: terminate_called_clone,
@@ -707,8 +708,8 @@ async fn test_multiple_facets_detachment_order() {
         mailbox,
         "tenant".to_string(),
         "namespace".to_string(),
-        None,
-    );
+    )
+    .await;
 
     actor.attach_facet(Box::new(facet1)).await.unwrap();
     actor.attach_facet(Box::new(facet2)).await.unwrap();

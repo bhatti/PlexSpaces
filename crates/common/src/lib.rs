@@ -33,6 +33,7 @@ pub mod release_config;
 pub mod release_parser;
 pub mod request_context;
 pub mod security_validator;
+pub mod storage_config;
 pub mod virtual_actor_config;
 
 #[cfg(any(test, feature = "test-helpers"))]
@@ -51,6 +52,7 @@ pub use release_config::create_default_release_config;
 pub use release_parser::{Release, ReleaseError};
 pub use request_context::{RequestContext, RequestContextError, AUTH_REQUIRED_HINT};
 pub use security_validator::{validate_security_config, SecurityValidationError};
+pub use storage_config::{resolve_shared_db_backend, sqlite_database_path, SharedDbBackend};
 pub use virtual_actor_config::{
     duration_to_proto, format_duration, get_activation_strategy, get_idle_timeout,
     get_max_pool_per_actor_type, DEFAULT_ACTIVATION_STRATEGY, DEFAULT_IDLE_TIMEOUT_SECONDS,

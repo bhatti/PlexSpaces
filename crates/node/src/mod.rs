@@ -276,15 +276,15 @@ impl Node {
         // This ensures ActorRegistry and all components use the correct node ID (from CLI args, not release.yaml)
         std::env::set_var("PLEXSPACES_NODE_ID", &actual_node_id);
 
-        // Initialize all services in ServiceLocator (centralized initialization)
-        // ServiceLocator now creates ActorFactoryImpl, facet factories, ActorServiceImpl, and TupleSpaceProvider
-        // CRITICAL: Pass actual_node_id (from NodeBuilder/CLI) not proto_node_config.id (which may be from release.yaml)
+        // Initialize all services from the effective release configuration.
+        // ServiceLocator now creates ActorFactoryImpl, facet factories, ActorServiceImpl, and TupleSpaceProvider.
+        // Ensure release.node reflects the resolved node identity from NodeBuilder/CLI.
         self.service_locator
-            .initialize_services(
-                Some(actual_node_id.clone()),
-                Some(proto_node_config.clone()),
-                self.release_spec.read().await.clone(),
-            )
+            .initialize_services(Some({
+                let mut release = self.release_spec.read().await.clone().unwrap_or_default();
+                release.node = Some(proto_node_config.clone());
+                release
+            }))
             .await;
 
         // Register ApplicationManager in ServiceLocator for ApplicationServiceImpl to use
@@ -1061,6 +1061,26 @@ impl Node {
         format!("sqlite:///tmp/plexspaces-{}.db?mode=rwc", node_id)
     }
 
+    /// Get the shared database config from ReleaseSpec config.
+    ///
+    /// This reads from the spec that was already initialized by config_manager::initialize(),
+    /// which has applied env overrides and set defaults.
+    async fn get_shared_database_config(&self) -> plexspaces_proto::storage::v1::SharedDbConfig {
+        if let Some(spec) = self.release_spec.read().await.as_ref() {
+            if let Some(ref runtime) = spec.runtime {
+                if let Some(ref db_config) = runtime.db {
+                    return db_config.clone();
+                }
+            }
+        }
+
+        let node_id = self.id.as_str().replace(['@', '/', '\\', ':'], "-");
+        plexspaces_proto::storage::v1::SharedDbConfig {
+            connection_string: format!("sqlite:///tmp/plexspaces-{}.db?mode=rwc", node_id),
+            ..Default::default()
+        }
+    }
+
     /// Initialize blob service
     /// Returns Arc<BlobService> on success, NodeError on failure (e.g. MinIO/S3 unreachable).
     /// Caller (start()) treats failure as optional: node starts without blob storage on error.
@@ -1522,21 +1542,20 @@ impl Node {
             state_store::SchedulingStateStore, SchedulingServiceImpl, TaskRouter,
         };
 
-        // Get shared database URL from RuntimeConfig.db (already initialized by config_manager)
-        // Scheduler uses the same shared database as other components (blob, etc.)
-        let db_url = self.get_shared_database_url().await;
+        let shared_db = self.get_shared_database_config().await;
 
-        // Create state store using factory method (uses shared database)
-        use plexspaces_scheduler::state_store::create_state_store;
-        let state_store: Arc<dyn SchedulingStateStore> = match create_state_store(&db_url).await {
+        // Create state store using the shared database config from RuntimeConfig.db.
+        use plexspaces_scheduler::state_store::create_state_store_from_shared_db;
+        let state_store: Arc<dyn SchedulingStateStore> =
+            match create_state_store_from_shared_db(&shared_db).await {
             Ok(store) => store,
             Err(e) => {
                 // FATAL: Cannot create state store - fail startup
                 let error_msg = format!(
-                    "FATAL: Failed to create scheduler state store with database '{}': {}. Cannot proceed without database access.",
-                    db_url, e
+                    "FATAL: Failed to create scheduler state store with shared database '{}': {}. Cannot proceed without database access.",
+                    shared_db.connection_string, e
                 );
-                tracing::error!(error = %e, db_url = %db_url, "{}", error_msg);
+                tracing::error!(error = %e, connection_string = %shared_db.connection_string, "{}", error_msg);
                 return Err(NodeError::ConfigError(error_msg));
             }
         };

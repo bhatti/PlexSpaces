@@ -27,13 +27,6 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use plexspaces_common::RequestContext;
-    use plexspaces_core::{ActorId, ActorRef, Message, Node};
-    use plexspaces_wasm_runtime::{WasmInstance, WasmModule};
-    use std::sync::Arc;
-    use std::time::Duration;
-    use tokio::time::timeout;
-
     /// Test that SimpleActor can handle concurrent messages without deadlock
     #[tokio::test]
     async fn test_simple_actor_concurrent_messages_no_deadlock() {

@@ -650,8 +650,15 @@ mod tests {
             result.decision,
             InterceptorDecision::InterceptorDecisionDeny as i32
         );
-        assert!(result
-            .error_message
-            .contains("Missing authorization header"));
+        assert!(
+            result.error_message.contains("Authorization header"),
+            "unexpected deny message: {:?}",
+            result.error_message
+        );
+        assert!(
+            result.error_message.contains("Bearer"),
+            "expected Bearer hint in message: {:?}",
+            result.error_message
+        );
     }
 }

@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::Message;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
+use plexspaces_core::{
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, ServiceLocator,
+};
 use plexspaces_journaling::{
     DurabilityFacet, JournalError, JournalResult, JournalStorage, SqliteJournalStorage,
     StateLoader, VirtualActorFacet,

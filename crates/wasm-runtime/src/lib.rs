@@ -96,7 +96,7 @@
 //! // Instantiate actor
 //! let actor_id = "actor-001".to_string();
 //! let initial_state = vec![]; // Empty state for new actor
-//! let instance = runtime.instantiate(module, actor_id, &initial_state, config, None, None, None, None, None, None, None).await?;
+//! let instance = runtime.instantiate(module, actor_id, &initial_state, config, None, None, None, None, None).await?;
 //!
 //! // Call actor's handle_message function
 //! let from = "caller-actor";

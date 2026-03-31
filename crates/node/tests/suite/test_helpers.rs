@@ -91,6 +91,7 @@ pub async fn lookup_actor_ref(
             Ok(Some(ActorRef::remote(
                 actor_id.clone(),
                 String::new(),
+                String::new(),
                 node_id,
                 node.service_locator().clone(),
             )))
@@ -221,6 +222,7 @@ where
             Ok(ActorRef::remote(
                 actor_id.clone(),
                 String::new(),
+                String::new(),
                 parsed_node_id,
                 node.service_locator().clone(),
             ))
@@ -288,6 +290,7 @@ pub async fn register_actor_with_message_sender(
     use plexspaces_core::MessageSender;
     let wrapper = Arc::new(ActorRef::local(
         actor_id.to_string(),
+        String::new(),
         String::new(),
         mailbox,
         node.service_locator().clone(),

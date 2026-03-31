@@ -33,7 +33,7 @@ use async_trait::async_trait;
 use plexspaces_actor::{Actor, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::Message;
-use plexspaces_core::{service_names, ActorRegistry, RequestContext};
+use plexspaces_core::{service_names, ActorRegistry, RequestContext, ServiceLocator};
 use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType};
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_node::{Node, NodeBuilder};
@@ -632,11 +632,13 @@ async fn test_application_deployment_with_eager_virtual_actors() {
                 shutdown_timeout: None,
                 supervisor: None,
                 facets: vec![create_virtual_actor_facet("eager")],
+                behavior_kind: None,
             }],
         };
 
         let app_spec = ApplicationSpec {
             name: "eager-virtual-app".to_string(),
+            tenant_id: String::new(),
             namespace: String::new(),
             version: "1.0.0".to_string(),
             description: "Test app with eager virtual actors".to_string(),
@@ -651,6 +653,7 @@ async fn test_application_deployment_with_eager_virtual_actors() {
                 nanos: 0,
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
             metadata: None,
         };
 

@@ -21,24 +21,20 @@
 //! This file demonstrates how to use different TupleSpace backends with
 //! MPI-style collective operations.
 
-use plexspaces_proto::v1::tuplespace::{TupleSpaceConfig, SqliteBackend};
+use plexspaces_proto::tuplespace::v1::TupleSpaceConfig;
 
 use matrix_vector_mpi::{
-    create_tuplespace_from_env,
+    create_tuplespace,
     create_tuplespace_from_config,
     create_in_memory_tuplespace,
 };
 
-/// Test 1: Create TupleSpace from environment variables (default to in-memory)
+/// Test 1: Create TupleSpace from runtime-oriented defaults
 #[tokio::test]
-async fn test_create_tuplespace_from_env() {
-    // Ensure no env vars are set (tests in-memory fallback)
-    std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
-
-    let tuplespace = create_tuplespace_from_env().await
-        .expect("Failed to create TupleSpace from env");
-
-    // Should create an in-memory TupleSpace by default
+async fn test_create_tuplespace() {
+    let tuplespace = create_tuplespace()
+        .await
+        .expect("Failed to create TupleSpace from defaults");
     assert!(std::sync::Arc::strong_count(&tuplespace) == 1);
 }
 
@@ -57,12 +53,6 @@ async fn test_create_in_memory_tuplespace() {
 #[cfg(feature = "sql-backend")]
 async fn test_create_tuplespace_with_sqlite() {
     let config = TupleSpaceConfig {
-        backend: Some(plexspaces_proto::v1::tuplespace::tuple_space_config::Backend::Sqlite(
-            SqliteBackend {
-                path: ":memory:".to_string(),
-            }
-        )),
-        pool_size: 1,
         default_ttl_seconds: 0,
         enable_indexing: false,
     };
@@ -84,14 +74,7 @@ async fn test_create_tuplespace_with_sqlite() {
 async fn test_multi_process_coordination_with_sqlite() {
     use plexspaces_tuplespace::{Tuple, TupleField, Pattern, PatternField};
 
-    // This would typically use a shared SQLite file
     let config = TupleSpaceConfig {
-        backend: Some(plexspaces_proto::v1::tuplespace::tuple_space_config::Backend::Sqlite(
-            SqliteBackend {
-                path: "/tmp/matrix-mpi-test.db".to_string(),
-            }
-        )),
-        pool_size: 1,
         default_ttl_seconds: 0,
         enable_indexing: false,
     };
@@ -128,22 +111,13 @@ async fn test_multi_process_coordination_with_sqlite() {
     let _ = std::fs::remove_file("/tmp/matrix-mpi-test.db");
 }
 
-/// Test 5: Environment variable configuration for SQLite
+/// Test 5: Explicit configuration path stays available
 #[tokio::test]
-#[cfg(feature = "sql-backend")]
-async fn test_env_var_configuration_sqlite() {
-    std::env::set_var("PLEXSPACES_TUPLESPACE_BACKEND", "sqlite");
-    std::env::set_var("PLEXSPACES_SQLITE_PATH", ":memory:");
-
-    let tuplespace = create_tuplespace_from_env().await
-        .expect("Failed to create TupleSpace from env vars");
-
-    // Verify it works
+async fn test_explicit_configuration_path() {
+    let tuplespace = create_tuplespace_from_config(TupleSpaceConfig::default())
+        .await
+        .expect("Failed to create TupleSpace from explicit config");
     assert!(std::sync::Arc::strong_count(&tuplespace) == 1);
-
-    // Clean up env vars
-    std::env::remove_var("PLEXSPACES_TUPLESPACE_BACKEND");
-    std::env::remove_var("PLEXSPACES_SQLITE_PATH");
 }
 
 /// Test 6: MPI scatter operation with configured TupleSpace

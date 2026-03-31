@@ -144,7 +144,7 @@ async fn test_spawn_actor_always_uses_local_node_id() {
 
     // Create ServiceLocator and register services
     let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        create_default_service_locator(Some("test-node".to_string()), None).await;
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
@@ -255,7 +255,7 @@ async fn test_spawn_actor_rejects_remote_node_id() {
 
     // Create ServiceLocator and register services
     let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        create_default_service_locator(Some("test-node".to_string()), None).await;
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
@@ -316,7 +316,7 @@ async fn test_spawn_actor_design_principle() {
 
     // Create ServiceLocator and register services
     let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        create_default_service_locator(Some("test-node".to_string()), None).await;
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
@@ -399,7 +399,7 @@ async fn test_spawn_actor_with_callback() {
 
     use plexspaces_node::create_default_service_locator;
     let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None, None).await;
+        create_default_service_locator(Some("test-node".to_string()), None).await;
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())

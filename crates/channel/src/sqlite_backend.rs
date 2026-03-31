@@ -40,6 +40,7 @@
 //!     id TEXT PRIMARY KEY,
 //!     channel_name TEXT NOT NULL,
 //!     payload BLOB NOT NULL,
+//!     headers_json TEXT NOT NULL DEFAULT '{}',
 //!     timestamp INTEGER NOT NULL,
 //!     acked INTEGER DEFAULT 0,
 //!     created_at INTEGER NOT NULL
@@ -208,6 +209,7 @@ impl SqliteChannel {
             sqlx::query(
                 r#"CREATE TABLE IF NOT EXISTS channel_messages (
                     id TEXT PRIMARY KEY, channel_name TEXT NOT NULL, payload BLOB NOT NULL,
+                    headers_json TEXT NOT NULL DEFAULT '{}',
                     timestamp INTEGER NOT NULL, acked INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)"#,
             )
             .execute(&pool)
@@ -261,9 +263,10 @@ impl SqliteChannel {
 
     /// Recover unacked messages from database
     async fn recover_unacked_messages(&self) -> ChannelResult<()> {
+        // Column order: 0=id, 1=channel_name, 2=payload, 3=headers_json, 4=timestamp, 5=acked, 6=created_at
         let query_sql = format!(
             r#"
-            SELECT id, channel_name, payload, timestamp, acked, created_at
+            SELECT id, channel_name, payload, headers_json, timestamp, acked, created_at
             FROM {}
             WHERE channel_name = ? AND acked = 0
             ORDER BY created_at ASC
@@ -285,7 +288,10 @@ impl SqliteChannel {
         for row in rows {
             let id: String = row.get(0);
             let payload: Vec<u8> = row.get(2);
-            let timestamp_ms: i64 = row.get(3);
+            let headers_json: String = row.try_get(3).unwrap_or_else(|_| "{}".to_string());
+            let timestamp_ms: i64 = row.get(4);
+            let headers: std::collections::HashMap<String, String> =
+                serde_json::from_str(&headers_json).unwrap_or_default();
 
             // Reconstruct Message
             let message = Message {
@@ -296,6 +302,7 @@ impl SqliteChannel {
                     seconds: timestamp_ms / 1000,
                     nanos: ((timestamp_ms % 1000) * 1_000_000) as i32,
                 }),
+                headers,
                 ..Default::default()
             };
 
@@ -391,12 +398,14 @@ impl Channel for SqliteChannel {
         let msg_id = message.id.clone();
         let timestamp_ms = Self::proto_timestamp_to_unix_ms(&message.timestamp);
         let created_at = Self::system_time_to_unix_ms(SystemTime::now());
+        let headers_json = serde_json::to_string(&message.headers)
+            .unwrap_or_else(|_| "{}".to_string());
 
         // Insert message into database
         let insert_sql = format!(
             r#"
-            INSERT INTO {} (id, channel_name, payload, timestamp, acked, created_at)
-            VALUES (?, ?, ?, ?, 0, ?)
+            INSERT INTO {} (id, channel_name, payload, headers_json, timestamp, acked, created_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?)
             "#,
             self.table_name
         );
@@ -405,6 +414,7 @@ impl Channel for SqliteChannel {
             .bind(&message.id)
             .bind(&self.config.name)
             .bind(&message.payload)
+            .bind(&headers_json)
             .bind(timestamp_ms)
             .bind(created_at)
             .execute(&self.pool)
@@ -422,9 +432,10 @@ impl Channel for SqliteChannel {
         let mut messages = Vec::new();
 
         // Query unacked messages
+        // Column order: 0=id, 1=channel_name, 2=payload, 3=headers_json, 4=timestamp, 5=acked, 6=created_at
         let query_sql = format!(
             r#"
-            SELECT id, channel_name, payload, timestamp, acked, created_at
+            SELECT id, channel_name, payload, headers_json, timestamp, acked, created_at
             FROM {}
             WHERE channel_name = ? AND acked = 0
             ORDER BY created_at ASC
@@ -445,7 +456,10 @@ impl Channel for SqliteChannel {
         for row in rows {
             let id: String = row.get(0);
             let payload: Vec<u8> = row.get(2);
-            let timestamp_ms: i64 = row.get(3);
+            let headers_json: String = row.try_get(3).unwrap_or_else(|_| "{}".to_string());
+            let timestamp_ms: i64 = row.get(4);
+            let headers: std::collections::HashMap<String, String> =
+                serde_json::from_str(&headers_json).unwrap_or_default();
 
             let message = Message {
                 id: id.clone(),
@@ -455,6 +469,7 @@ impl Channel for SqliteChannel {
                     seconds: timestamp_ms / 1000,
                     nanos: ((timestamp_ms % 1000) * 1_000_000) as i32,
                 }),
+                headers,
                 ..Default::default()
             };
 

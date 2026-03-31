@@ -23,6 +23,7 @@
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
+use plexspaces_core::ServiceLocator;
 use plexspaces_node::{default_node_config, Node, NodeId};
 use plexspaces_proto::{
     actor::v1::{ActorConfig as ProtoActorConfig, SpawnActorRequest},
@@ -117,6 +118,8 @@ async fn test_spawn_remote_actor_missing_actor_type() {
         config: None,
         labels: std::collections::HashMap::new(),
         facets: vec![],
+        namespace: "default".to_string(),
+        instances_count: 1,
     });
 
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
@@ -147,6 +150,8 @@ async fn test_spawn_remote_actor_wrong_node() {
         config: None,
         labels: std::collections::HashMap::new(),
         facets: vec![],
+        namespace: "default".to_string(),
+        instances_count: 1,
     });
 
     let response = ActorServiceTrait::spawn_actor(&service, request).await;
@@ -286,12 +291,14 @@ async fn test_node_route_local_message() {
     let actor_ref = ActorRef::local(
         "test-actor@node1".to_string(),
         "".to_string(),
+        "".to_string(),
         mailbox.clone(),
         service_locator.clone(),
     );
 
     let wrapper = Arc::new(ActorRef::local(
         "test-actor@node1".to_string(),
+        "".to_string(),
         "".to_string(), // test namespace
         mailbox.clone(),
         service_locator.clone(),
@@ -313,7 +320,7 @@ async fn test_node_route_local_message() {
             &ctx,
             "test-actor@node1".to_string(),
             wrapper,
-            None,
+            "TestActor".to_string(),
             None,
             None,
             None,
@@ -348,12 +355,14 @@ async fn test_node_route_remote_message() {
     let actor_ref2 = ActorRef::local(
         "remote-actor@node2".to_string(),
         "".to_string(),
+        "".to_string(),
         mailbox2.clone(),
         service_locator2.clone(),
     );
 
     let wrapper2 = Arc::new(ActorRef::local(
         "remote-actor@node2".to_string(),
+        "".to_string(),
         "".to_string(), // test namespace
         mailbox2.clone(),
         service_locator2.clone(),
@@ -375,7 +384,7 @@ async fn test_node_route_remote_message() {
             &ctx,
             "remote-actor@node2".to_string(),
             wrapper2,
-            None,
+            "TestActor".to_string(),
             None,
             None,
             None,
@@ -430,6 +439,7 @@ async fn test_node_route_remote_message() {
     let service_locator1 = node1.service_locator().clone();
     let remote_actor_ref = ActorRef::remote(
         "remote-actor@node2".to_string(),
+        "".to_string(),
         "".to_string(),
         "node2".to_string(),
         service_locator1,
@@ -486,12 +496,14 @@ async fn test_connection_pooling() {
     let actor_ref2 = ActorRef::local(
         "pooled-actor@node2".to_string(),
         "".to_string(),
+        "".to_string(),
         mailbox2.clone(),
         service_locator2.clone(),
     );
 
     let wrapper_pooled = Arc::new(ActorRef::local(
         "pooled-actor@node2".to_string(),
+        "".to_string(),
         "".to_string(), // test namespace
         mailbox2.clone(),
         service_locator2.clone(),
@@ -513,7 +525,7 @@ async fn test_connection_pooling() {
             &ctx,
             "pooled-actor@node2".to_string(),
             wrapper_pooled,
-            None,
+            "TestActor".to_string(),
             None,
             None,
             None,
@@ -569,6 +581,7 @@ async fn test_connection_pooling() {
     let remote_actor_ref = ActorRef::remote(
         "pooled-actor@node2".to_string(),
         "".to_string(),
+        "".to_string(),
         "node2".to_string(),
         service_locator1,
     );
@@ -612,7 +625,8 @@ async fn test_node_discovery() {
         object_category: "Node".to_string(),
         ..Default::default()
     };
-    let object_registry = node1.service_locator().get_object_registry().await.unwrap();
+    let object_registry: Arc<dyn plexspaces_core::ObjectRegistry> =
+        node1.service_locator().object_registry().await.unwrap();
     object_registry.register(&ctx, registration).await.unwrap();
 
     let lookup_result = object_registry.lookup(&ctx, "node2", None).await;

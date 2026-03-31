@@ -263,49 +263,43 @@ impl ElasticPool {
 
     /// Spawn N actors in the pool
     async fn spawn_workers(&self, count: usize) -> Result<(), ElasticPoolError> {
-        let mut workers = self.workers.write().await;
-        let mut available = self.available_workers.lock().await;
+        // Scope the write locks so they are released before update_metrics() runs.
+        // update_metrics() re-acquires workers.read() and available_workers.lock();
+        // holding the write guards across that call would deadlock.
+        {
+            let mut workers = self.workers.write().await;
+            let mut available = self.available_workers.lock().await;
 
-        for _ in 0..count {
-            // Generate actor ID
-            let worker_id = ulid::Ulid::new().to_string();
+            for _ in 0..count {
+                let worker_id = ulid::Ulid::new().to_string();
+                let worker = Worker::new(worker_id.clone());
+                workers.insert(worker_id.clone(), worker);
+                available.push_back(worker_id);
+            }
+        } // workers and available released here
 
-            // Create actor entry
-            let worker = Worker::new(worker_id.clone());
-            workers.insert(worker_id.clone(), worker);
-
-            // Add to available queue
-            available.push_back(worker_id);
-        }
-
-        // Update metrics
         self.update_metrics().await;
-
         Ok(())
     }
 
     /// Remove N actors from pool (idle first, then available)
     async fn remove_workers(&self, count: usize) -> Result<usize, ElasticPoolError> {
-        let mut workers = self.workers.write().await;
-        let mut available = self.available_workers.lock().await;
-        let mut removed = 0;
+        // Scope the write locks so they are released before update_metrics() runs.
+        let removed = {
+            let mut workers = self.workers.write().await;
+            let mut available = self.available_workers.lock().await;
+            let mut removed = 0;
 
-        // Remove idle/available actors only (not busy)
-        let to_remove: Vec<String> = available.iter().take(count).cloned().collect();
+            let to_remove: Vec<String> = available.iter().take(count).cloned().collect();
+            for worker_id in to_remove {
+                available.retain(|id| id != &worker_id);
+                workers.remove(&worker_id);
+                removed += 1;
+            }
+            removed
+        }; // workers and available released here
 
-        for worker_id in to_remove {
-            // Remove from available queue
-            available.retain(|id| id != &worker_id);
-
-            // Remove from workers map
-            workers.remove(&worker_id);
-
-            removed += 1;
-        }
-
-        // Update metrics
         self.update_metrics().await;
-
         Ok(removed)
     }
 
@@ -338,8 +332,13 @@ impl ElasticPool {
             return Err(ElasticPoolError::PoolDraining);
         }
 
-        // Try to get available worker immediately
-        if let Some(worker_id) = self.available_workers.lock().await.pop_front() {
+        // Try to get available worker immediately.
+        // Use a let binding so the MutexGuard is dropped before checkout_worker() is called.
+        // A temporary in an `if let` scrutinee lives for the entire body in Rust; holding
+        // available_workers across checkout_worker() → update_metrics() which re-acquires it
+        // would deadlock.
+        let maybe_worker = self.available_workers.lock().await.pop_front();
+        if let Some(worker_id) = maybe_worker {
             return self.checkout_worker(worker_id).await;
         }
 
@@ -438,16 +437,18 @@ impl ElasticPool {
             drop(metrics);
             drop(workers);
 
-            // Try to satisfy waiting checkout
-            if let Some(waiter) = self.checkout_queue.lock().await.pop_front() {
-                // Immediately checkout for waiter
+            // Try to satisfy waiting checkout.
+            // Use a let binding so the MutexGuard is dropped before checkout_worker() is called.
+            // Same Rust temporary-lifetime trap as in checkout(): holding checkout_queue across
+            // checkout_worker() → update_metrics() which re-acquires it would deadlock.
+            let maybe_waiter = self.checkout_queue.lock().await.pop_front();
+            if let Some(waiter) = maybe_waiter {
                 match self.checkout_worker(worker_id.clone()).await {
                     Ok(handle) => {
                         let _ = waiter.response_tx.send(Ok(handle));
                     }
                     Err(e) => {
                         let _ = waiter.response_tx.send(Err(e));
-                        // Put worker back in available queue
                         self.available_workers
                             .lock()
                             .await
@@ -455,7 +456,6 @@ impl ElasticPool {
                     }
                 }
             } else {
-                // No waiters, add back to available queue
                 self.available_workers.lock().await.push_back(worker_id);
             }
 
@@ -472,50 +472,59 @@ impl ElasticPool {
 
     /// Get pool metrics
     pub async fn get_metrics(&self) -> Result<PoolMetrics, ElasticPoolError> {
-        Ok(self.metrics.read().await.clone())
+        // Overlay the live scaling_state — pause_scaling/resume_scaling only update
+        // self.scaling_state; update_metrics writes it to the cache lazily, so we
+        // always reflect the current value here to avoid stale reads.
+        let mut m = self.metrics.read().await.clone();
+        m.scaling_state = self.scaling_state.read().await.clone() as i32;
+        Ok(m)
     }
 
-    /// Update metrics based on current state
+    /// Update metrics based on current state.
+    ///
+    /// Lock order: read workers/available/queue in one scope, release all, then write metrics.
+    /// Never hold metrics.write() while acquiring any of the other locks — doing so risks
+    /// deadlock with any caller that holds one of those locks and then calls update_metrics().
     async fn update_metrics(&self) {
-        let workers = self.workers.read().await;
-        let available = self.available_workers.lock().await;
-        let queue = self.checkout_queue.lock().await;
+        // Phase 1: snapshot live state under the read/mutex locks, then release them all.
+        let (total, busy, idle, failed, avail_len, q_len) = {
+            let workers = self.workers.read().await;
+            let available = self.available_workers.lock().await;
+            let queue = self.checkout_queue.lock().await;
 
-        let mut metrics = self.metrics.write().await;
-
-        // Count actors by state
-        let mut total = 0;
-        let mut busy = 0;
-        let mut idle = 0;
-        let mut failed = 0;
-
-        for worker in workers.values() {
-            total += 1;
-            match worker.state {
-                WorkerState::Busy => busy += 1,
-                WorkerState::Idle => idle += 1,
-                WorkerState::Failed => failed += 1,
-                WorkerState::Available => {}
+            let mut total = 0u32;
+            let mut busy = 0u32;
+            let mut idle = 0u32;
+            let mut failed = 0u32;
+            for worker in workers.values() {
+                total += 1;
+                match worker.state {
+                    WorkerState::Busy => busy += 1,
+                    WorkerState::Idle => idle += 1,
+                    WorkerState::Failed => failed += 1,
+                    WorkerState::Available => {}
+                }
             }
-        }
+            (total, busy, idle, failed, available.len() as u32, queue.len() as u32)
+        }; // workers, available, queue all released here
 
+        // Phase 2: read scaling_state (cheap, no contention with above locks).
+        let scaling_state_i32 = self.scaling_state.read().await.clone() as i32;
+
+        // Phase 3: write metrics — all other locks are already released.
+        let mut metrics = self.metrics.write().await;
         metrics.total_actors = total;
-        metrics.available_actors = available.len() as u32;
+        metrics.available_actors = avail_len;
         metrics.busy_actors = busy;
         metrics.idle_actors = idle;
         metrics.failed_actors = failed;
-        metrics.waiting_requests = queue.len() as u32;
-
-        // Calculate load
-        let load = if total > 0 {
-            (busy as f64 + queue.len() as f64) / total as f64
+        metrics.waiting_requests = q_len;
+        metrics.current_load = if total > 0 {
+            (busy as f64 + q_len as f64) / total as f64
         } else {
             0.0
         };
-        metrics.current_load = load;
-
-        // Update scaling state
-        metrics.scaling_state = self.scaling_state.read().await.clone() as i32;
+        metrics.scaling_state = scaling_state_i32;
     }
 
     /// Scale pool to absolute size
@@ -663,9 +672,11 @@ impl ElasticPoolData {
                 continue;
             }
 
-            // Get current metrics
-            let load = self.metrics.read().await.current_load;
-            let total_actors = self.metrics.read().await.total_actors;
+            // Get current metrics in a single read to ensure consistency.
+            let (load, total_actors) = {
+                let m = self.metrics.read().await;
+                (m.current_load, m.total_actors)
+            };
 
             // Scale up if load high
             if load > self.config.scaling_threshold && total_actors < self.config.max_size {
@@ -722,15 +733,19 @@ impl ElasticPoolData {
         let current_size = self.workers.read().await.len() as u32;
         let to_add = self.calculate_scale_amount(current_size, true);
 
-        // Spawn new workers
-        for _ in 0..to_add {
-            let worker_id = ulid::Ulid::new().to_string();
-            let worker = Worker::new(worker_id.clone());
-            self.workers.write().await.insert(worker_id.clone(), worker);
-            self.available_workers.lock().await.push_back(worker_id);
-        }
+        // Batch all inserts under a single critical section so update_metrics() (which reads
+        // both workers and available_workers) cannot interleave and see an inconsistent state,
+        // and so we don't re-acquire the locks on every iteration.
+        {
+            let mut workers = self.workers.write().await;
+            let mut available = self.available_workers.lock().await;
+            for _ in 0..to_add {
+                let worker_id = ulid::Ulid::new().to_string();
+                workers.insert(worker_id.clone(), Worker::new(worker_id.clone()));
+                available.push_back(worker_id);
+            }
+        } // workers and available released here
 
-        // Update state
         *self.last_scale_up.write().await = Some(Instant::now());
     }
 

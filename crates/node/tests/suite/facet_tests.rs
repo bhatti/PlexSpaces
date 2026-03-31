@@ -46,6 +46,10 @@ async fn create_test_node() -> Node {
     NodeBuilder::new("test-node").build().await
 }
 
+fn create_timer_facet(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Box<TimerFacet> {
+    Box::new(TimerFacet::new(serde_json::json!({}), 50, service_locator))
+}
+
 /// Helper to create a test message
 fn create_test_message(payload: Vec<u8>) -> Message {
     Message {
@@ -97,6 +101,7 @@ async fn test_spawn_actor_no_facets() {
 /// Test 2: Attach facet WITHOUT spawning - should not hang
 #[tokio::test]
 async fn test_attach_facet_no_spawn() {
+    let node = Arc::new(create_test_node().await);
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
         .with_id(ActorId::from("test-actor@local"))
@@ -104,7 +109,7 @@ async fn test_attach_facet_no_spawn() {
         .await
         .unwrap();
 
-    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
+    let timer_facet = create_timer_facet(node.service_locator());
     actor.attach_facet(timer_facet).await.unwrap();
 
     let facets = actor.facets();
@@ -125,7 +130,7 @@ async fn test_spawn_actor_with_facet() {
         .await
         .unwrap();
 
-    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
+    let timer_facet = create_timer_facet(node.service_locator());
     actor.attach_facet(timer_facet).await.unwrap();
 
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
@@ -163,7 +168,7 @@ async fn test_facet_storage_after_spawn() {
         .await
         .unwrap();
 
-    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
+    let timer_facet = create_timer_facet(node.service_locator());
     actor.attach_facet(timer_facet).await.unwrap();
 
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
@@ -193,7 +198,7 @@ async fn test_facet_service_get_facet_normal_actor() {
         .await
         .unwrap();
 
-    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
+    let timer_facet = create_timer_facet(node.service_locator());
     actor.attach_facet(timer_facet).await.unwrap();
 
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
@@ -233,7 +238,7 @@ async fn test_facet_service_get_facet_virtual_actor() {
     let virtual_facet = Box::new(VirtualActorFacet::new(serde_json::json!({}), 50));
     actor.attach_facet(virtual_facet).await.unwrap();
 
-    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
+    let timer_facet = create_timer_facet(node.service_locator());
     actor.attach_facet(timer_facet).await.unwrap();
 
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
@@ -307,7 +312,7 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
         .await
         .unwrap();
 
-    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
+    let timer_facet = create_timer_facet(node.service_locator());
     actor.attach_facet(timer_facet).await.unwrap();
 
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
@@ -340,7 +345,7 @@ async fn test_facet_service_with_sqlite_backend() {
         .build()
         .await;
 
-    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
+    let timer_facet = create_timer_facet(node.service_locator());
     actor.attach_facet(timer_facet).await.unwrap();
 
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
@@ -378,7 +383,7 @@ async fn test_facet_storage_direct() {
         .await
         .unwrap();
 
-    let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50));
+    let timer_facet = create_timer_facet(node.service_locator());
     actor.attach_facet(timer_facet).await.unwrap();
 
     let facets_before = actor.facets();

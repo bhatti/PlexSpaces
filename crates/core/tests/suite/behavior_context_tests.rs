@@ -23,7 +23,7 @@ async fn test_behavior_context_creation() {
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
     use plexspaces_node::service_locator_helpers::create_default_service_locator;
-    let service_locator = create_default_service_locator(None, None, None).await;
+    let service_locator = create_default_service_locator(None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "test-tenant".to_string(), // tenant_id
@@ -56,7 +56,7 @@ async fn test_behavior_context_with_sender() {
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
     use plexspaces_node::service_locator_helpers::create_default_service_locator;
-    let service_locator = create_default_service_locator(None, None, None).await;
+    let service_locator = create_default_service_locator(None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "test-tenant".to_string(), // tenant_id

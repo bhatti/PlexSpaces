@@ -620,8 +620,6 @@ mod tests {
         // Initialize services (no-op for test stub)
         async fn initialize_services(
             &self,
-            _node_id: Option<String>,
-            _node_config: Option<plexspaces_proto::node::v1::NodeConfig>,
             _release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
         ) {
         }

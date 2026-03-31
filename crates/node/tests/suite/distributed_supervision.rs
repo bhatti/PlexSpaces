@@ -17,8 +17,7 @@
 //! following Erlang's location-transparent monitoring philosophy.
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::service_names;
-use plexspaces_core::ExitReason;
+use plexspaces_core::{service_names, ExitReason, ServiceLocator};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeBuilder, NodeConfig, NodeId};
 use plexspaces_proto::ActorServiceServer;
@@ -71,6 +70,7 @@ async fn test_monitor_local_actor() {
     let service_locator = node.service_locator();
     let actor_ref = ActorRef::local(
         "worker@node1".to_string(),
+        "".to_string(),
         "".to_string(),
         mailbox.clone(),
         service_locator,
@@ -129,6 +129,7 @@ async fn test_monitor_remote_actor() {
     let service_locator2 = node2.service_locator();
     let actor_ref2 = ActorRef::local(
         "worker@node2".to_string(),
+        "".to_string(),
         "".to_string(),
         mailbox2.clone(),
         service_locator2,
@@ -201,6 +202,7 @@ async fn test_local_actor_termination_notification() {
     let service_locator = node.service_locator();
     let actor_ref = ActorRef::local(
         "worker@node1".to_string(),
+        "".to_string(),
         "".to_string(),
         mailbox.clone(),
         service_locator,
@@ -286,6 +288,7 @@ async fn test_multiple_monitors_same_actor() {
     let actor_ref = ActorRef::local(
         "worker@node1".to_string(),
         "".to_string(),
+        "".to_string(),
         mailbox.clone(),
         service_locator,
     );
@@ -356,6 +359,7 @@ async fn test_monitor_ref_uniqueness() {
     let actor_ref = ActorRef::local(
         "worker@node1".to_string(),
         "".to_string(),
+        "".to_string(),
         mailbox.clone(),
         service_locator,
     );
@@ -407,6 +411,7 @@ async fn test_actor_crash_reason_propagation() {
     let service_locator = node.service_locator();
     let actor_ref = ActorRef::local(
         "worker@node1".to_string(),
+        "".to_string(),
         "".to_string(),
         mailbox.clone(),
         service_locator,

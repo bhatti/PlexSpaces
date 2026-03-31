@@ -65,7 +65,6 @@ tonic = { workspace = true }
 plexspaces-core = { workspace = true }
 plexspaces-locks = { workspace = true }
 ulid = { workspace = true }
-
 [features]
 default = []
 redis-backend = ["redis", "base64"]
@@ -73,7 +72,15 @@ kafka-backend = ["rdkafka"]
 nats-backend = ["async-nats"]
 sqlite-backend = ["sqlx"]
 udp-backend = ["socket2"]
-sqs-backend = ["aws-sdk-sqs", "aws-config", "plexspaces-common", "metrics", "base64"]
+# `plexspaces-common/test-helpers` provides TCP runtime checks for LocalStack (same pattern as DDB tests).
+sqs-backend = [
+    "aws-sdk-sqs",
+    "aws-config",
+    "plexspaces-common",
+    "plexspaces-common/test-helpers",
+    "metrics",
+    "base64",
+]
 process-group-backend = ["plexspaces-core", "metrics"]
 test-helpers = ["plexspaces-common/test-helpers"]
 test-utils = []  # Enable mock_backend for integration tests

@@ -1078,7 +1078,7 @@ Service discovery and object registration.
 - `"register_object"`: Register an object in the registry
 - `"unregister_object"`: Unregister an object
 - `"lookup_object"`: Lookup an object by ID
-- `"discover_objects"`: Discover objects with filters
+- `"discover_objects"`: Discover objects with filters (JSON: `offset`, then `limit`)
 
 **Backend**: Uses ObjectRegistry from ServiceLocator (configured via node-config/runtimeconfig)
 

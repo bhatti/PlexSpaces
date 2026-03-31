@@ -99,7 +99,10 @@ pub mod redis;
 pub mod ddb;
 
 pub use error::{LockError, LockResult};
-pub use factory::{create_lock_manager, LockBackend};
+pub use factory::{
+    create_lock_manager, create_lock_manager_from_runtime, create_lock_manager_from_storage_config,
+    LockBackend,
+};
 pub use manager::LockManager;
 pub use memory::MemoryLockManager;
 

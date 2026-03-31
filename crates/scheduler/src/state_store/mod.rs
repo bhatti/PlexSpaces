@@ -30,8 +30,10 @@
 //! - Recovery support via query_pending_requests()
 
 use async_trait::async_trait;
+use plexspaces_common::{resolve_shared_db_backend, SharedDbBackend};
 use plexspaces_core::RequestContext;
 use plexspaces_proto::scheduling::v1::SchedulingRequest;
+use plexspaces_proto::storage::v1::SharedDbConfig;
 use std::error::Error;
 use std::sync::Arc;
 
@@ -114,137 +116,60 @@ pub mod sql;
 #[cfg(feature = "ddb-backend")]
 pub mod ddb;
 
-/// Create scheduling state store from shared database URL
-///
-/// ## Purpose
-/// Factory function that creates appropriate state store backend based on
-/// the shared database connection string from RuntimeConfig.db.
-///
-/// ## Arguments
-/// - `db_url`: Database connection string (e.g., "sqlite:///path/to/db", "postgres://...")
-///
-/// ## Returns
-/// Arc'd state store implementing SchedulingStateStore trait
-///
-/// ## Errors
-/// - InvalidConfiguration if db_url is malformed
-/// - ConnectionError if backend can't connect
-///
-/// ## Example
-/// ```rust,no_run
-/// use plexspaces_scheduler::state_store::create_state_store;
-///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let db_url = "sqlite:///tmp/scheduler.db";
-/// let store = create_state_store(&db_url).await?;
-/// # Ok(())
-/// # }
-/// ```
-pub async fn create_state_store(
-    db_url: &str,
+/// Create scheduling state store from shared database config.
+pub async fn create_state_store_from_shared_db(
+    config: &SharedDbConfig,
 ) -> Result<Arc<dyn SchedulingStateStore>, Box<dyn Error + Send + Sync>> {
-    // Determine backend type from connection string
-    if db_url.contains(":memory:")
-        || db_url.starts_with("sqlite:")
-        || db_url.starts_with("sqlite://")
-    {
-        #[cfg(feature = "sqlite-backend")]
-        {
-            // Extract path from SQLite connection string
-            let path = if db_url == ":memory:" || db_url.contains(":memory:") {
-                ":memory:".to_string()
-            } else if db_url.starts_with("sqlite:///") {
-                // Format: "sqlite:///absolute/path" - preserve leading /
-                // Example: "sqlite:///Users/bhatti/plexspaces/db/plexspaces.db?mode=rwc"
-                // After strip_prefix("sqlite:///"): "Users/bhatti/plexspaces/db/plexspaces.db?mode=rwc"
-                // After split('?'): "Users/bhatti/plexspaces/db/plexspaces.db" (no leading /)
-                // Result: "/Users/bhatti/plexspaces/db/plexspaces.db"
-                let extracted = db_url
-                    .strip_prefix("sqlite:///")
-                    .and_then(|s| s.split('?').next()) // Remove query parameters like ?mode=rwc
-                    .unwrap_or(db_url);
-                // extracted does NOT have leading / after strip_prefix, so add it back
-                format!("/{}", extracted)
-            } else if db_url.starts_with("sqlite://") {
-                // Format: "sqlite://relative/path" - no leading /
-                db_url
-                    .strip_prefix("sqlite://")
-                    .and_then(|s| s.split('?').next())
-                    .unwrap_or(db_url)
-                    .to_string()
-            } else if db_url.starts_with("sqlite:") {
-                // Format: "sqlite:path" - may or may not have leading /
-                db_url
-                    .strip_prefix("sqlite:")
-                    .and_then(|s| s.split('?').next())
-                    .unwrap_or(db_url)
-                    .to_string()
-            } else {
-                return Err("Invalid SQLite connection string format".into());
-            };
-
-            // Ensure directory exists for file-based SQLite databases
-            if path != ":memory:" && !path.is_empty() {
-                if let Some(parent) = std::path::Path::new(&path).parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| {
-                        format!(
-                            "Failed to create database directory '{}': {}",
-                            parent.display(),
-                            e
-                        )
-                    })?;
-                }
+    match resolve_shared_db_backend(config)? {
+        SharedDbBackend::Sqlite { database_path, .. } => {
+            #[cfg(feature = "sqlite-backend")]
+            {
+                use sql::SqliteSchedulingStateStore;
+                let store = SqliteSchedulingStateStore::new(&database_path).await?;
+                Ok(Arc::new(store))
             }
+            #[cfg(not(feature = "sqlite-backend"))]
+            {
+                Err("SQLite backend not enabled. Enable 'sqlite-backend' feature.".into())
+            }
+        }
+        SharedDbBackend::Postgres { connection_string } => Err(format!(
+            "PostgreSQL scheduler state store is not implemented for shared db '{}'",
+            connection_string
+        )
+        .into()),
+    }
+}
 
-            tracing::debug!(
-                db_url = %db_url,
-                extracted_path = %path,
-                "Creating scheduler state store with extracted path"
-            );
+#[cfg(test)]
+mod tests {
+    use super::create_state_store_from_shared_db;
+    use plexspaces_proto::storage::v1::SharedDbConfig;
+    use std::sync::Arc;
 
-            use sql::SqliteSchedulingStateStore;
-            let store = SqliteSchedulingStateStore::new(&path).await?;
-            Ok(Arc::new(store))
-        }
-        #[cfg(not(feature = "sqlite-backend"))]
-        {
-            Err("SQLite backend not enabled. Enable 'sqlite-backend' feature.".into())
-        }
-    } else if db_url.starts_with("postgres://") || db_url.starts_with("postgresql://") {
-        // PostgreSQL support not yet implemented - fallback to in-memory SQLite
-        tracing::warn!(
-            db_url = %db_url,
-            "PostgreSQL backend for scheduler not yet implemented, using in-memory SQLite fallback"
+    #[tokio::test]
+    async fn test_create_state_store_from_shared_db_sqlite_memory() {
+        let config = SharedDbConfig {
+            connection_string: "sqlite::memory:".to_string(),
+            ..Default::default()
+        };
+
+        let store = create_state_store_from_shared_db(&config).await.unwrap();
+        assert!(Arc::strong_count(&store) >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_create_state_store_from_shared_db_rejects_postgres_until_supported() {
+        let config = SharedDbConfig {
+            connection_string: "postgres://localhost/plexspaces".to_string(),
+            ..Default::default()
+        };
+
+        let result = create_state_store_from_shared_db(&config).await;
+        assert!(result.is_err(), "postgres scheduler state store should fail fast");
+        assert!(
+            result.err().unwrap().to_string().contains("not implemented"),
+            "error should explain that postgres support is not implemented"
         );
-        #[cfg(feature = "sqlite-backend")]
-        {
-            use sql::SqliteSchedulingStateStore;
-            let store = SqliteSchedulingStateStore::new(":memory:").await?;
-            Ok(Arc::new(store))
-        }
-        #[cfg(not(feature = "sqlite-backend"))]
-        {
-            Err("PostgreSQL backend not yet implemented and sqlite-backend not enabled".into())
-        }
-    } else {
-        // Fallback to in-memory SQLite for unsupported databases
-        tracing::warn!(
-            db_url = %db_url,
-            "Unsupported database type for scheduler, using in-memory SQLite fallback"
-        );
-        #[cfg(feature = "sqlite-backend")]
-        {
-            use sql::SqliteSchedulingStateStore;
-            let store = SqliteSchedulingStateStore::new(":memory:").await?;
-            Ok(Arc::new(store))
-        }
-        #[cfg(not(feature = "sqlite-backend"))]
-        {
-            Err(format!(
-                "Unsupported database URL: {} (and sqlite-backend not enabled)",
-                db_url
-            )
-            .into())
-        }
     }
 }

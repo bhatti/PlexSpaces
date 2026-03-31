@@ -230,7 +230,7 @@ async fn create_test_context() -> ActorContext {
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
     use plexspaces_node::service_locator_helpers::create_default_service_locator;
-    let service_locator = create_default_service_locator(None, None, None).await;
+    let service_locator = create_default_service_locator(None, None).await;
     ActorContext::new(
         "test-node".to_string(),
         "tenant-123".to_string(), // tenant_id
@@ -257,7 +257,7 @@ async fn test_actor_context_new_with_config() {
     use std::sync::Arc;
     // Create a minimal ServiceLocator for testing (without node dependency)
     use plexspaces_node::service_locator_helpers::create_default_service_locator;
-    let service_locator = create_default_service_locator(None, None, None).await;
+    let service_locator = create_default_service_locator(None, None).await;
     let ctx = ActorContext::new(
         "test-node".to_string(),
         "tenant-123".to_string(), // tenant_id

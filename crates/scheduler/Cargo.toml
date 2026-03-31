@@ -29,6 +29,7 @@ authors = ["Shahzad A. Bhatti <bhatti@plexobject.com>"]
 plexspaces-proto = { path = "../proto" }
 plexspaces-locks = { path = "../locks" }
 plexspaces-core = { path = "../core" }
+plexspaces-common = { path = "../common" }
 plexspaces-object-registry = { path = "../object-registry" }
 plexspaces-channel = { path = "../channel" }
 plexspaces-keyvalue = { path = "../keyvalue" }
@@ -81,4 +82,3 @@ tokio-test = "0.4"
 anyhow = "1.0"
 env_logger = "0.11"
 serial_test = "3.0"
-

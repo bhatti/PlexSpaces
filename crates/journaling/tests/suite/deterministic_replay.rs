@@ -37,7 +37,6 @@ mod sqlite_tests {
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> serde_json::Value {
         let mut value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,
@@ -59,19 +58,13 @@ mod sqlite_tests {
     #[tokio::test]
     async fn test_actor_restart_full_replay() {
         let storage = create_test_storage().await;
-        #[cfg(feature = "sqlite-backend")]
-        let backend = JournalBackend::JournalBackendSqlite as i32;
-        #[cfg(feature = "postgres-backend")]
-        let backend = JournalBackend::JournalBackendPostgres as i32;
 
         let config = DurabilityConfig {
-            backend,
             checkpoint_interval: 1000, // No checkpointing for this test
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -147,19 +140,13 @@ mod sqlite_tests {
     #[tokio::test]
     async fn test_actor_restart_with_checkpoint() {
         let storage = create_test_storage().await;
-        #[cfg(feature = "sqlite-backend")]
-        let backend = JournalBackend::JournalBackendSqlite as i32;
-        #[cfg(feature = "postgres-backend")]
-        let backend = JournalBackend::JournalBackendPostgres as i32;
 
         let config = DurabilityConfig {
-            backend,
             checkpoint_interval: 50, // Checkpoint every 50 messages
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -256,19 +243,13 @@ mod sqlite_tests {
     #[tokio::test]
     async fn test_deterministic_replay_with_side_effects() {
         let storage = create_test_storage().await;
-        #[cfg(feature = "sqlite-backend")]
-        let backend = JournalBackend::JournalBackendSqlite as i32;
-        #[cfg(feature = "postgres-backend")]
-        let backend = JournalBackend::JournalBackendPostgres as i32;
 
         let config = DurabilityConfig {
-            backend,
             checkpoint_interval: 1000,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true, // Enable side effect caching
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -365,19 +346,13 @@ mod sqlite_tests {
     #[tokio::test]
     async fn test_replay_empty_journal() {
         let storage = create_test_storage().await;
-        #[cfg(feature = "sqlite-backend")]
-        let backend = JournalBackend::JournalBackendSqlite as i32;
-        #[cfg(feature = "postgres-backend")]
-        let backend = JournalBackend::JournalBackendPostgres as i32;
 
         let config = DurabilityConfig {
-            backend,
             checkpoint_interval: 1000,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -404,19 +379,13 @@ mod sqlite_tests {
     #[tokio::test]
     async fn test_replay_missing_checkpoint() {
         let storage = create_test_storage().await;
-        #[cfg(feature = "sqlite-backend")]
-        let backend = JournalBackend::JournalBackendSqlite as i32;
-        #[cfg(feature = "postgres-backend")]
-        let backend = JournalBackend::JournalBackendPostgres as i32;
 
         let config = DurabilityConfig {
-            backend,
             checkpoint_interval: 10,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
 
@@ -456,13 +425,11 @@ mod sqlite_tests {
 
         // Create new config for restart (use SQLite backend)
         let restart_config = DurabilityConfig {
-            backend: JournalBackend::JournalBackendSqlite as i32,
             checkpoint_interval: 10,
             checkpoint_timeout: None,
             replay_on_activation: true,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         };
         let mut new_facet =

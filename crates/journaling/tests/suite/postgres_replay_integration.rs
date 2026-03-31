@@ -35,13 +35,11 @@ mod postgres_integration_tests {
         replay_on_activation: bool,
     ) -> DurabilityConfig {
         DurabilityConfig {
-            backend: JournalBackend::JournalBackendPostgres as i32,
             checkpoint_interval,
             checkpoint_timeout: None,
             replay_on_activation,
             cache_side_effects: true,
             compression: CompressionType::CompressionTypeNone as i32,
-            backend_config: None,
             state_schema_version: 1,
         }
     }
@@ -49,7 +47,6 @@ mod postgres_integration_tests {
     /// Helper to convert DurabilityConfig to Value
     fn config_to_value(config: &DurabilityConfig) -> JsonValue {
         let mut value = serde_json::json!({
-            "backend": config.backend,
             "checkpoint_interval": config.checkpoint_interval,
             "replay_on_activation": config.replay_on_activation,
             "cache_side_effects": config.cache_side_effects,

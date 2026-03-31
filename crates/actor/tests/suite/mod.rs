@@ -25,4 +25,5 @@ pub mod ttl_support_tests;
 pub mod supervision_tree_tests;
 pub mod supervisor_hierarchy_tests;
 pub mod supervisor_lifecycle_tests;
+pub mod test_actor_helpers;
 pub mod unified_lifecycle_supervisor_tests;

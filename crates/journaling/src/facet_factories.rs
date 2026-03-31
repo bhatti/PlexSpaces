@@ -309,11 +309,9 @@ impl FacetFactory for EventSourcingFacetFactory {
 mod tests {
     use super::*;
     use crate::SqliteJournalStorage;
-    use plexspaces_actor::test_service_locator::TestServiceLocatorStub;
     use plexspaces_core::{JournalStorage, LockManager};
-    use plexspaces_locks::SqliteLockManager;
+    use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_services::ServiceLocatorImpl;
-    use std::collections::HashMap;
 
     /// Helper to create a test ServiceLocator with JournalStorage
     async fn create_test_service_locator() -> Arc<dyn ServiceLocator> {

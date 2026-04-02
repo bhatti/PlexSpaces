@@ -92,7 +92,7 @@ An **Actor** is the fundamental unit of computation in PlexSpaces. Every actor h
 - **Identity**: Unique ID in canonical format `name:namespace@node_id` (e.g., `counter:default@node1`). For actors without a namespace, the shorter format `name@node_id` is also valid. Namespace is always present for WASM actors.
 - **State**: Private mutable state (no shared state between actors)
 - **Behavior**: Message handling logic (implemented via behaviors)
-- **Mailbox**: Message queue for incoming messages
+- **Delivery Runtime**: Local execution path that serializes incoming messages
 - **Facets**: Composable runtime capabilities (virtual actor, durability, timers, etc.)
 - **Lifecycle**: State machine tracking actor lifecycle
 
@@ -101,7 +101,7 @@ pub struct Actor {
     id: ActorId,                                    // "name:namespace@node_id"
     state: ActorState,                              // Creating, Inactive, Active, Terminated, Failed
     behavior: Box<dyn Actor>,                       // Message handling logic
-    mailbox: Arc<Mailbox>,                         // Message queue
+    mailbox: Arc<Mailbox>,                          // Internal delivery queue
     facets: Arc<RwLock<FacetContainer>>,          // Composable capabilities
     context: Arc<ActorContext>,                    // Service access
     // ... other fields
@@ -334,7 +334,7 @@ actor_ref.tell(event).await?;  // Activates actor automatically
 Actors support graceful shutdown:
 
 1. **Stop Accepting New Messages**: Mailbox stops accepting new messages
-2. **Process Remaining Messages**: Actor processes all messages in mailbox
+2. **Process Remaining Messages**: Actor drains the internal delivery queue
 3. **Call Terminate Hook**: `terminate()` lifecycle hook is called
 4. **Cleanup Resources**: Facets are detached, resources are freed
 5. **State Transition**: Actor transitions to `Terminated` state
@@ -1294,7 +1294,7 @@ graph TB
 ```
 
 **Routing Details**:
-- **Local Actors**: Direct mailbox access (tokio::mpsc channel)
+- **Local Actors**: Direct local-runtime delivery through the registered `ActorRef`
 - **Remote Actors**: gRPC via ActorService (location-transparent)
 - **Client Caching**: gRPC clients are cached (TTL: 30-60 seconds)
 - **Connection Pooling**: Reuses connections for performance
@@ -1306,13 +1306,13 @@ graph TB
 
 ### Registration During Supervision
 
-Actors are registered in the `ActorRegistry` during `supervisor.add_child()`. When a supervisor adds a child actor, the namespace is extracted from the actor ID (using the canonical `name:namespace@node_id` format) and stored as part of the registry metadata. This registration is what enables `ActorRegistry::tell()` and `ActorRegistry::ask()` to resolve local delivery and virtual activation consistently.
+Actors are registered in the `ActorRegistry` during `supervisor.add_child()`. Registration stores a scope-aware `ActorRef` entry keyed by `(tenant_id, namespace, actor_id)`. For local actors, the same registered `ActorRef` is enriched with an internal runtime state handle so lifecycle/state operations do not require a separate instance map. This registration is what enables `ActorRegistry::tell()` and `ActorRegistry::ask()` to resolve local delivery and virtual activation consistently.
 
 ```rust
 // During supervisor.add_child(), the actor is registered:
 // 1. Actor ID "worker:my-app@node1" is parsed
 // 2. Namespace "my-app" is extracted from the ID
-// 3. Actor is registered in ActorRegistry with namespace metadata
+// 3. ActorRef is registered in ActorRegistry under scope (tenant, namespace, actor_id)
 // 4. ActorRegistry::tell()/ask() can now route to "worker:my-app@node1"
 
 supervisor.add_child(child_spec).await?;
@@ -1321,7 +1321,7 @@ supervisor.add_child(child_spec).await?;
 
 ### Namespace Isolation
 
-Namespace is a fundamental isolation boundary in the actor system. It is extracted from the canonical actor ID format (`name:namespace@node_id`) and stored in `ActorRegistry` metadata alongside each actor entry.
+Namespace is a fundamental isolation boundary in the actor system. It is extracted from the canonical actor ID format (`name:namespace@node_id`) and stored as part of the scope key for each registered actor entry.
 
 **Key behaviors**:
 
@@ -1332,7 +1332,7 @@ Namespace is a fundamental isolation boundary in the actor system. It is extract
 - **Lookup operations** can filter by namespace to scope actor discovery
 
 ```rust
-// Namespace is extracted from actor ID and stored in registry metadata
+// Namespace is extracted from actor ID and used in the registry scope key
 // Actor ID: "worker:my-app@node1"
 //   name:      "worker"
 //   namespace: "my-app"
@@ -1455,35 +1455,35 @@ See [Actor System Improvements Plan](actor-system-improvements-plan.md) for impl
 ### Example 1: Simple Counter Actor
 
 ```rust
-use plexspaces_core::{Actor, ActorContext, BehaviorError};
-use plexspaces_mailbox::Message;
+use plexspaces_sdk::{
+    gen_server_actor, handler, json, plexspaces_handlers, spawn, ActorContext, BehaviorError,
+    Message,
+};
 
+#[gen_server_actor]
 struct Counter {
     count: i32,
 }
 
-#[async_trait]
-impl Actor for Counter {
-    async fn handle_message(
+#[plexspaces_handlers]
+impl Counter {
+    #[handler("increment")]
+    async fn increment(
         &mut self,
-        ctx: &ActorContext,
-        msg: Message,
-    ) -> Result<(), BehaviorError> {
-        match msg.payload() {
-            b"increment" => {
-                self.count += 1;
-                info!(count = self.count, "Counter incremented");
-            }
-            b"get" => {
-                ctx.reply(call_message(json!({ "count": self.count }))).await?;
-            }
-            _ => {}
-        }
-        Ok(())
+        _ctx: &ActorContext,
+        _msg: &Message,
+    ) -> Result<serde_json::Value, BehaviorError> {
+        self.count += 1;
+        Ok(json!({ "count": self.count }))
     }
 
-    fn behavior_type(&self) -> BehaviorType {
-        BehaviorType::Custom("Counter".to_string())
+    #[handler("get")]
+    async fn get(
+        &self,
+        _ctx: &ActorContext,
+        _msg: &Message,
+    ) -> Result<serde_json::Value, BehaviorError> {
+        Ok(json!({ "count": self.count }))
     }
 }
 

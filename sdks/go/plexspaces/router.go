@@ -50,6 +50,7 @@ type initConfig struct {
 type ActorRouter struct {
 	BaseActor
 	factories map[string]ActorFactory
+	definitions map[string]ActorDefinition
 	active    Actor  // currently active actor for this instance
 	actorID   string // actor ID from init config
 }
@@ -58,6 +59,7 @@ type ActorRouter struct {
 func NewActorRouter() *ActorRouter {
 	r := &ActorRouter{
 		factories: make(map[string]ActorFactory),
+		definitions: make(map[string]ActorDefinition),
 	}
 	r.SetSelf(r)
 	return r
@@ -72,7 +74,19 @@ func NewActorRouter() *ActorRouter {
 //	router.Route("rate-limiter", func() plexspaces.Actor { ... })
 //	// Matches: "rate-limiter", "rate-limiter-0", "rate-limiter-1", etc.
 func (r *ActorRouter) Route(prefix string, factory ActorFactory) {
-	r.factories[prefix] = factory
+	r.RouteDefinition(prefix, DefineActor(factory))
+}
+
+// RouteDefinition registers an actor definition with explicit behavior/facet metadata.
+func (r *ActorRouter) RouteDefinition(prefix string, definition ActorDefinition) {
+	r.factories[prefix] = definition.Factory
+	r.definitions[prefix] = definition
+}
+
+// Definition returns the registered actor definition for a prefix.
+func (r *ActorRouter) Definition(prefix string) (ActorDefinition, bool) {
+	definition, ok := r.definitions[prefix]
+	return definition, ok
 }
 
 // Init initializes the router by selecting the appropriate actor type
@@ -129,4 +143,36 @@ func (r *ActorRouter) SetState(stateJSON string) string {
 		return "ERROR: no active actor"
 	}
 	return r.active.SetState(stateJSON)
+}
+
+// Run delegates workflow execution to the active actor when it supports WorkflowActor.
+func (r *ActorRouter) Run(payloadJSON string) string {
+	if r.active == nil {
+		return `{"error":"no active actor (init not called)"}`
+	}
+	if workflow, ok := r.active.(WorkflowActor); ok {
+		return workflow.Run(payloadJSON)
+	}
+	return `{"error":"active actor does not implement workflow behavior"}`
+}
+
+// Signal delegates workflow signals to the active actor when it supports WorkflowActor.
+func (r *ActorRouter) Signal(name, payloadJSON string) {
+	if r.active == nil {
+		return
+	}
+	if workflow, ok := r.active.(WorkflowActor); ok {
+		workflow.Signal(name, payloadJSON)
+	}
+}
+
+// Query delegates workflow queries to the active actor when it supports WorkflowActor.
+func (r *ActorRouter) Query(name, payloadJSON string) string {
+	if r.active == nil {
+		return `{"error":"no active actor (init not called)"}`
+	}
+	if workflow, ok := r.active.(WorkflowActor); ok {
+		return workflow.Query(name, payloadJSON)
+	}
+	return `{"error":"active actor does not implement workflow behavior"}`
 }

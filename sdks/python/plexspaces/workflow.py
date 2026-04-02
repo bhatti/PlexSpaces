@@ -5,7 +5,7 @@
 # Single run-with-config semantics: use default_retry_config() for one attempt;
 # pass config with max_attempts > 1 for retries.
 
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 T = TypeVar("T")
 
@@ -31,30 +31,46 @@ except ImportError:
 # RetryConfigDict is a type alias kept for backward compatibility with callers that pass dicts.
 # New code should use RetryConfig directly (attribute access instead of dict key access).
 RetryConfigDict = Dict[str, Any]
+RetryConfigInput = Union[RetryConfig, RetryConfigDict]
 
 
-def default_retry_config() -> RetryConfigDict:
-    """Default retry config: single attempt (no retries). Aligns with proto when fields unset."""
-    return {
-        "max_attempts": 1,
-        "initial_interval_ms": 100,
-        "backoff_rate": 2.0,
-        "max_interval_ms": 30000,
-        "retryable_errors": [],
-    }
+def _to_retry_config(config: Optional[RetryConfigInput]) -> Optional[RetryConfig]:
+    """Normalize dict-or-proto input into the proto-shaped RetryConfig object."""
+    if config is None:
+        return None
+    if isinstance(config, dict):
+        return RetryConfig(
+            max_attempts=config.get("max_attempts", 0),
+            initial_interval_ms=config.get("initial_interval_ms", 0),
+            backoff_rate=config.get("backoff_rate", 0.0),
+            max_interval_ms=config.get("max_interval_ms", 0),
+            retryable_errors=list(config.get("retryable_errors", [])),
+        )
+    return config
 
 
-def _effective_max_attempts(config: Optional[RetryConfigDict]) -> int:
+def default_retry_config() -> RetryConfig:
+    """Default retry config as the canonical proto-shaped model."""
+    return RetryConfig(
+        max_attempts=1,
+        initial_interval_ms=100,
+        backoff_rate=2.0,
+        max_interval_ms=30000,
+        retryable_errors=[],
+    )
+
+
+def _effective_max_attempts(config: Optional[RetryConfig]) -> int:
     """Effective max attempts: 0 or unset means 1."""
-    if not config or "max_attempts" not in config:
+    if not config:
         return 1
-    n = config["max_attempts"]
+    n = getattr(config, "max_attempts", 0)
     return 1 if n == 0 else max(1, n)
 
 
 def with_retry(
     fn: Callable[[], T],
-    retry_config: Optional[RetryConfigDict] = None,
+    retry_config: Optional[RetryConfigInput] = None,
 ) -> T:
     """
     Execute a step with retries. Uses RetryConfig. When retry_config is omitted or
@@ -72,8 +88,9 @@ def with_retry(
     Raises:
         The last exception if all attempts fail.
     """
-    has_max = retry_config and "max_attempts" in retry_config
-    from_config = _effective_max_attempts(retry_config) if has_max else 0
+    normalized = _to_retry_config(retry_config)
+    has_max = normalized is not None and getattr(normalized, "max_attempts", 0) != 0
+    from_config = _effective_max_attempts(normalized) if has_max else 0
     max_attempts = from_config if from_config > 0 else 3
     last_error: Optional[Exception] = None
     for attempt in range(1, max_attempts + 1):

@@ -33,13 +33,5 @@ pub async fn actor_with_default_service_locator(
         service_locator,
         None,
     ));
-    Actor::new(
-        id,
-        behavior,
-        mailbox,
-        tenant_id,
-        namespace,
-        None,
-    )
-    .set_context(context)
+    Actor::new(id, behavior, mailbox, tenant_id, namespace, None).set_context(context)
 }

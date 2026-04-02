@@ -22,6 +22,7 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-expect-error - Virtual import - types are optional (generated in src/generated/)
 import { log as hostLog } from 'plexspaces:simple-actor/host@0.1.0';
+import { getActorDefinition } from './decorators.js';
 /**
  * Safe logging helper that uses WIT host.log function.
  *
@@ -104,9 +105,13 @@ export class PlexSpacesActor {
     handle(_fromActor, msgType, payloadJson) {
         try {
             const payload = payloadJson && payloadJson.trim() ? JSON.parse(payloadJson) : {};
+            const definition = getActorDefinition(this);
             // Workflow behavior: route by msgType when actor implements run/signal/query (aligned with crates/behavior Workflow trait)
             if (msgType === "workflow_run") {
-                const runFn = this.run;
+                const runMethod = definition?.runHandler;
+                const runFn = runMethod
+                    ? this[runMethod]
+                    : this.run;
                 if (typeof runFn === "function") {
                     const result = runFn.call(this, payload);
                     this.cachedStateJson = null;
@@ -115,26 +120,40 @@ export class PlexSpacesActor {
             }
             if (msgType.startsWith("workflow_signal:")) {
                 const name = msgType.slice("workflow_signal:".length).trim();
-                const signalFn = this.signal;
+                const signalMethod = definition?.signalHandlers?.[name];
+                const signalFn = signalMethod
+                    ? this[signalMethod]
+                    : this.signal;
                 if (typeof signalFn === "function") {
-                    signalFn.call(this, name, payload);
+                    if (signalMethod) {
+                        signalFn.call(this, payload);
+                    }
+                    else {
+                        signalFn.call(this, name, payload);
+                    }
                     this.cachedStateJson = null;
                     return "{}";
                 }
             }
             if (msgType.startsWith("workflow_query:")) {
                 const name = msgType.slice("workflow_query:".length).trim();
-                const queryFn = this.query;
+                const queryMethod = definition?.queryHandlers?.[name];
+                const queryFn = queryMethod
+                    ? this[queryMethod]
+                    : this.query;
                 if (typeof queryFn === "function") {
-                    const result = queryFn.call(this, name, payload);
+                    const result = queryMethod
+                        ? queryFn.call(this, payload)
+                        : queryFn.call(this, name, payload);
                     return iterativeStringify(result ?? {});
                 }
             }
             // Payload key order: message_type -> op -> msg_type; fallback to msgType so data-only payloads route by message type (e.g. tasks_ready)
             const opRaw = payload.message_type ?? payload.op ?? payload.msg_type;
             const op = (typeof opRaw === "string" && opRaw ? opRaw : msgType);
+            const decoratedMethod = this.resolveDecoratedHandler(op, definition);
             const opKey = typeof op === "string" ? this.capitalize(op) : "";
-            const methodName = opKey ? `on${opKey}` : "";
+            const methodName = decoratedMethod ?? (opKey ? `on${opKey}` : "");
             const method = methodName && typeof this[methodName] === "function"
                 ? this[methodName]
                 : null;
@@ -206,6 +225,11 @@ export class PlexSpacesActor {
         // This matches handler naming: onLoad_model, onPredict_batch, etc.
         // Only capitalize the first character, keep the rest as-is (preserves underscores and case)
         return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    resolveDecoratedHandler(op, definition = getActorDefinition(this)) {
+        if (!definition)
+            return null;
+        return definition.handlers[op]?.methodName ?? null;
     }
     /**
      * Serialize object to JSON string using fully iterative approach (zero recursion).

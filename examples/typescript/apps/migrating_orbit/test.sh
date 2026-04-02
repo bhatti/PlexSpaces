@@ -99,7 +99,7 @@ send_op() {
     # Generate a client-side message-id for logging (ULID-like format)
     local message_id="req-$(date +%s%N | cut -b1-13)$(openssl rand -hex 3 2>/dev/null || echo $(head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n'))"
     echo "  [CLIENT] Sending message: message_id=$message_id, actor_id=$actor_id, payload=$payload, timeout=${timeout}s" >&2
-    curl -s --max-time "$timeout" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor_id?timeout=$timeout" \
+    curl -s --max-time "$timeout" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor_id/ask?timeout=$timeout" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
 }

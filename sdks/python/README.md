@@ -63,7 +63,7 @@ curl -X POST http://localhost:8094/api/v1/deploy \
 
 ## Proto-generated types (optional)
 
-Workflow and common messages are defined in Protocol Buffers. After **`make proto`** or **`make proto-python`** at the repo root, typed classes appear under **`plexspaces/generated/`** (betterproto). The **`plexspaces.workflow`** module prefers importing **`RetryConfig`** (and related types) from generated code when available, with a small inline fallback for WASM guests that do not ship `generated/`.
+Workflow and common messages are defined in Protocol Buffers. After **`make proto`** or **`make proto-python`** at the repo root, typed classes appear under **`plexspaces/generated/`** (betterproto). The **`plexspaces.workflow`** module now treats the proto-shaped **`RetryConfig`** object as the canonical SDK model while still accepting dict input for compatibility in existing call sites.
 
 Install **`pip install -e ".[dev]"`** or **`pip install -e ".[proto]"`** to use betterproto locally. Regeneration uses local buf plugins; see **`make proto-install-deps`** in the root `Makefile`.
 
@@ -169,6 +169,9 @@ class ChatRoom:
 | `@fsm_actor` | Finite state machine actor (GenStateMachine behavior) |
 | `@gen_server_actor` | Explicit GenServer actor (same as `@actor`) |
 | `@workflow_actor` | Workflow/orchestration actor |
+| `@run_handler` | Workflow run entrypoint |
+| `@signal_handler("name")` | Named workflow signal handler |
+| `@query_handler("name")` | Named workflow query handler |
 | `@handler(*msg_types)` | Route messages to this method |
 | `state(default=None, default_factory=None)` | Define persistent state field |
 | `@init_handler` | Custom initialization handler |

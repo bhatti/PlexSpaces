@@ -47,7 +47,8 @@ pub fn resolve_shared_db_backend(config: &SharedDbConfig) -> Result<SharedDbBack
         return Err("shared database connection_string is required".to_string());
     }
 
-    if connection_string.starts_with("postgres://") || connection_string.starts_with("postgresql://")
+    if connection_string.starts_with("postgres://")
+        || connection_string.starts_with("postgresql://")
     {
         return Ok(SharedDbBackend::Postgres {
             connection_string: connection_string.to_string(),

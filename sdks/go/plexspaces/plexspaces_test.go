@@ -68,6 +68,36 @@ func (e *EchoActor) Handle(from, msgType, payloadJSON string) string {
 	return payloadJSON
 }
 
+type WorkflowTestActor struct {
+	BaseActor
+	Status  string   `json:"status"`
+	Signals []string `json:"signals"`
+}
+
+func newWorkflowTestActor() *WorkflowTestActor {
+	a := &WorkflowTestActor{Status: "pending", Signals: []string{}}
+	a.SetSelf(a)
+	return a
+}
+
+func (w *WorkflowTestActor) Handle(from, msgType, payloadJSON string) string {
+	return `{"error":"unexpected"}`
+}
+
+func (w *WorkflowTestActor) Run(payloadJSON string) string {
+	w.Status = "running:o-1"
+	return `{"status":"running:o-1"}`
+}
+
+func (w *WorkflowTestActor) Signal(name, payloadJSON string) {
+	w.Signals = append(w.Signals, "cancel:user")
+	w.Status = "cancelled"
+}
+
+func (w *WorkflowTestActor) Query(name, payloadJSON string) string {
+	return `{"status":"cancelled","signals":["cancel:user"]}`
+}
+
 // ========================================================================
 // Actor Interface Tests
 // ========================================================================
@@ -195,6 +225,39 @@ func TestGetRegisteredActorNil(t *testing.T) {
 	got := GetRegisteredActor()
 	if got != nil {
 		t.Error("GetRegisteredActor should return nil when nothing is registered")
+	}
+}
+
+func TestActorDefinitionHelpers(t *testing.T) {
+	definition := WorkflowActorDefinition(func() Actor {
+		return newCounterActor()
+	}, "virtual_actor", "durability")
+
+	if definition.BehaviorType != BehaviorWorkflowActor {
+		t.Fatalf("BehaviorType = %q", definition.BehaviorType)
+	}
+	if len(definition.Facets) != 2 || definition.Facets[0] != "virtual_actor" || definition.Facets[1] != "durability" {
+		t.Fatalf("Facets = %#v", definition.Facets)
+	}
+	if definition.Factory == nil {
+		t.Fatal("Factory should be set")
+	}
+}
+
+func TestActorRouterRouteDefinition(t *testing.T) {
+	router := NewActorRouter()
+	definition := GenServerActor(func() Actor { return newCounterActor() }, "virtual_actor")
+	router.RouteDefinition("counter", definition)
+
+	got, ok := router.Definition("counter")
+	if !ok {
+		t.Fatal("Definition should be registered")
+	}
+	if got.BehaviorType != BehaviorGenServer {
+		t.Fatalf("BehaviorType = %q", got.BehaviorType)
+	}
+	if len(got.Facets) != 1 || got.Facets[0] != "virtual_actor" {
+		t.Fatalf("Facets = %#v", got.Facets)
 	}
 }
 
@@ -440,13 +503,17 @@ func TestHostKV(t *testing.T) {
 }
 
 func TestHostPGMembers(t *testing.T) {
+	ResetStubs()
 	h := NewHost()
+	if err := h.PG().Join("workers"); err != nil {
+		t.Fatalf("PG.Join should not return error: %v", err)
+	}
 	members, err := h.PG().Members("workers")
 	if err != nil {
 		t.Fatalf("PG.Members should not return error: %v", err)
 	}
-	if len(members) != 2 {
-		t.Errorf("expected 2 members, got %d", len(members))
+	if len(members) != 1 {
+		t.Errorf("expected 1 member, got %d", len(members))
 	}
 }
 
@@ -617,6 +684,42 @@ func TestActorRouterSetStateDelegates(t *testing.T) {
 	}
 }
 
+func TestActorRouterWorkflowDelegates(t *testing.T) {
+	router := NewActorRouter()
+	router.Route("workflow", func() Actor { return newWorkflowTestActor() })
+	result := router.Init(`{"actor_id":"workflow:ns@node"}`)
+	if result != "" {
+		t.Fatalf("Init() = %q", result)
+	}
+
+	runResult := router.Run(`{"order_id":"o-1"}`)
+	if runResult != `{"status":"running:o-1"}` {
+		t.Fatalf("Run() = %q", runResult)
+	}
+
+	router.Signal("cancel", `{"reason":"user"}`)
+	queryResult := router.Query("status", `{}`)
+	if queryResult != `{"status":"cancelled","signals":["cancel:user"]}` {
+		t.Fatalf("Query() = %q", queryResult)
+	}
+}
+
+func TestActorRouterWorkflowWithoutWorkflowBehavior(t *testing.T) {
+	router := NewActorRouter()
+	router.Route("counter", func() Actor { return newCounterActor() })
+	result := router.Init(`{"actor_id":"counter:ns@node"}`)
+	if result != "" {
+		t.Fatalf("Init() = %q", result)
+	}
+
+	if got := router.Run(`{}`); !strings.Contains(got, "does not implement workflow behavior") {
+		t.Fatalf("Run() = %q", got)
+	}
+	if got := router.Query("status", `{}`); !strings.Contains(got, "does not implement workflow behavior") {
+		t.Fatalf("Query() = %q", got)
+	}
+}
+
 func TestActorRouterInvalidConfigJSON(t *testing.T) {
 	router := NewActorRouter()
 	router.Route("counter", func() Actor { return newCounterActor() })
@@ -715,22 +818,28 @@ func TestHostDemonitor(t *testing.T) {
 }
 
 func TestHostTupleSpace(t *testing.T) {
+	ResetStubs()
 	h := NewHost()
 	result := h.TSWrite(`["task","worker-1",123]`)
 	if isHostError(result) {
 		t.Errorf("TSWrite should succeed, got %q", result)
 	}
 	result = h.TSRead(`["task","*",null]`)
-	// Stub returns empty
+	if result != `["task","worker-1",123]` {
+		t.Errorf("TSRead should return stored tuple, got %q", result)
+	}
 	result = h.TSTake(`["task","*",null]`)
-	// Stub returns empty
+	if result != `["task","worker-1",123]` {
+		t.Errorf("TSTake should return stored tuple, got %q", result)
+	}
 	result = h.TSReadAll(`["task","*",null]`)
 	if result != "[]" {
-		t.Errorf("TSReadAll stub should return [], got %q", result)
+		t.Errorf("TSReadAll should return [], got %q", result)
 	}
 }
 
 func TestHostTupleSpaceHelper(t *testing.T) {
+	ResetStubs()
 	h := NewHost()
 	ts := h.TS()
 	if ts == nil {
@@ -741,15 +850,15 @@ func TestHostTupleSpaceHelper(t *testing.T) {
 	if isHostError(errStr) {
 		t.Errorf("TS().Write should succeed, got %q", errStr)
 	}
-	// Take: returns (nil, false) when stub returns empty
+	// Take should return the stored tuple
 	tuple, ok := ts.Take([]any{"job", "j1", "task", nil, nil})
-	if ok || tuple != nil {
-		t.Errorf("TS().Take stub should return (nil, false), got (%v, %v)", tuple, ok)
+	if !ok || len(tuple) != 5 {
+		t.Errorf("TS().Take should return stored tuple, got (%v, %v)", tuple, ok)
 	}
-	// ReadAll: stub returns "[]" -> empty slice
+	// ReadAll: tuple was taken, so the collection is empty
 	all := ts.ReadAll([]any{"job", nil, nil, nil, nil})
 	if all == nil || len(all) != 0 {
-		t.Errorf("TS().ReadAll stub should return empty slice, got %v", all)
+		t.Errorf("TS().ReadAll should return empty slice, got %v", all)
 	}
 }
 

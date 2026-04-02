@@ -427,7 +427,7 @@ impl ProcessGroupFacet {
 #[async_trait]
 impl Facet for ProcessGroupFacet {
     fn facet_type(&self) -> &str {
-        "process_groups"
+        "process_group"
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -722,6 +722,6 @@ mod tests {
     async fn test_facet_type() {
         let registry = Arc::new(TestProcessGroupRegistry::new());
         let facet = ProcessGroupFacet::new(registry, serde_json::json!({}), 50);
-        assert_eq!(facet.facet_type(), "process_groups");
+        assert_eq!(facet.facet_type(), "process_group");
     }
 }

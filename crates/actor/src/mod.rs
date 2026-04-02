@@ -248,13 +248,13 @@ fn parse_exit_reason_from_str(
 }
 use async_trait::async_trait;
 use plexspaces_facet::{Facet, FacetContainer};
-use plexspaces_journaling::ReplayHandler;
+use plexspaces_journaling::{CheckpointStateAdapter, ReplayHandler};
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
 
 // Observability
 use metrics;
-use tracing::{debug, info};
+use tracing::info;
 
 /// Actor state - matches proto ActorState enum exactly
 ///
@@ -405,6 +405,111 @@ pub struct Actor {
     error_message: Arc<RwLock<String>>,
 }
 
+struct ActorRuntimeHandle {
+    id: ActorId,
+    state: Arc<RwLock<ActorState>>,
+    behavior: Arc<RwLock<Box<dyn ActorTrait>>>,
+    mailbox: Arc<Mailbox>,
+    context: Arc<ActorContext>,
+    processor_handle: Option<tokio::task::AbortHandle>,
+    shutdown_tx: Option<mpsc::Sender<()>>,
+    facets: Arc<RwLock<FacetContainer>>,
+}
+
+async fn stop_actor_runtime(
+    actor_id: &ActorId,
+    state: &Arc<RwLock<ActorState>>,
+    shutdown_tx: &Option<mpsc::Sender<()>>,
+    mailbox: &Arc<Mailbox>,
+    processor_handle: &Option<tokio::task::AbortHandle>,
+    facets: &Arc<RwLock<FacetContainer>>,
+    behavior: &Arc<RwLock<Box<dyn ActorTrait>>>,
+    context: &Arc<ActorContext>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let current_state = state.read().await.clone();
+    if current_state == ActorState::Stopping
+        || current_state == ActorState::Terminated
+        || matches!(current_state, ActorState::Failed(_))
+    {
+        return Ok(());
+    }
+    if current_state != ActorState::Active && current_state != ActorState::Inactive {
+        return Ok(());
+    }
+    drop(current_state);
+
+    *state.write().await = ActorState::Stopping;
+
+    if let Some(tx) = shutdown_tx.as_ref() {
+        let _ = tx.clone().send(()).await;
+    }
+
+    if !mailbox.is_in_memory() {
+        let timeout = Some(std::time::Duration::from_secs(30));
+        if let Err(e) = mailbox.graceful_shutdown(timeout).await {
+            tracing::warn!(
+                actor_id = %actor_id,
+                error = %e,
+                "Mailbox graceful shutdown had errors during handle stop"
+            );
+        }
+    }
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    if let Some(handle) = processor_handle.clone() {
+        handle.abort();
+    }
+
+    let exit_reason = ExitReason::Shutdown;
+    {
+        let mut facets = facets.write().await;
+        let facet_exit_reason = plexspaces_facet::ExitReason::Shutdown;
+        let facet_errors = facets
+            .call_on_terminate_start(actor_id, &facet_exit_reason)
+            .await;
+        for error in &facet_errors {
+            tracing::warn!(
+                actor_id = %actor_id,
+                error = %error,
+                "Facet on_terminate_start() returned error during handle stop"
+            );
+        }
+    }
+
+    {
+        let mut behavior = behavior.write().await;
+        if let Err(e) = behavior.on_facets_detaching(context, &exit_reason).await {
+            tracing::warn!(
+                actor_id = %actor_id,
+                error = %e,
+                "Actor on_facets_detaching() returned error during handle stop"
+            );
+        }
+        if let Err(e) = behavior.terminate(context, &exit_reason).await {
+            tracing::warn!(
+                actor_id = %actor_id,
+                error = %e,
+                "Actor terminate() returned error during handle stop"
+            );
+        }
+    }
+
+    {
+        let mut facets = facets.write().await;
+        let facet_errors = facets.detach_all(actor_id).await;
+        for error in &facet_errors {
+            tracing::warn!(
+                actor_id = %actor_id,
+                error = %error,
+                "Facet detach() returned error during handle stop"
+            );
+        }
+    }
+
+    *state.write().await = ActorState::Terminated;
+    Ok(())
+}
+
 /// Helper function to set ReplayHandler for DurabilityFacet
 ///
 /// ## Purpose
@@ -429,8 +534,8 @@ async fn set_replay_handler_for_facet(
         durability_facet
             .set_replay_handler(Box::new(handler), Arc::clone(context))
             .await;
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!("ReplayHandler set for DurabilityFacet");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!("ReplayHandler set for DurabilityFacet");
         }
         return;
     }
@@ -441,6 +546,27 @@ async fn set_replay_handler_for_facet(
     }
 }
 
+/// Helper function to set CheckpointStateAdapter for DurabilityFacet.
+async fn set_checkpoint_state_adapter_for_facet(
+    facet: &mut dyn Facet,
+    behavior: &Arc<RwLock<Box<dyn ActorTrait>>>,
+    context: &Arc<ActorContext>,
+) {
+    let adapter = ActorCheckpointStateAdapter {
+        behavior: Arc::clone(behavior),
+        context: Arc::clone(context),
+    };
+
+    if let Some(durability_facet) = facet
+        .as_any_mut()
+        .downcast_mut::<plexspaces_journaling::DurabilityFacet>()
+    {
+        durability_facet
+            .set_checkpoint_state_adapter(Box::new(adapter))
+            .await;
+    }
+}
+
 /// ReplayHandler implementation for Actor
 ///
 /// ## Purpose
@@ -448,6 +574,11 @@ async fn set_replay_handler_for_facet(
 /// When DurabilityFacet replays journaled messages, this handler calls the
 /// actor's `handle_message()` method, enabling deterministic state recovery.
 struct ActorReplayHandler {
+    behavior: Arc<RwLock<Box<dyn ActorTrait>>>,
+    context: Arc<ActorContext>,
+}
+
+struct ActorCheckpointStateAdapter {
     behavior: Arc<RwLock<Box<dyn ActorTrait>>>,
     context: Arc<ActorContext>,
 }
@@ -470,7 +601,49 @@ impl ReplayHandler for ActorReplayHandler {
     }
 }
 
+#[async_trait]
+impl CheckpointStateAdapter for ActorCheckpointStateAdapter {
+    async fn capture_state(&self) -> plexspaces_journaling::JournalResult<Option<Vec<u8>>> {
+        let mut behavior = self.behavior.write().await;
+        behavior
+            .capture_checkpoint_state(&self.context)
+            .await
+            .map_err(|e| {
+                plexspaces_journaling::JournalError::Serialization(format!(
+                    "Failed to capture checkpoint state: {}",
+                    e
+                ))
+            })
+    }
+
+    async fn restore_state(&self, state_data: &[u8]) -> plexspaces_journaling::JournalResult<bool> {
+        let mut behavior = self.behavior.write().await;
+        behavior
+            .restore_checkpoint_state(&self.context, state_data)
+            .await
+            .map_err(|e| {
+                plexspaces_journaling::JournalError::Serialization(format!(
+                    "Failed to restore checkpoint state: {}",
+                    e
+                ))
+            })
+    }
+}
+
 impl Actor {
+    fn runtime_handle(&self) -> Arc<dyn plexspaces_core::ActorStateHandle> {
+        Arc::new(ActorRuntimeHandle {
+            id: self.id.clone(),
+            state: self.state.clone(),
+            behavior: self.behavior.clone(),
+            mailbox: self.mailbox.clone(),
+            context: self.context.clone(),
+            processor_handle: self.processor_handle.clone(),
+            shutdown_tx: self.shutdown_tx.clone(),
+            facets: self.facets.clone(),
+        })
+    }
+
     /// Create a new actor with the given configuration
     ///
     /// ## Note
@@ -602,6 +775,53 @@ impl Actor {
     /// Get the actor's mailbox (for ActorRef creation)
     pub fn mailbox(&self) -> &Arc<Mailbox> {
         &self.mailbox
+    }
+
+    /// Register a started local actor in ActorRegistry.
+    ///
+    /// Call this only after `start()` succeeds so the registered sender carries the live local
+    /// runtime handle with shutdown and processor state attached.
+    pub async fn register_started(&self, registry: &Arc<plexspaces_core::ActorRegistry>) {
+        use crate::ActorRef;
+        use plexspaces_core::{MessageSender, RequestContext};
+
+        let ctx = RequestContext::new_without_auth(
+            self.context.tenant_id.clone(),
+            self.context.namespace.clone(),
+        );
+
+        let actor_ref = ActorRef::local(
+            self.id.clone(),
+            self.context.tenant_id.clone(),
+            self.context.namespace.clone(),
+            self.mailbox.clone(),
+            self.context.service_locator.clone(),
+        );
+
+        let behavior_guard = self.behavior.read().await;
+        let behavior_type = behavior_guard.behavior_type();
+        let behavior_kind = behavior_guard.behavior_kind();
+        drop(behavior_guard);
+
+        let actor_type = match behavior_type {
+            plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
+            plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
+            plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+            plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
+            plexspaces_core::BehaviorType::Custom(s) => s,
+        };
+
+        registry
+            .register_actor(
+                &ctx,
+                self.id.clone(),
+                Arc::new(actor_ref) as Arc<dyn MessageSender>,
+                actor_type,
+                self.context.config.clone(),
+                Some(self.runtime_handle()),
+                Some(behavior_kind),
+            )
+            .await;
     }
 
     /// Get error message when actor is in FAILED state
@@ -817,12 +1037,7 @@ impl Actor {
             }
         }
 
-        // Step 5: Register in ActorRegistry AFTER init() succeeds
-        // This ensures failed actors are never visible to other actors
-        // Critical for supervisor tree: supervisor waits for init() before starting next child
-        self.register_in_registry().await?;
-
-        // Step 6: Call STATIC lifecycle hook (ALWAYS runs)
+        // Step 5: Call STATIC lifecycle hook (ALWAYS runs)
         self.on_activate().await?;
 
         // Start message processing
@@ -1106,8 +1321,8 @@ impl Actor {
                         }
 
                         // Process normal message with facets
-                        if tracing::enabled!(tracing::Level::DEBUG) {
-                            tracing::debug!(
+                        if tracing::enabled!(tracing::Level::TRACE) {
+                            tracing::trace!(
                                 "[ACTOR LOOP] Calling process_message: actor_id={}, message_id={}, message_type={}, sender_id={}, receiver_id={}, correlation_id={}",
                                 actor_id_for_logging, message.id, message.message_type, message.sender_id, message.receiver_id, message.correlation_id
                             );
@@ -1326,7 +1541,9 @@ impl Actor {
         }
         drop(state);
 
-        tracing::info!(actor_id = %self.id, "Stopping actor - starting graceful shutdown");
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(actor_id = %self.id, "Stopping actor - starting graceful shutdown");
+        }
 
         // Mark as stopping (prevents new messages from being processed and duplicate terminate() calls)
         *self.state.write().await = ActorState::Stopping;
@@ -1481,16 +1698,6 @@ impl Actor {
                         "actor_id" => self.id.clone()
                     )
                     .record(terminate_duration.as_secs_f64());
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            actor_id = %self.id,
-                            facet_count,
-                            facets_terminate_start_duration_ms,
-                            facets_detaching_duration_ms,
-                            duration_ms = terminate_duration.as_millis(),
-                            "Actor terminate() completed successfully"
-                        );
-                    }
                 }
                 Err(e) => {
                     let terminate_duration = terminate_start.elapsed();
@@ -1535,6 +1742,7 @@ impl Actor {
         let facets_detach_start = std::time::Instant::now();
         {
             let mut facets = self.facets.write().await;
+            let detached_facets = facets.list_facets().len();
             let facet_errors = facets.detach_all(&self.id).await;
 
             if !facet_errors.is_empty() {
@@ -1562,9 +1770,12 @@ impl Actor {
             if tracing::enabled!(tracing::Level::DEBUG) {
                 tracing::debug!(
                     actor_id = %self.id,
-                    facet_count = facets.list_facets().len(),
+                    detached_facet_count = detached_facets,
+                    remaining_facet_count = facets.list_facets().len(),
+                    facets_terminate_start_duration_ms,
+                    facets_detaching_duration_ms,
                     duration_ms = facets_detach_duration.as_millis(),
-                    "All facets detached"
+                    "Actor shutdown lifecycle completed and all facets detached"
                 );
             }
         }
@@ -1772,6 +1983,8 @@ impl Actor {
             // This enables DurabilityFacet to replay messages through actor's handle_message()
             // We use a helper function that works with any storage backend via type erasure
             set_replay_handler_for_facet(&mut *facet, &self.behavior, &self.context).await;
+            set_checkpoint_state_adapter_for_facet(&mut *facet, &self.behavior, &self.context)
+                .await;
         }
 
         // For RegistryFacet, store tenant_id/namespace from actor context
@@ -2012,78 +2225,6 @@ impl Actor {
         Ok(())
     }
 
-    /// Register actor in ActorRegistry (called AFTER init() succeeds)
-    ///
-    /// ## Purpose
-    /// Registers the actor in ActorRegistry so it can be discovered and messaged.
-    /// Called internally by `start()` after `init()` succeeds to ensure failed actors
-    /// are never registered (prevents memory leaks).
-    ///
-    /// ## Design Notes
-    /// - Registration happens AFTER init() succeeds (as per actors_gaps2.txt design)
-    /// - Supervisor waits for init() to complete before starting next child
-    /// - If init() fails, actor is never registered (no cleanup needed)
-    /// - This is critical for supervisor tree building
-    ///
-    /// ## Returns
-    /// Ok(()) if registration succeeds, ActorError otherwise
-    async fn register_in_registry(&self) -> Result<(), ActorError> {
-        use crate::ActorRef;
-        use plexspaces_core::{MessageSender, RequestContext};
-        use std::sync::Arc;
-
-        // Get ActorRegistry from ServiceLocator
-        if let Some(registry) = self.context.service_locator.actor_registry().await {
-            let ctx = RequestContext::new_without_auth(
-                self.context.tenant_id.clone(),
-                self.context.namespace.clone(),
-            );
-
-            // Create ActorRef for registration
-            // CRITICAL: Pass tenant_id from ActorContext to ActorRef
-            let actor_ref = ActorRef::local(
-                self.id.clone(),
-                self.context.tenant_id.clone(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
-                self.context.namespace.clone(),
-                self.mailbox.clone(),
-                self.context.service_locator.clone(),
-            );
-
-            // Extract actor_type and behavior_kind from behavior for dashboard and logging
-            let behavior_guard = self.behavior.read().await;
-            let behavior_type = behavior_guard.behavior_type();
-            let behavior_kind = behavior_guard.behavior_kind();
-            drop(behavior_guard);
-            let actor_type = match behavior_type {
-                plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
-                plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
-                plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
-                plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
-                plexspaces_core::BehaviorType::Custom(s) => s,
-            };
-
-            // Register actor in registry with type information for dashboard
-            // Note: Config and instance will be updated later in spawn_built_actor (idempotent)
-            registry
-                .register_actor(
-                    &ctx,
-                    self.id.clone(),
-                    Arc::new(actor_ref) as Arc<dyn MessageSender>,
-                    actor_type,
-                    None, // Config not available here (set during spawn, updated later)
-                    None, // Instance not available here (stored separately in actor_factory_impl, updated later)
-                    Some(behavior_kind),
-                )
-                .await;
-        } else {
-            return Err(ActorError::InvalidState(
-                "ActorRegistry not available in ServiceLocator".to_string(),
-            ));
-        }
-
-        Ok(())
-    }
-
     /// Called on timer/reminder events (ALWAYS AVAILABLE)
     ///
     /// This is a CORE lifecycle hook that handles timer events.
@@ -2318,6 +2459,11 @@ impl Actor {
                     );
                 }
 
+                // Facets such as durability may need to call back into the behavior to
+                // capture or restore state. Drop the behavior write lock before running
+                // after-method interception so the runtime never deadlocks itself.
+                drop(behavior);
+
                 // Decrement recursion depth
                 let _ = PROCESS_MESSAGE_DEPTH.with(|d| {
                     let current = d.get();
@@ -2391,10 +2537,16 @@ impl Actor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use plexspaces_behavior::MockBehavior;
-    use plexspaces_core::{ActorContext, ServiceLocator};
+    use plexspaces_core::{
+        ActorContext, ActorStateHandle as CoreActorStateHandle, BehaviorError, ServiceLocator,
+    };
+    use plexspaces_journaling::{DurabilityFacet, JournalStorage, SqliteJournalStorage};
     use plexspaces_mailbox::MailboxConfig;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::time::Duration;
     use ulid::Ulid;
 
     /// Builds an [`Actor`] whose [`ActorContext`] uses the same default [`ServiceLocator`] as
@@ -2423,15 +2575,7 @@ mod tests {
             service_locator,
             None,
         ));
-        Actor::new(
-            id,
-            behavior,
-            mailbox,
-            tenant_id,
-            namespace,
-            None,
-        )
-        .set_context(context)
+        Actor::new(id, behavior, mailbox, tenant_id, namespace, None).set_context(context)
     }
 
     /// Helper to create a test message
@@ -2451,6 +2595,102 @@ mod tests {
             nanos: ttl.subsec_nanos() as i32,
         });
         msg
+    }
+
+    struct TerminateTrackingBehavior {
+        terminated: Arc<AtomicBool>,
+    }
+
+    struct CheckpointTrackingBehavior {
+        count: i32,
+        observed_count: Arc<tokio::sync::RwLock<i32>>,
+        behavior_type: plexspaces_core::BehaviorType,
+    }
+
+    impl CheckpointTrackingBehavior {
+        async fn set_observed_count(&self) {
+            *self.observed_count.write().await = self.count;
+        }
+    }
+
+    #[async_trait]
+    impl plexspaces_core::Actor for TerminateTrackingBehavior {
+        async fn handle_message(
+            &mut self,
+            _ctx: &ActorContext,
+            _message: Message,
+        ) -> Result<(), BehaviorError> {
+            Ok(())
+        }
+
+        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+            plexspaces_core::BehaviorType::GenServer
+        }
+
+        async fn terminate(
+            &mut self,
+            _ctx: &ActorContext,
+            _reason: &plexspaces_core::ExitReason,
+        ) -> Result<(), plexspaces_core::ActorError> {
+            self.terminated.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl plexspaces_core::Actor for CheckpointTrackingBehavior {
+        async fn handle_message(
+            &mut self,
+            _ctx: &ActorContext,
+            message: Message,
+        ) -> Result<(), BehaviorError> {
+            if message.payload == b"inc".to_vec() {
+                self.count += 1;
+                self.set_observed_count().await;
+            }
+            Ok(())
+        }
+
+        fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+            plexspaces_core::BehaviorType::GenServer
+        }
+
+        async fn capture_checkpoint_state(
+            &mut self,
+            _ctx: &ActorContext,
+        ) -> Result<Option<Vec<u8>>, plexspaces_core::ActorError> {
+            serde_json::to_vec(&serde_json::json!({ "count": self.count }))
+                .map(Some)
+                .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))
+        }
+
+        async fn restore_checkpoint_state(
+            &mut self,
+            _ctx: &ActorContext,
+            state_data: &[u8],
+        ) -> Result<bool, plexspaces_core::ActorError> {
+            let value: serde_json::Value = serde_json::from_slice(state_data)
+                .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))?;
+            self.count = value
+                .get("count")
+                .and_then(|count| count.as_i64())
+                .unwrap_or_default() as i32;
+            self.set_observed_count().await;
+            Ok(true)
+        }
+    }
+
+    async fn wait_for_count(observed_count: &Arc<tokio::sync::RwLock<i32>>, expected: i32) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if *observed_count.read().await == expected {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("timed out waiting for actor state");
     }
 
     #[tokio::test]
@@ -2480,6 +2720,354 @@ mod tests {
         // Stop actor
         actor.stop().await.unwrap();
         assert_eq!(actor.state().await, ActorState::Terminated);
+    }
+
+    #[tokio::test]
+    async fn test_actor_handle_stop_actor_runs_terminate() {
+        let id = "test-stop-handle".to_string();
+        let terminated = Arc::new(AtomicBool::new(false));
+        let behavior = Box::new(TerminateTrackingBehavior {
+            terminated: terminated.clone(),
+        });
+        let mailbox = Mailbox::new(MailboxConfig::default(), id.clone())
+            .await
+            .unwrap();
+
+        let mut actor = actor_with_default_service_locator(
+            id,
+            behavior,
+            mailbox,
+            String::new(),
+            "test-namespace".to_string(),
+        )
+        .await;
+
+        actor.start().await.unwrap();
+        CoreActorStateHandle::stop_actor(&actor).await.unwrap();
+
+        assert!(terminated.load(Ordering::SeqCst));
+        assert_eq!(actor.state().await, ActorState::Terminated);
+    }
+
+    #[tokio::test]
+    async fn test_non_virtual_durable_actor_restores_checkpoint_on_restart() {
+        let actor_id = "durable-checkpoint-actor".to_string();
+        let namespace = "test-namespace".to_string();
+        let observed_count = Arc::new(tokio::sync::RwLock::new(0));
+        let storage: Arc<dyn JournalStorage> = Arc::new(
+            SqliteJournalStorage::new(":memory:")
+                .await
+                .expect("sqlite durability storage"),
+        );
+
+        let behavior = Box::new(CheckpointTrackingBehavior {
+            count: 0,
+            observed_count: observed_count.clone(),
+            behavior_type: plexspaces_core::BehaviorType::GenServer,
+        });
+        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+            .await
+            .unwrap();
+        let mut actor = actor_with_default_service_locator(
+            actor_id.clone(),
+            behavior,
+            mailbox,
+            String::new(),
+            namespace.clone(),
+        )
+        .await;
+        actor
+            .attach_facet(Box::new(DurabilityFacet::new(
+                storage.clone(),
+                serde_json::json!({
+                    "checkpoint_interval": 1,
+                    "replay_on_activation": true,
+                    "state_schema_version": 1
+                }),
+                50,
+            )))
+            .await
+            .expect("attach durability facet");
+        actor.start().await.unwrap();
+        actor
+            .send(create_test_message(b"inc".to_vec()))
+            .await
+            .unwrap();
+        actor
+            .send(create_test_message(b"inc".to_vec()))
+            .await
+            .unwrap();
+        wait_for_count(&observed_count, 2).await;
+        CoreActorStateHandle::stop_actor(&actor).await.unwrap();
+
+        let checkpoint = storage
+            .get_latest_checkpoint(&actor_id)
+            .await
+            .expect("checkpoint should be saved on stop");
+        assert!(!checkpoint.state_data.is_empty());
+        let checkpoint_payload: serde_json::Value =
+            serde_json::from_slice(&checkpoint.state_data).expect("checkpoint must be valid JSON");
+        assert_eq!(
+            checkpoint_payload
+                .get("count")
+                .and_then(|count| count.as_i64())
+                .unwrap_or_default(),
+            2
+        );
+
+        *observed_count.write().await = 0;
+        let restarted_behavior = Box::new(CheckpointTrackingBehavior {
+            count: 0,
+            observed_count: observed_count.clone(),
+            behavior_type: plexspaces_core::BehaviorType::GenServer,
+        });
+        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+            .await
+            .unwrap();
+        let mut restarted_actor = actor_with_default_service_locator(
+            actor_id.clone(),
+            restarted_behavior,
+            restarted_mailbox,
+            String::new(),
+            namespace,
+        )
+        .await;
+        restarted_actor
+            .attach_facet(Box::new(DurabilityFacet::new(
+                storage.clone(),
+                serde_json::json!({
+                    "checkpoint_interval": 1,
+                    "replay_on_activation": true,
+                    "state_schema_version": 1
+                }),
+                50,
+            )))
+            .await
+            .expect("attach durability facet");
+        restarted_actor.start().await.unwrap();
+        wait_for_count(&observed_count, 2).await;
+    }
+
+    #[tokio::test]
+    async fn test_non_virtual_non_durable_actor_restarts_from_fresh_state() {
+        let actor_id = "non-durable-checkpoint-actor".to_string();
+        let observed_count = Arc::new(tokio::sync::RwLock::new(0));
+
+        let behavior = Box::new(CheckpointTrackingBehavior {
+            count: 0,
+            observed_count: observed_count.clone(),
+            behavior_type: plexspaces_core::BehaviorType::GenServer,
+        });
+        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+            .await
+            .unwrap();
+        let mut actor = actor_with_default_service_locator(
+            actor_id.clone(),
+            behavior,
+            mailbox,
+            String::new(),
+            "test-namespace".to_string(),
+        )
+        .await;
+        actor.start().await.unwrap();
+        actor
+            .send(create_test_message(b"inc".to_vec()))
+            .await
+            .unwrap();
+        actor
+            .send(create_test_message(b"inc".to_vec()))
+            .await
+            .unwrap();
+        wait_for_count(&observed_count, 2).await;
+        CoreActorStateHandle::stop_actor(&actor).await.unwrap();
+
+        *observed_count.write().await = 0;
+        let restarted_behavior = Box::new(CheckpointTrackingBehavior {
+            count: 0,
+            observed_count: observed_count.clone(),
+            behavior_type: plexspaces_core::BehaviorType::GenServer,
+        });
+        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+            .await
+            .unwrap();
+        let mut restarted_actor = actor_with_default_service_locator(
+            actor_id,
+            restarted_behavior,
+            restarted_mailbox,
+            String::new(),
+            "test-namespace".to_string(),
+        )
+        .await;
+        restarted_actor.start().await.unwrap();
+        wait_for_count(&observed_count, 0).await;
+    }
+
+    #[tokio::test]
+    async fn test_non_virtual_durable_workflow_actor_restores_checkpoint_on_restart() {
+        let actor_id = "durable-workflow-checkpoint-actor".to_string();
+        let namespace = "test-namespace".to_string();
+        let observed_count = Arc::new(tokio::sync::RwLock::new(0));
+        let storage: Arc<dyn JournalStorage> = Arc::new(
+            SqliteJournalStorage::new(":memory:")
+                .await
+                .expect("sqlite durability storage"),
+        );
+
+        let behavior = Box::new(CheckpointTrackingBehavior {
+            count: 0,
+            observed_count: observed_count.clone(),
+            behavior_type: plexspaces_core::BehaviorType::Workflow,
+        });
+        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+            .await
+            .unwrap();
+        let mut actor = actor_with_default_service_locator(
+            actor_id.clone(),
+            behavior,
+            mailbox,
+            String::new(),
+            namespace.clone(),
+        )
+        .await;
+        actor
+            .attach_facet(Box::new(DurabilityFacet::new(
+                storage.clone(),
+                serde_json::json!({
+                    "checkpoint_interval": 1,
+                    "replay_on_activation": true,
+                    "state_schema_version": 1
+                }),
+                50,
+            )))
+            .await
+            .expect("attach durability facet");
+        actor.start().await.unwrap();
+        actor
+            .send(create_test_message(b"inc".to_vec()))
+            .await
+            .unwrap();
+        actor
+            .send(create_test_message(b"inc".to_vec()))
+            .await
+            .unwrap();
+        wait_for_count(&observed_count, 2).await;
+        CoreActorStateHandle::stop_actor(&actor).await.unwrap();
+
+        *observed_count.write().await = 0;
+        let restarted_behavior = Box::new(CheckpointTrackingBehavior {
+            count: 0,
+            observed_count: observed_count.clone(),
+            behavior_type: plexspaces_core::BehaviorType::Workflow,
+        });
+        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+            .await
+            .unwrap();
+        let mut restarted_actor = actor_with_default_service_locator(
+            actor_id,
+            restarted_behavior,
+            restarted_mailbox,
+            String::new(),
+            namespace,
+        )
+        .await;
+        restarted_actor
+            .attach_facet(Box::new(DurabilityFacet::new(
+                storage,
+                serde_json::json!({
+                    "checkpoint_interval": 1,
+                    "replay_on_activation": true,
+                    "state_schema_version": 1
+                }),
+                50,
+            )))
+            .await
+            .expect("attach durability facet");
+        restarted_actor.start().await.unwrap();
+        wait_for_count(&observed_count, 2).await;
+    }
+
+    #[tokio::test]
+    async fn test_non_virtual_durable_event_actor_restores_checkpoint_on_restart() {
+        let actor_id = "durable-event-checkpoint-actor".to_string();
+        let namespace = "test-namespace".to_string();
+        let observed_count = Arc::new(tokio::sync::RwLock::new(0));
+        let storage: Arc<dyn JournalStorage> = Arc::new(
+            SqliteJournalStorage::new(":memory:")
+                .await
+                .expect("sqlite durability storage"),
+        );
+
+        let behavior = Box::new(CheckpointTrackingBehavior {
+            count: 0,
+            observed_count: observed_count.clone(),
+            behavior_type: plexspaces_core::BehaviorType::GenEvent,
+        });
+        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+            .await
+            .unwrap();
+        let mut actor = actor_with_default_service_locator(
+            actor_id.clone(),
+            behavior,
+            mailbox,
+            String::new(),
+            namespace.clone(),
+        )
+        .await;
+        actor
+            .attach_facet(Box::new(DurabilityFacet::new(
+                storage.clone(),
+                serde_json::json!({
+                    "checkpoint_interval": 1,
+                    "replay_on_activation": true,
+                    "state_schema_version": 1
+                }),
+                50,
+            )))
+            .await
+            .expect("attach durability facet");
+        actor.start().await.unwrap();
+        actor
+            .send(create_test_message(b"inc".to_vec()))
+            .await
+            .unwrap();
+        actor
+            .send(create_test_message(b"inc".to_vec()))
+            .await
+            .unwrap();
+        wait_for_count(&observed_count, 2).await;
+        CoreActorStateHandle::stop_actor(&actor).await.unwrap();
+
+        *observed_count.write().await = 0;
+        let restarted_behavior = Box::new(CheckpointTrackingBehavior {
+            count: 0,
+            observed_count: observed_count.clone(),
+            behavior_type: plexspaces_core::BehaviorType::GenEvent,
+        });
+        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+            .await
+            .unwrap();
+        let mut restarted_actor = actor_with_default_service_locator(
+            actor_id,
+            restarted_behavior,
+            restarted_mailbox,
+            String::new(),
+            namespace,
+        )
+        .await;
+        restarted_actor
+            .attach_facet(Box::new(DurabilityFacet::new(
+                storage,
+                serde_json::json!({
+                    "checkpoint_interval": 1,
+                    "replay_on_activation": true,
+                    "state_schema_version": 1
+                }),
+                50,
+            )))
+            .await
+            .expect("attach durability facet");
+        restarted_actor.start().await.unwrap();
+        wait_for_count(&observed_count, 2).await;
     }
 
     #[tokio::test]
@@ -3306,34 +3894,72 @@ mod tests {
     }
 }
 
-// Implement ActorHandle trait for Actor so that ActorRegistry can check state,
+// Implement ActorStateHandle for Actor so that ActorRegistry can check state,
 // access the mailbox, and stop the actor without importing Actor directly.
 #[async_trait::async_trait]
-impl plexspaces_core::ActorHandle for Actor {
-    async fn actor_state(&self) -> i32 {
+impl plexspaces_core::ActorStateHandle for Actor {
+    async fn actor_state(&self) -> plexspaces_proto::v1::actor::ActorState {
         use crate::ActorState;
         use plexspaces_proto::v1::actor::ActorState as ProtoActorState;
         match self.state().await {
-            ActorState::Unspecified => ProtoActorState::ActorStateUnspecified as i32,
-            ActorState::Creating => ProtoActorState::ActorStateCreating as i32,
-            ActorState::Active => ProtoActorState::ActorStateActive as i32,
-            ActorState::Inactive => ProtoActorState::ActorStateInactive as i32,
-            ActorState::Activating => ProtoActorState::ActorStateActivating as i32,
-            ActorState::Deactivating => ProtoActorState::ActorStateDeactivating as i32,
-            ActorState::Stopping => ProtoActorState::ActorStateStopping as i32,
-            ActorState::Migrating => ProtoActorState::ActorStateMigrating as i32,
-            ActorState::Failed(_) => ProtoActorState::ActorStateFailed as i32,
-            ActorState::Terminated => ProtoActorState::ActorStateTerminated as i32,
+            ActorState::Unspecified => ProtoActorState::ActorStateUnspecified,
+            ActorState::Creating => ProtoActorState::ActorStateCreating,
+            ActorState::Active => ProtoActorState::ActorStateActive,
+            ActorState::Inactive => ProtoActorState::ActorStateInactive,
+            ActorState::Activating => ProtoActorState::ActorStateActivating,
+            ActorState::Deactivating => ProtoActorState::ActorStateDeactivating,
+            ActorState::Stopping => ProtoActorState::ActorStateStopping,
+            ActorState::Migrating => ProtoActorState::ActorStateMigrating,
+            ActorState::Failed(_) => ProtoActorState::ActorStateFailed,
+            ActorState::Terminated => ProtoActorState::ActorStateTerminated,
         }
     }
 
     async fn stop_actor(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Mark as Stopping so the message loop drops new messages
-        *self.state.write().await = ActorState::Stopping;
-        // Send the shutdown signal — mpsc::Sender is Clone so we can send from &self
-        if let Some(tx) = self.shutdown_tx.as_ref() {
-            let _ = tx.send(()).await;
+        stop_actor_runtime(
+            &self.id,
+            &self.state,
+            &self.shutdown_tx,
+            &self.mailbox,
+            &self.processor_handle,
+            &self.facets,
+            &self.behavior,
+            &self.context,
+        )
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl plexspaces_core::ActorStateHandle for ActorRuntimeHandle {
+    async fn actor_state(&self) -> plexspaces_proto::v1::actor::ActorState {
+        use crate::ActorState;
+        use plexspaces_proto::v1::actor::ActorState as ProtoActorState;
+        match self.state.read().await.clone() {
+            ActorState::Unspecified => ProtoActorState::ActorStateUnspecified,
+            ActorState::Creating => ProtoActorState::ActorStateCreating,
+            ActorState::Active => ProtoActorState::ActorStateActive,
+            ActorState::Inactive => ProtoActorState::ActorStateInactive,
+            ActorState::Activating => ProtoActorState::ActorStateActivating,
+            ActorState::Deactivating => ProtoActorState::ActorStateDeactivating,
+            ActorState::Stopping => ProtoActorState::ActorStateStopping,
+            ActorState::Migrating => ProtoActorState::ActorStateMigrating,
+            ActorState::Failed(_) => ProtoActorState::ActorStateFailed,
+            ActorState::Terminated => ProtoActorState::ActorStateTerminated,
         }
-        Ok(())
+    }
+
+    async fn stop_actor(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        stop_actor_runtime(
+            &self.id,
+            &self.state,
+            &self.shutdown_tx,
+            &self.mailbox,
+            &self.processor_handle,
+            &self.facets,
+            &self.behavior,
+            &self.context,
+        )
+        .await
     }
 }

@@ -15,6 +15,7 @@ Further reading: [SDK guide](../docs/sdk.md), [Polyglot WASM](../docs/polyglot.m
 | Example | Description | Abstractions / APIs | README |
 |---------|-------------|---------------------|--------|
 | `data_lake_rag` | Synthetic data-lake RAG-style benchmark: ingest, chunking, embedding, retrieval across leader/worker shard groups. | Go SDK `ActorRouter`, shard-group placement, application metrics | [README](go/apps/data_lake_rag/README.md) |
+| `abstractions` | Unified SDK authoring contract example. | GenServer + event-actor + workflow definitions, virtual actor facets, KV, tuple space, blob, process groups, timers, spawn/stop | [README](go/apps/abstractions/README.md) |
 | `migrating_aws_durable_lambda` | **Migration:** AWS Lambda–style durable execution patterns (webhook-style actor). | Go SDK WASM actor, workflow/durability patterns; see `native/` | [README](go/apps/migrating_aws_durable_lambda/README.md) |
 | `migrating_cadence` | **Migration:** Cadence-style payment workflow with idempotency and retries. | `WorkflowActor`, Run/Signal/Query, virtual actor + durability | [README](go/apps/migrating_cadence/README.md) |
 | `migrating_cloudflare_workers` | **Migration:** Durable Objects–style guild chat. | Go SDK WASM; compare with `native/guild_chat.js` | [README](go/apps/migrating_cloudflare_workers/README.md) |
@@ -44,6 +45,7 @@ cd go/apps/<example>
 | Example | Description | Abstractions / APIs | README |
 |---------|-------------|---------------------|--------|
 | `audit_log` | Fire-and-forget audit events via host logging (storage patterns evolve with WASM). | Python SDK `@actor` / handlers, `host.log` | [README](python/apps/audit_log/README.md) |
+| `abstractions` | Unified SDK authoring contract example. | `@gen_server_actor`, `@event_actor`, `@workflow_actor`, workflow handler decorators, host send / KV / tuple space / blob / process groups / timer / spawn | [README](python/apps/abstractions/README.md) |
 | `bank_account` | Durable bank account state with deposit/withdraw/history. | `@actor`, `state()`, `@handler`, WASM durable state | [README](python/apps/bank_account/README.md) |
 | `calculator` | Simple calculator operations and batch throughput. | GenServer-style handlers, WASM | [README](python/apps/calculator/README.md) |
 | `cdn_cache` | CDN-style edge caching behavior. | Python SDK WASM, host KV / coordination as documented | [README](python/apps/cdn_cache/README.md) |
@@ -85,6 +87,7 @@ cd python/apps/<app>
 | Example | Description | Abstractions / APIs | README |
 |---------|-------------|---------------------|--------|
 | `batch_image_classification` | **Parallel / ML:** Batch image classification fan-out (synthetic workload), shard-group scatter/gather, metrics. | `#[gen_server_actor(wasm)]`, shard groups, application metrics | [README](rust/apps/batch_image_classification/README.md) |
+| `abstractions` | Unified SDK authoring and deployable WASM example. | GenServer + Workflow + GenEvent child specs, virtual actor reactivation, timer/reminder, KV / tuple space / blob / process groups | [README](rust/apps/abstractions/README.md) |
 | `calculator` | Four-function calculator WASM actor with batch throughput. | `#[gen_server_actor(wasm)]`, `#[plexspaces_handlers(wasm)]`, WIT Guest | [README](rust/apps/calculator/README.md) |
 | `data_parallel_worker` | **Parallel:** Shard group rounds with scatter/gather over workers (SDK + WIT `scatter_gather`). | WASM GenServer, shard group, `host::scatter_gather` | [README](rust/apps/data_parallel_worker/README.md) |
 | `entity_recognition` | Doc → entity extraction heuristics (EMAIL/URL/TOKEN); batch ops. | WASM SDK annotations, `application_metrics_add` | [README](rust/apps/entity_recognition/README.md) |
@@ -146,6 +149,7 @@ cargo run
 
 | Example | Description | Abstractions / APIs | README |
 |---------|-------------|---------------------|--------|
+| `abstractions` | Unified SDK authoring contract example. | decorators, GenServer + event-actor + workflow definitions, virtual actor facets, KV / tuple space / blob / process groups / timer / spawn contract | [README](typescript/apps/abstractions/README.md) |
 | `bank_account` | Durable bank account (same conceptual API as Python). | `PlexSpacesActor`, jco componentize, WIT world | [README](typescript/apps/bank_account/README.md) |
 | `migrating_azure_durable_functions` | **Migration:** Azure Durable Functions–style document processing. | TS SDK workflow patterns; `native/` | [README](typescript/apps/migrating_azure_durable_functions/README.md) |
 | `migrating_cloudflare_workers` | **Migration:** Cloudflare Workers / Durable Objects patterns. | TS WASM actor | [README](typescript/apps/migrating_cloudflare_workers/README.md) |

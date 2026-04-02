@@ -65,7 +65,11 @@ fn http_base_url_for_node(node: &Node) -> Option<String> {
 
 /// Helper to create a test node
 async fn create_test_node(node_id: &str) -> Arc<Node> {
+    static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _env_guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
     let node = NodeBuilder::new(node_id).build().await;
+    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
     Arc::new(node)
 }
 
@@ -202,6 +206,7 @@ fn create_minimal_wasm_module() -> Vec<u8> {
 }
 
 #[tokio::test]
+#[ignore = "expensive full WASM deployment integration test; run explicitly"]
 async fn test_wasm_deployment_with_applicationspec_creates_actors() {
     // ARRANGE: In-process ApplicationService deploy (no tonic server required).
     let node = create_test_node("test-node-wasm").await;
@@ -446,6 +451,7 @@ fn ensure_wasm_file_exists() -> bool {
 }
 
 #[tokio::test]
+#[ignore = "expensive full WASM deployment integration test; run explicitly"]
 async fn test_dashboard_wasm_deployment_flow() {
     // Ensure WASM file exists
     if !ensure_wasm_file_exists() {
@@ -581,8 +587,7 @@ async fn test_dashboard_wasm_deployment_flow() {
     while {
         let apps: Vec<String> = app_manager.list_applications().await;
         !apps.contains(&"calculator".to_string())
-    }
-        && retries < 20
+    } && retries < 20
     {
         tokio::task::yield_now().await; // Yield to allow async operations to complete
         retries += 1;

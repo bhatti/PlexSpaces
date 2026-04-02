@@ -30,7 +30,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::info;
 
 /// Exit reason for actor termination (minimal definition for Facet trait)
 ///
@@ -390,9 +390,6 @@ impl FacetContainer {
         tenant_id: Option<String>,
         namespace: Option<String>,
     ) -> Result<String, FacetError> {
-        let span = tracing::span!(tracing::Level::DEBUG, "facet.attach", facet_type = %facet.facet_type(), actor_id = %actor_id);
-        let _enter = span.enter();
-
         let facet_type = facet.facet_type().to_string();
         metrics::counter!("plexspaces_facet_attach_attempts_total", "facet_type" => facet_type.clone()).increment(1);
         let start = std::time::Instant::now();
@@ -511,16 +508,11 @@ impl FacetContainer {
             .increment(1);
         metrics::gauge!("plexspaces_facet_active_total", "facet_type" => facet_type.clone())
             .increment(1.0);
-        tracing::debug!(facet_type = %facet_type, actor_id = %actor_id, priority = priority, "Facet attached");
-
         Ok(facet_type)
     }
 
     /// Detach a facet
     pub async fn detach(&mut self, facet_type: &str, actor_id: &str) -> Result<(), FacetError> {
-        let span = tracing::span!(tracing::Level::DEBUG, "facet.detach", facet_type = %facet_type, actor_id = %actor_id);
-        let _enter = span.enter();
-
         metrics::counter!("plexspaces_facet_detach_attempts_total", "facet_type" => facet_type.to_string()).increment(1);
         let start = std::time::Instant::now();
 
@@ -553,7 +545,9 @@ impl FacetContainer {
         metrics::counter!("plexspaces_facet_detached_total", "facet_type" => facet_type.to_string()).increment(1);
         metrics::gauge!("plexspaces_facet_active_total", "facet_type" => facet_type.to_string())
             .decrement(1.0);
-        tracing::info!(facet_type = %facet_type, actor_id = %actor_id, "Facet detached");
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(facet_type = %facet_type, actor_id = %actor_id, "Facet detached");
+        }
 
         Ok(())
     }
@@ -592,7 +586,9 @@ impl FacetContainer {
             let facet_type = facet.facet_type();
             match facet.before_method(method, &current_args).await? {
                 InterceptResult::Continue => {
-                    debug!(method = %method, facet_type = %facet_type, "FacetContainer: Facet continued (no interception)");
+                    if tracing::enabled!(tracing::Level::TRACE) {
+                        tracing::trace!(method = %method, facet_type = %facet_type, "FacetContainer: Facet continued (no interception)");
+                    }
                 }
                 InterceptResult::ReplaceArgs(new_args) => {
                     current_args = new_args;

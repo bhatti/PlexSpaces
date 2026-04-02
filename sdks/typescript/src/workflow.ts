@@ -5,22 +5,8 @@
 // Single run-with-config semantics: use defaultRetryConfig() for one attempt; pass config with
 // max_attempts > 1 for retries.
 
-/**
- * Retry configuration aligned with proto RetryConfig.
- * Unset max_attempts is treated as 1 (single attempt) at runtime.
- */
-export interface RetryConfig {
-  /** Maximum attempts (1 = no retries; unset/0 treated as 1). */
-  max_attempts?: number;
-  /** Initial retry interval ms. Default 100. */
-  initial_interval_ms?: number;
-  /** Backoff rate (e.g. 2 = doubling). Default 2. */
-  backoff_rate?: number;
-  /** Max interval ms. Default 30000. */
-  max_interval_ms?: number;
-  /** Error types to retry (empty = all). */
-  retryable_errors?: string[];
-}
+import type { RetryConfig } from './proto.js';
+export type { RetryConfig } from './proto.js';
 
 /** Default retry config: single attempt (no retries). Aligns with proto when fields unset. */
 export function defaultRetryConfig(): RetryConfig {

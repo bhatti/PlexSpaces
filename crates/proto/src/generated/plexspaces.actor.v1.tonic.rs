@@ -258,8 +258,6 @@ pub mod actor_service_client {
                 );
             self.inner.streaming(req, path, codec).await
         }
-        /** Change actor state
-*/
         pub async fn set_actor_state(
             &mut self,
             request: impl tonic::IntoRequest<super::SetActorStateRequest>,
@@ -287,8 +285,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Migrate actor to different node
-*/
         pub async fn migrate_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::MigrateActorRequest>,
@@ -316,8 +312,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Delete an actor
-*/
         pub async fn delete_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::DeleteActorRequest>,
@@ -345,24 +339,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Monitor an actor (Erlang-style location transparent monitoring)
-
- ## Purpose
- Establishes a monitoring link from supervisor to actor. When the actor
- terminates (normally or abnormally), the remote node will notify the
- supervisor via NotifyActorDown.
-
- ## Erlang Philosophy
- In Erlang, monitor(process, Pid) works the same for local and remote processes.
- The runtime handles location transparency - same API whether the process is
- in the same node or a different node.
-
- ## Design Notes
- - supervisor_id: The actor that wants to be notified (usually a supervisor)
- - supervisor_callback: gRPC address where to send NotifyActorDown
- - actor_id can be local or remote (format: "actor@node")
- - Returns monitor_ref for potential demonitor() in future
-*/
         pub async fn monitor_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::MonitorActorRequest>,
@@ -390,22 +366,6 @@ pub mod actor_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /** Link two actors (Erlang link/1 equivalent)
-
- ## Purpose
- Creates a bidirectional link between two actors. When one actor dies abnormally,
- the linked actor automatically dies (cascading failure).
-
- ## Erlang Philosophy
- Equivalent to Erlang's `link(Pid)` - creates bidirectional link.
- If either process dies abnormally, the other dies too.
-
- ## Design Notes
- - Links are bidirectional (if A links to B, B is linked to A)
- - Links only propagate abnormal deaths (not "normal" shutdowns)
- - Links are used internally by supervision (parent-child relationships)
- - Links can be created explicitly via this API
-*/
         pub async fn link_actor(
             &mut self,
             request: impl tonic::IntoRequest<super::LinkActorRequest>,
@@ -543,33 +503,6 @@ pub mod actor_service_client {
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("plexspaces.actor.v1.ActorService", "AskReply"));
-            self.inner.unary(req, path, codec).await
-        }
-        pub async fn terminate_actor(
-            &mut self,
-            request: impl tonic::IntoRequest<super::TerminateActorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::TerminateActorResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
-            let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/plexspaces.actor.v1.ActorService/TerminateActor",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("plexspaces.actor.v1.ActorService", "TerminateActor"),
-                );
             self.inner.unary(req, path, codec).await
         }
         pub async fn create_shard_group(
@@ -1017,8 +950,6 @@ pub mod actor_service_server {
             tonic::Response<Self::StreamMessagesStream>,
             tonic::Status,
         >;
-        /** Change actor state
-*/
         async fn set_actor_state(
             &self,
             request: tonic::Request<super::SetActorStateRequest>,
@@ -1026,8 +957,6 @@ pub mod actor_service_server {
             tonic::Response<super::SetActorStateResponse>,
             tonic::Status,
         >;
-        /** Migrate actor to different node
-*/
         async fn migrate_actor(
             &self,
             request: tonic::Request<super::MigrateActorRequest>,
@@ -1035,8 +964,6 @@ pub mod actor_service_server {
             tonic::Response<super::MigrateActorResponse>,
             tonic::Status,
         >;
-        /** Delete an actor
-*/
         async fn delete_actor(
             &self,
             request: tonic::Request<super::DeleteActorRequest>,
@@ -1044,24 +971,6 @@ pub mod actor_service_server {
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
         >;
-        /** Monitor an actor (Erlang-style location transparent monitoring)
-
- ## Purpose
- Establishes a monitoring link from supervisor to actor. When the actor
- terminates (normally or abnormally), the remote node will notify the
- supervisor via NotifyActorDown.
-
- ## Erlang Philosophy
- In Erlang, monitor(process, Pid) works the same for local and remote processes.
- The runtime handles location transparency - same API whether the process is
- in the same node or a different node.
-
- ## Design Notes
- - supervisor_id: The actor that wants to be notified (usually a supervisor)
- - supervisor_callback: gRPC address where to send NotifyActorDown
- - actor_id can be local or remote (format: "actor@node")
- - Returns monitor_ref for potential demonitor() in future
-*/
         async fn monitor_actor(
             &self,
             request: tonic::Request<super::MonitorActorRequest>,
@@ -1069,22 +978,6 @@ pub mod actor_service_server {
             tonic::Response<super::MonitorActorResponse>,
             tonic::Status,
         >;
-        /** Link two actors (Erlang link/1 equivalent)
-
- ## Purpose
- Creates a bidirectional link between two actors. When one actor dies abnormally,
- the linked actor automatically dies (cascading failure).
-
- ## Erlang Philosophy
- Equivalent to Erlang's `link(Pid)` - creates bidirectional link.
- If either process dies abnormally, the other dies too.
-
- ## Design Notes
- - Links are bidirectional (if A links to B, B is linked to A)
- - Links only propagate abnormal deaths (not "normal" shutdowns)
- - Links are used internally by supervision (parent-child relationships)
- - Links can be created explicitly via this API
-*/
         async fn link_actor(
             &self,
             request: tonic::Request<super::LinkActorRequest>,
@@ -1118,13 +1011,6 @@ pub mod actor_service_server {
             request: tonic::Request<super::AskReplyRequest>,
         ) -> std::result::Result<
             tonic::Response<super::AskReplyResponse>,
-            tonic::Status,
-        >;
-        async fn terminate_actor(
-            &self,
-            request: tonic::Request<super::TerminateActorRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::TerminateActorResponse>,
             tonic::Status,
         >;
         async fn create_shard_group(
@@ -1980,52 +1866,6 @@ pub mod actor_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = AskReplySvc(inner);
-                        let codec = tonic::codec::ProstCodec::default();
-                        let mut grpc = tonic::server::Grpc::new(codec)
-                            .apply_compression_config(
-                                accept_compression_encodings,
-                                send_compression_encodings,
-                            )
-                            .apply_max_message_size_config(
-                                max_decoding_message_size,
-                                max_encoding_message_size,
-                            );
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                }
-                "/plexspaces.actor.v1.ActorService/TerminateActor" => {
-                    #[allow(non_camel_case_types)]
-                    struct TerminateActorSvc<T: ActorService>(pub Arc<T>);
-                    impl<
-                        T: ActorService,
-                    > tonic::server::UnaryService<super::TerminateActorRequest>
-                    for TerminateActorSvc<T> {
-                        type Response = super::TerminateActorResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
-                        fn call(
-                            &mut self,
-                            request: tonic::Request<super::TerminateActorRequest>,
-                        ) -> Self::Future {
-                            let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as ActorService>::terminate_actor(&inner, request).await
-                            };
-                            Box::pin(fut)
-                        }
-                    }
-                    let accept_compression_encodings = self.accept_compression_encodings;
-                    let send_compression_encodings = self.send_compression_encodings;
-                    let max_decoding_message_size = self.max_decoding_message_size;
-                    let max_encoding_message_size = self.max_encoding_message_size;
-                    let inner = self.inner.clone();
-                    let fut = async move {
-                        let inner = inner.0;
-                        let method = TerminateActorSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

@@ -165,7 +165,7 @@ async fn wait_for_actors_activated(
     // Poll with adaptive backoff - check registered_actor_ids which is more reliable
     while start.elapsed() < timeout_duration {
         // Check if all actors are registered (registered_actor_ids is updated when actors are spawned)
-        let registered_ids = registry.registered_actor_ids().read().await;
+        let registered_ids = registry.registered_actor_ids().await;
         let expected_set: std::collections::HashSet<String> =
             expected_actor_ids.iter().cloned().collect();
         let registered_set: std::collections::HashSet<String> =
@@ -239,7 +239,7 @@ async fn wait_for_min_actors_activated(
     // Poll with adaptive backoff
     while start.elapsed() < timeout_duration {
         // Check current count
-        let registered_ids = registry.registered_actor_ids().read().await;
+        let registered_ids = registry.registered_actor_ids().await;
         if registered_ids.len() >= min_count {
             return true;
         }
@@ -373,7 +373,7 @@ async fn get_all_actor_ids(node: &Node) -> Vec<String> {
         .await
         .expect("ActorRegistry not found");
 
-    let registered_ids = actor_registry.registered_actor_ids().read().await;
+    let registered_ids = actor_registry.registered_actor_ids().await;
     registered_ids.iter().cloned().collect()
 }
 
@@ -1860,7 +1860,7 @@ async fn test_erlang_style_supervision_structure() {
             .await
             .expect("ActorRegistry not found");
 
-        let registered_ids = actor_registry.registered_actor_ids().read().await;
+        let registered_ids = actor_registry.registered_actor_ids().await;
         let spawned_count = expected_actors
             .iter()
             .filter(|expected| registered_ids.contains(expected.as_str()))

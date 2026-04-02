@@ -2,6 +2,16 @@
 
 TinyGo-oriented SDK for PlexSpaces WASM actors: implement the `Actor` interface, embed `BaseActor`, and use generated WIT imports for host calls.
 
+The SDK also exposes a proto-first authoring metadata layer so Go stays aligned with the Rust, Python, and TypeScript SDKs:
+
+- `DefineActor(...)`
+- `GenServerActor(...)`
+- `EventActor(...)`
+- `FSMActor(...)`
+- `WorkflowActorDefinition(...)`
+
+Use these with `ActorRouter.RouteDefinition(...)` when you want explicit behavior/facet metadata without inventing a separate Go-specific API shape.
+
 ## Module layout
 
 - **`plexspaces/`** — Actor API, host wrappers, router

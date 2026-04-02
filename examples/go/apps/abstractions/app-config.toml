@@ -1,0 +1,62 @@
+# Abstractions (Go WASM): GenServer + Workflow + GenEvent with shared services.
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "abstractions"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "abstractions" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } },
+  { type = "timer", priority = 80, config = { interval_ms = 1000 } },
+  { type = "reminder", priority = 70, config = { tick_interval_ms = 1500 } }
+]
+
+[[supervisor.children]]
+id = "workflow"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "Workflow"
+args = { role = "workflow" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+id = "channel"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenEvent"
+args = { role = "channel", group = "abstractions-group" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "process_group", priority = 90, config = { group = "abstractions-group" } }
+]
+
+[[supervisor.children]]
+id = "ephemeral"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "ephemeral", initial_count = "5" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } }
+]
+[[supervisor.children]]
+id = "controller"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "controller" }

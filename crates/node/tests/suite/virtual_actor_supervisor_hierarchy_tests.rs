@@ -255,7 +255,7 @@ async fn wait_for_actors_registered(
     let mut attempts = 0;
 
     while start.elapsed() < timeout_duration {
-        let registered_ids = registry.registered_actor_ids().read().await;
+        let registered_ids = registry.registered_actor_ids().await;
         let expected_set: std::collections::HashSet<String> =
             expected_actor_ids.iter().cloned().collect();
         let registered_set: std::collections::HashSet<String> =
@@ -472,11 +472,7 @@ async fn test_lazy_virtual_actors_registration() {
             .expect("ActorRegistry not found");
 
         assert!(
-            registry
-                .registered_actor_ids()
-                .read()
-                .await
-                .contains(&actor_id),
+            registry.registered_actor_ids().await.contains(&actor_id),
             "Lazy virtual actor should remain registered"
         );
 
@@ -580,11 +576,7 @@ async fn test_mixed_eager_lazy_virtual_actors() {
 
         // Lazy actor should be registered but not active
         assert!(
-            registry
-                .registered_actor_ids()
-                .read()
-                .await
-                .contains(&lazy_id),
+            registry.registered_actor_ids().await.contains(&lazy_id),
             "Lazy virtual actor should be registered"
         );
 

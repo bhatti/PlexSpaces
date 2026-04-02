@@ -127,3 +127,16 @@ pub trait StateLoader: Send + Sync {
     /// - Increment when making breaking state format changes
     fn schema_version(&self) -> u32;
 }
+
+/// Framework-owned bridge for automatic checkpoint capture and restoration.
+///
+/// Durability remains a dynamic facet capability. The runtime injects this
+/// adapter automatically so actors do not need durability-specific client code.
+#[async_trait]
+pub trait CheckpointStateAdapter: Send + Sync {
+    /// Capture the current actor state for a checkpoint.
+    async fn capture_state(&self) -> JournalResult<Option<Vec<u8>>>;
+
+    /// Restore actor state from checkpoint bytes.
+    async fn restore_state(&self, state_data: &[u8]) -> JournalResult<bool>;
+}

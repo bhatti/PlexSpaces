@@ -73,13 +73,15 @@ fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
                 let mailbox = rt
                     .block_on(Mailbox::new(MailboxConfig::default(), actor_id.clone()))
                     .expect("Failed to create mailbox in factory");
-                rt.block_on(super::test_actor_helpers::actor_with_default_service_locator(
-                    actor_id.clone(),
-                    Box::new(MockBehavior::new()),
-                    mailbox,
-                    "test-tenant".to_string(),
-                    "test".to_string(),
-                ))
+                rt.block_on(
+                    super::test_actor_helpers::actor_with_default_service_locator(
+                        actor_id.clone(),
+                        Box::new(MockBehavior::new()),
+                        mailbox,
+                        "test-tenant".to_string(),
+                        "test".to_string(),
+                    ),
+                )
             })
             .join()
             .expect("Thread panicked");
@@ -202,7 +204,8 @@ async fn test_three_level_supervision_tree() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    ).await;
+    )
+    .await;
 
     // Create 2 mid-level supervisors
     let (mid1_supervisor, mid1_events) = create_supervisor_with_locator(
@@ -211,7 +214,8 @@ async fn test_three_level_supervision_tree() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    ).await;
+    )
+    .await;
 
     let (mid2_supervisor, mid2_events) = create_supervisor_with_locator(
         "mid-supervisor-2".to_string(),
@@ -219,7 +223,8 @@ async fn test_three_level_supervision_tree() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    ).await;
+    )
+    .await;
 
     let journal = Arc::new(MemoryJournal::new());
 
@@ -317,7 +322,8 @@ async fn test_failure_isolation_across_branches() {
             max_restarts: 5,
             within_seconds: 60,
         },
-    ).await;
+    )
+    .await;
 
     // Create Branch1 with OneForAll strategy (restarts all children on failure)
     let (branch1_supervisor, branch1_events) = create_supervisor_with_locator(
@@ -326,7 +332,8 @@ async fn test_failure_isolation_across_branches() {
             max_restarts: 5,
             within_seconds: 60,
         },
-    ).await;
+    )
+    .await;
 
     // Create Branch2 with OneForOne strategy (only restarts failed child)
     let (branch2_supervisor, branch2_events) = create_supervisor_with_locator(
@@ -335,7 +342,8 @@ async fn test_failure_isolation_across_branches() {
             max_restarts: 5,
             within_seconds: 60,
         },
-    ).await;
+    )
+    .await;
 
     let journal = Arc::new(MemoryJournal::new());
 
@@ -434,7 +442,8 @@ async fn test_cascading_shutdown() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    ).await;
+    )
+    .await;
 
     // Create 2 mid-level supervisors
     let (mid1_supervisor, mid1_events) = create_supervisor_with_locator(
@@ -443,7 +452,8 @@ async fn test_cascading_shutdown() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    ).await;
+    )
+    .await;
 
     let (mid2_supervisor, mid2_events) = create_supervisor_with_locator(
         "mid-supervisor-2".to_string(),
@@ -451,7 +461,8 @@ async fn test_cascading_shutdown() {
             max_restarts: 3,
             within_seconds: 60,
         },
-    ).await;
+    )
+    .await;
 
     let journal = Arc::new(MemoryJournal::new());
 

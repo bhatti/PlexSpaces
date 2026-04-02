@@ -199,8 +199,8 @@ pub mod ddb;
 
 pub use config::{
     create_keyvalue_from_config, create_keyvalue_stores_from_config,
-    create_keyvalue_stores_from_shared_db, create_keyvalue_stores_from_storage_config,
-    BackendType, KVConfig,
+    create_keyvalue_stores_from_shared_db, create_keyvalue_stores_from_storage_config, BackendType,
+    KVConfig,
 };
 pub use error::{KVError, KVResult};
 

@@ -1009,18 +1009,9 @@ mod tests {
         initialize(&mut spec);
 
         // Verify directories were created
-        assert!(
-            Path::new(&test_base_str).exists(),
-            "base_dir should exist"
-        );
-        assert!(
-            test_base_dir.join("db").exists(),
-            "db dir should exist"
-        );
-        assert!(
-            test_base_dir.join("apps").exists(),
-            "apps dir should exist"
-        );
+        assert!(Path::new(&test_base_str).exists(), "base_dir should exist");
+        assert!(test_base_dir.join("db").exists(), "db dir should exist");
+        assert!(test_base_dir.join("apps").exists(), "apps dir should exist");
 
         env::remove_var("PLEXSPACES_BASE_DIR");
     }

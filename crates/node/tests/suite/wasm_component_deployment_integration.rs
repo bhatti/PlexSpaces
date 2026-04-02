@@ -347,7 +347,7 @@ async fn test_wasm_component_deployment_with_supervisor_tree() {
                     .await
                     .expect("ActorRegistry should be available");
 
-                let registered_ids = actor_registry.registered_actor_ids().read().await;
+                let registered_ids = actor_registry.registered_actor_ids().await;
                 let calculator_actor_count = registered_ids
                     .iter()
                     .filter(|id| id.contains("calculator"))

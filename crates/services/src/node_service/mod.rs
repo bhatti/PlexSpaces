@@ -227,8 +227,7 @@ impl NodeServiceImpl {
         // Get actor counts from ActorRegistry
         let active_actors =
             if let Some(actor_registry) = self.service_locator.actor_registry().await {
-                let registered_ids = actor_registry.registered_actor_ids().read().await;
-                registered_ids.len() as u32
+                actor_registry.live_actor_count().await as u32
             } else {
                 0
             };

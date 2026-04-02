@@ -22,8 +22,8 @@ Usage:
     ts = host.now_ms()
     
     # Process groups
-    host.process_groups.join("room", "user-123")
-    host.process_groups.publish("room", {"msg": "hello"})
+    host.process_groups.join("room")
+    host.process_groups.broadcast("room", "chat", {"msg": "hello"})
 """
 
 import json
@@ -71,9 +71,32 @@ class _MockHost:
 
     def __init__(self):
         self._kv: Dict[str, str] = {}
+        self._tuples: List[List[Any]] = []
+        self._blobs: Dict[str, str] = {}
+        self._groups: Dict[str, List[str]] = {}
+        self._sent_messages: List[Dict[str, str]] = []
+        self._group_messages: List[Dict[str, str]] = []
+        self._self_id = "mock-actor"
         self.ts = _TupleSpaceHelper(self)
 
+    def _matches_tuple(self, tuple_value: List[Any], pattern: List[Any]) -> bool:
+        if len(tuple_value) != len(pattern):
+            return False
+        for actual, expected in zip(tuple_value, pattern):
+            if expected is None or expected == "*":
+                continue
+            if actual != expected:
+                return False
+        return True
+
     def send(self, to: str, msg_type: str, payload_json: str) -> str:
+        self._sent_messages.append(
+            {
+                "to": to,
+                "msg_type": msg_type,
+                "payload_json": payload_json,
+            }
+        )
         print(f"[MOCK] send({to}, {msg_type}, {payload_json})")
         return ""
 
@@ -93,19 +116,51 @@ class _MockHost:
 
     def ts_write(self, tuple_json: str) -> str:
         """TupleSpace write (mock). Returns empty on success."""
+        try:
+            tuple_value = json.loads(tuple_json)
+            if isinstance(tuple_value, list):
+                self._tuples.append(tuple_value)
+        except json.JSONDecodeError:
+            return "ERROR: invalid tuple JSON"
         return ""
 
     def ts_read(self, pattern_json: str) -> str:
         """TupleSpace read (mock). Returns empty if not found."""
+        try:
+            pattern = json.loads(pattern_json)
+            if not isinstance(pattern, list):
+                return ""
+        except json.JSONDecodeError:
+            return "ERROR: invalid pattern JSON"
+        for tuple_value in self._tuples:
+            if self._matches_tuple(tuple_value, pattern):
+                return json.dumps(tuple_value)
         return ""
 
     def ts_take(self, pattern_json: str) -> str:
         """TupleSpace take (mock). Returns empty if not found."""
+        try:
+            pattern = json.loads(pattern_json)
+            if not isinstance(pattern, list):
+                return ""
+        except json.JSONDecodeError:
+            return "ERROR: invalid pattern JSON"
+        for index, tuple_value in enumerate(self._tuples):
+            if self._matches_tuple(tuple_value, pattern):
+                self._tuples.pop(index)
+                return json.dumps(tuple_value)
         return ""
 
     def ts_read_all(self, pattern_json: str) -> str:
         """TupleSpace read-all (mock). Returns empty array."""
-        return "[]"
+        try:
+            pattern = json.loads(pattern_json)
+            if not isinstance(pattern, list):
+                return "[]"
+        except json.JSONDecodeError:
+            return "ERROR: invalid pattern JSON"
+        matches = [tuple_value for tuple_value in self._tuples if self._matches_tuple(tuple_value, pattern)]
+        return json.dumps(matches)
 
     def kv_delete(self, key: str) -> str:
         """Key-value delete (mock). Returns empty on success."""
@@ -164,19 +219,21 @@ class _MockHost:
 
     def blob_upload(self, blob_id: str, data: str, content_type: str) -> str:
         """Blob upload (mock). Returns empty on success."""
+        self._blobs[blob_id] = data
         return ""
 
     def blob_download(self, blob_id: str) -> str:
         """Blob download (mock). Returns empty if not found."""
-        return ""
+        return self._blobs.get(blob_id, "")
 
     def blob_delete(self, blob_id: str) -> str:
         """Blob delete (mock). Returns empty on success."""
+        self._blobs.pop(blob_id, None)
         return ""
 
     def blob_list(self, prefix: str) -> str:
         """Blob list (mock). Returns empty array."""
-        return "[]"
+        return json.dumps([blob_id for blob_id in self._blobs if blob_id.startswith(prefix)])
 
     def ask(self, to: str, msg_type: str, payload_json: str, timeout_ms: int) -> str:
         """Ask (mock). Returns empty JSON."""
@@ -185,7 +242,7 @@ class _MockHost:
 
     def self_id(self) -> str:
         """Self ID (mock). Returns mock actor ID."""
-        return "mock-actor"
+        return self._self_id
 
     def spawn(self, module_ref: str, actor_id: str, init_config_json: str) -> str:
         """Spawn (mock). Returns spawned actor ID."""
@@ -220,18 +277,31 @@ class _MockHost:
 
     def pg_join(self, group_name: str) -> str:
         """Process group join (mock). Returns empty on success."""
+        members = self._groups.setdefault(group_name, [])
+        if self._self_id not in members:
+            members.append(self._self_id)
         return ""
 
     def pg_leave(self, group_name: str) -> str:
         """Process group leave (mock). Returns empty on success."""
+        members = self._groups.get(group_name, [])
+        if self._self_id in members:
+            members.remove(self._self_id)
         return ""
 
     def pg_members(self, group_name: str) -> str:
         """Process group members (mock). Returns empty array."""
-        return "[]"
+        return json.dumps(self._groups.get(group_name, []))
 
     def pg_broadcast(self, group_name: str, msg_type: str, payload_json: str) -> str:
         """Process group broadcast (mock). Returns empty on success."""
+        self._group_messages.append(
+            {
+                "group": group_name,
+                "msg_type": msg_type,
+                "payload_json": payload_json,
+            }
+        )
         return ""
 
     def pool_checkout(self, pool_name: str, timeout_ms: int) -> str:

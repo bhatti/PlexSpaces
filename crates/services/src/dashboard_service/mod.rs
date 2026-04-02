@@ -253,14 +253,17 @@ impl DashboardServiceImpl {
             }
 
             // Also count actors without type (registered but not in index)
-            let registered_ids = actor_registry.registered_actor_ids().read().await;
-            let mut typed_actors: HashSet<ActorId> = HashSet::new();
-            for actor_ids in index.values() {
+            let registered_actor_entries = actor_registry.registered_actor_entries().await;
+            let mut typed_actors: HashSet<(String, String, ActorId)> = HashSet::new();
+            for ((tenant_id, namespace, _actor_type), actor_ids) in index.iter() {
                 for actor_id in actor_ids {
-                    typed_actors.insert(actor_id.clone());
+                    typed_actors.insert((tenant_id.clone(), namespace.clone(), actor_id.clone()));
                 }
             }
-            let untyped_count = registered_ids.len().saturating_sub(typed_actors.len());
+            let untyped_count = registered_actor_entries
+                .iter()
+                .filter(|entry| !typed_actors.contains(*entry))
+                .count();
             if untyped_count > 0 {
                 *active_actors_by_type
                     .entry("unknown".to_string())
@@ -367,18 +370,14 @@ impl DashboardServiceImpl {
             // For per-actor metrics, we'd need to track them separately
             // For now, return aggregate metrics as approximation
             // ActorMetrics is a proto struct with fields, not methods
+            let is_live = actor_registry
+                .live_actor_entries()
+                .await
+                .iter()
+                .any(|(_, _, live_actor_id)| live_actor_id == actor_id);
             Some(ActorMetrics {
                 spawn_total: metrics.spawn_total,
-                active: if actor_registry
-                    .registered_actor_ids()
-                    .read()
-                    .await
-                    .contains(actor_id)
-                {
-                    1
-                } else {
-                    0
-                },
+                active: if is_live { 1 } else { 0 },
                 messages_routed: metrics.messages_routed,
                 local_deliveries: metrics.local_deliveries,
                 remote_deliveries: metrics.remote_deliveries,
@@ -585,16 +584,16 @@ impl DashboardService for DashboardServiceImpl {
 
             // Get from actors (parse from actor IDs or get from isolation context)
             if let Some(actor_registry) = self.service_locator.actor_registry().await {
-                let registered_ids = actor_registry.registered_actor_ids().read().await;
-                for actor_id in registered_ids.iter() {
-                    let (_, tenant) = self.parse_actor_id(actor_id);
-                    tenant_ids.insert(tenant);
-                }
+                tenant_ids.extend(actor_registry.registered_tenant_ids().await);
             }
 
             // Always show at least 1 tenant if there are nodes running
             let count = tenant_ids.len() as u32;
-            if count == 0 && total_nodes > 0 { 1 } else { count }
+            if count == 0 && total_nodes > 0 {
+                1
+            } else {
+                count
+            }
         } else if let Some(ref tid) = tenant_id {
             if tid.is_empty() {
                 // If no tenant_id but node is running, show 1 (current tenant)
@@ -650,14 +649,17 @@ impl DashboardService for DashboardServiceImpl {
             }
 
             // Also count actors without type (registered but not in index)
-            let registered_ids = actor_registry.registered_actor_ids().read().await;
-            let mut typed_actors = HashSet::new();
-            for actor_ids in index.values() {
+            let registered_actor_entries = actor_registry.registered_actor_entries().await;
+            let mut typed_actors: HashSet<(String, String, ActorId)> = HashSet::new();
+            for ((tenant_id, namespace, _actor_type), actor_ids) in index.iter() {
                 for actor_id in actor_ids {
-                    typed_actors.insert(actor_id.clone());
+                    typed_actors.insert((tenant_id.clone(), namespace.clone(), actor_id.clone()));
                 }
             }
-            let untyped_count = registered_ids.len().saturating_sub(typed_actors.len());
+            let untyped_count = registered_actor_entries
+                .iter()
+                .filter(|entry| !typed_actors.contains(*entry))
+                .count();
             if untyped_count > 0 {
                 *actors_by_type.entry("unknown".to_string()).or_insert(0) += untyped_count as u32;
             }
@@ -789,14 +791,17 @@ impl DashboardService for DashboardServiceImpl {
             }
 
             // Also count actors without type (registered but not in index)
-            let registered_ids = actor_registry.registered_actor_ids().read().await;
-            let mut typed_actors = HashSet::new();
-            for actor_ids in index.values() {
+            let registered_actor_entries = actor_registry.registered_actor_entries().await;
+            let mut typed_actors: HashSet<(String, String, ActorId)> = HashSet::new();
+            for ((tenant_id, namespace, _actor_type), actor_ids) in index.iter() {
                 for actor_id in actor_ids {
-                    typed_actors.insert(actor_id.clone());
+                    typed_actors.insert((tenant_id.clone(), namespace.clone(), actor_id.clone()));
                 }
             }
-            let untyped_count = registered_ids.len().saturating_sub(typed_actors.len());
+            let untyped_count = registered_actor_entries
+                .iter()
+                .filter(|entry| !typed_actors.contains(*entry))
+                .count();
             if untyped_count > 0 {
                 *actors_by_type.entry("unknown".to_string()).or_insert(0) += untyped_count as u32;
             }
@@ -805,11 +810,7 @@ impl DashboardService for DashboardServiceImpl {
         // Count unique tenants from actors
         let mut tenant_ids = HashSet::new();
         if let Some(actor_registry) = self.service_locator.actor_registry().await {
-            let registered_ids = actor_registry.registered_actor_ids().read().await;
-            for actor_id in registered_ids.iter() {
-                let (_, tenant) = self.parse_actor_id(actor_id);
-                tenant_ids.insert(tenant);
-            }
+            tenant_ids.extend(actor_registry.registered_tenant_ids().await);
         }
         let total_tenants = tenant_ids.len() as u32;
 
@@ -928,11 +929,16 @@ impl DashboardService for DashboardServiceImpl {
             .ok_or_else(|| Status::internal("ActorRegistry not found in ServiceLocator"))?;
 
         // Get registered actor IDs
-        let registered_ids = actor_registry.registered_actor_ids().read().await;
+        let registered_ids: Vec<ActorId> = actor_registry
+            .registered_actor_entries()
+            .await
+            .into_iter()
+            .map(|(_, _, actor_id)| actor_id)
+            .collect();
         let _actor_configs = actor_registry.actor_configs().read().await;
 
         let mut actors = Vec::new();
-        for actor_id in registered_ids.iter() {
+        for actor_id in &registered_ids {
             // Apply filters (proto fields are String, not Option<String>, so check if empty)
             if !req.actor_id_pattern.is_empty() {
                 if !actor_id.contains(&req.actor_id_pattern) {

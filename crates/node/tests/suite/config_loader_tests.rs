@@ -51,6 +51,60 @@ shutdown:
 }
 
 #[tokio::test]
+async fn test_load_release_spec_with_local_blob_backend() {
+    let yaml_content = r#"
+name: "test-release"
+version: "1.0.0"
+description: "Test release"
+node:
+  id: "test-node"
+  listen_address: "0.0.0.0:8000"
+  cluster_seed_nodes: []
+runtime:
+  blob:
+    backend: local
+    bucket: plexspaces-blobs
+    endpoint: ""
+    region: ""
+    access_key_id: ""
+    secret_access_key: ""
+    use_ssl: false
+    prefix: "/tmp/plexspaces-blobs"
+  grpc:
+    enabled: true
+    address: "0.0.0.0:8000"
+    max_connections: 100
+    keepalive_interval_seconds: 30
+  health:
+    heartbeat_interval_seconds: 10
+    heartbeat_timeout_seconds: 5
+    registry_url: "http://localhost:8000"
+applications: []
+env: {}
+shutdown:
+  global_timeout_seconds: 30
+  grace_period_seconds: 5
+  grpc_drain_timeout_seconds: 10
+"#;
+
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(yaml_content.as_bytes()).unwrap();
+    let path = file.path().to_str().unwrap().to_string();
+
+    let loader = ConfigLoader::new();
+    let spec = loader.load_release_spec(&path).await.unwrap();
+    let blob = spec
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.blob.as_ref())
+        .expect("blob config should be present");
+
+    assert_eq!(blob.backend, "local");
+    assert_eq!(blob.prefix, "/tmp/plexspaces-blobs");
+    assert_eq!(blob.bucket, "plexspaces-blobs");
+}
+
+#[tokio::test]
 async fn test_env_var_substitution() {
     // Use unique env var names to avoid conflicts with other tests
     let node_id_var = "TEST_ENV_SUB_NODE_ID";

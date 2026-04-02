@@ -58,6 +58,28 @@ impl WorkflowProbeActor {
     }
 }
 
+#[derive(Debug, Clone)]
+struct DurableWorkflowProbeActor {
+    count: i32,
+}
+
+impl DurableWorkflowProbeActor {
+    fn new_with_count(count: i32) -> Self {
+        Self { count }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DurableCounterActor {
+    count: i32,
+}
+
+impl DurableCounterActor {
+    fn new_with_count(count: i32) -> Self {
+        Self { count }
+    }
+}
+
 #[async_trait]
 impl ActorTrait for CounterActor {
     async fn handle_message(
@@ -88,6 +110,76 @@ impl ActorTrait for WorkflowProbeActor {
     }
 }
 
+#[async_trait]
+impl ActorTrait for DurableWorkflowProbeActor {
+    async fn handle_message(
+        &mut self,
+        ctx: &ActorContext,
+        msg: Message,
+    ) -> Result<(), BehaviorError> {
+        self.route_message(ctx, msg).await
+    }
+
+    fn behavior_type(&self) -> BehaviorType {
+        BehaviorType::Workflow
+    }
+
+    async fn capture_checkpoint_state(
+        &mut self,
+        _ctx: &ActorContext,
+    ) -> Result<Option<Vec<u8>>, plexspaces_core::ActorError> {
+        serde_json::to_vec(&serde_json::json!({ "count": self.count }))
+            .map(Some)
+            .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))
+    }
+
+    async fn restore_checkpoint_state(
+        &mut self,
+        _ctx: &ActorContext,
+        state_data: &[u8],
+    ) -> Result<bool, plexspaces_core::ActorError> {
+        let payload: serde_json::Value = serde_json::from_slice(state_data)
+            .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))?;
+        self.count = payload["count"].as_i64().unwrap_or_default() as i32;
+        Ok(true)
+    }
+}
+
+#[async_trait]
+impl ActorTrait for DurableCounterActor {
+    async fn handle_message(
+        &mut self,
+        ctx: &ActorContext,
+        msg: Message,
+    ) -> Result<(), BehaviorError> {
+        self.route_message(ctx, msg).await
+    }
+
+    fn behavior_type(&self) -> BehaviorType {
+        BehaviorType::GenServer
+    }
+
+    async fn capture_checkpoint_state(
+        &mut self,
+        _ctx: &ActorContext,
+    ) -> Result<Option<Vec<u8>>, plexspaces_core::ActorError> {
+        serde_json::to_vec(&serde_json::json!({ "count": self.count }))
+            .map(Some)
+            .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))
+    }
+
+    async fn restore_checkpoint_state(
+        &mut self,
+        _ctx: &ActorContext,
+        state_data: &[u8],
+    ) -> Result<bool, plexspaces_core::ActorError> {
+        let payload: serde_json::Value = serde_json::from_slice(state_data)
+            .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))?;
+        self.count = payload["count"].as_i64().unwrap_or_default() as i32;
+        Ok(true)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum CounterMessage {
     Increment,
@@ -107,6 +199,28 @@ impl GenServer for CounterActor {
         match counter_msg {
             CounterMessage::Increment => {
                 self.count += 1;
+                if !msg.sender_id.is_empty() {
+                    let correlation_id = if msg.correlation_id.is_empty() {
+                        None
+                    } else {
+                        Some(msg.correlation_id.as_str())
+                    };
+                    let reply = serde_json::json!({ "count": self.count });
+                    ctx.send_reply(
+                        correlation_id,
+                        &msg.sender_id,
+                        msg.receiver_id.clone(),
+                        Message {
+                            id: ulid::Ulid::new().to_string(),
+                            payload: serde_json::to_vec(&reply).unwrap(),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
+                    })?;
+                }
                 Ok(())
             }
             CounterMessage::GetCount => {
@@ -151,6 +265,94 @@ impl GenServer for WorkflowProbeActor {
         match counter_msg {
             CounterMessage::Increment => {
                 self.count += 1;
+                if !msg.sender_id.is_empty() {
+                    let correlation_id = if msg.correlation_id.is_empty() {
+                        None
+                    } else {
+                        Some(msg.correlation_id.as_str())
+                    };
+                    let reply = serde_json::json!({ "count": self.count });
+                    ctx.send_reply(
+                        correlation_id,
+                        &msg.sender_id,
+                        msg.receiver_id.clone(),
+                        Message {
+                            id: ulid::Ulid::new().to_string(),
+                            payload: serde_json::to_vec(&reply).unwrap(),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
+                    })?;
+                }
+                Ok(())
+            }
+            CounterMessage::GetCount => {
+                let reply = serde_json::json!({ "count": self.count });
+                if !msg.sender_id.is_empty() {
+                    let correlation_id = if msg.correlation_id.is_empty() {
+                        None
+                    } else {
+                        Some(msg.correlation_id.as_str())
+                    };
+                    ctx.send_reply(
+                        correlation_id,
+                        &msg.sender_id,
+                        msg.receiver_id.clone(),
+                        Message {
+                            id: ulid::Ulid::new().to_string(),
+                            payload: serde_json::to_vec(&reply).unwrap(),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
+                    })?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl GenServer for DurableCounterActor {
+    async fn handle_request(
+        &mut self,
+        ctx: &ActorContext,
+        msg: Message,
+    ) -> Result<(), BehaviorError> {
+        let counter_msg: CounterMessage = serde_json::from_slice(&msg.payload)
+            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
+
+        match counter_msg {
+            CounterMessage::Increment => {
+                self.count += 1;
+                if !msg.sender_id.is_empty() {
+                    let correlation_id = if msg.correlation_id.is_empty() {
+                        None
+                    } else {
+                        Some(msg.correlation_id.as_str())
+                    };
+                    let reply = serde_json::json!({ "count": self.count });
+                    ctx.send_reply(
+                        correlation_id,
+                        &msg.sender_id,
+                        msg.receiver_id.clone(),
+                        Message {
+                            id: ulid::Ulid::new().to_string(),
+                            payload: serde_json::to_vec(&reply).unwrap(),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
+                    })?;
+                }
                 Ok(())
             }
             CounterMessage::GetCount => {
@@ -200,6 +402,24 @@ async fn ask_for_count(
     Ok(payload["count"].as_i64().unwrap_or_default() as i32)
 }
 
+async fn increment_count(
+    actor_ref: &(dyn plexspaces_core::MessageSender + Send + Sync),
+) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {
+    let reply = actor_ref
+        .ask(
+            Message {
+                id: ulid::Ulid::new().to_string(),
+                payload: serde_json::to_vec(&CounterMessage::Increment)?,
+                message_type: "call".to_string(),
+                ..Default::default()
+            },
+            Duration::from_secs(5),
+        )
+        .await?;
+    let payload: serde_json::Value = serde_json::from_slice(&reply.payload)?;
+    Ok(payload["count"].as_i64().unwrap_or_default() as i32)
+}
+
 async fn register_counter_behavior_with_initial_count(
     service_locator: &plexspaces_services::ServiceLocatorImpl,
     actor_type: &str,
@@ -226,6 +446,41 @@ async fn register_counter_behavior_with_initial_count(
                     .and_then(|value| value.as_i64())
                     .unwrap_or_default() as i32;
                 Ok(Box::new(CounterActor::new_with_count(initial_count)) as Box<dyn ActorTrait>)
+            })
+        })
+        .await;
+    service_locator
+        .register_behavior_registry(Arc::new(registry))
+        .await;
+}
+
+async fn register_durable_counter_behavior_with_initial_count(
+    service_locator: &plexspaces_services::ServiceLocatorImpl,
+    actor_type: &str,
+) {
+    let registry = BehaviorRegistry::new();
+    let module_name = actor_type.to_string();
+    registry
+        .register(actor_type.to_string(), move |args| {
+            let args = args.to_vec();
+            let module_name = module_name.clone();
+            Box::pin(async move {
+                let config = if args.is_empty() {
+                    serde_json::json!({})
+                } else {
+                    serde_json::from_slice(&args).map_err(|e| {
+                        BehaviorFactoryError::InvalidArguments(
+                            module_name.clone(),
+                            format!("invalid JSON config: {}", e),
+                        )
+                    })?
+                };
+                let initial_count = config
+                    .get("initial_count")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or_default() as i32;
+                Ok(Box::new(DurableCounterActor::new_with_count(initial_count))
+                    as Box<dyn ActorTrait>)
             })
         })
         .await;
@@ -261,6 +516,43 @@ async fn register_workflow_probe_behavior(
                     .unwrap_or_default() as i32;
                 Ok(Box::new(WorkflowProbeActor::new_with_count(initial_count))
                     as Box<dyn ActorTrait>)
+            })
+        })
+        .await;
+    service_locator
+        .register_behavior_registry(Arc::new(registry))
+        .await;
+}
+
+async fn register_durable_workflow_probe_behavior(
+    service_locator: &plexspaces_services::ServiceLocatorImpl,
+    actor_type: &str,
+) {
+    let registry = BehaviorRegistry::new();
+    let module_name = actor_type.to_string();
+    registry
+        .register(actor_type.to_string(), move |args| {
+            let args = args.to_vec();
+            let module_name = module_name.clone();
+            Box::pin(async move {
+                let config = if args.is_empty() {
+                    serde_json::json!({})
+                } else {
+                    serde_json::from_slice(&args).map_err(|e| {
+                        BehaviorFactoryError::InvalidArguments(
+                            module_name.clone(),
+                            format!("invalid JSON config: {}", e),
+                        )
+                    })?
+                };
+                let initial_count = config
+                    .get("initial_count")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or_default() as i32;
+                Ok(
+                    Box::new(DurableWorkflowProbeActor::new_with_count(initial_count))
+                        as Box<dyn ActorTrait>,
+                )
             })
         })
         .await;
@@ -404,6 +696,12 @@ async fn current_facet_types(
         .expect("actor facets should be stored");
     let guard = facets.read().await;
     guard.list_facets()
+}
+
+fn count_from_invoke_response(response: &LocalInvokeResponse) -> i32 {
+    let payload: serde_json::Value =
+        serde_json::from_slice(&response.payload).expect("ask reply payload should be JSON");
+    payload["count"].as_i64().unwrap_or_default() as i32
 }
 
 async fn assert_has_concrete_timer_and_reminder_facets(
@@ -726,7 +1024,10 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
         true,
     )
     .await;
-    assert!(activate_response.is_ok(), "initial activation of user-1 must succeed");
+    assert!(
+        activate_response.is_ok(),
+        "initial activation of user-1 must succeed"
+    );
 
     let actor_registry = service_locator.actor_registry().await.unwrap();
     wait_for_actor_registration(&actor_registry, &actor_id).await;
@@ -914,7 +1215,12 @@ async fn test_virtual_actor_activation_with_http_format() {
 
     // Build proper actor ID format
     use plexspaces_core::actor_id::build_actor_id;
-    let actor_id = build_actor_id(&instance_id, base_actor_type, Some(namespace), "test-node-http-fmt");
+    let actor_id = build_actor_id(
+        &instance_id,
+        base_actor_type,
+        Some(namespace),
+        "test-node-http-fmt",
+    );
 
     // Verify format is correct (not //orbit-tracker::...)
     assert!(
@@ -1121,6 +1427,13 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
         initial_count, 7,
         "behavior should be rebuilt from init_config_template on first activation"
     );
+
+    let incremented_count = increment_count(actor_ref.as_ref()).await.unwrap();
+    assert_eq!(
+        incremented_count, 8,
+        "live actor state should reflect mutations before explicit stop"
+    );
+
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     service_locator
@@ -1157,7 +1470,7 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
     let reactivated_count = ask_for_count(reactivated_ref.as_ref()).await.unwrap();
     assert_eq!(
         reactivated_count, 7,
-        "reactivation should rebuild from stored type metadata rather than a retained instance"
+        "non-durable reactivation should rebuild from init_config_template instead of leaked in-memory state"
     );
 
     let instance_metadata = virtual_actor_manager.get_metadata(&actor_id).await.unwrap();
@@ -1283,16 +1596,18 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
             },
             plexspaces_proto::common::v1::Facet {
                 r#type: "timer".to_string(),
-                config: std::collections::HashMap::from([
-                    ("interval_ms".to_string(), "250".to_string()),
-                ]),
+                config: std::collections::HashMap::from([(
+                    "interval_ms".to_string(),
+                    "250".to_string(),
+                )]),
                 ..Default::default()
             },
             plexspaces_proto::common::v1::Facet {
                 r#type: "reminder".to_string(),
-                config: std::collections::HashMap::from([
-                    ("default_due_time".to_string(), "100ms".to_string()),
-                ]),
+                config: std::collections::HashMap::from([(
+                    "default_due_time".to_string(),
+                    "100ms".to_string(),
+                )]),
                 ..Default::default()
             },
         ]),
@@ -1321,14 +1636,27 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
         true,
     )
     .await;
-    assert!(response.is_ok(), "initial activation must succeed: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "initial activation must succeed: {:?}",
+        response.err()
+    );
 
     wait_for_actor_registration(&actor_registry, &actor_id).await;
 
     let facet_types = current_facet_types(&service_locator, &actor_id).await;
-    assert!(facet_types.contains(&"virtual_actor".to_string()), "virtual_actor facet missing before stop");
-    assert!(facet_types.contains(&"timer".to_string()), "timer facet missing before stop");
-    assert!(facet_types.contains(&"reminder".to_string()), "reminder facet missing before stop");
+    assert!(
+        facet_types.contains(&"virtual_actor".to_string()),
+        "virtual_actor facet missing before stop"
+    );
+    assert!(
+        facet_types.contains(&"timer".to_string()),
+        "timer facet missing before stop"
+    );
+    assert!(
+        facet_types.contains(&"reminder".to_string()),
+        "reminder facet missing before stop"
+    );
     assert_has_concrete_timer_and_reminder_facets(&service_locator, &actor_id).await;
 
     service_locator
@@ -1352,14 +1680,24 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
     .await;
     assert!(
         response.is_ok(),
-        "reactivation with timer/reminder facets should succeed: {:?}", response.err()
+        "reactivation with timer/reminder facets should succeed: {:?}",
+        response.err()
     );
 
     wait_for_actor_registration(&actor_registry, &actor_id).await;
     let reactivated_facet_types = current_facet_types(&service_locator, &actor_id).await;
-    assert!(reactivated_facet_types.contains(&"virtual_actor".to_string()), "virtual_actor missing after respawn");
-    assert!(reactivated_facet_types.contains(&"timer".to_string()), "timer missing after respawn");
-    assert!(reactivated_facet_types.contains(&"reminder".to_string()), "reminder missing after respawn");
+    assert!(
+        reactivated_facet_types.contains(&"virtual_actor".to_string()),
+        "virtual_actor missing after respawn"
+    );
+    assert!(
+        reactivated_facet_types.contains(&"timer".to_string()),
+        "timer missing after respawn"
+    );
+    assert!(
+        reactivated_facet_types.contains(&"reminder".to_string()),
+        "reminder missing after respawn"
+    );
     assert_has_concrete_timer_and_reminder_facets(&service_locator, &actor_id).await;
 
     let actor_ref = actor_registry.lookup_actor(&actor_id).await.unwrap();
@@ -1367,6 +1705,281 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
     assert_eq!(
         count, 3,
         "reactivation should rebuild from init_config_template"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_virtual_actor_reactivation_restores_durable_state() {
+    let node = NodeBuilder::new("test-node").build().await;
+    let service_locator = node.service_locator();
+    let tenant_id = "test-tenant";
+    let actor_type = "durable-counter";
+    let namespace = "test-ns";
+    register_durable_counter_behavior_with_initial_count(&service_locator, actor_type).await;
+
+    use plexspaces_core::actor_id::build_actor_id;
+    let actor_id = build_actor_id("cart-1", actor_type, Some(namespace), "test-node");
+    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+
+    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    plexspaces_core::register_virtual_actor_type_consistent(
+        &sl_dyn,
+        actor_type.to_string(),
+        namespace.to_string(),
+        None,
+        Some(&[
+            plexspaces_proto::common::v1::Facet {
+                r#type: "virtual_actor".to_string(),
+                config: std::collections::HashMap::from([
+                    ("idle_timeout".to_string(), "1s".to_string()),
+                    ("activation_strategy".to_string(), "lazy".to_string()),
+                ]),
+                ..Default::default()
+            },
+            plexspaces_proto::common::v1::Facet {
+                r#type: "durability".to_string(),
+                config: std::collections::HashMap::from([
+                    ("checkpoint_interval".to_string(), "1".to_string()),
+                    ("replay_on_activation".to_string(), "true".to_string()),
+                    ("state_schema_version".to_string(), "1".to_string()),
+                ]),
+                ..Default::default()
+            },
+        ]),
+        None,
+        Some(tenant_id.to_string()),
+        Some(br#"{"initial_count":0}"#.to_vec()),
+    )
+    .await
+    .expect("type registration must succeed");
+
+    let actor_registry = service_locator.actor_registry().await.unwrap();
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:cart-1", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(
+        response.is_ok(),
+        "initial activation must succeed: {:?}",
+        response.err()
+    );
+
+    wait_for_actor_registration(&actor_registry, &actor_id).await;
+    assert!(
+        actor_registry.get_actor_instance(&actor_id).await.is_some(),
+        "reactivated durable virtual actor should store a live actor instance for explicit stop"
+    );
+    let increment_one = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:cart-1", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::Increment).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("first increment should succeed");
+    assert_eq!(count_from_invoke_response(&increment_one), 1);
+    let increment_two = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:cart-1", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::Increment).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("second increment should succeed");
+    assert_eq!(count_from_invoke_response(&increment_two), 2);
+
+    service_locator
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&ctx, &actor_id)
+        .await
+        .unwrap();
+
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:cart-1", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(
+        response.is_ok(),
+        "reactivation must succeed: {:?}",
+        response.err()
+    );
+
+    wait_for_actor_registration(&actor_registry, &actor_id).await;
+    assert!(
+        actor_registry.get_actor_instance(&actor_id).await.is_some(),
+        "reactivated durable virtual actor should store a live actor instance after reactivation"
+    );
+    let reactivated_facet_types = current_facet_types(&service_locator, &actor_id).await;
+    assert!(
+        reactivated_facet_types.contains(&"virtual_actor".to_string()),
+        "virtual_actor missing after durable reactivation"
+    );
+    assert!(
+        reactivated_facet_types.contains(&"durability".to_string()),
+        "durability missing after durable reactivation"
+    );
+    let reactivated = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:cart-1", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("reactivated count query should succeed");
+    assert_eq!(
+        count_from_invoke_response(&reactivated),
+        2,
+        "durable virtual actor should restore last checkpoint"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_virtual_actor_reactivation_recreates_process_group_facet() {
+    let node = NodeBuilder::new("test-node").build().await;
+    let service_locator = node.service_locator();
+    let tenant_id = "test-tenant";
+    let actor_type = "channel-with-group";
+    let namespace = "test-ns";
+    register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
+
+    use plexspaces_core::actor_id::build_actor_id;
+    let actor_id = build_actor_id("alerts", actor_type, Some(namespace), "test-node");
+    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+
+    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    plexspaces_core::register_virtual_actor_type_consistent(
+        &sl_dyn,
+        actor_type.to_string(),
+        namespace.to_string(),
+        None,
+        Some(&[
+            plexspaces_proto::common::v1::Facet {
+                r#type: "virtual_actor".to_string(),
+                config: std::collections::HashMap::from([
+                    ("idle_timeout".to_string(), "1s".to_string()),
+                    ("activation_strategy".to_string(), "lazy".to_string()),
+                ]),
+                ..Default::default()
+            },
+            plexspaces_proto::common::v1::Facet {
+                r#type: "process_group".to_string(),
+                config: std::collections::HashMap::from([(
+                    "group".to_string(),
+                    "abstractions-group".to_string(),
+                )]),
+                ..Default::default()
+            },
+        ]),
+        None,
+        Some(tenant_id.to_string()),
+        Some(br#"{"role":"channel","group":"abstractions-group"}"#.to_vec()),
+    )
+    .await
+    .expect("type registration must succeed");
+
+    let actor_registry = service_locator.actor_registry().await.unwrap();
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:alerts", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(
+        response.is_ok(),
+        "initial activation must succeed: {:?}",
+        response.err()
+    );
+
+    wait_for_actor_registration(&actor_registry, &actor_id).await;
+    let facet_types = current_facet_types(&service_locator, &actor_id).await;
+    assert!(
+        facet_types.contains(&"virtual_actor".to_string()),
+        "virtual_actor facet missing before stop"
+    );
+    assert!(
+        facet_types.contains(&"process_group".to_string()),
+        "process_group facet missing before stop"
+    );
+
+    service_locator
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&ctx, &actor_id)
+        .await
+        .unwrap();
+
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &format!("{}:alerts", actor_type),
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(
+        response.is_ok(),
+        "reactivation with process_group facet should succeed: {:?}",
+        response.err()
+    );
+
+    wait_for_actor_registration(&actor_registry, &actor_id).await;
+    let reactivated_facet_types = current_facet_types(&service_locator, &actor_id).await;
+    assert!(
+        reactivated_facet_types.contains(&"virtual_actor".to_string()),
+        "virtual_actor facet missing after stop/reactivate"
+    );
+    assert!(
+        reactivated_facet_types.contains(&"process_group".to_string()),
+        "process_group facet missing after stop/reactivate"
     );
 }
 
@@ -1457,6 +2070,131 @@ async fn test_virtual_workflow_behavior_reactivates_from_type_metadata() {
     assert_eq!(count, 11);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
+    let node = NodeBuilder::new("test-node").build().await;
+    let service_locator = node.service_locator();
+    let tenant_id = "test-tenant";
+    let namespace = "test-workflows";
+    let actor_type = "durable-workflow-probe";
+    register_durable_workflow_probe_behavior(&service_locator, actor_type).await;
+
+    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    plexspaces_core::register_virtual_actor_type_consistent(
+        &sl_dyn,
+        actor_type.to_string(),
+        namespace.to_string(),
+        None,
+        Some(&[
+            plexspaces_proto::common::v1::Facet {
+                r#type: "virtual_actor".to_string(),
+                config: std::collections::HashMap::from([
+                    ("idle_timeout".to_string(), "1s".to_string()),
+                    ("activation_strategy".to_string(), "lazy".to_string()),
+                ]),
+                ..Default::default()
+            },
+            plexspaces_proto::common::v1::Facet {
+                r#type: "durability".to_string(),
+                config: std::collections::HashMap::from([
+                    ("checkpoint_interval".to_string(), "1".to_string()),
+                    ("replay_on_activation".to_string(), "true".to_string()),
+                    ("state_schema_version".to_string(), "1".to_string()),
+                ]),
+                ..Default::default()
+            },
+        ]),
+        None,
+        Some(tenant_id.to_string()),
+        Some(br#"{"initial_count":0}"#.to_vec()),
+    )
+    .await
+    .expect("type registration must succeed");
+
+    let actor_service = Arc::new(ActorServiceImpl::new(
+        service_locator.clone(),
+        "test-node".to_string(),
+    ));
+    let actor_registry = service_locator.actor_registry().await.unwrap();
+    let actor_name = format!("{}:execution-1", actor_type);
+    let actor_id = plexspaces_core::actor_id::build_actor_id(
+        "execution-1",
+        actor_type,
+        Some(namespace),
+        "test-node",
+    );
+    let stop_ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+
+    let response = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &actor_name,
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await;
+    assert!(response.is_ok(), "workflow actor should activate");
+    wait_for_actor_registration(&actor_registry, &actor_id).await;
+
+    let increment_one = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &actor_name,
+        "POST",
+        serde_json::to_vec(&CounterMessage::Increment).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("first increment should succeed");
+    assert_eq!(count_from_invoke_response(&increment_one), 1);
+
+    let increment_two = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &actor_name,
+        "POST",
+        serde_json::to_vec(&CounterMessage::Increment).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("second increment should succeed");
+    assert_eq!(count_from_invoke_response(&increment_two), 2);
+
+    service_locator
+        .get_actor_factory()
+        .await
+        .unwrap()
+        .stop_actor(&stop_ctx, &actor_id)
+        .await
+        .unwrap();
+
+    let reactivated = invoke_virtual_actor(
+        &actor_service,
+        tenant_id,
+        namespace,
+        &actor_name,
+        "POST",
+        serde_json::to_vec(&CounterMessage::GetCount).unwrap(),
+        HashMap::new(),
+        true,
+    )
+    .await
+    .expect("reactivated workflow count query should succeed");
+    assert_eq!(
+        count_from_invoke_response(&reactivated),
+        2,
+        "durable workflow virtual actor should restore last checkpoint"
+    );
+}
+
 // ============================================================================
 // Test: type-level virtual actor registration is NOT evicted on actor vacation
 // ============================================================================
@@ -1517,7 +2255,11 @@ async fn test_virtual_actor_type_not_evicted_on_vacation() {
         true,
     )
     .await;
-    assert!(response.is_ok(), "initial activation should succeed: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "initial activation should succeed: {:?}",
+        response.err()
+    );
 
     let actor_registry = service_locator.actor_registry().await.unwrap();
     wait_for_actor_registration(&actor_registry, &actor_id).await;
@@ -1541,7 +2283,10 @@ async fn test_virtual_actor_type_not_evicted_on_vacation() {
         actor_type
     );
     let meta = meta.unwrap();
-    let fc = meta.facet_config.as_ref().expect("facet_config must be present");
+    let fc = meta
+        .facet_config
+        .as_ref()
+        .expect("facet_config must be present");
     assert!(
         fc.get("virtual_actor").is_some(),
         "virtual_actor facet config must be preserved in type metadata"
@@ -1626,16 +2371,18 @@ async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
             },
             plexspaces_proto::common::v1::Facet {
                 r#type: "timer".to_string(),
-                config: std::collections::HashMap::from([
-                    ("interval_ms".to_string(), "250".to_string()),
-                ]),
+                config: std::collections::HashMap::from([(
+                    "interval_ms".to_string(),
+                    "250".to_string(),
+                )]),
                 ..Default::default()
             },
             plexspaces_proto::common::v1::Facet {
                 r#type: "reminder".to_string(),
-                config: std::collections::HashMap::from([
-                    ("default_due_time".to_string(), "100ms".to_string()),
-                ]),
+                config: std::collections::HashMap::from([(
+                    "default_due_time".to_string(),
+                    "100ms".to_string(),
+                )]),
                 ..Default::default()
             },
         ]),
@@ -1663,16 +2410,29 @@ async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
         true,
     )
     .await;
-    assert!(response.is_ok(), "initial activation must succeed: {:?}", response.err());
+    assert!(
+        response.is_ok(),
+        "initial activation must succeed: {:?}",
+        response.err()
+    );
 
     let actor_registry = service_locator.actor_registry().await.unwrap();
     wait_for_actor_registration(&actor_registry, &actor_id).await;
 
     // Assert all 3 facets present before stop
     let pre_stop_facets = current_facet_types(&service_locator, &actor_id).await;
-    assert!(pre_stop_facets.contains(&"virtual_actor".to_string()), "must have virtual_actor before stop");
-    assert!(pre_stop_facets.contains(&"timer".to_string()), "must have timer before stop");
-    assert!(pre_stop_facets.contains(&"reminder".to_string()), "must have reminder before stop");
+    assert!(
+        pre_stop_facets.contains(&"virtual_actor".to_string()),
+        "must have virtual_actor before stop"
+    );
+    assert!(
+        pre_stop_facets.contains(&"timer".to_string()),
+        "must have timer before stop"
+    );
+    assert!(
+        pre_stop_facets.contains(&"reminder".to_string()),
+        "must have reminder before stop"
+    );
 
     // Stop the actor (vacation)
     service_locator
@@ -1745,29 +2505,32 @@ async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
         },
         ProtoFacet {
             r#type: "timer".to_string(),
-            config: std::collections::HashMap::from([
-                ("interval_ms".to_string(), "500".to_string()),
-            ]),
+            config: std::collections::HashMap::from([(
+                "interval_ms".to_string(),
+                "500".to_string(),
+            )]),
             ..Default::default()
         },
         ProtoFacet {
             r#type: "reminder".to_string(),
-            config: std::collections::HashMap::from([
-                ("default_due_time".to_string(), "200ms".to_string()),
-            ]),
+            config: std::collections::HashMap::from([(
+                "default_due_time".to_string(),
+                "200ms".to_string(),
+            )]),
             ..Default::default()
         },
     ];
 
     // Call the same helper used by wasm_application.rs.
     // Coerce ServiceLocatorImpl → Arc<dyn ServiceLocator> as the function expects.
-    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> = service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
+    let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>;
     let result = plexspaces_core::register_virtual_actor_type_consistent(
         &sl_dyn,
         actor_type.to_string(),
         namespace.to_string(),
-        None,                   // No trait-object facets (WASM path)
-        Some(&proto_facets),    // Proto facets from app-config.toml
+        None,                // No trait-object facets (WASM path)
+        Some(&proto_facets), // Proto facets from app-config.toml
         None,
         Some(tenant_id.to_string()),
         Some(br#"{"initial_count":0}"#.to_vec()),
@@ -1787,7 +2550,10 @@ async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
         .expect("facet_config must be present after registration");
 
     // virtual_actor facet config
-    assert!(fc.get("virtual_actor").is_some(), "virtual_actor config must be stored");
+    assert!(
+        fc.get("virtual_actor").is_some(),
+        "virtual_actor config must be stored"
+    );
     assert_eq!(
         fc["virtual_actor"]["idle_timeout"].as_str().unwrap(),
         "8m",
@@ -1803,12 +2569,19 @@ async fn test_wasm_deployment_virtual_timer_facet_config_propagation() {
     assert!(fc.get("timer").is_some(), "timer config must be stored");
     let timer_interval_val = &fc["timer"]["interval_ms"];
     // Accept either JSON number 500 or string "500" (both valid serializations of the config)
-    let timer_interval_ok = timer_interval_val.as_u64() == Some(500)
-        || timer_interval_val.as_str() == Some("500");
-    assert!(timer_interval_ok, "timer interval_ms must be 500 (got {:?})", timer_interval_val);
+    let timer_interval_ok =
+        timer_interval_val.as_u64() == Some(500) || timer_interval_val.as_str() == Some("500");
+    assert!(
+        timer_interval_ok,
+        "timer interval_ms must be 500 (got {:?})",
+        timer_interval_val
+    );
 
     // reminder facet config
-    assert!(fc.get("reminder").is_some(), "reminder config must be stored");
+    assert!(
+        fc.get("reminder").is_some(),
+        "reminder config must be stored"
+    );
     assert_eq!(
         fc["reminder"]["default_due_time"].as_str().unwrap_or(""),
         "200ms",

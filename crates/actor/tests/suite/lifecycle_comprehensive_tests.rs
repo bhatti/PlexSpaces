@@ -506,8 +506,7 @@ async fn test_handle_exit_called_when_trap_exit_true() {
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
-            .await;
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -541,8 +540,7 @@ async fn test_handle_exit_propagate_action_terminates_actor() {
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
-            .await;
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -575,8 +573,7 @@ async fn test_handle_exit_handle_action_continues_actor() {
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
-            .await;
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -617,8 +614,7 @@ async fn test_handle_exit_receives_correct_parameters() {
     // Create context with trap_exit=true
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
-            .await;
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -767,8 +763,7 @@ async fn test_exit_message_calls_handle_exit_when_trapping() {
     // Test handle_exit() directly
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
-            .await;
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -883,8 +878,7 @@ async fn test_multiple_exit_messages_handled_correctly() {
     // we test handle_exit() directly by calling it multiple times
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
-            .await;
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),
@@ -924,8 +918,7 @@ async fn test_exit_message_with_linked_reason() {
     // Test handle_exit() with Linked reason directly (no need to create actor)
     use plexspaces_core::ServiceLocator;
     let service_locator =
-        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None)
-            .await;
+        plexspaces_node::create_default_service_locator(Some("test-node".to_string()), None).await;
     let mut ctx = ActorContext::new(
         "node-1".to_string(),
         "tenant".to_string(),

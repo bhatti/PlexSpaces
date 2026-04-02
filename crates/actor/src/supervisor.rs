@@ -38,7 +38,9 @@ use tokio::time::timeout as tokio_timeout;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{Actor, ActorRef as ActorActorRef};
-use plexspaces_core::{ActorContext, ActorError, ActorId, ActorRef, ServiceLocator as ServiceLocatorTrait};
+use plexspaces_core::{
+    ActorContext, ActorError, ActorId, ActorRef, ServiceLocator as ServiceLocatorTrait,
+};
 
 // Import proto types
 use plexspaces_proto::supervision::v1::{SupervisionError as ProtoError, SupervisorStats};
@@ -436,8 +438,8 @@ impl Supervisor {
             ))?
             .clone();
 
-        // Inject the supervisor's service_locator into the actor's context so that
-        // register_in_registry() can find the ActorRegistry. Actor::new() always
+        // Inject the supervisor's service_locator into the actor's context so the
+        // started actor can be registered in ActorRegistry afterward. Actor::new() always
         // starts with a TestServiceLocatorStub; we replace it here with the real one.
         let existing_ctx = actor.context().clone();
         let new_ctx = Arc::new(ActorContext::new(
@@ -470,6 +472,12 @@ impl Supervisor {
             .await
             .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?;
 
+        if let Some(service_locator) = &self.service_locator {
+            if let Some(registry) = service_locator.actor_registry().await {
+                actor.register_started(&registry).await;
+            }
+        }
+
         let supervised = SupervisedActor {
             actor: Arc::new(RwLock::new(actor)),
             actor_ref: core_actor_ref.clone(),
@@ -492,11 +500,6 @@ impl Supervisor {
                 registry
                     .register_parent_child(&supervisor_id, &child_id)
                     .await;
-
-                // NOTE: ActorRef is already registered during Actor::start() →
-                // register_in_registry() with proper actor_type and behavior_kind.
-                // No duplicate register_actor() call here – parent-child link above
-                // is sufficient for supervisor tree tracking.
 
                 // OBSERVABILITY: Log parent-child registration
                 trace!(
@@ -1532,8 +1535,8 @@ impl Supervisor {
             }
         }
 
-        // Inject supervisor's service_locator into actor context before restarting
-        // so that register_in_registry can find ActorRegistry
+        // Inject supervisor's service_locator into actor context before restarting so the
+        // restarted actor can be registered in ActorRegistry afterward.
         if let Some(service_locator) = &self.service_locator {
             let existing_ctx = new_actor.context().clone();
             let new_ctx = Arc::new(ActorContext::new(
@@ -1558,6 +1561,12 @@ impl Supervisor {
             );
             SupervisorError::RestartFailed(e.to_string())
         })?;
+
+        if let Some(service_locator) = &self.service_locator {
+            if let Some(registry) = service_locator.actor_registry().await {
+                new_actor.register_started(&registry).await;
+            }
+        }
 
         // Update child state
         child.actor = Arc::new(RwLock::new(new_actor));
@@ -1763,7 +1772,7 @@ impl Supervisor {
                 }
                 Some(timeout_ms) => {
                     // Timeout: Graceful shutdown with timeout
-                    debug!(
+                    info!(
                         supervisor_id = %self.id,
                         child_id = %id,
                         timeout_ms = timeout_ms,

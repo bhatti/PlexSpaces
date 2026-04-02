@@ -9,19 +9,24 @@ This document describes the message routing design for the PlexSpaces actor syst
 1. **Location Transparency**: Actors can communicate without knowing if the target is local or remote
 2. **Request-Reply Pattern**: `ask()` provides synchronous request-reply semantics over async messaging
 3. **Simplified Design**: Always create temporary sender ActorRef for `ask()` calls (actor or non-actor) - simplifies code and ensures consistent behavior
-4. **Single Routing Rule**: If receiver is temporary sender → REPLY → route to ReplyWaiter; otherwise → send to mailbox
+4. **Single Routing Rule**: If receiver is temporary sender → REPLY → route to ReplyWaiter; otherwise → route through the target actor runtime
 5. **Unified Routing Module**: All routing logic centralized in `crates/actor/src/routing.rs` for consistency and reusability
 6. **Dynamic Locality**: Locality determined dynamically by comparing node_id, not by ActorRefInner variants
 7. **Tenant ID Propagation**: tenant_id flows from API → ActorBuilder → ActorRef → RequestContext for proper multi-tenancy
 8. **Parallel Operations**: `ask_helper()` returns Futures enabling true parallel map/reduce operations
+9. **Scoped Lookup**: Runtime paths use `(tenant_id, namespace, actor_id)` when scope is available and fail closed on ambiguous flat IDs
 
 ## Core Concepts
 
 ### ActorRef
 
-An `ActorRef` is a location-transparent handle to an actor. It can represent:
-- **Local Actor**: Actor on the same node (has mailbox)
-- **Remote Actor**: Actor on a different node (uses gRPC)
+An `ActorRef` is the location-transparent runtime handle used for routing. `ActorRegistry`
+stores scoped `ActorRef` entries keyed by `(tenant_id, namespace, actor_id)`.
+
+- **Local ActorRef**: Carries the local delivery path and, for local actors only, the internal
+  lifecycle/state handle used by framework runtime operations.
+- **Remote ActorRef**: Carries tenant/namespace scope plus the remote routing identity; delivery
+  goes through gRPC when the target node is remote.
 
 ### Message Types
 
@@ -38,25 +43,25 @@ An `ActorRef` is a location-transparent handle to an actor. It can represent:
 ### Local Actor (Same Node)
 
 ```
-Caller → ActorRef::tell() → ActorRegistry lookup → Mailbox → Actor
+Caller → ActorRef::tell() → ActorRegistry lookup → Local ActorRef → Actor runtime
 ```
 
 **Flow:**
 1. `ActorRef::tell(message)` is called
-2. If `ActorRef` is Local: Get mailbox from `ActorRefInner::Local`
-3. If `ActorRef` is Remote pointing to local: Lookup actor in `ActorRegistry`, get mailbox
-4. Send message to mailbox
-5. Actor processes message from mailbox
+2. If `ActorRef` is Local: route through the local actor ref
+3. If `ActorRef` is Remote pointing to local: lookup the scoped local actor ref in `ActorRegistry`
+4. Deliver through the local actor runtime
+5. Actor processes the message
 
 **Key Points:**
-- Messages always go to mailbox (no bypass)
+- Local routing always goes through the registered local actor ref
 - No correlation_id handling in `tell()`
 - Simple fire-and-forget semantics
 
 ### Remote Actor (Different Node)
 
 ```
-Caller → ActorRef::tell() → ServiceLocator::get_node_client() → gRPC → Remote Node → ActorRegistry → Mailbox → Actor
+Caller → ActorRef::tell() → ServiceLocator::get_node_client() → gRPC → Remote Node → ActorRegistry → Local ActorRef → Actor runtime
 ```
 
 **Flow:**
@@ -65,9 +70,9 @@ Caller → ActorRef::tell() → ServiceLocator::get_node_client() → gRPC → R
 3. Get gRPC client for remote node via `ServiceLocator`
 4. Convert message to proto format
 5. Send via gRPC `send_message` RPC
-6. Remote node receives, looks up actor in `ActorRegistry`
-7. Sends to actor's mailbox
-8. Actor processes message
+6. Remote node receives, looks up the scoped actor ref in `ActorRegistry`
+7. Delivers through the local actor runtime
+8. Actor processes the message
 
 **Key Points:**
 - Uses gRPC for network transport
@@ -88,14 +93,14 @@ Caller → ActorRef::tell() → ServiceLocator::get_node_client() → gRPC → R
 5. `ask()` sends request message with `correlation_id` and temporary sender ID
 6. Target actor processes request and sends reply with same `correlation_id`
 7. Reply is routed to temporary sender ActorRef
-8. `tell()` detects receiver is temporary sender → routes to `ReplyWaiter` (bypasses mailbox)
+8. `tell()` detects receiver is temporary sender → routes to `ReplyWaiter` (bypasses normal actor runtime delivery)
 9. `ReplyWaiter` wakes up sender with reply message
 10. Temporary sender is cleaned up after `ask()` completes
 
 ### Actor Calling ask() on Another Actor (Local)
 
 ```
-Actor A → ActorRef::ask() → Create Temporary Sender → Register in ActorRegistry → ReplyWaiterRegistry::register() → ActorRef::tell(request) → Actor B Mailbox
+Actor A → ActorRef::ask() → Create Temporary Sender → Register in ActorRegistry → ReplyWaiterRegistry::register() → ActorRef::tell(request) → Actor B runtime
                                                                                                                                               ↓
 Actor B → handle_request() → ctx.send_reply() → ActorService::send_reply() → ActorRegistry lookup → Temporary Sender ActorRef::tell(reply)
                                                                                                                                               ↓
@@ -111,7 +116,7 @@ Temporary Sender ActorRef::tell() → ReplyWaiterRegistry::notify() → ReplyWai
 6. `ask()` sets `message.sender = temporary_sender_id`
 7. `ask()` sets `message.correlation_id = correlation_id`
 8. `ask()` calls `target_actor_ref.tell(request_message)`
-9. Actor B receives request in mailbox, processes it
+9. Actor B receives the request through its local runtime, processes it
 10. Actor B calls `ctx.send_reply(correlation_id, current_actor_id, temporary_sender_id, reply_message)`
 11. `ActorContext::send_reply()` uses `ActorService::send()` to route the reply
 12. `ActorService::send()` routes to temporary sender ActorRef (temporary sender behaves like normal actor)
@@ -125,14 +130,14 @@ Temporary Sender ActorRef::tell() → ReplyWaiterRegistry::notify() → ReplyWai
 **Key Points:**
 - Always creates temporary sender ActorRef (simplifies code, consistent behavior)
 - Temporary sender ActorRef is registered in `ActorRegistry` (so it can be looked up)
-- Temporary sender ActorRef's `tell()` routes messages directly to `ReplyWaiter` (bypasses mailbox)
+- Temporary sender ActorRef's `tell()` routes messages directly to `ReplyWaiter` (bypasses normal actor runtime delivery)
 - One temporary sender ActorRef per `ask()` call
 - Temporary sender ActorRef is cleaned up after `ask()` completes
 
 ### Actor Calling ask() on Another Actor (Remote)
 
 ```
-Actor A (Node1) → ActorRef::ask() → Create Temporary Sender (Node1) → Register in ActorRegistry → ReplyWaiterRegistry::register() → gRPC → Node2 → Actor B Mailbox
+Actor A (Node1) → ActorRef::ask() → Create Temporary Sender (Node1) → Register in ActorRegistry → ReplyWaiterRegistry::register() → gRPC → Node2 → Actor B runtime
                                                                                                                                                         ↓
 Actor B → handle_request() → ctx.send_reply() → ActorService::send_reply() → gRPC → Node1
                                                                                         ↓
@@ -148,7 +153,7 @@ Node1 → ActorRegistry lookup → Temporary Sender ActorRef::tell(reply) → Re
 6. `ask()` extracts target node_id from `message.receiver` (e.g., `server@node2`)
 7. `ask()` gets gRPC client for Node2
 8. `ask()` sends request via gRPC `AskReply` on actor-runtime HTTP-style paths, or direct remote ask routing for actor refs
-9. Node2 receives request, looks up Actor B in `ActorRegistry`, sends to mailbox
+9. Node2 receives request, looks up Actor B in `ActorRegistry`, and routes through the local actor runtime
 10. Actor B processes request, calls `ctx.send_reply()`
 11. `ActorContext::send_reply()` uses `ActorService::send()` to route the reply
 12. `ActorService::send()` detects remote target (`temporary_sender_id@node1`)
@@ -165,7 +170,7 @@ Node1 → ActorRegistry lookup → Temporary Sender ActorRef::tell(reply) → Re
 - Temporary sender ActorRef is ALWAYS created on local node (where ask() is called)
 - Target can be local or remote (extracted from `message.receiver`)
 - Reply routing crosses network boundary back to temporary sender ActorRef
-- Temporary sender ActorRef's `tell()` routes replies directly to `ReplyWaiter` (bypasses mailbox)
+- Temporary sender ActorRef's `tell()` routes replies directly to `ReplyWaiter` (bypasses normal actor runtime delivery)
 
 ## Simplified Design: Always Create Temporary Sender
 
@@ -177,10 +182,10 @@ The temporary sender ActorRef:
 1. Is always created on the local node (where `ask()` is called)
 2. Has ID format: `"ask-{correlation_id}@{node_id}"` (never matches actor IDs)
 3. Is registered in `ActorRegistry` as an actual ActorRef (so it can be looked up)
-4. When `tell()` is called on it, routes messages directly to `ReplyWaiter` (bypasses mailbox)
+4. When `tell()` is called on it, routes messages directly to `ReplyWaiter` (bypasses normal actor runtime delivery)
 5. Is cleaned up after `ask()` completes (success or timeout)
 
-This follows Akka's pattern where temporary actors are created for ask() calls. The temporary ActorRef doesn't process messages in a mailbox - it routes replies directly to the waiting `ask()` caller.
+This follows Akka's pattern where temporary actors are created for ask() calls. The temporary ActorRef does not host a normal actor runtime; it routes replies directly to the waiting `ask()` caller.
 
 **Benefits of Always Creating Temporary Sender:**
 - Simpler code: No conditional logic for actor vs non-actor
@@ -191,7 +196,7 @@ This follows Akka's pattern where temporary actors are created for ask() calls. 
 ### Non-Actor ask() - Local Target
 
 ```
-Non-Actor → ActorRef::ask() → Create Temporary ActorRef → Register in ActorRegistry → ReplyWaiterRegistry::register() → ActorRef::tell(request) → Target Actor Mailbox
+Non-Actor → ActorRef::ask() → Create Temporary ActorRef → Register in ActorRegistry → ReplyWaiterRegistry::register() → ActorRef::tell(request) → Target Actor runtime
                                                                                                                                                       ↓
 Target Actor → handle_request() → ctx.send_reply() → ActorService::send_reply() → ActorRegistry lookup → Temporary ActorRef::tell(reply)
                                                                                                                                     ↓
@@ -207,7 +212,7 @@ Temporary ActorRef::tell() → ReplyWaiterRegistry::notify() → ReplyWaiter::no
 6. `ask()` sets `message.sender = temporary_actor_id`
 7. `ask()` sets `message.correlation_id = correlation_id`
 8. `ask()` calls `target_actor_ref.tell(request_message)`
-9. Target actor receives request in mailbox, processes it
+9. Target actor receives the request through its local runtime, processes it
 10. Target actor calls `ctx.send_reply(correlation_id, current_actor_id, temporary_actor_id, reply_message)`
 11. `ActorContext::send_reply()` uses `ActorService::send()` to route the reply
 12. `ActorService::send()` routes to temporary ActorRef (temporary sender behaves like normal actor)
@@ -220,18 +225,18 @@ Temporary ActorRef::tell() → ReplyWaiterRegistry::notify() → ReplyWaiter::no
 
 **Key Points:**
 - Temporary ActorRef is a REAL ActorRef registered in `ActorRegistry` (not just an ID)
-- Temporary ActorRef's `tell()` routes messages directly to `ReplyWaiter` (bypasses mailbox)
+- Temporary ActorRef's `tell()` routes messages directly to `ReplyWaiter` (bypasses normal actor runtime delivery)
 - One temporary ActorRef per `ask()` call
 - Temporary ActorRef is cleaned up after `ask()` completes
 
 ### Non-Actor ask() - Remote Target
 
 ```
-Non-Actor (Node1) → ActorRef::ask() → Create Temporary Actor (Node1) → Register in ActorRegistry → ReplyWaiterRegistry::register() → gRPC → Node2 → Target Actor Mailbox
+Non-Actor (Node1) → ActorRef::ask() → Create Temporary Actor (Node1) → Register in ActorRegistry → ReplyWaiterRegistry::register() → gRPC → Node2 → Target Actor runtime
                                                                                                                                                         ↓
 Target Actor (Node2) → handle_request() → ctx.send_reply() → ActorService::send_reply() → gRPC → Node1
                                                                                                                                   ↓
-Node1 → ActorRegistry lookup → Temporary Actor Mailbox → handle_message() → ReplyWaiterRegistry::notify() → ReplyWaiter::notify() → Non-Actor ask() wakes up → Cleanup Temporary Actor
+Node1 → ActorRegistry lookup → Temporary ActorRef::tell(reply) → ReplyWaiterRegistry::notify() → ReplyWaiter::notify() → Non-Actor ask() wakes up → Cleanup Temporary Actor
 ```
 
 **Flow:**
@@ -243,7 +248,7 @@ Node1 → ActorRegistry lookup → Temporary Actor Mailbox → handle_message() 
 6. `ask()` extracts target node_id from `message.receiver` (Node2)
 7. `ask()` gets gRPC client for Node2
 8. `ask()` sends request via gRPC `send_message` RPC
-9. Node2 receives request, looks up target actor, sends to mailbox
+9. Node2 receives request, looks up target actor, and routes through the local actor runtime
 10. Target actor processes request, calls `ctx.send_reply()`
 11. `ActorContext::send_reply()` uses `ActorService::send()` to route the reply
 12. `ActorService::send()` detects remote target (`temporary_actor_id@node1`)
@@ -259,7 +264,7 @@ Node1 → ActorRegistry lookup → Temporary Actor Mailbox → handle_message() 
 - Temporary ActorRef is ALWAYS created on local node (where ask() is called)
 - Target can be local or remote (extracted from `message.receiver`)
 - Reply routing crosses network boundary back to temporary ActorRef
-- Temporary ActorRef's `tell()` routes replies directly to `ReplyWaiter` (bypasses mailbox)
+- Temporary ActorRef's `tell()` routes replies directly to `ReplyWaiter` (bypasses normal actor runtime delivery)
 
 ## Unified Routing Module
 
@@ -318,20 +323,20 @@ let results = join_all(futures).await;
 ### Simplified Routing Logic
 
 **Key Simplification**: Since we always create temporary sender for `ask()`, routing is simple:
-- **If receiver is temporary sender** → REPLY → route to ReplyWaiter (bypass mailbox)
-- **Otherwise** → REQUEST or normal message → send to mailbox
+- **If receiver is temporary sender** → REPLY → route to ReplyWaiter (bypass normal actor runtime delivery)
+- **Otherwise** → REQUEST or normal message → route through the target actor runtime
 
 **Request:**
 - `receiver = target_actor_id` (message TO target actor)
 - `sender = temporary_sender_id` (always temporary sender for ask())
 - Has `correlation_id` (for ask() pattern)
-- Goes to target actor's mailbox
+- Goes through the target actor runtime
 
 **Reply:**
 - `receiver = temporary_sender_id` (message TO temporary sender)
 - `sender = target_actor_id` (message FROM target actor)
 - Has `correlation_id` (matches request's correlation_id)
-- Routed to `ReplyWaiter` (bypasses mailbox) when `tell()` detects receiver is temporary sender
+- Routed to `ReplyWaiter` (bypasses normal actor runtime delivery) when `tell()` detects receiver is temporary sender
 
 ### Routing Logic in tell()
 
@@ -344,8 +349,8 @@ let waiter_registry: Option<Arc<ReplyWaiterRegistry>> =
     service_locator.reply_waiter_registry().await;
 
 // SIMPLIFIED ROUTING: Since we always create temporary sender for ask(), routing is simple:
-// - If receiver is temporary sender → REPLY → route to ReplyWaiter (bypass mailbox)
-// - Otherwise → REQUEST or normal message → send to mailbox
+// - If receiver is temporary sender → REPLY → route to ReplyWaiter (bypass normal actor runtime delivery)
+// - Otherwise → REQUEST or normal message → route through the target actor runtime
 // 
 // Note: We only check receiver, not actor_id. When tell() is called on a temporary sender ActorRef,
 // the receiver will be that temporary sender ID, so checking receiver covers all cases.
@@ -359,8 +364,8 @@ if Self::is_temporary_sender_id(&message.receiver) {
     }
 }
 
-// REQUEST or normal message → send to mailbox
-send_to_mailbox(message)
+// REQUEST or normal message → route through the target actor runtime
+send_to_actor_runtime(message)
 ```
 
 **Key Points:**
@@ -427,7 +432,7 @@ if Self::is_temporary_sender_id(&actor_id) {
 // In ActorRef::ask() for non-actor callers
 let temporary_actor_id = format!("ask-{}@{}", correlation_id, node_id);
 
-// Create temporary ActorRef (with dummy mailbox - never used)
+// Create temporary ActorRef (the local runtime path is never exercised for reply delivery)
 let dummy_mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), temporary_actor_id.clone()).await?);
 let temporary_actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
     temporary_actor_id.clone(),
@@ -452,7 +457,7 @@ message.sender = Some(temporary_actor_id.clone());
 - Temporary ActorRef is registered in `ActorRegistry` via `register_temporary_sender()`
 - `register_temporary_sender()` calls `register_actor()` internally (consistent with regular actors)
 - `remove_temporary_sender()` calls `unregister_with_cleanup()` internally (consistent cleanup)
-- Temporary ActorRef's `tell()` routes directly to `ReplyWaiter` (bypasses mailbox)
+- Temporary ActorRef's `tell()` routes directly to `ReplyWaiter` (bypasses normal actor runtime delivery)
 
 ## Message Flow Diagrams
 
@@ -574,7 +579,7 @@ Cleanup involves:
 ### Error Handling
 
 - **Timeout**: If reply doesn't arrive within timeout, `ReplyWaiter` times out, temporary actor cleans up
-- **No ReplyWaiter**: If `ReplyWaiter` not found (already consumed/timeout), message goes to mailbox (temporary actor logs warning)
+- **No ReplyWaiter**: If `ReplyWaiter` is not found (already consumed/timeout), the reply cannot be delivered and the temporary sender path logs a warning
 - **Actor Not Found**: If target actor doesn't exist, `ask()` returns error immediately (before waiting)
 
 ### Observability

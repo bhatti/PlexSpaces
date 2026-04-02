@@ -646,6 +646,30 @@ pub trait ObjectRegistry: Send + Sync {
         object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
+    /// Unregister every object in the current tenant/namespace.
+    ///
+    /// ## Purpose
+    /// Supports complete namespace cleanup during application undeploy.
+    async fn unregister_all(
+        &self,
+        ctx: &RequestContext,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        let registrations = self
+            .discover(ctx, None, None, None, None, None, 0, 10_000)
+            .await?;
+        let mut removed = 0_u64;
+        for registration in registrations {
+            let object_type = plexspaces_proto::object_registry::v1::ObjectType::try_from(
+                registration.object_type,
+            )
+            .unwrap_or(plexspaces_proto::object_registry::v1::ObjectType::ObjectTypeActor);
+            self.unregister(ctx, object_type, &registration.object_id)
+                .await?;
+            removed += 1;
+        }
+        Ok(removed)
+    }
+
     /// Send heartbeat for an object
     ///
     /// ## Arguments

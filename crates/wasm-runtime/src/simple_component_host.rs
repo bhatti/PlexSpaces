@@ -1243,7 +1243,6 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
     /// Stop an actor. Delegates to HostFunctions::stop_actor().
     async fn stop(&mut self, actor_id: String) -> String {
         let self_id = self.actor_id.to_string();
-        tracing::debug!(actor_id = %self_id, target = %actor_id, "simple actor stop");
         match self
             .host_functions
             .stop_actor(&self_id, &actor_id, 5000)

@@ -225,10 +225,7 @@ async fn test_jwt_http_auth() {
     }
 
     let client = reqwest::Client::new();
-    let url = format!(
-        "{}/api/v1/actors/default/test?action=get",
-        http_endpoint
-    );
+    let url = format!("{}/api/v1/actors/default/test?action=get", http_endpoint);
     let response = client
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -316,10 +313,7 @@ async fn test_http_auth_enabled_no_jwt_fails() {
         return;
     }
 
-    let url = format!(
-        "http://127.0.0.1:{}/api/v1/actors/default/test",
-        http_port
-    );
+    let url = format!("http://127.0.0.1:{}/api/v1/actors/default/test", http_port);
     let resp = reqwest::Client::new().get(&url).send().await;
     let resp = resp.expect("request should not fail");
     let status = resp.status();

@@ -398,8 +398,8 @@ impl Channel for SqliteChannel {
         let msg_id = message.id.clone();
         let timestamp_ms = Self::proto_timestamp_to_unix_ms(&message.timestamp);
         let created_at = Self::system_time_to_unix_ms(SystemTime::now());
-        let headers_json = serde_json::to_string(&message.headers)
-            .unwrap_or_else(|_| "{}".to_string());
+        let headers_json =
+            serde_json::to_string(&message.headers).unwrap_or_else(|_| "{}".to_string());
 
         // Insert message into database
         let insert_sql = format!(

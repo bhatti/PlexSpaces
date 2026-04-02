@@ -696,21 +696,22 @@ Always test:
 
 ---
 
-## WASM Actor Durability (Cloudflare Durable Objects Pattern)
+## WASM Actor Durability
 
-WASM actors use a different durability pattern than Rust actors. Instead of the DurabilityFacet with journaling and replay, WASM actors use **checkpoint-based durability** inspired by [Cloudflare Durable Objects](https://developers.cloudflare.com/durable-objects/).
+WASM actors use the same **DurabilityFacet** lifecycle as native actors. The difference is the
+state adapter underneath the facet:
 
-### Why a Different Pattern?
+- **Rust/native behaviors** can recover through checkpoint restore plus deterministic replay
+- **WASM behaviors** expose state through the WIT `get-state()` / `set-state()` surface
+- **DurabilityFacet** stays the single dynamic capability that decides whether durability is active
 
-The DurabilityFacet pattern (journaling + replay) doesn't work with WASM actors because:
+That keeps one durability model across native Rust, Rust WASM, Python, TypeScript, and Go: if the
+`durability` facet is attached, the actor runtime automatically restores state on activation and
+checkpoints state on graceful stop.
 
-1. **Replay requires initialized actors**: DurabilityFacet's `on_attach()` replays messages through a `ReplayHandler`
-2. **WASM actors aren't ready**: During facet attach, WASM actors aren't fully initialized yet
-3. **Result**: Attaching DurabilityFacet to WASM actors causes "Replay failed: WASM handle_message failed"
+### WASM State Adapter
 
-### The Cloudflare Durable Objects Pattern
-
-Instead, WASM actors use **explicit state snapshots** via the WIT interface:
+WASM behaviors provide state snapshots via the WIT interface:
 
 ```wit
 interface actor {
@@ -723,9 +724,9 @@ interface actor {
 **How it works:**
 
 1. **Actor manages state**: The WASM actor maintains its own state internally
-2. **Framework calls `get-state()`**: Periodically or on shutdown, framework gets state snapshot
-3. **State is persisted**: Framework stores state in checkpoint storage (SQLite/Postgres)
-4. **On restart, `set-state()` is called**: Framework restores state from checkpoint
+2. **DurabilityFacet requests a snapshot**: The actor runtime asks the behavior for checkpoint state
+3. **State is persisted**: The facet stores the snapshot in checkpoint storage
+4. **On restart, the facet restores state**: The runtime passes checkpoint bytes back through `set-state()`
 
 ### Architecture
 
@@ -750,48 +751,35 @@ sequenceDiagram
     Note over WASM Actor: ✅ State Recovered
 ```
 
-### Comparison: Rust vs WASM Durability
+### Comparison: Native vs WASM State Adapters
 
-| Aspect | Rust Actors (DurabilityFacet) | WASM Actors (Checkpoint) |
+| Aspect | Native Actors | WASM Actors |
 |--------|------------------------------|--------------------------|
-| **Pattern** | Event Sourcing + Replay | State Snapshots |
-| **State Recovery** | Replay messages through handler | Load snapshot, call `set-state()` |
-| **Side Effects** | Cached during replay | Actor must handle idempotency |
-| **Audit Trail** | Full message history | Snapshot only (no history) |
-| **Complexity** | Higher (replay logic) | Lower (simple snapshots) |
-| **Best For** | Audit requirements, complex workflows | Simple state, high performance |
+| **Durability switch** | `DurabilityFacet` | `DurabilityFacet` |
+| **State capture** | Behavior/runtime adapter | `get-state()` |
+| **State restore** | Behavior/runtime adapter + replay | `set-state()` |
+| **Checkpoint storage** | Shared journal/checkpoint storage | Shared journal/checkpoint storage |
+| **Virtual actor reactivation** | Durable = restore checkpoint, non-durable = init-config | Durable = restore checkpoint, non-durable = init-config |
 
-### Durability Facet Parameter (Python SDK)
+### Durability Facet Parameter (Polyglot SDKs)
 
-Python WASM actors declare durability expectation via the **`facets`** parameter on the `@actor` decorator. This does **not** enable durability by itself; it documents that the actor expects checkpoint-based persistence and can be used by tooling to validate configuration.
+Polyglot WASM actors declare durability through the same facet model as native actors:
 
 | Layer | Role |
 |-------|------|
-| **Python code** | `@actor(facets=["durability"])` — declares "this actor expects durability" |
-| **Runtime** | `WasmConfig.durability_enabled` — when `true`, framework calls `get_state()`/`set_state()` for checkpoints |
-| **Configuration** | Set `durability_enabled: true` in release.yaml, app-config.toml, or node config |
+| **SDK code** | `facets=["durability"]` / `@actor(...durability...)` / builder registration |
+| **Runtime** | `DurabilityFacet` attaches a framework-owned state adapter |
+| **WASM behavior** | Exposes `get-state()` / `set-state()` for checkpoint bytes |
+| **Configuration** | Facet config controls checkpoint/replay behavior |
 
 **How to enable WASM durability:**
 
-1. **Release config (release.yaml):**
-   ```yaml
-   wasm:
-     durability_enabled: true
-   ```
+1. Attach the `durability` facet in SDK code or app config
+2. Provide `get-state()` / `set-state()` in the WASM actor
+3. Configure checkpoint behavior through facet config when needed
 
-2. **Application config (app-config.toml):**
-   ```toml
-   [wasm]
-   durability_enabled = true
-   ```
-
-3. **Node config (config/default.yaml):**
-   ```yaml
-   wasm:
-     durability_enabled: true
-   ```
-
-When durability is enabled, the framework uses the same checkpoint storage (e.g. SQLite) as for Rust actors; the only difference is that WASM actors expose state via `get_state()`/`set_state()` instead of journal replay. See [Bank Account example](../../examples/python/apps/bank_account/README.md) and [SDK Guide](sdk.md#facets).
+When durability is enabled, the framework uses the same checkpoint storage and the same actor
+lifecycle semantics across all languages. See [Bank Account example](../../examples/python/apps/bank_account/README.md) and [SDK Guide](sdk.md#facets).
 
 ### Implementation in Python WASM
 

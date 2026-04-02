@@ -66,6 +66,11 @@ pub fn extract_node_id(actor_id: &str) -> (String, Option<String>) {
 /// 3. Fallback to ActorRegistry.local_node_id() for testing
 /// 4. Also checking if actor exists locally (for actors registered with "remote-looking" IDs)
 ///
+/// ## Scope Behavior
+/// The fallback registry lookup is intentionally conservative. If the same actor id exists in
+/// multiple scopes, `ActorRegistry::lookup_actor()` returns `None` rather than selecting an
+/// arbitrary actor, so locality detection fails closed in ambiguous cases.
+///
 /// ## Arguments
 /// * `actor_id` - Actor ID to check (format: "actor_name@node_id" or just "actor_name")
 /// * `service_locator` - ServiceLocator to access NodeConfig and ActorRegistry
@@ -97,7 +102,8 @@ pub async fn is_actor_local(
             }
         }
 
-        // Also check if actor exists locally (for actors registered with "remote-looking" IDs)
+        // Also check if actor exists locally (for actors registered with "remote-looking" IDs).
+        // This remains a conservative fallback: ambiguous cross-scope ids fail closed.
         if let Some(registry) = service_locator.actor_registry().await {
             if registry.lookup_actor(&actor_id.to_string()).await.is_some() {
                 return true;
@@ -172,7 +178,10 @@ pub fn ask_helper(
             .actor_registry()
             .await
             .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry not available".to_string()))?;
-        let is_local = match registry.lookup_actor(&target_actor_id).await {
+        let is_local = match registry
+            .lookup_actor_in_scope(ctx.tenant_id(), ctx.namespace(), &target_actor_id)
+            .await
+        {
             Some(_) => true,
             None => {
                 let (_, node_id_opt) = extract_node_id(&target_actor_id);
@@ -443,12 +452,7 @@ pub fn route_remote(
                 .await
                 .map(|resp| {
                     let inner = resp.into_inner();
-                    (
-                        inner.actor_id,
-                        inner.payload,
-                        inner.headers,
-                        String::new(),
-                    )
+                    (inner.actor_id, inner.payload, inner.headers, String::new())
                 })
         } else {
             client
@@ -470,7 +474,12 @@ pub fn route_remote(
                 .await
                 .map(|resp| {
                     let inner = resp.into_inner();
-                    (inner.actor_id, Vec::new(), Default::default(), inner.message_id)
+                    (
+                        inner.actor_id,
+                        Vec::new(),
+                        Default::default(),
+                        inner.message_id,
+                    )
                 })
         } {
             Ok(r) => r,

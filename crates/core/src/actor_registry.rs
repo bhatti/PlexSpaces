@@ -27,9 +27,9 @@ use crate::actor_context::ObjectRegistry;
 use crate::ActorFactory;
 use crate::Service;
 use crate::{
-    actor_id::parse_actor_id, actor_state_checker, ActorId, ActorMetricsExt, ActorMetricsHandle,
-    ExitReason, MessageSender, ReplyWaiter, ReplyWaiterRegistry, RequestContext,
-    VirtualActorManager, TEMP_SENDER_PREFIX,
+    actor_id::parse_actor_id, ActorId, ActorMetricsExt, ActorMetricsHandle, ExitReason,
+    MessageSender, ReplyWaiter, ReplyWaiterRegistry, RequestContext, VirtualActorManager,
+    TEMP_SENDER_PREFIX,
 };
 use plexspaces_facet::{ExitReason as FacetExitReason, FacetManager};
 use plexspaces_proto::common::v1::Message;
@@ -102,19 +102,13 @@ pub enum ActorRegistryError {
 pub struct ActorRegistry {
     /// ObjectRegistry retained for local registry integration points.
     object_registry: Arc<dyn ObjectRegistry>,
-    /// Local actor senders. Virtual actors may be absent while passivated and are
-    /// re-instantiated from VirtualActorManager metadata on demand.
-    actors: Arc<RwLock<HashMap<ActorId, Arc<dyn MessageSender>>>>,
+    /// Local actor senders keyed by tenant/namespace scope plus actor id.
+    /// Virtual actors may be absent while passivated and are re-instantiated
+    /// from VirtualActorManager metadata on demand.
+    actors: Arc<RwLock<HashMap<ScopedActorKey, Arc<dyn MessageSender>>>>,
     /// Current node ID
     local_node_id: String,
 
-    /// Actor instances (for all actors - virtual and regular)
-    /// Stores the Actor instance after it's started (for both virtual and regular actors)
-    /// Used to check actor state, access the mailbox, and stop the actor gracefully.
-    /// For lazy virtual actors: not stored (metadata in VirtualActorManager is the rebuild source)
-    /// For eager virtual actors and regular actors: stored after start() completes
-    actor_instances:
-        Arc<RwLock<HashMap<ActorId, Arc<dyn crate::actor_state_checker::ActorHandle>>>>,
     /// FacetManager for facet storage and management
     facet_manager: Arc<FacetManager>,
     /// ActorFactory used to instantiate virtual actors and temporary senders.
@@ -136,8 +130,11 @@ pub struct ActorRegistry {
     /// Actor configurations (Phase 3: Resource-aware scheduling)
     /// Maps actor_id -> ActorConfig (for resource requirement tracking)
     actor_configs: Arc<RwLock<HashMap<ActorId, plexspaces_proto::v1::actor::ActorConfig>>>,
-    /// Track registered actor IDs (for duplicate detection, even without config)
-    registered_actor_ids: Arc<RwLock<HashSet<ActorId>>>,
+    /// Scope-aware registered actor inventory.
+    ///
+    /// This includes actors that are known to the system even when no live sender
+    /// currently exists, such as passivated virtual actors retained for discovery.
+    registered_actor_entries: Arc<RwLock<HashSet<ScopedActorKey>>>,
     /// Actor metrics (extracted from NodeMetrics for better separation of concerns)
     actor_metrics: ActorMetricsHandle,
     /// Temporary sender mappings: temporary_sender_id -> TemporarySenderEntry
@@ -150,15 +147,6 @@ pub struct ActorRegistry {
     /// Maintained in sync with actors map for O(1) lookup
     /// Key: (tenant_id, namespace, actor_type), Value: List of actor IDs of that type
     actor_type_index: Arc<RwLock<HashMap<(String, String, String), Vec<ActorId>>>>,
-
-    /// Actor metadata: actor_id -> (tenant_id, namespace)
-    /// Stores tenant/namespace for each actor for proper isolation during operations like stop()
-    /// This avoids needing to access actor instance just to get context
-    actor_metadata: Arc<RwLock<HashMap<ActorId, (String, String)>>>, // (tenant_id, namespace)
-    /// Actor types: actor_id -> actor_type
-    /// Stores actor_type for each actor to enable rebuilding suspended actors
-    /// Used when reactivating suspended virtual actors that need to be rebuilt
-    actor_types: Arc<RwLock<HashMap<ActorId, String>>>,
 
     // === Parent-Child Relationships (Phase 3) ===
     /// Parent-to-children mapping: parent_id -> Vec<child_id>
@@ -200,7 +188,26 @@ pub struct MonitorLink {
     pub termination_sender: mpsc::Sender<(ActorId, String)>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct ScopedActorKey {
+    tenant_id: String,
+    namespace: String,
+    actor_id: ActorId,
+}
+
 impl ActorRegistry {
+    fn scoped_actor_key(
+        tenant_id: impl Into<String>,
+        namespace: impl Into<String>,
+        actor_id: ActorId,
+    ) -> ScopedActorKey {
+        ScopedActorKey {
+            tenant_id: tenant_id.into(),
+            namespace: namespace.into(),
+            actor_id,
+        }
+    }
+
     /// ## Arguments
     /// * `object_registry` - Object registry service
     /// * `local_node_id` - ID of the local node
@@ -223,18 +230,15 @@ impl ActorRegistry {
             object_registry,
             actors: Arc::new(RwLock::new(HashMap::new())),
             local_node_id,
-            actor_instances: Arc::new(RwLock::new(HashMap::new())),
             facet_manager: Arc::new(plexspaces_facet::FacetManager::new()),
             monitors: Arc::new(RwLock::new(HashMap::new())),
             links: Arc::new(RwLock::new(HashMap::new())),
             lifecycle_subscribers: Arc::new(RwLock::new(Vec::new())),
             actor_configs: Arc::new(RwLock::new(HashMap::new())),
-            registered_actor_ids: Arc::new(RwLock::new(HashSet::new())),
+            registered_actor_entries: Arc::new(RwLock::new(HashSet::new())),
             actor_metrics: Arc::new(RwLock::new(ActorMetricsExt::new())),
             temporary_senders: Arc::new(RwLock::new(HashMap::new())),
             actor_type_index: Arc::new(RwLock::new(HashMap::new())),
-            actor_metadata: Arc::new(RwLock::new(HashMap::new())),
-            actor_types: Arc::new(RwLock::new(HashMap::new())),
             parent_to_children: Arc::new(RwLock::new(HashMap::new())),
             child_to_parent: Arc::new(RwLock::new(HashMap::new())),
             actor_factory: Arc::new(RwLock::new(None)),
@@ -259,46 +263,48 @@ impl ActorRegistry {
 
     // === Accessor methods for actor-related data ===
 
-    /// Check if actor instance exists (for ask() to determine if actor is activated)
+    /// Check if a live local runtime handle exists for an actor.
     ///
     /// ## Purpose
-    /// Internal method to check if an actor instance is stored (indicating the actor is activated).
-    /// Used by ask() to determine if it should use the actor instance directly or activate a lazy virtual actor.
+    /// Internal method to check whether a registered sender carries a local runtime/state handle.
+    /// Used by runtime code that needs to distinguish a live local actor from a passivated
+    /// virtual actor that is only represented by metadata.
     ///
     /// ## Note
     /// This is kept private to maintain encapsulation. External code should use lookup_actor() to get MessageSender.
     pub(crate) fn has_actor_instance(&self, actor_id: &ActorId) -> bool {
-        // This is a synchronous check - we can't use async in a sync method
-        // So we use try_read() which returns immediately
-        if let Ok(instances) = self.actor_instances.try_read() {
-            instances.contains_key(actor_id)
+        if let Ok(actors) = self.actors.try_read() {
+            actors.iter().any(|(key, sender)| {
+                key.actor_id == *actor_id && sender.local_state_handle().is_some()
+            })
         } else {
             false
         }
     }
 
-    /// Get actor instance for active actors and tests.
+    /// Get the local runtime/state handle for active actors and tests.
     ///
     /// ## Purpose
     /// Gets the stored actor instance for:
-    /// 1. Active actors that expose runtime state through `ActorHandle`
-    /// 2. Test helpers that need to inspect the running instance
+    /// 1. Active local actors that expose runtime state through `ActorStateHandle`
+    /// 2. Test helpers that need to inspect the running runtime handle
     ///
     /// ## Design Principles
-    /// - **Encapsulation**: `actor_instances` map is private, accessed only via this method
-    /// - **Simple**: Single method to get instance, use `unregister_with_cleanup()` to remove
-    /// - **Consistent**: All instance management goes through `register_actor()` and `unregister_with_cleanup()`
+    /// - **Encapsulation**: Runtime state is exposed through the registered sender only
+    /// - **Simple**: Single method to get the local runtime handle when one exists
+    /// - **Consistent**: Local actor lifecycle flows through the same registered sender shape
     ///
     /// ## Note
-    /// Production code should use `lookup_actor()` to get MessageSender.
-    /// Lazy virtual actors do not keep an instance here; they are rebuilt from
+    /// Production code should use `lookup_actor()` or `lookup_actor_in_scope()` to get a
+    /// `MessageSender`. Lazy virtual actors do not keep a live handle here; they are rebuilt from
     /// `VirtualActorManager` metadata during activation.
     pub async fn get_actor_instance(
         &self,
         actor_id: &ActorId,
-    ) -> Option<Arc<dyn crate::actor_state_checker::ActorHandle>> {
-        let instances = self.actor_instances.read().await;
-        instances.get(actor_id).cloned()
+    ) -> Option<Arc<dyn crate::actor_state_checker::ActorStateHandle>> {
+        self.lookup_actor(actor_id)
+            .await
+            .and_then(|sender| sender.local_state_handle())
     }
 
     /// Get actor state
@@ -308,16 +314,19 @@ impl ActorRegistry {
     /// This is used to determine if an actor is truly active (state is Active).
     ///
     /// ## Returns
-    /// `Option<i32>` - The actor's state as a proto `ActorState` enum value, or `None` if not an Actor or instance doesn't exist
+    /// `Option<ActorState>` - The actor's state as a proto enum value, or `None` if not an actor or instance doesn't exist
     ///
     /// ## Implementation
-    /// Uses the `ActorHandle` trait to get state without importing `Actor` directly.
+    /// Uses the `ActorStateHandle` trait to get state without importing `Actor` directly.
     /// The trait is implemented by `Actor` in the `plexspaces_actor` crate.
     ///
     /// ## Usage
     /// Called by `is_actor_state_active()` to check if an actor is truly active.
     /// This is consistent for all actor types (regular/virtual/workflows/etc.).
-    pub async fn get_actor_state(&self, actor_id: &ActorId) -> Option<i32> {
+    pub async fn get_actor_state(
+        &self,
+        actor_id: &ActorId,
+    ) -> Option<plexspaces_proto::v1::actor::ActorState> {
         if let Some(instance) = self.get_actor_instance(actor_id).await {
             Some(instance.actor_state().await)
         } else {
@@ -349,11 +358,14 @@ impl ActorRegistry {
         use plexspaces_proto::v1::actor::ActorState as ProtoActorState;
 
         if let Some(state_value) = self.get_actor_state(actor_id).await {
-            // Check if state is Active (proto enum value)
-            let is_active = state_value == ProtoActorState::ActorStateActive as i32;
+            let is_active = state_value == ProtoActorState::ActorStateActive;
             if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!("[ACTOR_REGISTRY] is_actor_state_active: actor_id={}, state_value={}, ActorStateActive={}, is_active={}", 
-                    actor_id, state_value, ProtoActorState::ActorStateActive as i32, is_active);
+                tracing::debug!(
+                    "[ACTOR_REGISTRY] is_actor_state_active: actor_id={}, state_value={:?}, is_active={}",
+                    actor_id,
+                    state_value,
+                    is_active
+                );
             }
             is_active
         } else {
@@ -373,8 +385,25 @@ impl ActorRegistry {
     /// ## Note
     /// This is for internal use by ActorFactory. External code should not need this.
     pub async fn get_actor_metadata(&self, actor_id: &ActorId) -> Option<(String, String)> {
-        let metadata = self.actor_metadata.read().await;
-        metadata.get(actor_id).cloned()
+        if let Some(sender) = self.lookup_actor(actor_id).await {
+            if let (Some(tenant_id), Some(namespace)) = (sender.tenant_id(), sender.namespace()) {
+                return Some((tenant_id.to_string(), namespace.to_string()));
+            }
+        }
+
+        let manager = self.virtual_actor_manager.read().await.clone();
+        if let Some(manager) = manager {
+            if let Some(metadata) = manager.get_metadata(actor_id).await {
+                return Some((metadata.tenant_id, metadata.namespace));
+            }
+            if let Ok(parsed) = parse_actor_id(actor_id) {
+                if let Some(metadata) = manager.get_virtual_actor_type(&parsed.actor_type).await {
+                    return Some((metadata.tenant_id, metadata.namespace));
+                }
+            }
+        }
+
+        None
     }
 
     /// Get actor type for an actor_id
@@ -386,14 +415,32 @@ impl ActorRegistry {
     /// ## Returns
     /// Some(actor_type) if found, None otherwise
     pub async fn get_actor_type(&self, actor_id: &ActorId) -> Option<String> {
-        let actor_types = self.actor_types.read().await;
-        let result = actor_types.get(actor_id).cloned();
+        if let Some(sender) = self.lookup_actor(actor_id).await {
+            if let Some(actor_type) = sender.actor_type() {
+                return Some(actor_type);
+            }
+        }
+
+        let manager = self.virtual_actor_manager.read().await.clone();
+        let result = if let Some(manager) = manager {
+            if let Some(metadata) = manager.get_metadata(actor_id).await {
+                Some(metadata.actor_type)
+            } else if let Ok(parsed) = parse_actor_id(actor_id) {
+                manager
+                    .get_virtual_actor_type(&parsed.actor_type)
+                    .await
+                    .map(|metadata| metadata.actor_type)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         if tracing::enabled!(tracing::Level::DEBUG) {
             tracing::debug!(
-                "[ACTOR_REGISTRY] get_actor_type: actor_id={}, result={:?}, total_types={}",
+                "[ACTOR_REGISTRY] get_actor_type: actor_id={}, result={:?}",
                 actor_id,
-                result,
-                actor_types.len()
+                result
             );
         }
         result
@@ -401,13 +448,13 @@ impl ActorRegistry {
 
     //
     // Design: Simple and encapsulated
-    // - actor_instances map is private (encapsulation)
-    // - get_actor_instance() - only way to read instances
-    // - register_actor() - only way to store instances (via instance parameter)
-    // - unregister_with_cleanup() - only way to remove instances
+    // - runtime state lives on the registered sender
+    // - get_actor_instance() - only way to read a local runtime handle
+    // - register_actor() - only way to enrich the sender with local state
+    // - unregister_with_cleanup() - only way to remove sender/runtime registration
     //
-    // Lazy virtual actors rebuild from VirtualActorManager metadata, so actor_instances
-    // only tracks running actors and other callers that intentionally store an instance.
+    // Lazy virtual actors rebuild from VirtualActorManager metadata, so the registry
+    // only tracks a live runtime while the actor is active.
 
     /// Get FacetManager
     pub fn facet_manager(&self) -> &Arc<FacetManager> {
@@ -438,17 +485,75 @@ impl ActorRegistry {
         &self.actor_configs
     }
 
-    pub fn actor_types(&self) -> &Arc<RwLock<HashMap<ActorId, String>>> {
-        &self.actor_types
+    /// Returns the currently registered actor inventory entries.
+    ///
+    /// Unlike `live_actor_entries()`, this includes actors that remain registered
+    /// for discovery without a live sender, such as passivated virtual actors.
+    pub async fn registered_actor_entries(&self) -> Vec<(String, String, ActorId)> {
+        let entries = self.registered_actor_entries.read().await;
+        entries
+            .iter()
+            .map(|key| {
+                (
+                    key.tenant_id.clone(),
+                    key.namespace.clone(),
+                    key.actor_id.clone(),
+                )
+            })
+            .collect()
     }
 
-    pub fn actor_metadata(&self) -> &Arc<RwLock<HashMap<ActorId, (String, String)>>> {
-        &self.actor_metadata
+    /// Returns the number of registered actors across all scopes.
+    pub async fn registered_actor_count(&self) -> usize {
+        self.registered_actor_entries.read().await.len()
     }
 
-    /// Get registered actor IDs set
-    pub fn registered_actor_ids(&self) -> &Arc<RwLock<HashSet<ActorId>>> {
-        &self.registered_actor_ids
+    /// Returns the set of tenant ids with at least one registered actor.
+    pub async fn registered_tenant_ids(&self) -> HashSet<String> {
+        let entries = self.registered_actor_entries.read().await;
+        entries.iter().map(|key| key.tenant_id.clone()).collect()
+    }
+
+    /// Returns the de-duplicated set of registered actor ids.
+    ///
+    /// This is primarily useful for callers that only need an actor-id inventory
+    /// and do not require tenant/namespace scope information.
+    pub async fn registered_actor_ids(&self) -> HashSet<ActorId> {
+        let entries = self.registered_actor_entries.read().await;
+        entries.iter().map(|key| key.actor_id.clone()).collect()
+    }
+
+    /// Returns the currently live registered actor entries.
+    ///
+    /// Each entry is keyed by the actor's isolation scope plus actor id so callers
+    /// can reason about live actors without flattening distinct tenant/namespace
+    /// registrations into a single global actor-id set.
+    pub async fn live_actor_entries(&self) -> Vec<(String, String, ActorId)> {
+        let actors = self.actors.read().await;
+        actors
+            .keys()
+            .map(|key| {
+                (
+                    key.tenant_id.clone(),
+                    key.namespace.clone(),
+                    key.actor_id.clone(),
+                )
+            })
+            .collect()
+    }
+
+    /// Returns the number of currently live registered actors.
+    ///
+    /// The count is scope-aware: the same actor id in two different scopes is
+    /// counted twice because they are distinct live registrations.
+    pub async fn live_actor_count(&self) -> usize {
+        self.actors.read().await.len()
+    }
+
+    /// Returns the set of tenant ids with at least one live registered actor.
+    pub async fn live_tenant_ids(&self) -> HashSet<String> {
+        let actors = self.actors.read().await;
+        actors.keys().map(|key| key.tenant_id.clone()).collect()
     }
 
     /// Get local node ID
@@ -479,13 +584,13 @@ impl ActorRegistry {
     /// * `sender` - MessageSender for a running actor
     /// * `actor_type` - Optional actor type for dashboard visibility
     /// * `config` - Optional actor configuration (resource requirements, etc.)
-    /// * `instance` - Optional actor instance (for activated actors - stored for ask() to get mailbox)
+    /// * `instance` - Optional local runtime/state handle for running local actors
     /// * `behavior_kind` - Optional OTP-style behavior kind for logging (GenServer, GenEvent, etc.)
     ///
     /// ## Design
-    /// - Running actors are registered with their live MessageSender
-    /// - Actor instance is stored for running actors so state and lifecycle remain observable
-    /// - Config: Stored separately for resource tracking
+    /// - Running actors are registered with their live `MessageSender`
+    /// - Local runtime state hangs off that sender through `ActorStateHandle`
+    /// - Config remains separate for resource tracking
     pub async fn register_actor(
         &self,
         ctx: &RequestContext,
@@ -493,51 +598,52 @@ impl ActorRegistry {
         sender: Arc<dyn MessageSender>,
         actor_type: String,
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
-        instance: Option<Arc<dyn crate::actor_state_checker::ActorHandle>>,
+        instance: Option<Arc<dyn crate::actor_state_checker::ActorStateHandle>>,
         behavior_kind: Option<crate::BehaviorType>,
     ) {
-        let mut actors = self.actors.write().await;
-        let was_new = actors.insert(actor_id.clone(), sender).is_none();
-        drop(actors);
-
-        // CRITICAL: Also add to registered_actor_ids to keep them in sync
-        // This ensures tests can check registered_actor_ids reliably
-        if was_new {
-            let mut registered_ids = self.registered_actor_ids.write().await;
-            registered_ids.insert(actor_id.clone());
+        sender.set_actor_type(Some(actor_type.clone())).await;
+        if let Some(ref handle) = instance {
+            sender.set_local_state_handle(Some(handle.clone())).await;
         }
 
-        // Store tenant/namespace metadata (for proper isolation during operations like stop())
-        // This avoids needing to access actor instance just to get context
-        {
-            let mut metadata = self.actor_metadata.write().await;
-            metadata.insert(
-                actor_id.clone(),
-                (ctx.tenant_id().to_string(), ctx.namespace().to_string()),
-            );
+        let mut actors = self.actors.write().await;
+        let scoped_key = Self::scoped_actor_key(
+            ctx.tenant_id().to_string(),
+            ctx.namespace().to_string(),
+            actor_id.clone(),
+        );
+
+        if instance.is_none() {
+            if let Some(existing_sender) = actors.get(&scoped_key) {
+                if let Some(existing_handle) = existing_sender.local_state_handle() {
+                    sender
+                        .set_local_state_handle(Some(existing_handle.clone()))
+                        .await;
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
+                            actor_id = %actor_id,
+                            tenant_id = %ctx.tenant_id(),
+                            namespace = %ctx.namespace(),
+                            "Preserved existing local state handle during actor re-registration"
+                        );
+                    }
+                }
+            }
+        }
+
+        let was_new = actors.insert(scoped_key.clone(), sender.clone()).is_none();
+        drop(actors);
+
+        // Keep registered discoverability inventory in sync with live registrations.
+        if was_new {
+            let mut registered_entries = self.registered_actor_entries.write().await;
+            registered_entries.insert(scoped_key);
         }
 
         // Store actor config if provided (for resource tracking)
         if let Some(config) = config {
             let mut actor_configs = self.actor_configs.write().await;
             actor_configs.insert(actor_id.clone(), config);
-        }
-
-        if let Some(ref instance) = instance {
-            let mut actor_instances = self.actor_instances.write().await;
-            actor_instances.insert(actor_id.clone(), instance.clone());
-            if tracing::enabled!(tracing::Level::TRACE) {
-                tracing::trace!(
-                    actor_id = %actor_id,
-                    "Stored actor instance (actor is activated and ready for ask())"
-                );
-            }
-        }
-
-        // Store actor_type and update actor-type index (required field)
-        {
-            let mut actor_types = self.actor_types.write().await;
-            actor_types.insert(actor_id.clone(), actor_type.clone());
         }
 
         let mut index = self.actor_type_index.write().await;
@@ -594,18 +700,14 @@ impl ActorRegistry {
         actor_id: ActorId,
         actor_type: String,
     ) {
-        self.registered_actor_ids
+        self.registered_actor_entries
             .write()
             .await
-            .insert(actor_id.clone());
-        self.actor_metadata.write().await.insert(
-            actor_id.clone(),
-            (ctx.tenant_id().to_string(), ctx.namespace().to_string()),
-        );
-        self.actor_types
-            .write()
-            .await
-            .insert(actor_id.clone(), actor_type.clone());
+            .insert(Self::scoped_actor_key(
+                ctx.tenant_id().to_string(),
+                ctx.namespace().to_string(),
+                actor_id.clone(),
+            ));
         let key = (
             ctx.tenant_id().to_string(),
             ctx.namespace().to_string(),
@@ -628,10 +730,50 @@ impl ActorRegistry {
     /// * `actor_id` - Actor ID
     ///
     /// ## Returns
-    /// MessageSender trait object if found, None otherwise
+    /// MessageSender trait object if found, None otherwise.
+    ///
+    /// This method is intentionally conservative: if more than one live actor
+    /// exists with the same `actor_id` across different scopes, lookup fails
+    /// closed and returns `None`. Callers that already know tenant/namespace
+    /// should use `lookup_actor_in_scope()` instead.
     pub async fn lookup_actor(&self, actor_id: &ActorId) -> Option<Arc<dyn MessageSender>> {
         let actors = self.actors.read().await;
-        actors.get(actor_id).cloned()
+        let mut matches = actors
+            .iter()
+            .filter(|(key, _)| key.actor_id == *actor_id)
+            .map(|(_, sender)| sender.clone());
+        let first = matches.next();
+        if matches.next().is_some() {
+            if tracing::enabled!(tracing::Level::WARN) {
+                tracing::warn!(
+                    actor_id = %actor_id,
+                    "Ambiguous actor lookup across multiple scopes"
+                );
+            }
+            None
+        } else {
+            first
+        }
+    }
+
+    /// Lookup a live actor within an explicit tenant/namespace scope.
+    ///
+    /// This is the preferred hot-path lookup for request routing because it
+    /// avoids ambiguous matches when the same actor id exists in multiple scopes.
+    pub async fn lookup_actor_in_scope(
+        &self,
+        tenant_id: &str,
+        namespace: &str,
+        actor_id: &ActorId,
+    ) -> Option<Arc<dyn MessageSender>> {
+        let actors = self.actors.read().await;
+        actors
+            .get(&Self::scoped_actor_key(
+                tenant_id.to_string(),
+                namespace.to_string(),
+                actor_id.clone(),
+            ))
+            .cloned()
     }
 
     /// Unregister actor
@@ -641,7 +783,7 @@ impl ActorRegistry {
         // Remove from actors map (MessageSender)
         {
             let mut actors = self.actors.write().await;
-            actors.remove(actor_id);
+            actors.retain(|key, _| key.actor_id != *actor_id);
         }
 
         // Remove from actor-type index (scan all entries to find and remove)
@@ -654,17 +796,23 @@ impl ActorRegistry {
             index.retain(|_, actor_ids| !actor_ids.is_empty());
         }
 
+        // Remove from registered inventory
+        {
+            let mut registered_entries = self.registered_actor_entries.write().await;
+            registered_entries.retain(|key| key.actor_id != *actor_id);
+        }
+
         // TODO: Add unregister to ObjectRegistry trait and call it here
         // For now, we only remove from actors map
 
         Ok(())
     }
 
-    /// Check if actor is activated (has MessageSender) without exposing mailbox
+    /// Check if actor is activated (has a live registered sender) without exposing internals
     ///
     /// ## Purpose
-    /// Allows checking if an actor is activated without exposing mailbox directly.
-    /// Checks if MessageSender is registered, which indicates the actor is active.
+    /// Allows checking if an actor is activated without exposing runtime internals.
+    /// A registered live sender indicates that the actor is active.
     ///
     /// ## Arguments
     /// * `actor_id` - Actor ID
@@ -673,7 +821,7 @@ impl ActorRegistry {
     /// true if actor is activated (has MessageSender), false otherwise
     pub async fn is_actor_activated(&self, actor_id: &ActorId) -> bool {
         let actors = self.actors.read().await;
-        actors.contains_key(actor_id)
+        actors.keys().any(|key| key.actor_id == *actor_id)
     }
 
     fn is_local_actor_id(&self, actor_id: &ActorId) -> bool {
@@ -684,7 +832,13 @@ impl ActorRegistry {
     }
 
     async fn actor_exists_locally(&self, actor_id: &ActorId) -> bool {
-        if self.registered_actor_ids.read().await.contains(actor_id) {
+        if self
+            .registered_actor_entries
+            .read()
+            .await
+            .iter()
+            .any(|key| key.actor_id == *actor_id)
+        {
             return true;
         }
         if self.lookup_actor(actor_id).await.is_some() {
@@ -876,9 +1030,13 @@ impl ActorRegistry {
     /// Removes only the live sender/runtime for a passivated virtual actor while preserving
     /// metadata required for reactivation.
     pub async fn remove_live_actor_runtime(&self, actor_id: &ActorId) {
-        self.actor_instances.write().await.remove(actor_id);
-        self.actors.write().await.remove(actor_id);
-        tracing::debug!(actor_id = %actor_id, "Removed live actor runtime; metadata preserved");
+        self.actors
+            .write()
+            .await
+            .retain(|key, _| key.actor_id != *actor_id);
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(actor_id = %actor_id, "Removed live actor runtime; metadata preserved");
+        }
     }
 
     /// Subscribe to lifecycle events
@@ -950,13 +1108,13 @@ impl ActorRegistry {
         // Check if actor existed before removing
         let existed = {
             let actors = self.actors.read().await;
-            actors.contains_key(actor_id)
+            actors.keys().any(|key| key.actor_id == *actor_id)
         };
 
         // Remove from actors (MessageSender trait objects)
         {
             let mut actors = self.actors.write().await;
-            actors.remove(actor_id);
+            actors.retain(|key, _| key.actor_id != *actor_id);
         }
 
         // Remove from actor_type_index
@@ -970,16 +1128,9 @@ impl ActorRegistry {
         }
 
         // CRITICAL: Lock acquisition order must be consistent to prevent deadlocks
-        // Order: 1. actor_instances, 2. actor_metadata, 3. actor_types, 4. facet_manager (via remove_facets), 5. registered_ids, 6. actor_configs
-        let mut actor_instances = self.actor_instances.write().await;
-        let mut actor_metadata = self.actor_metadata.write().await;
-        let mut actor_types = self.actor_types.write().await;
-        let mut registered_ids = self.registered_actor_ids.write().await;
+        // Order: 1. facet_manager (via remove_facets), 2. registered inventory, 3. actor_configs
+        let mut registered_entries = self.registered_actor_entries.write().await;
         let mut actor_configs = self.actor_configs.write().await;
-
-        actor_instances.remove(actor_id);
-        actor_metadata.remove(actor_id);
-        actor_types.remove(actor_id);
 
         // Clean up parent-child relationships (Phase 3)
         {
@@ -997,7 +1148,7 @@ impl ActorRegistry {
             child_to_parent.remove(actor_id);
         }
         self.facet_manager.remove_facets(actor_id).await;
-        registered_ids.remove(actor_id);
+        registered_entries.retain(|key| key.actor_id != *actor_id);
         actor_configs.remove(actor_id);
 
         // Update metrics if actor existed
@@ -1775,47 +1926,25 @@ impl ActorRegistry {
     /// - Linked actors with trap_exit=true receive EXIT as message
     /// - Linked actors with trap_exit=false terminate immediately
     pub async fn handle_actor_termination(&self, actor_id: &ActorId, reason: ExitReason) {
-        tracing::info!(
-            actor_id = %actor_id,
-            reason = ?reason,
-            "Handling actor termination (Phase 6: Link/Monitor semantics)"
-        );
-
         // 1. Send DOWN to all monitors (always, regardless of exit reason)
         self.send_down_to_monitors(actor_id, &reason).await;
 
         // 2. Propagate EXIT to linked actors (only for error exits)
         // Normal and Shutdown exits don't propagate to links (Erlang semantics)
         let is_error = reason.is_error();
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                actor_id = %actor_id,
-                reason = ?reason,
-                is_error = is_error,
-                "Checking if exit reason should propagate to links"
-            );
-        }
         if is_error {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    actor_id = %actor_id,
-                    reason = ?reason,
-                    "Exit reason is error, propagating to linked actors"
-                );
-            }
             self.propagate_exit_to_links(actor_id, &reason).await;
-        } else {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    actor_id = %actor_id,
-                    reason = ?reason,
-                    "Exit reason is not error, NOT propagating to linked actors"
-                );
-            }
         }
 
         // 3. Clean up this actor's link/monitor entries
         self.cleanup_terminated_actor_links_monitors(actor_id).await;
+
+        tracing::info!(
+            actor_id = %actor_id,
+            reason = ?reason,
+            propagated_exit_to_links = is_error,
+            "Actor termination handled; link and monitor state cleaned up"
+        );
     }
 
     /// Send DOWN message to all monitors (Phase 6)
@@ -2134,8 +2263,8 @@ impl ActorRegistry {
             links.remove(actor_id);
         }
 
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 actor_id = %actor_id,
                 "Cleaned up link/monitor entries for terminated actor"
             );

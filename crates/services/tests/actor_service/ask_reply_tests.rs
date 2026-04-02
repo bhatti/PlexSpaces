@@ -250,8 +250,7 @@ async fn create_test_registry_with_actors(
 
     let actor_registry = Arc::new(ActorRegistry::new(object_registry, node_id.to_string()));
     use plexspaces_node::create_default_service_locator;
-    let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     service_locator
         .register_service(actor_registry.clone())
         .await;
@@ -293,7 +292,9 @@ async fn create_test_registry_with_actors(
     actor_registry
         .set_virtual_actor_manager(virtual_actor_manager.clone())
         .await;
-    actor_registry.set_actor_factory(actor_factory.clone()).await;
+    actor_registry
+        .set_actor_factory(actor_factory.clone())
+        .await;
 
     let registry = BehaviorRegistry::new();
     let module_name = actor_type.to_string();
@@ -512,7 +513,10 @@ async fn test_ask_reply_ignores_stale_actor_type_index_entries() {
         "default",
     )
     .await;
-    assert!(result.is_ok(), "ask_reply should ignore stale type index entries");
+    assert!(
+        result.is_ok(),
+        "ask_reply should ignore stale type index entries"
+    );
 }
 
 #[tokio::test]
@@ -564,7 +568,84 @@ async fn test_ask_reply_activates_virtual_actor_type_with_instance_id() {
         "node1",
     );
     assert_eq!(response.actor_id, expected_actor_id);
-    assert!(actor_registry.lookup_actor(&response.actor_id).await.is_some());
+    assert!(actor_registry
+        .lookup_actor(&response.actor_id)
+        .await
+        .is_some());
+}
+
+#[tokio::test]
+async fn test_ask_reply_shorthand_virtual_actor_increment_applies_once() {
+    let (actor_registry, service_locator) =
+        create_test_registry_with_actors("node1", "virtual-counter", "default", 0).await;
+    register_counter_behavior(&service_locator, "virtual-counter").await;
+
+    let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
+    virtual_actor_manager
+        .register_virtual_actor_type(
+            "virtual-counter".to_string(),
+            None,
+            "default".to_string(),
+            serde_json::json!({
+                "virtual_actor": {
+                    "idle_timeout": "5m",
+                    "activation_strategy": "lazy"
+                }
+            }),
+            Some("default".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let service =
+        create_test_actor_service(actor_registry.clone(), service_locator, "node1".to_string())
+            .await;
+
+    let increment_response = ask_reply_request(
+        &service,
+        build_ask_request(
+            "virtual-counter:user-1",
+            "POST",
+            br#"{"action":"increment"}"#.to_vec(),
+            HashMap::new(),
+        ),
+        "default",
+    )
+    .await
+    .expect("increment ask_reply should succeed")
+    .into_inner();
+    assert!(increment_response.success);
+
+    let count_response = ask_reply_request(
+        &service,
+        build_ask_request(
+            "virtual-counter:user-1",
+            "GET",
+            vec![],
+            HashMap::from([("action".to_string(), "get".to_string())]),
+        ),
+        "default",
+    )
+    .await
+    .expect("get ask_reply should succeed")
+    .into_inner();
+
+    let expected_actor_id = plexspaces_core::actor_id::build_actor_id(
+        "user-1",
+        "virtual-counter",
+        Some("default"),
+        "node1",
+    );
+    assert_eq!(count_response.actor_id, expected_actor_id);
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&count_response.payload).expect("count payload");
+    assert_eq!(
+        payload.get("count").and_then(|value| value.as_i64()),
+        Some(1),
+        "fresh shorthand virtual actor increment should be applied exactly once"
+    );
 }
 
 #[tokio::test]
@@ -597,7 +678,10 @@ async fn test_send_message_activates_virtual_actor_type_with_instance_id() {
 
     let response = send_message_request(
         &service,
-        build_send_request("virtual-counter:user-2", br#"{"action":"increment"}"#.to_vec()),
+        build_send_request(
+            "virtual-counter:user-2",
+            br#"{"action":"increment"}"#.to_vec(),
+        ),
         "default",
     )
     .await
@@ -612,7 +696,10 @@ async fn test_send_message_activates_virtual_actor_type_with_instance_id() {
     );
     assert!(response.success);
     assert_eq!(response.actor_id, expected_actor_id);
-    assert!(actor_registry.lookup_actor(&response.actor_id).await.is_some());
+    assert!(actor_registry
+        .lookup_actor(&response.actor_id)
+        .await
+        .is_some());
 }
 
 #[tokio::test]

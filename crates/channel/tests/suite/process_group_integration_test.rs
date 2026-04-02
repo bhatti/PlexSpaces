@@ -407,8 +407,7 @@ async fn run_market_feed_test(channel: Arc<dyn Channel>, backend_name: &str) {
         "Analyst should have processed all received messages"
     );
     assert_eq!(
-        stats.messages_sent,
-        total_sent,
+        stats.messages_sent, total_sent,
         "{} backend should record all sent messages",
         backend_name
     );
@@ -570,10 +569,13 @@ async fn test_high_throughput_market_feed() {
             channel.send(msg).await.unwrap();
         }
     }
-    let received = timeout(Duration::from_secs(2), channel.receive(total_messages as u32))
-        .await
-        .expect("high-throughput receive should complete quickly")
-        .unwrap();
+    let received = timeout(
+        Duration::from_secs(2),
+        channel.receive(total_messages as u32),
+    )
+    .await
+    .expect("high-throughput receive should complete quickly")
+    .unwrap();
 
     let stats = channel.get_stats().await.unwrap_or_default();
 

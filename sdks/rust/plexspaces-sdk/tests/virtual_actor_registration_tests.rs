@@ -101,11 +101,18 @@ async fn test_virtual_actor_type_registration_on_spawn() {
     assert!(type_metadata.is_some(), "Type metadata should exist");
     let metadata = type_metadata.unwrap();
     assert_eq!(metadata.actor_type, "GenServer");
+    assert_eq!(metadata.behavior_kind.as_deref(), Some("GenServer"));
     assert_eq!(metadata.namespace, "test-namespace");
     assert!(
         metadata.facet_config.is_some(),
         "facet_config should be set"
     );
+    assert_eq!(
+        metadata.proto_facets.len(),
+        1,
+        "expected proto facet metadata"
+    );
+    assert_eq!(metadata.proto_facets[0].r#type, "virtual_actor");
 
     // Verify facet_config is in keyed format
     let facet_config = metadata.facet_config.unwrap();

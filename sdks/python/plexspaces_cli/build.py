@@ -30,6 +30,20 @@ import tempfile
 from pathlib import Path
 
 
+def componentize_command() -> list[str]:
+    """Return a componentize-py invocation bound to the current interpreter."""
+    return [
+        sys.executable,
+        "-c",
+        (
+            "import sys; "
+            "from componentize_py import script; "
+            "sys.argv[0] = 'componentize-py'; "
+            "sys.exit(script())"
+        ),
+    ]
+
+
 def find_wit_dir() -> str:
     """Find the WIT directory for simple-actor interface."""
     # Check common locations
@@ -197,8 +211,8 @@ def build_wasm(
             if verbose:
                 print("  Generating WIT bindings...")
             
-            cmd_bindings = [
-                "componentize-py", "-d", wit_dir, "-w", world, "bindings", "."
+            cmd_bindings = componentize_command() + [
+                "-d", wit_dir, "-w", world, "bindings", "."
             ]
             result = subprocess.run(
                 cmd_bindings,
@@ -213,8 +227,8 @@ def build_wasm(
             if verbose:
                 print("  Building WASM component...")
             
-            cmd_build = [
-                "componentize-py", "-d", wit_dir, "-w", world,
+            cmd_build = componentize_command() + [
+                "-d", wit_dir, "-w", world,
                 "componentize", "-o", str(output), build_module
             ]
             result = subprocess.run(

@@ -42,9 +42,11 @@ use tokio::sync::RwLock;
 
 use crate::actor_id::parse_actor_id;
 use crate::virtual_actor_lifecycle_facet::VirtualActorLifecycleFacet;
+use crate::virtual_actor_registration::VirtualActorDefinitionRegistration;
 use crate::Service;
 use crate::{ActorId, ActorRegistry};
 use plexspaces_common::{from_config_str, ActivationStrategy};
+use plexspaces_proto::common::v1::Facet as ProtoFacet;
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::v1::actor::ActorConfig;
 
@@ -78,6 +80,8 @@ pub struct VirtualActorMetadata {
     pub actor_type: String,
     /// Actor configuration (resource requirements, etc.) - needed to rebuild suspended actors
     pub config: Option<ActorConfig>,
+    /// Behavior kind captured at registration time.
+    pub behavior_kind: Option<String>,
     /// Tenant ID (for proper isolation) - needed to rebuild suspended actors
     pub tenant_id: String,
     /// Namespace (for proper isolation) - needed to rebuild suspended actors
@@ -107,6 +111,8 @@ pub struct VirtualActorMetadata {
     /// **Usage**: When activating a virtual actor, parse this template, replace `actor_id`
     /// with the actual actor_id, and pass as `initial_state` to `spawn_actor()`.
     pub init_config_template: Option<Vec<u8>>,
+    /// Proto-first facet metadata captured at registration time.
+    pub proto_facets: Vec<ProtoFacet>,
 
     /// Initial state bytes captured at registration.
     ///
@@ -133,6 +139,15 @@ pub struct VirtualActorMetadata {
 pub struct ActiveInstance {
     pub actor_id: ActorId,
     pub last_access: std::time::SystemTime,
+}
+
+/// Result of removing all virtual actor metadata owned by an application namespace.
+#[derive(Debug, Default, Clone)]
+pub struct VirtualActorNamespaceCleanup {
+    /// Removed virtual actor instance IDs.
+    pub actor_ids: Vec<ActorId>,
+    /// Removed type registrations.
+    pub actor_types: Vec<String>,
 }
 
 /// Virtual Actor Registry - stores virtual actor metadata
@@ -291,18 +306,34 @@ impl VirtualActorManager {
             ));
         }
 
+        let type_metadata = {
+            let virtual_types = self.registry.virtual_actor_types().read().await;
+            virtual_types.get(&actor_type).cloned()
+        };
+
         let mut virtual_actors = self.registry.virtual_actors().write().await;
         virtual_actors.insert(
             actor_id,
             VirtualActorMetadata {
-                init_config_template: None,
+                init_config_template: type_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.init_config_template.clone()),
                 facet: Some(facet),
                 last_deactivated: None,
                 actor_type,
                 config,
+                behavior_kind: type_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.behavior_kind.clone()),
                 tenant_id,
                 namespace,
-                facet_config: None,
+                facet_config: type_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.facet_config.clone()),
+                proto_facets: type_metadata
+                    .as_ref()
+                    .map(|metadata| metadata.proto_facets.clone())
+                    .unwrap_or_default(),
                 initial_state,
                 labels,
                 activation_strategy,
@@ -390,6 +421,35 @@ impl VirtualActorManager {
         tenant_id: Option<String>,
         init_config_template: Option<Vec<u8>>,
     ) -> Result<(), VirtualActorError> {
+        self.register_virtual_actor_definition(VirtualActorDefinitionRegistration {
+            actor_type,
+            behavior_kind: None,
+            namespace,
+            actor_config: config,
+            proto_facets: Vec::new(),
+            facet_config,
+            tenant_id,
+            init_config_template,
+        })
+        .await
+    }
+
+    /// Register a virtual actor definition using the shared framework metadata shape.
+    pub async fn register_virtual_actor_definition(
+        &self,
+        definition: VirtualActorDefinitionRegistration,
+    ) -> Result<(), VirtualActorError> {
+        let VirtualActorDefinitionRegistration {
+            actor_type,
+            behavior_kind,
+            namespace,
+            actor_config,
+            proto_facets,
+            facet_config,
+            tenant_id,
+            init_config_template,
+        } = definition;
+
         if actor_type.is_empty() {
             return Err(VirtualActorError::ActivationFailed(
                 "actor_type is required (from proto Actor.actor_type)".to_string(),
@@ -412,11 +472,13 @@ impl VirtualActorManager {
                 facet: None, // Facet created from facet_config when needed
                 last_deactivated: None,
                 actor_type: actor_type.clone(),
-                config,
+                config: actor_config,
+                behavior_kind,
                 tenant_id: tenant_id.unwrap_or_default(),
                 namespace,
                 facet_config: Some(facet_config),
                 init_config_template,
+                proto_facets,
                 initial_state: Vec::new(),
                 labels: HashMap::new(),
                 activation_strategy,
@@ -471,6 +533,57 @@ impl VirtualActorManager {
     pub async fn get_metadata(&self, actor_id: &ActorId) -> Option<VirtualActorMetadata> {
         let virtual_actors = self.registry.virtual_actors().read().await;
         virtual_actors.get(actor_id).cloned()
+    }
+
+    /// Remove all virtual actor registrations owned by an application namespace.
+    ///
+    /// ## Purpose
+    /// Explicit undeploy must remove both type registrations and instance metadata so a later
+    /// redeploy starts from a clean slate instead of resurrecting stale virtual actors.
+    pub async fn unregister_namespace(&self, namespace: &str) -> VirtualActorNamespaceCleanup {
+        let mut cleanup = VirtualActorNamespaceCleanup::default();
+
+        {
+            let mut virtual_actors = self.registry.virtual_actors().write().await;
+            let actor_ids: Vec<ActorId> = virtual_actors
+                .iter()
+                .filter(|(_, metadata)| metadata.namespace == namespace)
+                .map(|(actor_id, _)| actor_id.clone())
+                .collect();
+            for actor_id in &actor_ids {
+                virtual_actors.remove(actor_id);
+            }
+            cleanup.actor_ids = actor_ids;
+        }
+
+        {
+            let mut pending = self.registry.pending_activations().write().await;
+            for actor_id in &cleanup.actor_ids {
+                pending.remove(actor_id);
+            }
+        }
+
+        {
+            let mut virtual_types = self.registry.virtual_actor_types().write().await;
+            let actor_types: Vec<String> = virtual_types
+                .iter()
+                .filter(|(_, metadata)| metadata.namespace == namespace)
+                .map(|(actor_type, _)| actor_type.clone())
+                .collect();
+            for actor_type in &actor_types {
+                virtual_types.remove(actor_type);
+            }
+            cleanup.actor_types = actor_types;
+        }
+
+        {
+            let mut active_instances = self.registry.active_instances_by_type().write().await;
+            for actor_type in &cleanup.actor_types {
+                active_instances.remove(actor_type);
+            }
+        }
+
+        cleanup
     }
 
     /// Get virtual actor facet
@@ -762,9 +875,12 @@ impl crate::Service for VirtualActorManager {
 mod tests {
     use super::*;
     use crate::actor_context::ObjectRegistry;
+    use crate::virtual_actor_registration::VirtualActorDefinitionRegistration;
     use crate::ActorRegistry;
     use async_trait::async_trait;
     use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
+    use plexspaces_proto::common::v1::Facet as ProtoFacet;
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     // Helper to wrap ObjectRegistry for ActorRegistry
@@ -991,6 +1107,124 @@ mod tests {
         assert!(metadata.is_some());
         let metadata = metadata.unwrap();
         assert_eq!(metadata.tenant_id, tenant_id.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_register_virtual_actor_definition_preserves_behavior_and_proto_facets() {
+        let manager = create_test_manager().await;
+
+        let actor_type = "workflow-type".to_string();
+        let namespace = "namespace".to_string();
+        let facet_config = serde_json::json!({
+            "virtual_actor": {
+                "idle_timeout": "5m",
+                "activation_strategy": "lazy"
+            },
+            "durability": {
+                "checkpoint_interval": 100
+            }
+        });
+
+        let result = manager
+            .register_virtual_actor_definition(VirtualActorDefinitionRegistration {
+                actor_type: actor_type.clone(),
+                behavior_kind: Some("Workflow".to_string()),
+                namespace: namespace.clone(),
+                actor_config: None,
+                proto_facets: vec![
+                    ProtoFacet {
+                        r#type: "virtual_actor".to_string(),
+                        config: HashMap::from([
+                            ("idle_timeout".to_string(), "5m".to_string()),
+                            ("activation_strategy".to_string(), "lazy".to_string()),
+                        ]),
+                        priority: 100,
+                        state: HashMap::new(),
+                        metadata: None,
+                    },
+                    ProtoFacet {
+                        r#type: "durability".to_string(),
+                        config: HashMap::from([(
+                            "checkpoint_interval".to_string(),
+                            "100".to_string(),
+                        )]),
+                        priority: 90,
+                        state: HashMap::new(),
+                        metadata: None,
+                    },
+                ],
+                facet_config: facet_config.clone(),
+                tenant_id: Some("tenant-123".to_string()),
+                init_config_template: Some(br#"{"actor_id":"template"}"#.to_vec()),
+            })
+            .await;
+
+        assert!(result.is_ok());
+
+        let metadata = manager
+            .get_virtual_actor_type(&actor_type)
+            .await
+            .expect("metadata should exist");
+        assert_eq!(metadata.actor_type, actor_type);
+        assert_eq!(metadata.namespace, namespace);
+        assert_eq!(metadata.behavior_kind.as_deref(), Some("Workflow"));
+        assert_eq!(metadata.tenant_id, "tenant-123");
+        assert_eq!(metadata.facet_config, Some(facet_config));
+        assert_eq!(metadata.proto_facets.len(), 2);
+        assert_eq!(metadata.proto_facets[0].r#type, "virtual_actor");
+        assert_eq!(metadata.proto_facets[1].r#type, "durability");
+        assert_eq!(
+            metadata.init_config_template,
+            Some(br#"{"actor_id":"template"}"#.to_vec())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unregister_namespace_removes_virtual_types_and_instances() {
+        let manager = create_test_manager().await;
+        let actor_id = "cart-1//abstractions::demo@test-node".to_string();
+
+        manager
+            .register(
+                actor_id.clone(),
+                Arc::new(RwLock::new(
+                    Box::new(MockLifecycleFacet) as Box<dyn VirtualActorLifecycleFacet>
+                )),
+                "abstractions".to_string(),
+                None,
+                "tenant".to_string(),
+                "demo".to_string(),
+                Vec::new(),
+                HashMap::new(),
+                ActivationStrategy::ActivationStrategyLazy,
+            )
+            .await
+            .expect("virtual actor instance should register");
+
+        manager
+            .register_virtual_actor_definition(VirtualActorDefinitionRegistration {
+                actor_type: "abstractions".to_string(),
+                behavior_kind: Some("GenServer".to_string()),
+                namespace: "demo".to_string(),
+                actor_config: None,
+                proto_facets: vec![],
+                facet_config: serde_json::json!({
+                    "virtual_actor": {
+                        "idle_timeout": "5m",
+                        "activation_strategy": "lazy"
+                    }
+                }),
+                tenant_id: Some("tenant".to_string()),
+                init_config_template: None,
+            })
+            .await
+            .expect("virtual actor type should register");
+
+        let cleanup = manager.unregister_namespace("demo").await;
+        assert_eq!(cleanup.actor_ids, vec![actor_id.clone()]);
+        assert_eq!(cleanup.actor_types, vec!["abstractions".to_string()]);
+        assert!(manager.get_metadata(&actor_id).await.is_none());
+        assert!(!manager.is_virtual_actor_type("abstractions").await);
     }
 
     #[tokio::test]
@@ -1334,6 +1568,89 @@ mod tests {
         let metadata = virtual_actors.get(&actor_id).unwrap();
         assert_eq!(metadata.actor_type, new_type);
         assert_eq!(metadata.config, new_config);
+    }
+
+    #[tokio::test]
+    async fn test_instance_registration_inherits_type_level_rebuild_metadata() {
+        let manager = create_test_manager().await;
+
+        let actor_type = "durable-counter".to_string();
+        let facet_config = serde_json::json!({
+            "virtual_actor": {
+                "idle_timeout": "5m",
+                "activation_strategy": "lazy"
+            },
+            "durability": {
+                "checkpoint_interval": 5
+            },
+            "timer": {
+                "interval_ms": 1000
+            }
+        });
+
+        manager
+            .register_virtual_actor_definition(VirtualActorDefinitionRegistration {
+                actor_type: actor_type.clone(),
+                behavior_kind: Some("GenServer".to_string()),
+                namespace: "test-ns".to_string(),
+                actor_config: None,
+                proto_facets: vec![
+                    ProtoFacet {
+                        r#type: "virtual_actor".to_string(),
+                        config: HashMap::from([
+                            ("idle_timeout".to_string(), "5m".to_string()),
+                            ("activation_strategy".to_string(), "lazy".to_string()),
+                        ]),
+                        priority: 100,
+                        state: HashMap::new(),
+                        metadata: None,
+                    },
+                    ProtoFacet {
+                        r#type: "durability".to_string(),
+                        config: HashMap::from([(
+                            "checkpoint_interval".to_string(),
+                            "5".to_string(),
+                        )]),
+                        priority: 90,
+                        state: HashMap::new(),
+                        metadata: None,
+                    },
+                ],
+                facet_config: facet_config.clone(),
+                tenant_id: Some("tenant-a".to_string()),
+                init_config_template: Some(
+                    br#"{"actor_id":"","args":{"role":"abstractions"}}"#.to_vec(),
+                ),
+            })
+            .await
+            .unwrap();
+
+        manager
+            .register(
+                "cart-1//durable-counter::test-ns@test-node".to_string(),
+                create_test_virtual_actor_facet(),
+                actor_type.clone(),
+                None,
+                "tenant-a".to_string(),
+                "test-ns".to_string(),
+                vec![1, 2, 3],
+                HashMap::new(),
+                plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
+            )
+            .await
+            .unwrap();
+
+        let metadata = manager
+            .get_metadata(&"cart-1//durable-counter::test-ns@test-node".to_string())
+            .await
+            .expect("instance metadata should exist");
+        assert_eq!(metadata.facet_config, Some(facet_config));
+        assert_eq!(metadata.behavior_kind.as_deref(), Some("GenServer"));
+        assert_eq!(metadata.proto_facets.len(), 2);
+        assert_eq!(
+            metadata.init_config_template,
+            Some(br#"{"actor_id":"","args":{"role":"abstractions"}}"#.to_vec())
+        );
     }
 
     #[tokio::test]

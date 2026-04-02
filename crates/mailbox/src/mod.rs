@@ -1527,11 +1527,17 @@ mod tests {
         let mailbox = create_test_mailbox(config).await;
 
         mailbox
-            .enqueue(with_priority(new_message(b"low".to_vec()), MessagePriority::Low))
+            .enqueue(with_priority(
+                new_message(b"low".to_vec()),
+                MessagePriority::Low,
+            ))
             .await
             .unwrap();
         mailbox
-            .enqueue(with_priority(new_message(b"high".to_vec()), MessagePriority::High))
+            .enqueue(with_priority(
+                new_message(b"high".to_vec()),
+                MessagePriority::High,
+            ))
             .await
             .unwrap();
 
@@ -1562,7 +1568,10 @@ mod tests {
 
         // Verify signal message has Highest priority
         let signal_msg = signal_message(b"signal".to_vec());
-        assert_eq!(priority_from_int(signal_msg.priority), MessagePriority::Highest);
+        assert_eq!(
+            priority_from_int(signal_msg.priority),
+            MessagePriority::Highest
+        );
         assert_eq!(
             message_priority_value(&priority_from_int(signal_msg.priority)),
             5
@@ -1615,11 +1624,17 @@ mod tests {
 
         // Enqueue low priority first, then high priority
         mailbox
-            .enqueue(with_priority(new_message(b"low".to_vec()), MessagePriority::Low))
+            .enqueue(with_priority(
+                new_message(b"low".to_vec()),
+                MessagePriority::Low,
+            ))
             .await
             .unwrap();
         mailbox
-            .enqueue(with_priority(new_message(b"high".to_vec()), MessagePriority::High))
+            .enqueue(with_priority(
+                new_message(b"high".to_vec()),
+                MessagePriority::High,
+            ))
             .await
             .unwrap();
 
@@ -1647,7 +1662,10 @@ mod tests {
 
         // Enqueue low priority, then signal (Highest)
         mailbox
-            .enqueue(with_priority(new_message(b"low".to_vec()), MessagePriority::Low))
+            .enqueue(with_priority(
+                new_message(b"low".to_vec()),
+                MessagePriority::Low,
+            ))
             .await
             .unwrap();
         mailbox
@@ -1682,11 +1700,17 @@ mod tests {
 
         // Enqueue in random order
         mailbox
-            .enqueue(with_priority(new_message(b"low".to_vec()), MessagePriority::Low))
+            .enqueue(with_priority(
+                new_message(b"low".to_vec()),
+                MessagePriority::Low,
+            ))
             .await
             .unwrap();
         mailbox
-            .enqueue(with_priority(new_message(b"high".to_vec()), MessagePriority::High))
+            .enqueue(with_priority(
+                new_message(b"high".to_vec()),
+                MessagePriority::High,
+            ))
             .await
             .unwrap();
         mailbox
@@ -1995,7 +2019,10 @@ mod tests {
         let mut proto_msg2 = proto_msg.clone();
         proto_msg2.priority = 30;
         let message2 = proto_msg2;
-        assert_eq!(priority_from_int(message2.priority), MessagePriority::Normal);
+        assert_eq!(
+            priority_from_int(message2.priority),
+            MessagePriority::Normal
+        );
 
         // Test low priority (< 25 range)
         let mut proto_msg3 = proto_msg.clone();

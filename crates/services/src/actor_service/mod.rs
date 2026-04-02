@@ -130,12 +130,8 @@ use plexspaces_actor::parallel::{
     select_collective_value, shard_group_config, shard_query_responses_from_results,
 };
 use plexspaces_actor::ActorRef as ActorRefImpl;
-use plexspaces_core::{
-    ActorRegistry, RequestContext, ServiceLocator as ServiceLocatorTrait,
-};
-use plexspaces_core::{
-    actor_id::{build_actor_id, extract_actor_type, parse_actor_id},
-};
+use plexspaces_core::actor_id::{build_actor_id, extract_actor_type, parse_actor_id};
+use plexspaces_core::{ActorRegistry, RequestContext, ServiceLocator as ServiceLocatorTrait};
 use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime};
@@ -145,11 +141,11 @@ use ulid::Ulid;
 use plexspaces_proto::actor::v1::{
     // gRPC service trait and server
     actor_service_server::ActorService as ActorServiceTrait,
-    AskReplyRequest,
-    AskReplyResponse,
     ActorDownNotification,
     AllReduceShardGroupRequest,
     AllReduceShardGroupResponse,
+    AskReplyRequest,
+    AskReplyResponse,
     BarrierShardGroupRequest,
     BarrierShardGroupResponse,
     BroadcastShardGroupRequest,
@@ -204,8 +200,6 @@ use plexspaces_proto::actor::v1::{
     SpawnActorsResponse,
     StreamMessageRequest,
     StreamMessageResponse,
-    TerminateActorRequest,
-    TerminateActorResponse,
     UnlinkActorRequest,
     UnlinkActorResponse,
 };
@@ -338,10 +332,52 @@ impl ActorServiceImpl {
         Ok(target_actor_id)
     }
 
+    async fn canonical_actor_id_from_client_target(
+        &self,
+        ctx: &RequestContext,
+        requested_actor_type: &str,
+    ) -> Option<String> {
+        if requested_actor_type.contains("//") {
+            return Some(requested_actor_type.to_string());
+        }
+
+        if !requested_actor_type.contains(':') {
+            let resolved = self
+                .resolve_actor_target(ctx, requested_actor_type)
+                .await
+                .ok();
+            return resolved;
+        }
+
+        let (actor_type, base_actor_id) = requested_actor_type.split_once(':')?;
+        if actor_type.is_empty() || base_actor_id.is_empty() {
+            return None;
+        }
+
+        let namespace = if let Some(virtual_actor_manager) =
+            self.service_locator.virtual_actor_manager().await
+        {
+            virtual_actor_manager
+                .get_virtual_actor_type(actor_type)
+                .await
+                .map(|metadata| metadata.namespace)
+                .unwrap_or_else(|| ctx.namespace().to_string())
+        } else {
+            ctx.namespace().to_string()
+        };
+
+        let canonical = build_actor_id(
+            base_actor_id,
+            actor_type,
+            Some(&namespace),
+            &self.local_node_id,
+        );
+        Some(canonical)
+    }
+
     fn duration_from_proto(duration: Option<prost_types::Duration>) -> Option<Duration> {
-        duration.map(|d| {
-            Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64)
-        })
+        duration
+            .map(|d| Duration::from_secs(d.seconds as u64) + Duration::from_nanos(d.nanos as u64))
     }
 
     fn build_message_metadata(
@@ -387,7 +423,11 @@ impl ActorServiceImpl {
             .await;
         let mut active_actor_ids = Vec::with_capacity(discovered_actor_ids.len());
         for actor_id in &discovered_actor_ids {
-            if actor_registry.lookup_actor(actor_id).await.is_some() {
+            if actor_registry
+                .lookup_actor_in_scope(ctx.tenant_id(), ctx.namespace(), actor_id)
+                .await
+                .is_some()
+            {
                 active_actor_ids.push(actor_id.clone());
             }
         }
@@ -402,8 +442,12 @@ impl ActorServiceImpl {
             return Ok(active_actor_ids[idx].clone());
         }
 
-        self.resolve_target_actor_id_for_type_lookup(ctx, requested_actor_type, &discovered_actor_ids)
-            .await
+        self.resolve_target_actor_id_for_type_lookup(
+            ctx,
+            requested_actor_type,
+            &discovered_actor_ids,
+        )
+        .await
     }
 
     async fn route_actor_request(
@@ -414,17 +458,22 @@ impl ActorServiceImpl {
         wait_for_response: bool,
         timeout: Option<Duration>,
     ) -> Result<(String, String, Option<Message>), Status> {
+        let requested_target = self
+            .canonical_actor_id_from_client_target(&ctx, requested_actor_type)
+            .await
+            .unwrap_or_else(|| requested_actor_type.to_string());
+
         match self
             .route_message(
                 ctx.clone(),
-                requested_actor_type,
+                &requested_target,
                 message.clone(),
                 wait_for_response,
                 timeout,
             )
             .await
         {
-            Ok((message_id, reply)) => Ok((requested_actor_type.to_string(), message_id, reply)),
+            Ok((message_id, reply)) => Ok((requested_target, message_id, reply)),
             Err(status) if status.code() == tonic::Code::NotFound => {
                 let mut type_candidates = Vec::new();
                 type_candidates.push(requested_actor_type.to_string());
@@ -533,14 +582,22 @@ impl ActorServiceImpl {
         config: Option<plexspaces_proto::v1::actor::ActorConfig>,
         labels: std::collections::HashMap<String, String>,
     ) -> Result<ActorRefImpl, Box<dyn std::error::Error + Send + Sync>> {
-        // Normalize actor_id with build_actor_id; reject if input specifies a different node.
+        // Public/client-facing spawn takes a base actor id.
+        // The framework owns canonical actor-id construction so callers do not have to
+        // assemble `{id}//{actor_type}::{namespace}@{node_id}` themselves.
         let local_actor_id = match parse_actor_id(actor_id) {
-            Ok(parsed) => {
+            Ok(parsed) if actor_id.contains("//") => {
                 if parsed.node_id.is_empty() || parsed.node_id == self.local_node_id {
                     build_actor_id(
                         &parsed.id,
                         actor_type,
-                        parsed.namespace.as_deref(),
+                        parsed.namespace.as_deref().or_else(|| {
+                            if ctx.namespace().is_empty() {
+                                None
+                            } else {
+                                Some(ctx.namespace())
+                            }
+                        }),
                         &self.local_node_id,
                     )
                 } else {
@@ -550,7 +607,16 @@ impl ActorServiceImpl {
                     ).into());
                 }
             }
-            Err(_) => build_actor_id(actor_id, actor_type, None, &self.local_node_id),
+            _ => build_actor_id(
+                actor_id,
+                actor_type,
+                if ctx.namespace().is_empty() {
+                    None
+                } else {
+                    Some(ctx.namespace())
+                },
+                &self.local_node_id,
+            ),
         };
 
         // Use ActorFactory from ServiceLocatorImpl (direct access to inherent method)
@@ -1640,17 +1706,19 @@ impl ActorServiceTrait for ActorServiceImpl {
             uri_method: http_method.clone(),
             ..Default::default()
         };
-        let timeout = Self::duration_from_proto(req.timeout)
-            .or_else(|| Some(Duration::from_secs(5)));
+        let timeout =
+            Self::duration_from_proto(req.timeout).or_else(|| Some(Duration::from_secs(5)));
 
-        tracing::debug!(
-            tenant_id = %routing_ctx.tenant_id(),
-            namespace = %routing_ctx.namespace(),
-            actor_type = %actor_type,
-            method = %http_method,
-            path = %full_path,
-            "ask_reply request started"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                tenant_id = %routing_ctx.tenant_id(),
+                namespace = %routing_ctx.namespace(),
+                actor_type = %actor_type,
+                method = %http_method,
+                path = %full_path,
+                "ask_reply request started"
+            );
+        }
 
         let start = Instant::now();
         let result = self
@@ -1659,13 +1727,15 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         match result {
             Ok((resolved_actor_id, _message_id, Some(reply))) => {
-                tracing::debug!(
-                    actor_type = %actor_type,
-                    actor_id = %resolved_actor_id,
-                    duration_ms = start.elapsed().as_millis(),
-                    reply_size = reply.payload.len(),
-                    "ask_reply request completed"
-                );
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
+                        actor_type = %actor_type,
+                        actor_id = %resolved_actor_id,
+                        duration_ms = start.elapsed().as_millis(),
+                        reply_size = reply.payload.len(),
+                        "ask_reply request completed"
+                    );
+                }
                 Ok(Response::new(AskReplyResponse {
                     success: true,
                     payload: reply.payload,
@@ -1685,137 +1755,6 @@ impl ActorServiceTrait for ActorServiceImpl {
                     "ask_reply request failed"
                 );
                 Err(status)
-            }
-        }
-    }
-
-    /// Terminate an actor gracefully by ID
-    ///
-    /// ## Purpose
-    /// Permanently terminates an actor, completing pending work and removing from system.
-    /// This is the HTTP DELETE endpoint for actors (pairs with SpawnActor).
-    ///
-    /// Terminates the actor permanently rather than passivating it.
-    async fn terminate_actor(
-        &self,
-        request: Request<TerminateActorRequest>,
-    ) -> Result<Response<TerminateActorResponse>, Status> {
-        let start_time = std::time::Instant::now();
-
-        // Check if service is accepting requests (not shutting down)
-        if self.service_locator.is_shutdown_requested() {
-            return Err(Status::unavailable(
-                "Service is shutting down and not accepting new requests",
-            ));
-        }
-
-        // Create RequestContext from gRPC request
-        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
-            self.service_locator.clone();
-        let ctx = crate::request_context_from_grpc_request(
-            request.metadata(),
-            &std::collections::HashMap::new(),
-            &service_locator_trait,
-        )
-        .await
-        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
-
-        let req = request.into_inner();
-        let actor_id = req.actor_id.clone();
-        let namespace = if req.namespace.is_empty() {
-            ctx.namespace().to_string()
-        } else {
-            req.namespace.clone()
-        };
-        let force = req.force;
-        let timeout_ms = if req.timeout_ms > 0 {
-            req.timeout_ms
-        } else {
-            5000 // Default 5 seconds
-        };
-
-        tracing::info!(
-            actor_id = %actor_id,
-            namespace = %namespace,
-            force = %force,
-            timeout_ms = %timeout_ms,
-            "Terminating actor"
-        );
-
-        // Get actor factory to stop the actor
-        let actor_factory = self
-            .service_locator
-            .get_actor_factory()
-            .await
-            .ok_or_else(|| Status::internal("Actor factory not available"))?;
-
-        // Build full actor ID if needed (use parse/build from actor_id)
-        let full_actor_id = match parse_actor_id(&actor_id) {
-            Ok(parsed) if !parsed.node_id.is_empty() => actor_id.clone(),
-            _ => {
-                let node_id = self
-                    .service_locator
-                    .get_node_id()
-                    .await
-                    .ok_or_else(|| Status::internal("Node ID not available"))?;
-                build_actor_id(&actor_id, "", None, &node_id)
-            }
-        };
-
-        // Stop the actor using actor factory with tenant isolation validation
-        // Note: timeout_ms is currently not used by stop_actor, but kept for future use
-        let _timeout = std::time::Duration::from_millis(timeout_ms);
-        match actor_factory.stop_actor(&ctx, &full_actor_id).await {
-            Ok(()) => {
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_actor_service_terminate_actor_duration_seconds",
-                    "namespace" => namespace.clone(),
-                    "status" => "success"
-                )
-                .record(duration.as_secs_f64());
-                metrics::counter!("plexspaces_actor_service_terminate_actor_total",
-                    "namespace" => namespace.clone(),
-                    "status" => "success"
-                )
-                .increment(1);
-
-                tracing::info!(
-                    actor_id = %full_actor_id,
-                    duration_ms = %duration.as_millis(),
-                    "Actor terminated successfully"
-                );
-
-                Ok(Response::new(TerminateActorResponse {
-                    success: true,
-                    actor_id: full_actor_id,
-                    messages_processed: 0, // TODO: Track actual count
-                    messages_dropped: 0,
-                    error_message: String::new(),
-                }))
-            }
-            Err(e) => {
-                let duration = start_time.elapsed();
-                metrics::histogram!("plexspaces_actor_service_terminate_actor_duration_seconds",
-                    "namespace" => namespace.clone(),
-                    "status" => "error"
-                )
-                .record(duration.as_secs_f64());
-                metrics::counter!("plexspaces_actor_service_terminate_actor_total",
-                    "namespace" => namespace.clone(),
-                    "status" => "error"
-                )
-                .increment(1);
-
-                tracing::error!(
-                    actor_id = %full_actor_id,
-                    error = %e,
-                    "Failed to terminate actor"
-                );
-
-                Err(Status::internal(format!(
-                    "Failed to terminate actor: {}",
-                    e
-                )))
             }
         }
     }
@@ -4048,13 +3987,6 @@ impl ActorServiceTrait for ActorServiceWrapper {
         self.0.ask_reply(request).await
     }
 
-    async fn terminate_actor(
-        &self,
-        request: Request<TerminateActorRequest>,
-    ) -> Result<Response<TerminateActorResponse>, Status> {
-        self.0.terminate_actor(request).await
-    }
-
     async fn create_shard_group(
         &self,
         request: Request<CreateShardGroupRequest>,
@@ -4472,24 +4404,26 @@ mod tests {
         actor_id: String,
         mailbox: Arc<Mailbox>,
         service_locator: Arc<dyn ServiceLocatorTrait>,
+        actor_type: &str,
+        namespace: &str,
     ) {
         // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for tests)
         let sender: Arc<dyn MessageSender> = Arc::new(plexspaces_actor::ActorRef::local(
             actor_id.clone(),
             String::new(), // Test context uses empty tenant_id
-            String::new(), // Test context uses empty namespace
+            namespace.to_string(),
             mailbox,
             service_locator,
         ));
         // Tenant comes from auth, not config - use empty strings for test actor registration
         use plexspaces_core::RequestContext;
-        let ctx = RequestContext::new_without_auth(String::new(), String::new());
+        let ctx = RequestContext::new_without_auth(String::new(), namespace.to_string());
         actor_registry
             .register_actor(
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                actor_type.to_string(),
                 None,
                 None,
                 None,
@@ -4684,6 +4618,8 @@ mod tests {
             "test@node1".to_string(),
             Arc::clone(&mailbox),
             service.service_locator.clone(),
+            "TestActor",
+            "",
         )
         .await;
 
@@ -4739,6 +4675,44 @@ mod tests {
         assert_eq!(build_actor_id("x", "", None, "n1"), "x@n1");
     }
 
+    #[tokio::test]
+    async fn test_canonical_actor_id_from_client_target_resolves_bare_live_actor_type() {
+        let actor_registry = create_test_registry("node1").await;
+        let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
+
+        let mailbox = Arc::new(
+            Mailbox::new(
+                mailbox_config_default(),
+                "controller//controller::app-ns@node1".to_string(),
+            )
+            .await
+            .expect("Failed to create mailbox"),
+        );
+        let actor_id = plexspaces_core::actor_id::build_actor_id(
+            "controller",
+            "controller",
+            Some("app-ns"),
+            "node1",
+        );
+        let ctx = RequestContext::new_without_auth(String::new(), "app-ns".to_string());
+
+        register_test_actor(
+            actor_registry,
+            actor_id.clone(),
+            mailbox,
+            service.service_locator.clone(),
+            "controller",
+            "app-ns",
+        )
+        .await;
+
+        let resolved = service
+            .canonical_actor_id_from_client_target(&ctx, "controller")
+            .await;
+
+        assert_eq!(resolved, Some(actor_id));
+    }
+
     // ========================================================================
     // COVERAGE TESTS - route_message()
     // ========================================================================
@@ -4783,6 +4757,8 @@ mod tests {
             "test@node1".to_string(),
             Arc::clone(&mailbox),
             service.service_locator.clone(),
+            "TestActor",
+            "",
         )
         .await;
 
@@ -4882,6 +4858,8 @@ mod tests {
             "test@node1".to_string(),
             Arc::clone(&mailbox),
             service.service_locator.clone(),
+            "TestActor",
+            "",
         )
         .await;
 
@@ -4928,6 +4906,8 @@ mod tests {
             "test@node1".to_string(),
             Arc::clone(&mailbox),
             service.service_locator.clone(),
+            "TestActor",
+            "",
         )
         .await;
 
@@ -4983,6 +4963,8 @@ mod tests {
             "test@node1".to_string(),
             Arc::clone(&mailbox),
             service.service_locator.clone(),
+            "TestActor",
+            "",
         )
         .await;
 

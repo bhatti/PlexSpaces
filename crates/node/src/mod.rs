@@ -584,9 +584,17 @@ impl Node {
     /// Get registered actor IDs
     pub async fn registered_actor_ids(
         &self,
-    ) -> Result<Arc<RwLock<std::collections::HashSet<ActorId>>>, NodeError> {
+    ) -> Result<std::collections::HashSet<ActorId>, NodeError> {
         let registry = self.actor_registry().await?;
-        Ok(registry.registered_actor_ids().clone())
+        Ok(registry.registered_actor_ids().await)
+    }
+
+    /// Get registered actor inventory entries with explicit scope.
+    pub async fn registered_actor_entries(
+        &self,
+    ) -> Result<Vec<(String, String, ActorId)>, NodeError> {
+        let registry = self.actor_registry().await?;
+        Ok(registry.registered_actor_entries().await)
     }
 
     // === Helper methods for VirtualActorFacet downcasting ===
@@ -752,8 +760,7 @@ impl Node {
         // Get actor counts from ActorRegistry
         let active_actors =
             if let Some(actor_registry) = self.service_locator.actor_registry().await {
-                let registered_ids = actor_registry.registered_actor_ids().read().await;
-                registered_ids.len() as u32
+                actor_registry.live_actor_count().await as u32
             } else {
                 0
             };
@@ -1546,8 +1553,11 @@ impl Node {
 
         // Create state store using the shared database config from RuntimeConfig.db.
         use plexspaces_scheduler::state_store::create_state_store_from_shared_db;
-        let state_store: Arc<dyn SchedulingStateStore> =
-            match create_state_store_from_shared_db(&shared_db).await {
+        let state_store: Arc<dyn SchedulingStateStore> = match create_state_store_from_shared_db(
+            &shared_db,
+        )
+        .await
+        {
             Ok(store) => store,
             Err(e) => {
                 // FATAL: Cannot create state store - fail startup
@@ -2274,83 +2284,233 @@ impl Node {
                 // Create Axum router for HTTP gateway routes (auth middleware runs first when auth enabled)
                 // Build as Router<HttpGatewayState>; call .with_state(gateway_state) once at the end to get Router<()> for serve
                 let app = Router::new()
-                    .layer(axum::middleware::from_fn_with_state(gateway_state.clone(), http_auth_middleware))
+                    .layer(axum::middleware::from_fn_with_state(
+                        gateway_state.clone(),
+                        http_auth_middleware,
+                    ))
                     .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
                     .route(
                         "/api/v1/actors/:namespace/:actor_type",
                         get({
-                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
+                            move |axum::extract::State((
+                                actor_service,
+                                auth_disabled,
+                                jwt_secret,
+                                _,
+                                _,
+                            )): axum::extract::State<
+                                HttpGatewayState,
+                            >,
+                                  jwt: Option<
+                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
+                            >,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
+                                    &jwt,
+                                    auth_disabled,
+                                    jwt_secret.as_deref(),
+                                    &headers,
+                                );
                                 let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
-                                actor_http_request(effective_tenant_id, axum::http::Method::GET, path, query, None, headers, actor_service).await
+                                actor_http_request(
+                                    effective_tenant_id,
+                                    axum::http::Method::GET,
+                                    path,
+                                    query,
+                                    None,
+                                    headers,
+                                    actor_service,
+                                )
+                                .await
                             }
                         })
                         .post({
-                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
+                            move |axum::extract::State((
+                                actor_service,
+                                auth_disabled,
+                                jwt_secret,
+                                _,
+                                _,
+                            )): axum::extract::State<
+                                HttpGatewayState,
+                            >,
+                                  jwt: Option<
+                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
+                            >,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap,
                                   body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
+                                    &jwt,
+                                    auth_disabled,
+                                    jwt_secret.as_deref(),
+                                    &headers,
+                                );
                                 let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
-                                actor_http_request(effective_tenant_id, axum::http::Method::POST, path, query, body, headers, actor_service).await
+                                actor_http_request(
+                                    effective_tenant_id,
+                                    axum::http::Method::POST,
+                                    path,
+                                    query,
+                                    body,
+                                    headers,
+                                    actor_service,
+                                )
+                                .await
                             }
                         })
                         .put({
-                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
+                            move |axum::extract::State((
+                                actor_service,
+                                auth_disabled,
+                                jwt_secret,
+                                _,
+                                _,
+                            )): axum::extract::State<
+                                HttpGatewayState,
+                            >,
+                                  jwt: Option<
+                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
+                            >,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap,
                                   body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
+                                    &jwt,
+                                    auth_disabled,
+                                    jwt_secret.as_deref(),
+                                    &headers,
+                                );
                                 let path = format!("/api/v1/actors/{}/{}", namespace, actor_type);
-                                actor_http_request(effective_tenant_id, axum::http::Method::PUT, path, query, body, headers, actor_service).await
+                                actor_http_request(
+                                    effective_tenant_id,
+                                    axum::http::Method::PUT,
+                                    path,
+                                    query,
+                                    body,
+                                    headers,
+                                    actor_service,
+                                )
+                                .await
                             }
-                        })
+                        }),
                     )
                     .route(
                         "/api/v1/actors/:namespace/:actor_type/ask",
                         get({
-                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
+                            move |axum::extract::State((
+                                actor_service,
+                                auth_disabled,
+                                jwt_secret,
+                                _,
+                                _,
+                            )): axum::extract::State<
+                                HttpGatewayState,
+                            >,
+                                  jwt: Option<
+                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
+                            >,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
-                                let path = format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
-                                actor_http_request(effective_tenant_id, axum::http::Method::GET, path, query, None, headers, actor_service).await
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
+                                    &jwt,
+                                    auth_disabled,
+                                    jwt_secret.as_deref(),
+                                    &headers,
+                                );
+                                let path =
+                                    format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
+                                actor_http_request(
+                                    effective_tenant_id,
+                                    axum::http::Method::GET,
+                                    path,
+                                    query,
+                                    None,
+                                    headers,
+                                    actor_service,
+                                )
+                                .await
                             }
                         })
                         .post({
-                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
+                            move |axum::extract::State((
+                                actor_service,
+                                auth_disabled,
+                                jwt_secret,
+                                _,
+                                _,
+                            )): axum::extract::State<
+                                HttpGatewayState,
+                            >,
+                                  jwt: Option<
+                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
+                            >,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap,
                                   body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
-                                let path = format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
-                                actor_http_request(effective_tenant_id, axum::http::Method::POST, path, query, body, headers, actor_service).await
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
+                                    &jwt,
+                                    auth_disabled,
+                                    jwt_secret.as_deref(),
+                                    &headers,
+                                );
+                                let path =
+                                    format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
+                                actor_http_request(
+                                    effective_tenant_id,
+                                    axum::http::Method::POST,
+                                    path,
+                                    query,
+                                    body,
+                                    headers,
+                                    actor_service,
+                                )
+                                .await
                             }
                         })
                         .put({
-                            move |axum::extract::State((actor_service, auth_disabled, jwt_secret, _, _)): axum::extract::State<HttpGatewayState>,
-                                  jwt: Option<axum::extract::Extension<crate::http_jwt::JwtClaims>>,
+                            move |axum::extract::State((
+                                actor_service,
+                                auth_disabled,
+                                jwt_secret,
+                                _,
+                                _,
+                            )): axum::extract::State<
+                                HttpGatewayState,
+                            >,
+                                  jwt: Option<
+                                axum::extract::Extension<crate::http_jwt::JwtClaims>,
+                            >,
                                   Path((namespace, actor_type)): Path<(String, String)>,
                                   query: Option<Query<HashMap<String, String>>>,
                                   headers: axum::http::HeaderMap,
                                   body: Option<axum::body::Bytes>| async move {
-                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(&jwt, auth_disabled, jwt_secret.as_deref(), &headers);
-                                let path = format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
-                                actor_http_request(effective_tenant_id, axum::http::Method::PUT, path, query, body, headers, actor_service).await
+                                let effective_tenant_id = effective_tenant_id_from_jwt_or_headers(
+                                    &jwt,
+                                    auth_disabled,
+                                    jwt_secret.as_deref(),
+                                    &headers,
+                                );
+                                let path =
+                                    format!("/api/v1/actors/{}/{}/ask", namespace, actor_type);
+                                actor_http_request(
+                                    effective_tenant_id,
+                                    axum::http::Method::PUT,
+                                    path,
+                                    query,
+                                    body,
+                                    headers,
+                                    actor_service,
+                                )
+                                .await
                             }
-                        })
+                        }),
                     );
 
                 // Add HTTP multipart endpoint for WASM file uploads (large files)
@@ -3544,12 +3704,12 @@ impl Node {
         // Get actor count and mailbox queue sizes
         let (actor_count, total_mailbox_queue_size) =
             if let Some(actor_registry) = self.service_locator.actor_registry().await {
-                let registered_ids = actor_registry.registered_actor_ids().read().await;
-                let actor_count = registered_ids.len();
+                let live_actor_entries = actor_registry.live_actor_entries().await;
+                let actor_count = live_actor_entries.len();
 
                 // Try to get mailbox queue sizes (may not be accessible for all actors)
                 let total_queue_size = 0;
-                for actor_id in registered_ids.iter() {
+                for (_, _, actor_id) in &live_actor_entries {
                     if let Some(_sender) = actor_registry.lookup_actor(actor_id).await {
                         // Try to get mailbox size if accessible
                         // Note: MessageSender trait doesn't expose mailbox directly, so we can't get queue size

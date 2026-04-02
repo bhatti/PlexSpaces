@@ -95,8 +95,7 @@ async fn create_test_actor_service(
     });
     let actor_registry = Arc::new(ActorRegistry::new(object_registry, node_id.to_string()));
 
-    let service_locator =
-        create_default_service_locator(Some(node_id.to_string()), None).await;
+    let service_locator = create_default_service_locator(Some(node_id.to_string()), None).await;
     service_locator
         .register_service(actor_registry.clone())
         .await;

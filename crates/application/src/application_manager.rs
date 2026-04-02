@@ -714,9 +714,14 @@ impl ApplicationManagerImpl {
             )));
         }
 
-        // Get module hash for WASM apps before remove (for cache eviction)
         let module_hash = instance.app.module_hash_for_cleanup();
-        apps.remove(name);
+        let mut instance = apps
+            .remove(name)
+            .ok_or_else(|| ApplicationError::Other(format!("Application '{}' not found", name)))?;
+        drop(apps);
+
+        instance.app.cleanup_for_undeploy().await?;
+
         if tracing::enabled!(tracing::Level::INFO) {
             tracing::info!("Unregistered application: {}", name);
         }
@@ -1165,6 +1170,7 @@ mod tests {
         should_fail_start: bool,
         should_fail_stop: bool,
         stop_delay: Duration,
+        cleanup_called: Arc<std::sync::atomic::AtomicBool>,
     }
 
     #[async_trait]
@@ -1201,6 +1207,12 @@ mod tests {
             HealthStatus::HealthStatusHealthy
         }
 
+        async fn cleanup_for_undeploy(&mut self) -> Result<(), ApplicationError> {
+            self.cleanup_called
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+
         fn as_any(&self) -> &dyn std::any::Any {
             self
         }
@@ -1216,6 +1228,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app).await.unwrap();
@@ -1236,6 +1249,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         let app2 = Box::new(MockApplication {
@@ -1244,6 +1258,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app1).await.unwrap();
@@ -1272,6 +1287,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app).await.unwrap();
@@ -1299,6 +1315,7 @@ mod tests {
             should_fail_start: true,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app).await.unwrap();
@@ -1327,6 +1344,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app).await.unwrap();
@@ -1358,6 +1376,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(10), // Longer than timeout
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app).await.unwrap();
@@ -1391,6 +1410,7 @@ mod tests {
                 should_fail_start: false,
                 should_fail_stop: false,
                 stop_delay: Duration::from_secs(0),
+                cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             });
 
             manager.register(app).await.unwrap();
@@ -1426,6 +1446,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app).await.unwrap();
@@ -1446,6 +1467,7 @@ mod tests {
                 should_fail_start: false,
                 should_fail_stop: false,
                 stop_delay: Duration::from_secs(0),
+                cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             });
 
             manager.register(app).await.unwrap();
@@ -1469,12 +1491,14 @@ mod tests {
 
         manager.set_node_context(node).await;
 
+        let cleanup_called = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let app = Box::new(MockApplication {
             name: "test-app".to_string(),
             version: "0.1.0".to_string(),
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: cleanup_called.clone(),
         });
 
         manager.register(app).await.unwrap();
@@ -1490,6 +1514,7 @@ mod tests {
         // Application should no longer exist
         assert_eq!(manager.get_state("test-app").await, None);
         assert!(manager.list_applications().await.is_empty());
+        assert!(cleanup_called.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     /// Test: Unregister running application fails
@@ -1509,6 +1534,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app).await.unwrap();
@@ -1768,7 +1794,7 @@ mod tests {
         assert!(app_info.metrics.is_some());
         let metrics = app_info.metrics.unwrap();
         assert!(metrics.uptime_seconds >= 0); // May be 0 if very fast, but should be calculated
-        // tracked_actor_count is 0, so "total" key is absent (only inserted when count > 0)
+                                              // tracked_actor_count is 0, so "total" key is absent (only inserted when count > 0)
         assert_eq!(metrics.actor_counts.get("total"), None);
     }
 

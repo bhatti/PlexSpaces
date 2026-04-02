@@ -25,7 +25,10 @@ use plexspaces_common::ActivationStrategy;
 use plexspaces_core::virtual_actor_lifecycle_facet::{
     VirtualActorLifecycleFacet, VirtualActorLifecycleState,
 };
-use plexspaces_core::{ActorId, ActorHandle, ActorRegistry, MessageSender, RequestContext, ServiceLocator, VirtualActorManager};
+use plexspaces_core::{
+    ActorId, ActorRegistry, ActorStateHandle, MessageSender, RequestContext, ServiceLocator,
+    VirtualActorManager,
+};
 use plexspaces_mailbox::Mailbox;
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use std::sync::Arc;
@@ -34,13 +37,13 @@ use tokio::sync::RwLock;
 
 use async_trait::async_trait;
 
-/// Minimal [`ActorHandle`] so [`ActorRegistry::is_actor_state_active`] is true for LRU tests.
+/// Minimal [`ActorStateHandle`] so [`ActorRegistry::is_actor_state_active`] is true for LRU tests.
 struct TestActiveActorHandle;
 
 #[async_trait]
-impl ActorHandle for TestActiveActorHandle {
-    async fn actor_state(&self) -> i32 {
-        plexspaces_proto::v1::actor::ActorState::ActorStateActive as i32
+impl ActorStateHandle for TestActiveActorHandle {
+    async fn actor_state(&self) -> plexspaces_proto::v1::actor::ActorState {
+        plexspaces_proto::v1::actor::ActorState::ActorStateActive
     }
 
     async fn stop_actor(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -63,9 +66,12 @@ async fn register_actor_as_active_in_registry(
 ) {
     let ctx = RequestContext::new_without_auth(tenant.to_string(), namespace.to_string());
     let mailbox = Arc::new(
-        Mailbox::new(plexspaces_mailbox::mailbox_config_default(), actor_id.clone())
-            .await
-            .unwrap(),
+        Mailbox::new(
+            plexspaces_mailbox::mailbox_config_default(),
+            actor_id.clone(),
+        )
+        .await
+        .unwrap(),
     );
     let actor_ref = ActorRef::local(
         actor_id.clone(),

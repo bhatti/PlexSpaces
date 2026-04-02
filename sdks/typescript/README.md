@@ -12,7 +12,21 @@ npm install
 npm run build
 ```
 
-Proto **types** for workflows and common messages are generated into **`src/generated/proto/`** when you run **`make proto`** or **`make proto-typescript`** from the repository root. **`src/proto.ts`** re-exports selected types (for example `RetryConfig`, `ErrorDetail`) for application code; runtime host calls still use JSON at the WIT boundary.
+Proto-shaped SDK types live in **`src/proto.ts`** and keep canonical proto field names even when generated files are not present yet. When you run **`make proto`** or **`make proto-typescript`**, richer generated models can be added on top, but application code can already stay proto-first at the SDK boundary.
+
+The SDK now supports decorator-based authoring metadata in addition to the existing base classes:
+
+- `@actor`
+- `@gen_server_actor`
+- `@event_actor`
+- `@fsm_actor`
+- `@workflow_actor`
+- `@run_handler`
+- `@signal_handler("name")`
+- `@query_handler("name")`
+- `@handler`
+
+These decorators align the TypeScript surface with the Rust and Python SDKs while keeping `PlexSpacesActor` and `WorkflowActor` as the runtime substrate.
 
 In an example or app, add a dependency:
 

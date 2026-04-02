@@ -367,6 +367,46 @@ impl CheckpointManager {
         Ok(Some(current_sequence))
     }
 
+    /// Create and persist a checkpoint immediately.
+    ///
+    /// Used during graceful shutdown so durable actors save their latest state
+    /// even when the periodic checkpoint interval has not been reached.
+    pub async fn save_checkpoint_now(
+        &self,
+        actor_id: &str,
+        current_sequence: u64,
+        state_data: Vec<u8>,
+    ) -> JournalResult<u64> {
+        let start_time = Instant::now();
+        let checkpoint = self
+            .create_checkpoint(actor_id, current_sequence, state_data)
+            .await?;
+
+        self.storage.save_checkpoint(&checkpoint).await?;
+
+        let mut actor_states = self.actor_state.write().await;
+        actor_states.insert(
+            actor_id.to_string(),
+            ActorCheckpointState {
+                last_sequence: current_sequence,
+                last_time: Instant::now(),
+            },
+        );
+        drop(actor_states);
+
+        let checkpoint_duration = start_time.elapsed();
+        let mut stats = self.stats.write().await;
+        stats.checkpoints_created += 1;
+        stats.last_checkpoint_size = checkpoint.state_data.len() as u64;
+        stats.last_checkpoint_at = checkpoint.timestamp.clone();
+        stats.avg_checkpoint_duration = Some(prost_types::Duration {
+            seconds: checkpoint_duration.as_secs() as i64,
+            nanos: checkpoint_duration.subsec_nanos() as i32,
+        });
+
+        Ok(current_sequence)
+    }
+
     /// Create checkpoint with optional compression
     ///
     /// ## Arguments

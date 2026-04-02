@@ -7261,169 +7261,6 @@ func (x *UnlinkActorResponse) GetSuccess() bool {
 	return false
 }
 
-// Request to terminate an actor gracefully
-//
-// ## Purpose
-// Permanently terminates an actor, completing pending work and removing from system.
-// Pairs with SpawnActorRequest for complete lifecycle management.
-type TerminateActorRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Namespace of the actor
-	Namespace string `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
-	// Actor ID to terminate
-	ActorId string `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	// Optional: Force termination even if actor has pending messages
-	// When false (default): Actor completes pending messages before terminating
-	// When true: Actor terminates immediately, pending messages may be lost
-	Force bool `protobuf:"varint,3,opt,name=force,proto3" json:"force,omitempty"`
-	// Optional: Timeout for graceful shutdown (in milliseconds)
-	// Default: 5000ms (5 seconds)
-	// After timeout, actor is forcefully terminated
-	TimeoutMs     uint64 `protobuf:"varint,4,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TerminateActorRequest) Reset() {
-	*x = TerminateActorRequest{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[75]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TerminateActorRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TerminateActorRequest) ProtoMessage() {}
-
-func (x *TerminateActorRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[75]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TerminateActorRequest.ProtoReflect.Descriptor instead.
-func (*TerminateActorRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{75}
-}
-
-func (x *TerminateActorRequest) GetNamespace() string {
-	if x != nil {
-		return x.Namespace
-	}
-	return ""
-}
-
-func (x *TerminateActorRequest) GetActorId() string {
-	if x != nil {
-		return x.ActorId
-	}
-	return ""
-}
-
-func (x *TerminateActorRequest) GetForce() bool {
-	if x != nil {
-		return x.Force
-	}
-	return false
-}
-
-func (x *TerminateActorRequest) GetTimeoutMs() uint64 {
-	if x != nil {
-		return x.TimeoutMs
-	}
-	return 0
-}
-
-// Response from terminating an actor
-type TerminateActorResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Whether the actor was successfully terminated
-	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	// Actor ID that was terminated
-	ActorId string `protobuf:"bytes,2,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	// Number of pending messages that were processed before termination
-	MessagesProcessed uint64 `protobuf:"varint,3,opt,name=messages_processed,json=messagesProcessed,proto3" json:"messages_processed,omitempty"`
-	// Number of pending messages that were dropped (if force=true)
-	MessagesDropped uint64 `protobuf:"varint,4,opt,name=messages_dropped,json=messagesDropped,proto3" json:"messages_dropped,omitempty"`
-	// Error message if success is false
-	ErrorMessage  string `protobuf:"bytes,5,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TerminateActorResponse) Reset() {
-	*x = TerminateActorResponse{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[76]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TerminateActorResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TerminateActorResponse) ProtoMessage() {}
-
-func (x *TerminateActorResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[76]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TerminateActorResponse.ProtoReflect.Descriptor instead.
-func (*TerminateActorResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{76}
-}
-
-func (x *TerminateActorResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *TerminateActorResponse) GetActorId() string {
-	if x != nil {
-		return x.ActorId
-	}
-	return ""
-}
-
-func (x *TerminateActorResponse) GetMessagesProcessed() uint64 {
-	if x != nil {
-		return x.MessagesProcessed
-	}
-	return 0
-}
-
-func (x *TerminateActorResponse) GetMessagesDropped() uint64 {
-	if x != nil {
-		return x.MessagesDropped
-	}
-	return 0
-}
-
-func (x *TerminateActorResponse) GetErrorMessage() string {
-	if x != nil {
-		return x.ErrorMessage
-	}
-	return ""
-}
-
 // Request to check if actor exists
 type CheckActorExistsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -7435,7 +7272,7 @@ type CheckActorExistsRequest struct {
 
 func (x *CheckActorExistsRequest) Reset() {
 	*x = CheckActorExistsRequest{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[77]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7447,7 +7284,7 @@ func (x *CheckActorExistsRequest) String() string {
 func (*CheckActorExistsRequest) ProtoMessage() {}
 
 func (x *CheckActorExistsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[77]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7460,7 +7297,7 @@ func (x *CheckActorExistsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckActorExistsRequest.ProtoReflect.Descriptor instead.
 func (*CheckActorExistsRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{77}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *CheckActorExistsRequest) GetActorId() string {
@@ -7485,7 +7322,7 @@ type CheckActorExistsResponse struct {
 
 func (x *CheckActorExistsResponse) Reset() {
 	*x = CheckActorExistsResponse{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[78]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7497,7 +7334,7 @@ func (x *CheckActorExistsResponse) String() string {
 func (*CheckActorExistsResponse) ProtoMessage() {}
 
 func (x *CheckActorExistsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[78]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7510,7 +7347,7 @@ func (x *CheckActorExistsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckActorExistsResponse.ProtoReflect.Descriptor instead.
 func (*CheckActorExistsResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{78}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *CheckActorExistsResponse) GetExists() bool {
@@ -7595,7 +7432,7 @@ type AskReplyRequest struct {
 
 func (x *AskReplyRequest) Reset() {
 	*x = AskReplyRequest{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[79]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7607,7 +7444,7 @@ func (x *AskReplyRequest) String() string {
 func (*AskReplyRequest) ProtoMessage() {}
 
 func (x *AskReplyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[79]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7620,7 +7457,7 @@ func (x *AskReplyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AskReplyRequest.ProtoReflect.Descriptor instead.
 func (*AskReplyRequest) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{79}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *AskReplyRequest) GetNamespace() string {
@@ -7744,7 +7581,7 @@ type AskReplyResponse struct {
 
 func (x *AskReplyResponse) Reset() {
 	*x = AskReplyResponse{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[80]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7756,7 +7593,7 @@ func (x *AskReplyResponse) String() string {
 func (*AskReplyResponse) ProtoMessage() {}
 
 func (x *AskReplyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[80]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7769,7 +7606,7 @@ func (x *AskReplyResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AskReplyResponse.ProtoReflect.Descriptor instead.
 func (*AskReplyResponse) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{80}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *AskReplyResponse) GetSuccess() bool {
@@ -7866,7 +7703,7 @@ type LifecycleEventFilter struct {
 
 func (x *LifecycleEventFilter) Reset() {
 	*x = LifecycleEventFilter{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[81]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7878,7 +7715,7 @@ func (x *LifecycleEventFilter) String() string {
 func (*LifecycleEventFilter) ProtoMessage() {}
 
 func (x *LifecycleEventFilter) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[81]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7891,7 +7728,7 @@ func (x *LifecycleEventFilter) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LifecycleEventFilter.ProtoReflect.Descriptor instead.
 func (*LifecycleEventFilter) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{81}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *LifecycleEventFilter) GetSubscriptionId() string {
@@ -8013,7 +7850,7 @@ type VirtualActorLifecycle struct {
 
 func (x *VirtualActorLifecycle) Reset() {
 	*x = VirtualActorLifecycle{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[82]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8025,7 +7862,7 @@ func (x *VirtualActorLifecycle) String() string {
 func (*VirtualActorLifecycle) ProtoMessage() {}
 
 func (x *VirtualActorLifecycle) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[82]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8038,7 +7875,7 @@ func (x *VirtualActorLifecycle) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VirtualActorLifecycle.ProtoReflect.Descriptor instead.
 func (*VirtualActorLifecycle) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{82}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *VirtualActorLifecycle) GetLastActivated() *timestamppb.Timestamp {
@@ -8119,7 +7956,7 @@ type VirtualActorConfig struct {
 
 func (x *VirtualActorConfig) Reset() {
 	*x = VirtualActorConfig{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[83]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8131,7 +7968,7 @@ func (x *VirtualActorConfig) String() string {
 func (*VirtualActorConfig) ProtoMessage() {}
 
 func (x *VirtualActorConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[83]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8144,7 +7981,7 @@ func (x *VirtualActorConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VirtualActorConfig.ProtoReflect.Descriptor instead.
 func (*VirtualActorConfig) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{83}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *VirtualActorConfig) GetActivationStrategy() v1.ActivationStrategy {
@@ -8180,7 +8017,7 @@ type ActorRefError struct {
 
 func (x *ActorRefError) Reset() {
 	*x = ActorRefError{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[84]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8192,7 +8029,7 @@ func (x *ActorRefError) String() string {
 func (*ActorRefError) ProtoMessage() {}
 
 func (x *ActorRefError) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[84]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8205,7 +8042,7 @@ func (x *ActorRefError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActorRefError.ProtoReflect.Descriptor instead.
 func (*ActorRefError) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{84}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *ActorRefError) GetCode() ActorRefErrorCode {
@@ -8249,7 +8086,7 @@ type ResourceContract struct {
 
 func (x *ResourceContract) Reset() {
 	*x = ResourceContract{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[85]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8261,7 +8098,7 @@ func (x *ResourceContract) String() string {
 func (*ResourceContract) ProtoMessage() {}
 
 func (x *ResourceContract) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[85]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8274,7 +8111,7 @@ func (x *ResourceContract) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceContract.ProtoReflect.Descriptor instead.
 func (*ResourceContract) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{85}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *ResourceContract) GetMaxCpuPercent() float32 {
@@ -8329,7 +8166,7 @@ type ResourceUsage struct {
 
 func (x *ResourceUsage) Reset() {
 	*x = ResourceUsage{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[86]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8341,7 +8178,7 @@ func (x *ResourceUsage) String() string {
 func (*ResourceUsage) ProtoMessage() {}
 
 func (x *ResourceUsage) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[86]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8354,7 +8191,7 @@ func (x *ResourceUsage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceUsage.ProtoReflect.Descriptor instead.
 func (*ResourceUsage) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{86}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *ResourceUsage) GetCpuPercent() float32 {
@@ -8400,7 +8237,7 @@ type ResourceViolation struct {
 
 func (x *ResourceViolation) Reset() {
 	*x = ResourceViolation{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[87]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8412,7 +8249,7 @@ func (x *ResourceViolation) String() string {
 func (*ResourceViolation) ProtoMessage() {}
 
 func (x *ResourceViolation) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[87]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8425,7 +8262,7 @@ func (x *ResourceViolation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceViolation.ProtoReflect.Descriptor instead.
 func (*ResourceViolation) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{87}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *ResourceViolation) GetCode() ResourceViolationCode {
@@ -8470,7 +8307,7 @@ type ActorHealth struct {
 
 func (x *ActorHealth) Reset() {
 	*x = ActorHealth{}
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[88]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8482,7 +8319,7 @@ func (x *ActorHealth) String() string {
 func (*ActorHealth) ProtoMessage() {}
 
 func (x *ActorHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[88]
+	mi := &file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8495,7 +8332,7 @@ func (x *ActorHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActorHealth.ProtoReflect.Descriptor instead.
 func (*ActorHealth) Descriptor() ([]byte, []int) {
-	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{88}
+	return file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *ActorHealth) GetStatus() ActorHealthStatus {
@@ -8991,21 +8828,7 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"Q*\x14Unlink Actor Request2\x1cRequest to unlink two actors\xd2\x01\bactor_id\xd2\x01\x0flinked_actor_id\"o\n" +
 	"\x13UnlinkActorResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess:>\x92A;\n" +
-	"9*\x15Unlink Actor Response2 Response confirming link removal\"\xf6\x01\n" +
-	"\x15TerminateActorRequest\x12)\n" +
-	"\tnamespace\x18\x01 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace\x12(\n" +
-	"\bactor_id\x18\x02 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12\x14\n" +
-	"\x05force\x18\x03 \x01(\bR\x05force\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x04 \x01(\x04R\ttimeoutMs:S\x92AP\n" +
-	"N*\x17Terminate Actor Request2(Request to gracefully terminate an actor\xd2\x01\bactor_id\"\x91\x02\n" +
-	"\x16TerminateActorResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x19\n" +
-	"\bactor_id\x18\x02 \x01(\tR\aactorId\x12-\n" +
-	"\x12messages_processed\x18\x03 \x01(\x04R\x11messagesProcessed\x12)\n" +
-	"\x10messages_dropped\x18\x04 \x01(\x04R\x0fmessagesDropped\x12#\n" +
-	"\rerror_message\x18\x05 \x01(\tR\ferrorMessage:C\x92A@\n" +
-	">*\x18Terminate Actor Response2\"Response from terminating an actor\"\x9b\x01\n" +
+	"9*\x15Unlink Actor Response2 Response confirming link removal\"\x9b\x01\n" +
 	"\x17CheckActorExistsRequest\x12(\n" +
 	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId:V\x92AS\n" +
 	"Q*\x1aCheck Actor Exists Request2(Request to check if virtual actor exists\xd2\x01\bactor_id\"\xc5\x01\n" +
@@ -9250,7 +9073,7 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\x1bACTOR_HEALTH_STATUS_HEALTHY\x10\x01\x12 \n" +
 	"\x1cACTOR_HEALTH_STATUS_DEGRADED\x10\x02\x12\x1d\n" +
 	"\x19ACTOR_HEALTH_STATUS_STUCK\x10\x03\x12\x1e\n" +
-	"\x1aACTOR_HEALTH_STATUS_FAILED\x10\x042\xd56\n" +
+	"\x1aACTOR_HEALTH_STATUS_FAILED\x10\x042\xc94\n" +
 	"\fActorService\x12\xa1\x02\n" +
 	"\n" +
 	"SpawnActor\x12&.plexspaces.actor.v1.SpawnActorRequest\x1a'.plexspaces.actor.v1.SpawnActorResponse\"\xc1\x01\x92A\x9e\x01\n" +
@@ -9284,9 +9107,7 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\x10CheckActorExists\x12,.plexspaces.actor.v1.CheckActorExistsRequest\x1a-.plexspaces.actor.v1.CheckActorExistsResponse\"\x81\x01\x92AV\n" +
 	"\x0eVirtual Actors\x12\x12Check Actor Exists\x1a0Check if virtual actor exists without activating\x82\xd3\xe4\x93\x02\"\x12 /api/v1/actors/{actor_id}/exists\x12\xe5\x02\n" +
 	"\bAskReply\x12$.plexspaces.actor.v1.AskReplyRequest\x1a%.plexspaces.actor.v1.AskReplyResponse\"\x8b\x02\x92AE\n" +
-	"\x06Actors\x12\tAsk Reply\x1a0Ask an actor via HTTP GET/POST/PUT ask endpoints\x82\xd3\xe4\x93\x02\xbc\x01Z-\x12+/api/v1/actors/{namespace}/{actor_type}/askZ0:\x01*\"+/api/v1/actors/{namespace}/{actor_type}/askZ0:\x01*\x1a+/api/v1/actors/{namespace}/{actor_type}/ask\x12'/api/v1/actors/{namespace}/{actor_type}\x12\x89\x02\n" +
-	"\x0eTerminateActor\x12*.plexspaces.actor.v1.TerminateActorRequest\x1a+.plexspaces.actor.v1.TerminateActorResponse\"\x9d\x01\x92Am\n" +
-	"\x06Actors\x12\x0fTerminate Actor\x1aRGracefully terminate an actor by ID (permanent termination, pairs with SpawnActor)\x82\xd3\xe4\x93\x02'*%/api/v1/actors/{namespace}/{actor_id}\x12\xdf\x01\n" +
+	"\x06Actors\x12\tAsk Reply\x1a0Ask an actor via HTTP GET/POST/PUT ask endpoints\x82\xd3\xe4\x93\x02\xbc\x01Z-\x12+/api/v1/actors/{namespace}/{actor_type}/askZ0:\x01*\"+/api/v1/actors/{namespace}/{actor_type}/askZ0:\x01*\x1a+/api/v1/actors/{namespace}/{actor_type}/ask\x12'/api/v1/actors/{namespace}/{actor_type}\x12\xdf\x01\n" +
 	"\x10CreateShardGroup\x12,.plexspaces.actor.v1.CreateShardGroupRequest\x1a-.plexspaces.actor.v1.CreateShardGroupResponse\"n\x92AL\n" +
 	"\vShardGroups\x12\x12Create Shard Group\x1a)Create a shard group and spawn its shards\x82\xd3\xe4\x93\x02\x19:\x01*\"\x14/api/v1/shard-groups\x12\xe5\x01\n" +
 	"\x10DeleteShardGroup\x12,.plexspaces.actor.v1.DeleteShardGroupRequest\x1a\x1b.plexspaces.common.v1.Empty\"\x85\x01\x92A[\n" +
@@ -9334,7 +9155,7 @@ func file_plexspaces_v1_actors_actor_runtime_proto_rawDescGZIP() []byte {
 }
 
 var file_plexspaces_v1_actors_actor_runtime_proto_enumTypes = make([]protoimpl.EnumInfo, 21)
-var file_plexspaces_v1_actors_actor_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 104)
+var file_plexspaces_v1_actors_actor_runtime_proto_msgTypes = make([]protoimpl.MessageInfo, 102)
 var file_plexspaces_v1_actors_actor_runtime_proto_goTypes = []any{
 	(ActorState)(0),                      // 0: plexspaces.actor.v1.ActorState
 	(ExitReason)(0),                      // 1: plexspaces.actor.v1.ExitReason
@@ -9432,66 +9253,64 @@ var file_plexspaces_v1_actors_actor_runtime_proto_goTypes = []any{
 	(*LinkActorResponse)(nil),            // 93: plexspaces.actor.v1.LinkActorResponse
 	(*UnlinkActorRequest)(nil),           // 94: plexspaces.actor.v1.UnlinkActorRequest
 	(*UnlinkActorResponse)(nil),          // 95: plexspaces.actor.v1.UnlinkActorResponse
-	(*TerminateActorRequest)(nil),        // 96: plexspaces.actor.v1.TerminateActorRequest
-	(*TerminateActorResponse)(nil),       // 97: plexspaces.actor.v1.TerminateActorResponse
-	(*CheckActorExistsRequest)(nil),      // 98: plexspaces.actor.v1.CheckActorExistsRequest
-	(*CheckActorExistsResponse)(nil),     // 99: plexspaces.actor.v1.CheckActorExistsResponse
-	(*AskReplyRequest)(nil),              // 100: plexspaces.actor.v1.AskReplyRequest
-	(*AskReplyResponse)(nil),             // 101: plexspaces.actor.v1.AskReplyResponse
-	(*LifecycleEventFilter)(nil),         // 102: plexspaces.actor.v1.LifecycleEventFilter
-	(*VirtualActorLifecycle)(nil),        // 103: plexspaces.actor.v1.VirtualActorLifecycle
-	(*VirtualActorConfig)(nil),           // 104: plexspaces.actor.v1.VirtualActorConfig
-	(*ActorRefError)(nil),                // 105: plexspaces.actor.v1.ActorRefError
-	(*ResourceContract)(nil),             // 106: plexspaces.actor.v1.ResourceContract
-	(*ResourceUsage)(nil),                // 107: plexspaces.actor.v1.ResourceUsage
-	(*ResourceViolation)(nil),            // 108: plexspaces.actor.v1.ResourceViolation
-	(*ActorHealth)(nil),                  // 109: plexspaces.actor.v1.ActorHealth
-	nil,                                  // 110: plexspaces.actor.v1.ActorConfig.PropertiesEntry
-	nil,                                  // 111: plexspaces.actor.v1.ResourceRequirements.CustomRequirementsEntry
-	nil,                                  // 112: plexspaces.actor.v1.ShardGroup.MetadataEntry
-	nil,                                  // 113: plexspaces.actor.v1.NodePlacement.RequiredLabelsEntry
-	nil,                                  // 114: plexspaces.actor.v1.NodePlacement.AffinityLabelsEntry
-	nil,                                  // 115: plexspaces.actor.v1.CreateShardGroupRequest.MetadataEntry
-	nil,                                  // 116: plexspaces.actor.v1.BulkUpdateShardGroupRequest.UpdatesEntry
-	nil,                                  // 117: plexspaces.actor.v1.SpawnActorRequest.LabelsEntry
-	nil,                                  // 118: plexspaces.actor.v1.SendMessageRequest.HeadersEntry
-	nil,                                  // 119: plexspaces.actor.v1.SendMessageRequest.QueryParamsEntry
-	nil,                                  // 120: plexspaces.actor.v1.ActorLink.MetadataEntry
-	nil,                                  // 121: plexspaces.actor.v1.AskReplyRequest.HeadersEntry
-	nil,                                  // 122: plexspaces.actor.v1.AskReplyRequest.QueryParamsEntry
-	nil,                                  // 123: plexspaces.actor.v1.AskReplyResponse.HeadersEntry
-	nil,                                  // 124: plexspaces.actor.v1.LifecycleEventFilter.RequiredTagsEntry
-	(*v1.Metadata)(nil),                  // 125: plexspaces.common.v1.Metadata
-	(*v1.Facet)(nil),                     // 126: plexspaces.common.v1.Facet
-	(*durationpb.Duration)(nil),          // 127: google.protobuf.Duration
-	(*v1.RetryPolicy)(nil),               // 128: plexspaces.common.v1.RetryPolicy
-	(*timestamppb.Timestamp)(nil),        // 129: google.protobuf.Timestamp
-	(*v1.ResourceSpec)(nil),              // 130: plexspaces.common.v1.ResourceSpec
-	(*v1.PageRequest)(nil),               // 131: plexspaces.common.v1.PageRequest
-	(*v1.PageResponse)(nil),              // 132: plexspaces.common.v1.PageResponse
-	(*v1.Message)(nil),                   // 133: plexspaces.common.v1.Message
-	(v1.ActivationStrategy)(0),           // 134: plexspaces.common.v1.ActivationStrategy
-	(*anypb.Any)(nil),                    // 135: google.protobuf.Any
-	(*v1.Empty)(nil),                     // 136: plexspaces.common.v1.Empty
+	(*CheckActorExistsRequest)(nil),      // 96: plexspaces.actor.v1.CheckActorExistsRequest
+	(*CheckActorExistsResponse)(nil),     // 97: plexspaces.actor.v1.CheckActorExistsResponse
+	(*AskReplyRequest)(nil),              // 98: plexspaces.actor.v1.AskReplyRequest
+	(*AskReplyResponse)(nil),             // 99: plexspaces.actor.v1.AskReplyResponse
+	(*LifecycleEventFilter)(nil),         // 100: plexspaces.actor.v1.LifecycleEventFilter
+	(*VirtualActorLifecycle)(nil),        // 101: plexspaces.actor.v1.VirtualActorLifecycle
+	(*VirtualActorConfig)(nil),           // 102: plexspaces.actor.v1.VirtualActorConfig
+	(*ActorRefError)(nil),                // 103: plexspaces.actor.v1.ActorRefError
+	(*ResourceContract)(nil),             // 104: plexspaces.actor.v1.ResourceContract
+	(*ResourceUsage)(nil),                // 105: plexspaces.actor.v1.ResourceUsage
+	(*ResourceViolation)(nil),            // 106: plexspaces.actor.v1.ResourceViolation
+	(*ActorHealth)(nil),                  // 107: plexspaces.actor.v1.ActorHealth
+	nil,                                  // 108: plexspaces.actor.v1.ActorConfig.PropertiesEntry
+	nil,                                  // 109: plexspaces.actor.v1.ResourceRequirements.CustomRequirementsEntry
+	nil,                                  // 110: plexspaces.actor.v1.ShardGroup.MetadataEntry
+	nil,                                  // 111: plexspaces.actor.v1.NodePlacement.RequiredLabelsEntry
+	nil,                                  // 112: plexspaces.actor.v1.NodePlacement.AffinityLabelsEntry
+	nil,                                  // 113: plexspaces.actor.v1.CreateShardGroupRequest.MetadataEntry
+	nil,                                  // 114: plexspaces.actor.v1.BulkUpdateShardGroupRequest.UpdatesEntry
+	nil,                                  // 115: plexspaces.actor.v1.SpawnActorRequest.LabelsEntry
+	nil,                                  // 116: plexspaces.actor.v1.SendMessageRequest.HeadersEntry
+	nil,                                  // 117: plexspaces.actor.v1.SendMessageRequest.QueryParamsEntry
+	nil,                                  // 118: plexspaces.actor.v1.ActorLink.MetadataEntry
+	nil,                                  // 119: plexspaces.actor.v1.AskReplyRequest.HeadersEntry
+	nil,                                  // 120: plexspaces.actor.v1.AskReplyRequest.QueryParamsEntry
+	nil,                                  // 121: plexspaces.actor.v1.AskReplyResponse.HeadersEntry
+	nil,                                  // 122: plexspaces.actor.v1.LifecycleEventFilter.RequiredTagsEntry
+	(*v1.Metadata)(nil),                  // 123: plexspaces.common.v1.Metadata
+	(*v1.Facet)(nil),                     // 124: plexspaces.common.v1.Facet
+	(*durationpb.Duration)(nil),          // 125: google.protobuf.Duration
+	(*v1.RetryPolicy)(nil),               // 126: plexspaces.common.v1.RetryPolicy
+	(*timestamppb.Timestamp)(nil),        // 127: google.protobuf.Timestamp
+	(*v1.ResourceSpec)(nil),              // 128: plexspaces.common.v1.ResourceSpec
+	(*v1.PageRequest)(nil),               // 129: plexspaces.common.v1.PageRequest
+	(*v1.PageResponse)(nil),              // 130: plexspaces.common.v1.PageResponse
+	(*v1.Message)(nil),                   // 131: plexspaces.common.v1.Message
+	(v1.ActivationStrategy)(0),           // 132: plexspaces.common.v1.ActivationStrategy
+	(*anypb.Any)(nil),                    // 133: google.protobuf.Any
+	(*v1.Empty)(nil),                     // 134: plexspaces.common.v1.Empty
 }
 var file_plexspaces_v1_actors_actor_runtime_proto_depIdxs = []int32{
 	0,   // 0: plexspaces.actor.v1.Actor.state:type_name -> plexspaces.actor.v1.ActorState
-	125, // 1: plexspaces.actor.v1.Actor.metadata:type_name -> plexspaces.common.v1.Metadata
+	123, // 1: plexspaces.actor.v1.Actor.metadata:type_name -> plexspaces.common.v1.Metadata
 	23,  // 2: plexspaces.actor.v1.Actor.config:type_name -> plexspaces.actor.v1.ActorConfig
 	60,  // 3: plexspaces.actor.v1.Actor.metrics:type_name -> plexspaces.actor.v1.ActorMetrics
-	126, // 4: plexspaces.actor.v1.Actor.facets:type_name -> plexspaces.common.v1.Facet
+	124, // 4: plexspaces.actor.v1.Actor.facets:type_name -> plexspaces.common.v1.Facet
 	1,   // 5: plexspaces.actor.v1.ExitReasonDetails.linked_reason:type_name -> plexspaces.actor.v1.ExitReason
-	127, // 6: plexspaces.actor.v1.ActorConfig.mailbox_timeout:type_name -> google.protobuf.Duration
-	127, // 7: plexspaces.actor.v1.ActorConfig.checkpoint_interval:type_name -> google.protobuf.Duration
-	128, // 8: plexspaces.actor.v1.ActorConfig.restart_policy:type_name -> plexspaces.common.v1.RetryPolicy
+	125, // 6: plexspaces.actor.v1.ActorConfig.mailbox_timeout:type_name -> google.protobuf.Duration
+	125, // 7: plexspaces.actor.v1.ActorConfig.checkpoint_interval:type_name -> google.protobuf.Duration
+	126, // 8: plexspaces.actor.v1.ActorConfig.restart_policy:type_name -> plexspaces.common.v1.RetryPolicy
 	13,  // 9: plexspaces.actor.v1.ActorConfig.supervision_strategy:type_name -> plexspaces.actor.v1.SupervisionStrategy
-	110, // 10: plexspaces.actor.v1.ActorConfig.properties:type_name -> plexspaces.actor.v1.ActorConfig.PropertiesEntry
+	108, // 10: plexspaces.actor.v1.ActorConfig.properties:type_name -> plexspaces.actor.v1.ActorConfig.PropertiesEntry
 	26,  // 11: plexspaces.actor.v1.ActorConfig.stateless_worker_config:type_name -> plexspaces.actor.v1.StatelessWorkerConfig
 	27,  // 12: plexspaces.actor.v1.ActorConfig.data_parallel_config:type_name -> plexspaces.actor.v1.DataParallelConfig
 	11,  // 13: plexspaces.actor.v1.ActorConfig.state_management_mode:type_name -> plexspaces.actor.v1.StateMgmtMode
 	12,  // 14: plexspaces.actor.v1.ActorConfig.consistency_level:type_name -> plexspaces.actor.v1.ConsistencyLevel
 	25,  // 15: plexspaces.actor.v1.ActorConfig.resource_requirements:type_name -> plexspaces.actor.v1.ActorResourceRequirements
-	111, // 16: plexspaces.actor.v1.ResourceRequirements.custom_requirements:type_name -> plexspaces.actor.v1.ResourceRequirements.CustomRequirementsEntry
+	109, // 16: plexspaces.actor.v1.ResourceRequirements.custom_requirements:type_name -> plexspaces.actor.v1.ResourceRequirements.CustomRequirementsEntry
 	30,  // 17: plexspaces.actor.v1.ActorResourceRequirements.placement:type_name -> plexspaces.actor.v1.NodePlacement
 	4,   // 18: plexspaces.actor.v1.StatelessWorkerConfig.strategy:type_name -> plexspaces.actor.v1.LoadBalancingStrategy
 	5,   // 19: plexspaces.actor.v1.DataParallelConfig.partition_strategy:type_name -> plexspaces.actor.v1.PartitionStrategy
@@ -9499,91 +9318,91 @@ var file_plexspaces_v1_actors_actor_runtime_proto_depIdxs = []int32{
 	30,  // 21: plexspaces.actor.v1.DataParallelConfig.placement:type_name -> plexspaces.actor.v1.NodePlacement
 	27,  // 22: plexspaces.actor.v1.ShardGroup.config:type_name -> plexspaces.actor.v1.DataParallelConfig
 	7,   // 23: plexspaces.actor.v1.ShardGroup.state:type_name -> plexspaces.actor.v1.ShardGroupState
-	129, // 24: plexspaces.actor.v1.ShardGroup.created_at:type_name -> google.protobuf.Timestamp
-	112, // 25: plexspaces.actor.v1.ShardGroup.metadata:type_name -> plexspaces.actor.v1.ShardGroup.MetadataEntry
+	127, // 24: plexspaces.actor.v1.ShardGroup.created_at:type_name -> google.protobuf.Timestamp
+	110, // 25: plexspaces.actor.v1.ShardGroup.metadata:type_name -> plexspaces.actor.v1.ShardGroup.MetadataEntry
 	29,  // 26: plexspaces.actor.v1.ShardGroup.rebalance_status:type_name -> plexspaces.actor.v1.RebalanceStatus
-	129, // 27: plexspaces.actor.v1.RebalanceStatus.started_at:type_name -> google.protobuf.Timestamp
-	129, // 28: plexspaces.actor.v1.RebalanceStatus.estimated_completion:type_name -> google.protobuf.Timestamp
+	127, // 27: plexspaces.actor.v1.RebalanceStatus.started_at:type_name -> google.protobuf.Timestamp
+	127, // 28: plexspaces.actor.v1.RebalanceStatus.estimated_completion:type_name -> google.protobuf.Timestamp
 	8,   // 29: plexspaces.actor.v1.NodePlacement.strategy:type_name -> plexspaces.actor.v1.NodePlacementStrategy
-	113, // 30: plexspaces.actor.v1.NodePlacement.required_labels:type_name -> plexspaces.actor.v1.NodePlacement.RequiredLabelsEntry
-	130, // 31: plexspaces.actor.v1.NodePlacement.resource_requirements:type_name -> plexspaces.common.v1.ResourceSpec
-	114, // 32: plexspaces.actor.v1.NodePlacement.affinity_labels:type_name -> plexspaces.actor.v1.NodePlacement.AffinityLabelsEntry
+	111, // 30: plexspaces.actor.v1.NodePlacement.required_labels:type_name -> plexspaces.actor.v1.NodePlacement.RequiredLabelsEntry
+	128, // 31: plexspaces.actor.v1.NodePlacement.resource_requirements:type_name -> plexspaces.common.v1.ResourceSpec
+	112, // 32: plexspaces.actor.v1.NodePlacement.affinity_labels:type_name -> plexspaces.actor.v1.NodePlacement.AffinityLabelsEntry
 	27,  // 33: plexspaces.actor.v1.CreateShardGroupRequest.config:type_name -> plexspaces.actor.v1.DataParallelConfig
 	23,  // 34: plexspaces.actor.v1.CreateShardGroupRequest.shard_config:type_name -> plexspaces.actor.v1.ActorConfig
-	115, // 35: plexspaces.actor.v1.CreateShardGroupRequest.metadata:type_name -> plexspaces.actor.v1.CreateShardGroupRequest.MetadataEntry
+	113, // 35: plexspaces.actor.v1.CreateShardGroupRequest.metadata:type_name -> plexspaces.actor.v1.CreateShardGroupRequest.MetadataEntry
 	28,  // 36: plexspaces.actor.v1.CreateShardGroupResponse.group:type_name -> plexspaces.actor.v1.ShardGroup
-	127, // 37: plexspaces.actor.v1.DeleteShardGroupRequest.shutdown_timeout:type_name -> google.protobuf.Duration
+	125, // 37: plexspaces.actor.v1.DeleteShardGroupRequest.shutdown_timeout:type_name -> google.protobuf.Duration
 	28,  // 38: plexspaces.actor.v1.GetShardGroupResponse.group:type_name -> plexspaces.actor.v1.ShardGroup
 	7,   // 39: plexspaces.actor.v1.ListShardGroupsRequest.state:type_name -> plexspaces.actor.v1.ShardGroupState
-	131, // 40: plexspaces.actor.v1.ListShardGroupsRequest.page:type_name -> plexspaces.common.v1.PageRequest
+	129, // 40: plexspaces.actor.v1.ListShardGroupsRequest.page:type_name -> plexspaces.common.v1.PageRequest
 	28,  // 41: plexspaces.actor.v1.ListShardGroupsResponse.groups:type_name -> plexspaces.actor.v1.ShardGroup
-	132, // 42: plexspaces.actor.v1.ListShardGroupsResponse.page:type_name -> plexspaces.common.v1.PageResponse
-	133, // 43: plexspaces.actor.v1.SendToShardRequest.message:type_name -> plexspaces.common.v1.Message
-	127, // 44: plexspaces.actor.v1.SendToShardRequest.timeout:type_name -> google.protobuf.Duration
-	133, // 45: plexspaces.actor.v1.SendToShardResponse.response:type_name -> plexspaces.common.v1.Message
-	133, // 46: plexspaces.actor.v1.ScatterGatherRequest.query:type_name -> plexspaces.common.v1.Message
-	127, // 47: plexspaces.actor.v1.ScatterGatherRequest.timeout:type_name -> google.protobuf.Duration
+	130, // 42: plexspaces.actor.v1.ListShardGroupsResponse.page:type_name -> plexspaces.common.v1.PageResponse
+	131, // 43: plexspaces.actor.v1.SendToShardRequest.message:type_name -> plexspaces.common.v1.Message
+	125, // 44: plexspaces.actor.v1.SendToShardRequest.timeout:type_name -> google.protobuf.Duration
+	131, // 45: plexspaces.actor.v1.SendToShardResponse.response:type_name -> plexspaces.common.v1.Message
+	131, // 46: plexspaces.actor.v1.ScatterGatherRequest.query:type_name -> plexspaces.common.v1.Message
+	125, // 47: plexspaces.actor.v1.ScatterGatherRequest.timeout:type_name -> google.protobuf.Duration
 	9,   // 48: plexspaces.actor.v1.ScatterGatherRequest.aggregation:type_name -> plexspaces.actor.v1.ShardGroupAggregationStrategy
-	133, // 49: plexspaces.actor.v1.ShardQueryResponse.response:type_name -> plexspaces.common.v1.Message
-	127, // 50: plexspaces.actor.v1.ShardQueryResponse.latency:type_name -> google.protobuf.Duration
-	127, // 51: plexspaces.actor.v1.ScatterGatherStats.max_latency:type_name -> google.protobuf.Duration
-	133, // 52: plexspaces.actor.v1.ScatterGatherResponse.result:type_name -> plexspaces.common.v1.Message
+	131, // 49: plexspaces.actor.v1.ShardQueryResponse.response:type_name -> plexspaces.common.v1.Message
+	125, // 50: plexspaces.actor.v1.ShardQueryResponse.latency:type_name -> google.protobuf.Duration
+	125, // 51: plexspaces.actor.v1.ScatterGatherStats.max_latency:type_name -> google.protobuf.Duration
+	131, // 52: plexspaces.actor.v1.ScatterGatherResponse.result:type_name -> plexspaces.common.v1.Message
 	41,  // 53: plexspaces.actor.v1.ScatterGatherResponse.shard_responses:type_name -> plexspaces.actor.v1.ShardQueryResponse
 	42,  // 54: plexspaces.actor.v1.ScatterGatherResponse.stats:type_name -> plexspaces.actor.v1.ScatterGatherStats
-	116, // 55: plexspaces.actor.v1.BulkUpdateShardGroupRequest.updates:type_name -> plexspaces.actor.v1.BulkUpdateShardGroupRequest.UpdatesEntry
+	114, // 55: plexspaces.actor.v1.BulkUpdateShardGroupRequest.updates:type_name -> plexspaces.actor.v1.BulkUpdateShardGroupRequest.UpdatesEntry
 	12,  // 56: plexspaces.actor.v1.BulkUpdateShardGroupRequest.consistency_level:type_name -> plexspaces.actor.v1.ConsistencyLevel
-	127, // 57: plexspaces.actor.v1.BulkUpdateShardGroupRequest.timeout:type_name -> google.protobuf.Duration
+	125, // 57: plexspaces.actor.v1.BulkUpdateShardGroupRequest.timeout:type_name -> google.protobuf.Duration
 	46,  // 58: plexspaces.actor.v1.BulkUpdateShardGroupResponse.shard_stats:type_name -> plexspaces.actor.v1.ShardUpdateStats
-	133, // 59: plexspaces.actor.v1.MapShardGroupRequest.map_function:type_name -> plexspaces.common.v1.Message
-	127, // 60: plexspaces.actor.v1.MapShardGroupRequest.timeout:type_name -> google.protobuf.Duration
+	131, // 59: plexspaces.actor.v1.MapShardGroupRequest.map_function:type_name -> plexspaces.common.v1.Message
+	125, // 60: plexspaces.actor.v1.MapShardGroupRequest.timeout:type_name -> google.protobuf.Duration
 	41,  // 61: plexspaces.actor.v1.MapShardGroupResponse.shard_results:type_name -> plexspaces.actor.v1.ShardQueryResponse
 	42,  // 62: plexspaces.actor.v1.MapShardGroupResponse.stats:type_name -> plexspaces.actor.v1.ScatterGatherStats
-	133, // 63: plexspaces.actor.v1.BroadcastShardGroupRequest.message:type_name -> plexspaces.common.v1.Message
-	127, // 64: plexspaces.actor.v1.BroadcastShardGroupRequest.timeout:type_name -> google.protobuf.Duration
+	131, // 63: plexspaces.actor.v1.BroadcastShardGroupRequest.message:type_name -> plexspaces.common.v1.Message
+	125, // 64: plexspaces.actor.v1.BroadcastShardGroupRequest.timeout:type_name -> google.protobuf.Duration
 	41,  // 65: plexspaces.actor.v1.BroadcastShardGroupResponse.shard_responses:type_name -> plexspaces.actor.v1.ShardQueryResponse
 	42,  // 66: plexspaces.actor.v1.BroadcastShardGroupResponse.stats:type_name -> plexspaces.actor.v1.ScatterGatherStats
-	133, // 67: plexspaces.actor.v1.ReduceShardGroupRequest.map_function:type_name -> plexspaces.common.v1.Message
-	127, // 68: plexspaces.actor.v1.ReduceShardGroupRequest.timeout:type_name -> google.protobuf.Duration
+	131, // 67: plexspaces.actor.v1.ReduceShardGroupRequest.map_function:type_name -> plexspaces.common.v1.Message
+	125, // 68: plexspaces.actor.v1.ReduceShardGroupRequest.timeout:type_name -> google.protobuf.Duration
 	10,  // 69: plexspaces.actor.v1.ReduceShardGroupRequest.reduction:type_name -> plexspaces.actor.v1.CollectiveReduction
 	49,  // 70: plexspaces.actor.v1.ReduceShardGroupRequest.target:type_name -> plexspaces.actor.v1.CollectiveTargetField
-	133, // 71: plexspaces.actor.v1.ReduceShardGroupResponse.result:type_name -> plexspaces.common.v1.Message
+	131, // 71: plexspaces.actor.v1.ReduceShardGroupResponse.result:type_name -> plexspaces.common.v1.Message
 	41,  // 72: plexspaces.actor.v1.ReduceShardGroupResponse.shard_responses:type_name -> plexspaces.actor.v1.ShardQueryResponse
 	42,  // 73: plexspaces.actor.v1.ReduceShardGroupResponse.stats:type_name -> plexspaces.actor.v1.ScatterGatherStats
-	133, // 74: plexspaces.actor.v1.AllReduceShardGroupRequest.map_function:type_name -> plexspaces.common.v1.Message
-	127, // 75: plexspaces.actor.v1.AllReduceShardGroupRequest.timeout:type_name -> google.protobuf.Duration
+	131, // 74: plexspaces.actor.v1.AllReduceShardGroupRequest.map_function:type_name -> plexspaces.common.v1.Message
+	125, // 75: plexspaces.actor.v1.AllReduceShardGroupRequest.timeout:type_name -> google.protobuf.Duration
 	10,  // 76: plexspaces.actor.v1.AllReduceShardGroupRequest.reduction:type_name -> plexspaces.actor.v1.CollectiveReduction
 	49,  // 77: plexspaces.actor.v1.AllReduceShardGroupRequest.target:type_name -> plexspaces.actor.v1.CollectiveTargetField
-	133, // 78: plexspaces.actor.v1.AllReduceShardGroupResponse.result:type_name -> plexspaces.common.v1.Message
+	131, // 78: plexspaces.actor.v1.AllReduceShardGroupResponse.result:type_name -> plexspaces.common.v1.Message
 	41,  // 79: plexspaces.actor.v1.AllReduceShardGroupResponse.shard_responses:type_name -> plexspaces.actor.v1.ShardQueryResponse
 	42,  // 80: plexspaces.actor.v1.AllReduceShardGroupResponse.stats:type_name -> plexspaces.actor.v1.ScatterGatherStats
-	127, // 81: plexspaces.actor.v1.BarrierShardGroupRequest.timeout:type_name -> google.protobuf.Duration
+	125, // 81: plexspaces.actor.v1.BarrierShardGroupRequest.timeout:type_name -> google.protobuf.Duration
 	41,  // 82: plexspaces.actor.v1.BarrierShardGroupResponse.shard_responses:type_name -> plexspaces.actor.v1.ShardQueryResponse
 	42,  // 83: plexspaces.actor.v1.BarrierShardGroupResponse.stats:type_name -> plexspaces.actor.v1.ScatterGatherStats
 	6,   // 84: plexspaces.actor.v1.ScaleShardGroupRequest.rebalance_policy:type_name -> plexspaces.actor.v1.RebalancePolicy
 	23,  // 85: plexspaces.actor.v1.ScaleShardGroupRequest.new_shard_config:type_name -> plexspaces.actor.v1.ActorConfig
 	28,  // 86: plexspaces.actor.v1.ScaleShardGroupResponse.group:type_name -> plexspaces.actor.v1.ShardGroup
 	29,  // 87: plexspaces.actor.v1.ScaleShardGroupResponse.rebalance_status:type_name -> plexspaces.actor.v1.RebalanceStatus
-	127, // 88: plexspaces.actor.v1.ActorMetrics.average_processing_time:type_name -> google.protobuf.Duration
-	129, // 89: plexspaces.actor.v1.ActorMetrics.last_activity:type_name -> google.protobuf.Timestamp
+	125, // 88: plexspaces.actor.v1.ActorMetrics.average_processing_time:type_name -> google.protobuf.Duration
+	127, // 89: plexspaces.actor.v1.ActorMetrics.last_activity:type_name -> google.protobuf.Timestamp
 	23,  // 90: plexspaces.actor.v1.SpawnActorRequest.config:type_name -> plexspaces.actor.v1.ActorConfig
-	117, // 91: plexspaces.actor.v1.SpawnActorRequest.labels:type_name -> plexspaces.actor.v1.SpawnActorRequest.LabelsEntry
-	126, // 92: plexspaces.actor.v1.SpawnActorRequest.facets:type_name -> plexspaces.common.v1.Facet
+	115, // 91: plexspaces.actor.v1.SpawnActorRequest.labels:type_name -> plexspaces.actor.v1.SpawnActorRequest.LabelsEntry
+	124, // 92: plexspaces.actor.v1.SpawnActorRequest.facets:type_name -> plexspaces.common.v1.Facet
 	21,  // 93: plexspaces.actor.v1.SpawnActorResponse.actor:type_name -> plexspaces.actor.v1.Actor
 	61,  // 94: plexspaces.actor.v1.SpawnActorsRequest.requests:type_name -> plexspaces.actor.v1.SpawnActorRequest
 	62,  // 95: plexspaces.actor.v1.SpawnActorResult.response:type_name -> plexspaces.actor.v1.SpawnActorResponse
 	64,  // 96: plexspaces.actor.v1.SpawnActorsResponse.results:type_name -> plexspaces.actor.v1.SpawnActorResult
 	21,  // 97: plexspaces.actor.v1.GetActorResponse.actor:type_name -> plexspaces.actor.v1.Actor
-	131, // 98: plexspaces.actor.v1.ListActorsRequest.page_request:type_name -> plexspaces.common.v1.PageRequest
+	129, // 98: plexspaces.actor.v1.ListActorsRequest.page_request:type_name -> plexspaces.common.v1.PageRequest
 	0,   // 99: plexspaces.actor.v1.ListActorsRequest.state:type_name -> plexspaces.actor.v1.ActorState
 	21,  // 100: plexspaces.actor.v1.ListActorsResponse.actors:type_name -> plexspaces.actor.v1.Actor
-	132, // 101: plexspaces.actor.v1.ListActorsResponse.page_response:type_name -> plexspaces.common.v1.PageResponse
-	118, // 102: plexspaces.actor.v1.SendMessageRequest.headers:type_name -> plexspaces.actor.v1.SendMessageRequest.HeadersEntry
-	119, // 103: plexspaces.actor.v1.SendMessageRequest.query_params:type_name -> plexspaces.actor.v1.SendMessageRequest.QueryParamsEntry
-	133, // 104: plexspaces.actor.v1.StreamMessageRequest.message:type_name -> plexspaces.common.v1.Message
+	130, // 101: plexspaces.actor.v1.ListActorsResponse.page_response:type_name -> plexspaces.common.v1.PageResponse
+	116, // 102: plexspaces.actor.v1.SendMessageRequest.headers:type_name -> plexspaces.actor.v1.SendMessageRequest.HeadersEntry
+	117, // 103: plexspaces.actor.v1.SendMessageRequest.query_params:type_name -> plexspaces.actor.v1.SendMessageRequest.QueryParamsEntry
+	131, // 104: plexspaces.actor.v1.StreamMessageRequest.message:type_name -> plexspaces.common.v1.Message
 	0,   // 105: plexspaces.actor.v1.SetActorStateRequest.target_state:type_name -> plexspaces.actor.v1.ActorState
 	21,  // 106: plexspaces.actor.v1.SetActorStateResponse.actor:type_name -> plexspaces.actor.v1.Actor
 	21,  // 107: plexspaces.actor.v1.MigrateActorResponse.actor:type_name -> plexspaces.actor.v1.Actor
-	129, // 108: plexspaces.actor.v1.ActorLifecycleEvent.timestamp:type_name -> google.protobuf.Timestamp
+	127, // 108: plexspaces.actor.v1.ActorLifecycleEvent.timestamp:type_name -> google.protobuf.Timestamp
 	80,  // 109: plexspaces.actor.v1.ActorLifecycleEvent.created:type_name -> plexspaces.actor.v1.ActorCreated
 	81,  // 110: plexspaces.actor.v1.ActorLifecycleEvent.starting:type_name -> plexspaces.actor.v1.ActorStarting
 	82,  // 111: plexspaces.actor.v1.ActorLifecycleEvent.activated:type_name -> plexspaces.actor.v1.ActorActivated
@@ -9592,27 +9411,27 @@ var file_plexspaces_v1_actors_actor_runtime_proto_depIdxs = []int32{
 	85,  // 114: plexspaces.actor.v1.ActorLifecycleEvent.terminated:type_name -> plexspaces.actor.v1.ActorTerminated
 	86,  // 115: plexspaces.actor.v1.ActorLifecycleEvent.failed:type_name -> plexspaces.actor.v1.ActorFailed
 	87,  // 116: plexspaces.actor.v1.ActorLifecycleEvent.migrating:type_name -> plexspaces.actor.v1.ActorMigrating
-	129, // 117: plexspaces.actor.v1.ActorLink.created_at:type_name -> google.protobuf.Timestamp
-	120, // 118: plexspaces.actor.v1.ActorLink.metadata:type_name -> plexspaces.actor.v1.ActorLink.MetadataEntry
-	121, // 119: plexspaces.actor.v1.AskReplyRequest.headers:type_name -> plexspaces.actor.v1.AskReplyRequest.HeadersEntry
-	122, // 120: plexspaces.actor.v1.AskReplyRequest.query_params:type_name -> plexspaces.actor.v1.AskReplyRequest.QueryParamsEntry
-	127, // 121: plexspaces.actor.v1.AskReplyRequest.timeout:type_name -> google.protobuf.Duration
-	123, // 122: plexspaces.actor.v1.AskReplyResponse.headers:type_name -> plexspaces.actor.v1.AskReplyResponse.HeadersEntry
+	127, // 117: plexspaces.actor.v1.ActorLink.created_at:type_name -> google.protobuf.Timestamp
+	118, // 118: plexspaces.actor.v1.ActorLink.metadata:type_name -> plexspaces.actor.v1.ActorLink.MetadataEntry
+	119, // 119: plexspaces.actor.v1.AskReplyRequest.headers:type_name -> plexspaces.actor.v1.AskReplyRequest.HeadersEntry
+	120, // 120: plexspaces.actor.v1.AskReplyRequest.query_params:type_name -> plexspaces.actor.v1.AskReplyRequest.QueryParamsEntry
+	125, // 121: plexspaces.actor.v1.AskReplyRequest.timeout:type_name -> google.protobuf.Duration
+	121, // 122: plexspaces.actor.v1.AskReplyResponse.headers:type_name -> plexspaces.actor.v1.AskReplyResponse.HeadersEntry
 	15,  // 123: plexspaces.actor.v1.LifecycleEventFilter.event_types:type_name -> plexspaces.actor.v1.LifecycleEventType
-	124, // 124: plexspaces.actor.v1.LifecycleEventFilter.required_tags:type_name -> plexspaces.actor.v1.LifecycleEventFilter.RequiredTagsEntry
+	122, // 124: plexspaces.actor.v1.LifecycleEventFilter.required_tags:type_name -> plexspaces.actor.v1.LifecycleEventFilter.RequiredTagsEntry
 	16,  // 125: plexspaces.actor.v1.LifecycleEventFilter.drop_policy:type_name -> plexspaces.actor.v1.DropPolicy
-	129, // 126: plexspaces.actor.v1.VirtualActorLifecycle.last_activated:type_name -> google.protobuf.Timestamp
-	129, // 127: plexspaces.actor.v1.VirtualActorLifecycle.last_accessed:type_name -> google.protobuf.Timestamp
-	127, // 128: plexspaces.actor.v1.VirtualActorLifecycle.idle_timeout:type_name -> google.protobuf.Duration
-	134, // 129: plexspaces.actor.v1.VirtualActorConfig.activation_strategy:type_name -> plexspaces.common.v1.ActivationStrategy
-	127, // 130: plexspaces.actor.v1.VirtualActorConfig.idle_timeout:type_name -> google.protobuf.Duration
+	127, // 126: plexspaces.actor.v1.VirtualActorLifecycle.last_activated:type_name -> google.protobuf.Timestamp
+	127, // 127: plexspaces.actor.v1.VirtualActorLifecycle.last_accessed:type_name -> google.protobuf.Timestamp
+	125, // 128: plexspaces.actor.v1.VirtualActorLifecycle.idle_timeout:type_name -> google.protobuf.Duration
+	132, // 129: plexspaces.actor.v1.VirtualActorConfig.activation_strategy:type_name -> plexspaces.common.v1.ActivationStrategy
+	125, // 130: plexspaces.actor.v1.VirtualActorConfig.idle_timeout:type_name -> google.protobuf.Duration
 	17,  // 131: plexspaces.actor.v1.ActorRefError.code:type_name -> plexspaces.actor.v1.ActorRefErrorCode
-	127, // 132: plexspaces.actor.v1.ResourceContract.max_execution_time:type_name -> google.protobuf.Duration
+	125, // 132: plexspaces.actor.v1.ResourceContract.max_execution_time:type_name -> google.protobuf.Duration
 	19,  // 133: plexspaces.actor.v1.ResourceViolation.code:type_name -> plexspaces.actor.v1.ResourceViolationCode
 	20,  // 134: plexspaces.actor.v1.ActorHealth.status:type_name -> plexspaces.actor.v1.ActorHealthStatus
-	127, // 135: plexspaces.actor.v1.ActorHealth.stuck_since:type_name -> google.protobuf.Duration
-	135, // 136: plexspaces.actor.v1.ActorConfig.PropertiesEntry.value:type_name -> google.protobuf.Any
-	133, // 137: plexspaces.actor.v1.BulkUpdateShardGroupRequest.UpdatesEntry.value:type_name -> plexspaces.common.v1.Message
+	125, // 135: plexspaces.actor.v1.ActorHealth.stuck_since:type_name -> google.protobuf.Duration
+	133, // 136: plexspaces.actor.v1.ActorConfig.PropertiesEntry.value:type_name -> google.protobuf.Any
+	131, // 137: plexspaces.actor.v1.BulkUpdateShardGroupRequest.UpdatesEntry.value:type_name -> plexspaces.common.v1.Message
 	61,  // 138: plexspaces.actor.v1.ActorService.SpawnActor:input_type -> plexspaces.actor.v1.SpawnActorRequest
 	63,  // 139: plexspaces.actor.v1.ActorService.SpawnActors:input_type -> plexspaces.actor.v1.SpawnActorsRequest
 	66,  // 140: plexspaces.actor.v1.ActorService.GetActor:input_type -> plexspaces.actor.v1.GetActorRequest
@@ -9626,57 +9445,55 @@ var file_plexspaces_v1_actors_actor_runtime_proto_depIdxs = []int32{
 	92,  // 148: plexspaces.actor.v1.ActorService.LinkActor:input_type -> plexspaces.actor.v1.LinkActorRequest
 	94,  // 149: plexspaces.actor.v1.ActorService.UnlinkActor:input_type -> plexspaces.actor.v1.UnlinkActorRequest
 	90,  // 150: plexspaces.actor.v1.ActorService.NotifyActorDown:input_type -> plexspaces.actor.v1.ActorDownNotification
-	98,  // 151: plexspaces.actor.v1.ActorService.CheckActorExists:input_type -> plexspaces.actor.v1.CheckActorExistsRequest
-	100, // 152: plexspaces.actor.v1.ActorService.AskReply:input_type -> plexspaces.actor.v1.AskReplyRequest
-	96,  // 153: plexspaces.actor.v1.ActorService.TerminateActor:input_type -> plexspaces.actor.v1.TerminateActorRequest
-	31,  // 154: plexspaces.actor.v1.ActorService.CreateShardGroup:input_type -> plexspaces.actor.v1.CreateShardGroupRequest
-	33,  // 155: plexspaces.actor.v1.ActorService.DeleteShardGroup:input_type -> plexspaces.actor.v1.DeleteShardGroupRequest
-	34,  // 156: plexspaces.actor.v1.ActorService.GetShardGroup:input_type -> plexspaces.actor.v1.GetShardGroupRequest
-	36,  // 157: plexspaces.actor.v1.ActorService.ListShardGroups:input_type -> plexspaces.actor.v1.ListShardGroupsRequest
-	58,  // 158: plexspaces.actor.v1.ActorService.ScaleShardGroup:input_type -> plexspaces.actor.v1.ScaleShardGroupRequest
-	38,  // 159: plexspaces.actor.v1.ActorService.SendToShard:input_type -> plexspaces.actor.v1.SendToShardRequest
-	50,  // 160: plexspaces.actor.v1.ActorService.BroadcastShardGroup:input_type -> plexspaces.actor.v1.BroadcastShardGroupRequest
-	52,  // 161: plexspaces.actor.v1.ActorService.ReduceShardGroup:input_type -> plexspaces.actor.v1.ReduceShardGroupRequest
-	54,  // 162: plexspaces.actor.v1.ActorService.AllReduceShardGroup:input_type -> plexspaces.actor.v1.AllReduceShardGroupRequest
-	56,  // 163: plexspaces.actor.v1.ActorService.BarrierShardGroup:input_type -> plexspaces.actor.v1.BarrierShardGroupRequest
-	40,  // 164: plexspaces.actor.v1.ActorService.ScatterGather:input_type -> plexspaces.actor.v1.ScatterGatherRequest
-	44,  // 165: plexspaces.actor.v1.ActorService.BulkUpdateShardGroup:input_type -> plexspaces.actor.v1.BulkUpdateShardGroupRequest
-	47,  // 166: plexspaces.actor.v1.ActorService.MapShardGroup:input_type -> plexspaces.actor.v1.MapShardGroupRequest
-	102, // 167: plexspaces.actor.v1.LifecycleEventChannel.SubscribeLifecycleEvents:input_type -> plexspaces.actor.v1.LifecycleEventFilter
-	79,  // 168: plexspaces.actor.v1.LifecycleEventChannel.PublishLifecycleEvent:input_type -> plexspaces.actor.v1.ActorLifecycleEvent
-	62,  // 169: plexspaces.actor.v1.ActorService.SpawnActor:output_type -> plexspaces.actor.v1.SpawnActorResponse
-	65,  // 170: plexspaces.actor.v1.ActorService.SpawnActors:output_type -> plexspaces.actor.v1.SpawnActorsResponse
-	67,  // 171: plexspaces.actor.v1.ActorService.GetActor:output_type -> plexspaces.actor.v1.GetActorResponse
-	69,  // 172: plexspaces.actor.v1.ActorService.ListActors:output_type -> plexspaces.actor.v1.ListActorsResponse
-	71,  // 173: plexspaces.actor.v1.ActorService.SendMessage:output_type -> plexspaces.actor.v1.SendMessageResponse
-	73,  // 174: plexspaces.actor.v1.ActorService.StreamMessages:output_type -> plexspaces.actor.v1.StreamMessageResponse
-	75,  // 175: plexspaces.actor.v1.ActorService.SetActorState:output_type -> plexspaces.actor.v1.SetActorStateResponse
-	77,  // 176: plexspaces.actor.v1.ActorService.MigrateActor:output_type -> plexspaces.actor.v1.MigrateActorResponse
-	136, // 177: plexspaces.actor.v1.ActorService.DeleteActor:output_type -> plexspaces.common.v1.Empty
-	89,  // 178: plexspaces.actor.v1.ActorService.MonitorActor:output_type -> plexspaces.actor.v1.MonitorActorResponse
-	93,  // 179: plexspaces.actor.v1.ActorService.LinkActor:output_type -> plexspaces.actor.v1.LinkActorResponse
-	95,  // 180: plexspaces.actor.v1.ActorService.UnlinkActor:output_type -> plexspaces.actor.v1.UnlinkActorResponse
-	136, // 181: plexspaces.actor.v1.ActorService.NotifyActorDown:output_type -> plexspaces.common.v1.Empty
-	99,  // 182: plexspaces.actor.v1.ActorService.CheckActorExists:output_type -> plexspaces.actor.v1.CheckActorExistsResponse
-	101, // 183: plexspaces.actor.v1.ActorService.AskReply:output_type -> plexspaces.actor.v1.AskReplyResponse
-	97,  // 184: plexspaces.actor.v1.ActorService.TerminateActor:output_type -> plexspaces.actor.v1.TerminateActorResponse
-	32,  // 185: plexspaces.actor.v1.ActorService.CreateShardGroup:output_type -> plexspaces.actor.v1.CreateShardGroupResponse
-	136, // 186: plexspaces.actor.v1.ActorService.DeleteShardGroup:output_type -> plexspaces.common.v1.Empty
-	35,  // 187: plexspaces.actor.v1.ActorService.GetShardGroup:output_type -> plexspaces.actor.v1.GetShardGroupResponse
-	37,  // 188: plexspaces.actor.v1.ActorService.ListShardGroups:output_type -> plexspaces.actor.v1.ListShardGroupsResponse
-	59,  // 189: plexspaces.actor.v1.ActorService.ScaleShardGroup:output_type -> plexspaces.actor.v1.ScaleShardGroupResponse
-	39,  // 190: plexspaces.actor.v1.ActorService.SendToShard:output_type -> plexspaces.actor.v1.SendToShardResponse
-	51,  // 191: plexspaces.actor.v1.ActorService.BroadcastShardGroup:output_type -> plexspaces.actor.v1.BroadcastShardGroupResponse
-	53,  // 192: plexspaces.actor.v1.ActorService.ReduceShardGroup:output_type -> plexspaces.actor.v1.ReduceShardGroupResponse
-	55,  // 193: plexspaces.actor.v1.ActorService.AllReduceShardGroup:output_type -> plexspaces.actor.v1.AllReduceShardGroupResponse
-	57,  // 194: plexspaces.actor.v1.ActorService.BarrierShardGroup:output_type -> plexspaces.actor.v1.BarrierShardGroupResponse
-	43,  // 195: plexspaces.actor.v1.ActorService.ScatterGather:output_type -> plexspaces.actor.v1.ScatterGatherResponse
-	45,  // 196: plexspaces.actor.v1.ActorService.BulkUpdateShardGroup:output_type -> plexspaces.actor.v1.BulkUpdateShardGroupResponse
-	48,  // 197: plexspaces.actor.v1.ActorService.MapShardGroup:output_type -> plexspaces.actor.v1.MapShardGroupResponse
-	79,  // 198: plexspaces.actor.v1.LifecycleEventChannel.SubscribeLifecycleEvents:output_type -> plexspaces.actor.v1.ActorLifecycleEvent
-	136, // 199: plexspaces.actor.v1.LifecycleEventChannel.PublishLifecycleEvent:output_type -> plexspaces.common.v1.Empty
-	169, // [169:200] is the sub-list for method output_type
-	138, // [138:169] is the sub-list for method input_type
+	96,  // 151: plexspaces.actor.v1.ActorService.CheckActorExists:input_type -> plexspaces.actor.v1.CheckActorExistsRequest
+	98,  // 152: plexspaces.actor.v1.ActorService.AskReply:input_type -> plexspaces.actor.v1.AskReplyRequest
+	31,  // 153: plexspaces.actor.v1.ActorService.CreateShardGroup:input_type -> plexspaces.actor.v1.CreateShardGroupRequest
+	33,  // 154: plexspaces.actor.v1.ActorService.DeleteShardGroup:input_type -> plexspaces.actor.v1.DeleteShardGroupRequest
+	34,  // 155: plexspaces.actor.v1.ActorService.GetShardGroup:input_type -> plexspaces.actor.v1.GetShardGroupRequest
+	36,  // 156: plexspaces.actor.v1.ActorService.ListShardGroups:input_type -> plexspaces.actor.v1.ListShardGroupsRequest
+	58,  // 157: plexspaces.actor.v1.ActorService.ScaleShardGroup:input_type -> plexspaces.actor.v1.ScaleShardGroupRequest
+	38,  // 158: plexspaces.actor.v1.ActorService.SendToShard:input_type -> plexspaces.actor.v1.SendToShardRequest
+	50,  // 159: plexspaces.actor.v1.ActorService.BroadcastShardGroup:input_type -> plexspaces.actor.v1.BroadcastShardGroupRequest
+	52,  // 160: plexspaces.actor.v1.ActorService.ReduceShardGroup:input_type -> plexspaces.actor.v1.ReduceShardGroupRequest
+	54,  // 161: plexspaces.actor.v1.ActorService.AllReduceShardGroup:input_type -> plexspaces.actor.v1.AllReduceShardGroupRequest
+	56,  // 162: plexspaces.actor.v1.ActorService.BarrierShardGroup:input_type -> plexspaces.actor.v1.BarrierShardGroupRequest
+	40,  // 163: plexspaces.actor.v1.ActorService.ScatterGather:input_type -> plexspaces.actor.v1.ScatterGatherRequest
+	44,  // 164: plexspaces.actor.v1.ActorService.BulkUpdateShardGroup:input_type -> plexspaces.actor.v1.BulkUpdateShardGroupRequest
+	47,  // 165: plexspaces.actor.v1.ActorService.MapShardGroup:input_type -> plexspaces.actor.v1.MapShardGroupRequest
+	100, // 166: plexspaces.actor.v1.LifecycleEventChannel.SubscribeLifecycleEvents:input_type -> plexspaces.actor.v1.LifecycleEventFilter
+	79,  // 167: plexspaces.actor.v1.LifecycleEventChannel.PublishLifecycleEvent:input_type -> plexspaces.actor.v1.ActorLifecycleEvent
+	62,  // 168: plexspaces.actor.v1.ActorService.SpawnActor:output_type -> plexspaces.actor.v1.SpawnActorResponse
+	65,  // 169: plexspaces.actor.v1.ActorService.SpawnActors:output_type -> plexspaces.actor.v1.SpawnActorsResponse
+	67,  // 170: plexspaces.actor.v1.ActorService.GetActor:output_type -> plexspaces.actor.v1.GetActorResponse
+	69,  // 171: plexspaces.actor.v1.ActorService.ListActors:output_type -> plexspaces.actor.v1.ListActorsResponse
+	71,  // 172: plexspaces.actor.v1.ActorService.SendMessage:output_type -> plexspaces.actor.v1.SendMessageResponse
+	73,  // 173: plexspaces.actor.v1.ActorService.StreamMessages:output_type -> plexspaces.actor.v1.StreamMessageResponse
+	75,  // 174: plexspaces.actor.v1.ActorService.SetActorState:output_type -> plexspaces.actor.v1.SetActorStateResponse
+	77,  // 175: plexspaces.actor.v1.ActorService.MigrateActor:output_type -> plexspaces.actor.v1.MigrateActorResponse
+	134, // 176: plexspaces.actor.v1.ActorService.DeleteActor:output_type -> plexspaces.common.v1.Empty
+	89,  // 177: plexspaces.actor.v1.ActorService.MonitorActor:output_type -> plexspaces.actor.v1.MonitorActorResponse
+	93,  // 178: plexspaces.actor.v1.ActorService.LinkActor:output_type -> plexspaces.actor.v1.LinkActorResponse
+	95,  // 179: plexspaces.actor.v1.ActorService.UnlinkActor:output_type -> plexspaces.actor.v1.UnlinkActorResponse
+	134, // 180: plexspaces.actor.v1.ActorService.NotifyActorDown:output_type -> plexspaces.common.v1.Empty
+	97,  // 181: plexspaces.actor.v1.ActorService.CheckActorExists:output_type -> plexspaces.actor.v1.CheckActorExistsResponse
+	99,  // 182: plexspaces.actor.v1.ActorService.AskReply:output_type -> plexspaces.actor.v1.AskReplyResponse
+	32,  // 183: plexspaces.actor.v1.ActorService.CreateShardGroup:output_type -> plexspaces.actor.v1.CreateShardGroupResponse
+	134, // 184: plexspaces.actor.v1.ActorService.DeleteShardGroup:output_type -> plexspaces.common.v1.Empty
+	35,  // 185: plexspaces.actor.v1.ActorService.GetShardGroup:output_type -> plexspaces.actor.v1.GetShardGroupResponse
+	37,  // 186: plexspaces.actor.v1.ActorService.ListShardGroups:output_type -> plexspaces.actor.v1.ListShardGroupsResponse
+	59,  // 187: plexspaces.actor.v1.ActorService.ScaleShardGroup:output_type -> plexspaces.actor.v1.ScaleShardGroupResponse
+	39,  // 188: plexspaces.actor.v1.ActorService.SendToShard:output_type -> plexspaces.actor.v1.SendToShardResponse
+	51,  // 189: plexspaces.actor.v1.ActorService.BroadcastShardGroup:output_type -> plexspaces.actor.v1.BroadcastShardGroupResponse
+	53,  // 190: plexspaces.actor.v1.ActorService.ReduceShardGroup:output_type -> plexspaces.actor.v1.ReduceShardGroupResponse
+	55,  // 191: plexspaces.actor.v1.ActorService.AllReduceShardGroup:output_type -> plexspaces.actor.v1.AllReduceShardGroupResponse
+	57,  // 192: plexspaces.actor.v1.ActorService.BarrierShardGroup:output_type -> plexspaces.actor.v1.BarrierShardGroupResponse
+	43,  // 193: plexspaces.actor.v1.ActorService.ScatterGather:output_type -> plexspaces.actor.v1.ScatterGatherResponse
+	45,  // 194: plexspaces.actor.v1.ActorService.BulkUpdateShardGroup:output_type -> plexspaces.actor.v1.BulkUpdateShardGroupResponse
+	48,  // 195: plexspaces.actor.v1.ActorService.MapShardGroup:output_type -> plexspaces.actor.v1.MapShardGroupResponse
+	79,  // 196: plexspaces.actor.v1.LifecycleEventChannel.SubscribeLifecycleEvents:output_type -> plexspaces.actor.v1.ActorLifecycleEvent
+	134, // 197: plexspaces.actor.v1.LifecycleEventChannel.PublishLifecycleEvent:output_type -> plexspaces.common.v1.Empty
+	168, // [168:198] is the sub-list for method output_type
+	138, // [138:168] is the sub-list for method input_type
 	138, // [138:138] is the sub-list for extension type_name
 	138, // [138:138] is the sub-list for extension extendee
 	0,   // [0:138] is the sub-list for field type_name
@@ -9697,16 +9514,16 @@ func file_plexspaces_v1_actors_actor_runtime_proto_init() {
 		(*ActorLifecycleEvent_Failed)(nil),
 		(*ActorLifecycleEvent_Migrating)(nil),
 	}
+	file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[83].OneofWrappers = []any{}
 	file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[85].OneofWrappers = []any{}
-	file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[87].OneofWrappers = []any{}
-	file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[88].OneofWrappers = []any{}
+	file_plexspaces_v1_actors_actor_runtime_proto_msgTypes[86].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_plexspaces_v1_actors_actor_runtime_proto_rawDesc), len(file_plexspaces_v1_actors_actor_runtime_proto_rawDesc)),
 			NumEnums:      21,
-			NumMessages:   104,
+			NumMessages:   102,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

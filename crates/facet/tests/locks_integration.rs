@@ -69,9 +69,7 @@ async fn get_shared_node() -> Arc<Node> {
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("GenServer", || {
-            Box::pin(async move {
-                Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>)
-            })
+            Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>) })
         })
         .await;
     node.service_locator()
@@ -343,10 +341,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 .actor_registry()
                 .await
                 .expect("ActorRegistry should be available");
-            assert!(actor_registry1
-                .lookup_actor(&actor_id1)
-                .await
-                .is_some());
+            assert!(actor_registry1.lookup_actor(&actor_id1).await.is_some());
             let actor_ref1 = ActorRef::remote(
                 actor_id1.clone(),
                 String::new(),
@@ -405,10 +400,7 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 .actor_registry()
                 .await
                 .expect("ActorRegistry should be available");
-            assert!(actor_registry2
-                .lookup_actor(&actor_id2)
-                .await
-                .is_some());
+            assert!(actor_registry2.lookup_actor(&actor_id2).await.is_some());
             let actor_ref2 = ActorRef::remote(
                 actor_id2.clone(),
                 String::new(),

@@ -41,6 +41,7 @@ export declare abstract class PlexSpacesActor<TState extends object = Record<str
     /** WIT set-state(state-json) -> string. Empty = success, "ERROR:..." = failure. */
     setState(stateJson: string): string;
     protected capitalize(s: string): string;
+    protected resolveDecoratedHandler(op: string, definition?: import("./decorators.js").ActorDefinitionMetadata | undefined): string | null;
     /**
      * Serialize object to JSON string using fully iterative approach (zero recursion).
      *

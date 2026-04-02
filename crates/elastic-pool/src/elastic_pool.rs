@@ -505,7 +505,14 @@ impl ElasticPool {
                     WorkerState::Available => {}
                 }
             }
-            (total, busy, idle, failed, available.len() as u32, queue.len() as u32)
+            (
+                total,
+                busy,
+                idle,
+                failed,
+                available.len() as u32,
+                queue.len() as u32,
+            )
         }; // workers, available, queue all released here
 
         // Phase 2: read scaling_state (cheap, no contention with above locks).

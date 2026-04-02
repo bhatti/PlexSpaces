@@ -200,6 +200,63 @@ impl ApplicationServiceImpl {
             .ok_or_else(|| Status::not_found(format!("Local node not found: {}", node_id)))?;
         Ok((node_id, registration.node_address))
     }
+
+    async fn cleanup_namespace_for_undeploy(
+        &self,
+        tenant_id: &str,
+        application_id: &str,
+    ) -> Result<(), Status> {
+        let namespace = application_id.to_string();
+        let ctx = plexspaces_core::RequestContext::new_without_auth(
+            tenant_id.to_string(),
+            namespace.clone(),
+        );
+
+        let virtual_cleanup =
+            if let Some(manager) = self.service_locator.virtual_actor_manager().await {
+                manager.unregister_namespace(&namespace).await
+            } else {
+                plexspaces_core::virtual_actor_manager::VirtualActorNamespaceCleanup::default()
+            };
+
+        let mut purged_records = 0_u64;
+        if let Some(journal_storage) = self.service_locator.get_journal_storage().await {
+            for actor_id in &virtual_cleanup.actor_ids {
+                purged_records += journal_storage
+                    .purge_actor(actor_id)
+                    .await
+                    .map_err(|e| Status::internal(format!("Failed to purge actor state: {}", e)))?;
+            }
+            purged_records += journal_storage
+                .purge_namespace(&namespace)
+                .await
+                .map_err(|e| Status::internal(format!("Failed to purge namespace state: {}", e)))?;
+        }
+
+        let removed_registrations =
+            if let Some(object_registry) = self.service_locator.get_object_registry().await {
+                object_registry.unregister_all(&ctx).await.map_err(|e| {
+                    Status::internal(format!(
+                        "Failed to purge object registrations during undeploy: {}",
+                        e
+                    ))
+                })?
+            } else {
+                0
+            };
+
+        tracing::info!(
+            application_id = %application_id,
+            namespace = %namespace,
+            removed_virtual_types = virtual_cleanup.actor_types.len(),
+            removed_virtual_instances = virtual_cleanup.actor_ids.len(),
+            purged_records = purged_records,
+            removed_registrations = removed_registrations,
+            "Stateless undeploy cleanup completed"
+        );
+
+        Ok(())
+    }
 }
 
 #[tonic::async_trait]
@@ -675,7 +732,7 @@ impl ApplicationService for ApplicationServiceImpl {
         // Stop application gracefully using ApplicationManager directly
         let timeout =
             Duration::from_secs(req.timeout.as_ref().map(|d| d.seconds as u64).unwrap_or(30));
-        application_manager
+        let stop_result = application_manager
             .stop(&req.application_id, timeout)
             .await
             .map_err(|e| {
@@ -683,10 +740,6 @@ impl ApplicationService for ApplicationServiceImpl {
                 let is_not_found =
                     matches!(e, AppError::NotFound(_)) || msg.to_lowercase().contains("not found");
                 if is_not_found {
-                    tracing::info!(
-                        application_id = %req.application_id,
-                        "Undeploy: application not found (returning 404)"
-                    );
                     Status::not_found(msg)
                 } else {
                     tracing::error!(
@@ -697,7 +750,30 @@ impl ApplicationService for ApplicationServiceImpl {
                     );
                     Status::internal(format!("Failed to stop application: {}", e))
                 }
-            })?;
+            });
+
+        if let Err(status) = stop_result {
+            if status.code() == tonic::Code::NotFound {
+                self.cleanup_namespace_for_undeploy(&tenant_id, &req.application_id)
+                    .await?;
+
+                metrics::counter!("plexspaces_node_application_undeploy_success_total",
+                    "application_id" => req.application_id.clone()
+                )
+                .increment(1);
+                tracing::info!(
+                    application_id = %req.application_id,
+                    "Application undeployed successfully (stateless cleanup)"
+                );
+
+                return Ok(Response::new(UndeployApplicationResponse {
+                    success: true,
+                    error: None,
+                }));
+            }
+
+            return Err(status);
+        }
 
         // Unregister application after successful stop (returns module hash for WASM apps)
         let module_hash = application_manager

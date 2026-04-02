@@ -15,6 +15,11 @@ node:
   wasm_apps_directory: "/app/wasm"
 
 runtime:
+  db:
+    connection_string: "sqlite:///tmp/plexspaces-my-node.db?mode=rwc"
+    pool_size: 10
+    auto_migrate: true
+
   grpc:
     enabled: true
     address: 0.0.0.0:8091
@@ -22,16 +27,17 @@ runtime:
     keepalive_interval_seconds: 30
     middleware: []
   
-  # Blob storage configuration (S3-compatible - MinIO for local dev)
+  # Blob storage configuration for local development.
+  # This keeps scripts/server.sh self-contained without requiring MinIO.
   blob:
-    storage_type: s3
+    backend: local
     bucket: plexspaces-blobs
-    endpoint: http://localhost:9000
-    region: us-east-1
-    access_key_id: minioadmin
-    secret_access_key: minioadmin
-    # For local MinIO, path style is required
-    force_path_style: true
+    endpoint: ""
+    region: ""
+    access_key_id: ""
+    secret_access_key: ""
+    use_ssl: false
+    prefix: "/tmp/plexspaces-blobs"
   
   health:
     heartbeat_interval_seconds: 5

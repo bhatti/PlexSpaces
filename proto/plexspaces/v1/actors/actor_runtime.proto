@@ -2913,31 +2913,6 @@ service ActorService {
     };
   }
 
-  // Terminate an actor gracefully by ID
-  //
-  // ## Purpose
-  // Gracefully terminates an actor, allowing it to complete pending work and clean up.
-  // This is the HTTP DELETE endpoint for actors (mapped from DELETE /api/v1/actors/{namespace}/{actor_id}).
-  // Pairs with SpawnActor for complete actor lifecycle management.
-  //
-  // ## Behavior
-  // - Sends graceful shutdown signal to actor
-  // - Actor completes pending messages (with timeout)
-  // - Actor state is persisted (if DurabilityFacet attached)
-  // - Actor is removed from registry
-  //
-  // ## Security
-  // - Requires permission to terminate actors in the namespace
-  // - Tenant isolation enforced via JWT claims
-  rpc TerminateActor(TerminateActorRequest) returns (TerminateActorResponse) {
-    option (google.api.http) = {delete: "/api/v1/actors/{namespace}/{actor_id}"};
-    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
-      summary: "Terminate Actor"
-      description: "Gracefully terminate an actor by ID (permanent termination, pairs with SpawnActor)"
-      tags: "Actors"
-    };
-  }
-
   // ============================================================================
   // ACTOR GROUPS (data-parallel sharding). See docs/ACTOR_GROUPS_DESIGN.md.
   // ============================================================================
@@ -3089,71 +3064,6 @@ service ActorService {
 // Provides pub/sub channel for actor lifecycle events, inspired by JavaNOW's
 // EntitySpace event notification and channel/subscriber architecture.
 // This is the foundation for metrics, tracing, and monitoring integration.
-
-// Request to terminate an actor gracefully
-//
-// ## Purpose
-// Permanently terminates an actor, completing pending work and removing from system.
-// Pairs with SpawnActorRequest for complete lifecycle management.
-message TerminateActorRequest {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Terminate Actor Request"
-      description: "Request to gracefully terminate an actor"
-      required: ["actor_id"]
-    }
-  };
-
-  // Namespace of the actor
-  string namespace = 1 [
-    (google.api.field_behavior) = OPTIONAL,
-    (buf.validate.field).string = {max_len: 128}
-  ];
-
-  // Actor ID to terminate
-  string actor_id = 2 [
-    (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {
-      min_len: 1
-      max_len: 255
-    }
-  ];
-
-  // Optional: Force termination even if actor has pending messages
-  // When false (default): Actor completes pending messages before terminating
-  // When true: Actor terminates immediately, pending messages may be lost
-  bool force = 3;
-
-  // Optional: Timeout for graceful shutdown (in milliseconds)
-  // Default: 5000ms (5 seconds)
-  // After timeout, actor is forcefully terminated
-  uint64 timeout_ms = 4;
-}
-
-// Response from terminating an actor
-message TerminateActorResponse {
-  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
-    json_schema: {
-      title: "Terminate Actor Response"
-      description: "Response from terminating an actor"
-    }
-  };
-
-  // Whether the actor was successfully terminated
-  bool success = 1;
-
-  // Actor ID that was terminated
-  string actor_id = 2;
-
-  // Number of pending messages that were processed before termination
-  uint64 messages_processed = 3;
-
-  // Number of pending messages that were dropped (if force=true)
-  uint64 messages_dropped = 4;
-
-  // Error message if success is false
-  string error_message = 5;
-}
 
 // Request to check if actor exists
 message CheckActorExistsRequest {

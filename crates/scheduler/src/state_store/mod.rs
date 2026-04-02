@@ -166,9 +166,16 @@ mod tests {
         };
 
         let result = create_state_store_from_shared_db(&config).await;
-        assert!(result.is_err(), "postgres scheduler state store should fail fast");
         assert!(
-            result.err().unwrap().to_string().contains("not implemented"),
+            result.is_err(),
+            "postgres scheduler state store should fail fast"
+        );
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("not implemented"),
             "error should explain that postgres support is not implemented"
         );
     }

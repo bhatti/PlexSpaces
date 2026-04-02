@@ -85,7 +85,7 @@ send_op() {
     local actor="$1"
     local payload="$2"
     local timeout="${3:-10}"
-    curl -s --max-time "$timeout" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor?timeout=$timeout" \
+    curl -s --max-time "$timeout" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$actor/ask?timeout=$timeout" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
 }

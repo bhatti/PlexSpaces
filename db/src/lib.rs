@@ -188,7 +188,10 @@ mod tests {
         .fetch_optional(&pool)
         .await
         .unwrap();
-        assert!(tuples_index.is_some(), "expected tuples expiry index to exist");
+        assert!(
+            tuples_index.is_some(),
+            "expected tuples expiry index to exist"
+        );
 
         let watcher_index = sqlx::query(
             "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_watchers_pattern' LIMIT 1",

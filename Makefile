@@ -315,7 +315,8 @@ proto-polyglot: proto-python proto-typescript proto-go
 # Build workspace crates + sdks/ (TypeScript npm build, Python pip -e, go build); excludes examples/* workspace members
 build:
 	@echo "Building workspace crates and SDKs..."
-	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
+	@set -euo pipefail; \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
 	fi; \
@@ -332,13 +333,11 @@ build:
 	@if [ -d "sdks/typescript" ] && [ -f "sdks/typescript/package.json" ]; then \
 		echo "  Building TypeScript SDK..."; \
 		if command -v npm >/dev/null 2>&1; then \
-			if (cd sdks/typescript && ([ -d "node_modules" ] || npm install --no-audit --no-fund >/dev/null 2>&1) && npm run build >/dev/null 2>&1); then \
-				echo "  ✓ TypeScript SDK built"; \
-			else \
-				echo "  ⚠️  TypeScript SDK build failed (non-critical)"; \
-			fi; \
+			(cd sdks/typescript && ([ -d "node_modules" ] || npm install --no-audit --no-fund >/dev/null 2>&1) && npm run build >/dev/null 2>&1); \
+			echo "  ✓ TypeScript SDK built"; \
 		else \
-			echo "  ⚠️  npm not found, skipping TypeScript SDK"; \
+			echo "  ❌ npm not found, cannot build TypeScript SDK"; \
+			exit 1; \
 		fi; \
 	fi
 	@if [ -d "sdks/python" ] && [ -f "sdks/python/pyproject.toml" ]; then \
@@ -350,25 +349,21 @@ build:
 			PYTHON_SDK_BUILD_CMD="python3 -m pip install -e . --quiet --no-build-isolation"; \
 		fi; \
 		if [ -n "$$PYTHON_SDK_BUILD_CMD" ]; then \
-			if (cd sdks/python && sh -c "$$PYTHON_SDK_BUILD_CMD" >/dev/null 2>&1); then \
-				echo "  ✓ Python SDK built"; \
-			else \
-				echo "  ⚠️  Python SDK build failed (non-critical - setuptools missing in current Python environment)"; \
-			fi; \
+			(cd sdks/python && sh -c "$$PYTHON_SDK_BUILD_CMD" >/dev/null 2>&1); \
+			echo "  ✓ Python SDK built"; \
 		else \
-			echo "  ⚠️  Python not found, skipping Python SDK"; \
+			echo "  ❌ Python not found, cannot build Python SDK"; \
+			exit 1; \
 		fi; \
 	fi
 	@if [ -d "sdks/go" ] && [ -f "sdks/go/go.mod" ]; then \
 		echo "  Building Go SDK..."; \
 		if command -v go >/dev/null 2>&1; then \
-			if (cd sdks/go && GOCACHE="$(CURDIR)/target/go-build-cache" go build ./... >/dev/null 2>&1); then \
-				echo "  ✓ Go SDK built"; \
-			else \
-				echo "  ⚠️  Go SDK build failed (non-critical)"; \
-			fi; \
+			(cd sdks/go && GOCACHE="$(CURDIR)/target/go-build-cache" go build ./... >/dev/null 2>&1); \
+			echo "  ✓ Go SDK built"; \
 		else \
-			echo "  ⚠️  go not found, skipping Go SDK"; \
+			echo "  ❌ go not found, cannot build Go SDK"; \
+			exit 1; \
 		fi; \
 	fi
 	@echo "Build complete!"
@@ -624,13 +619,13 @@ test:
 		echo "Using cargo-nextest for faster test execution (single run)..." | tee -a test-out; \
 		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
 		echo "Note: tuplespace tests run with single thread (configured in nextest.toml)" | tee -a test-out; \
-		echo "Running all tests including those marked #[ignore] (--run-ignored all)" | tee -a test-out; \
-		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --run-ignored all 2>&1 | tee -a test-out || exit 1; \
+		echo "Running default test suite (ignored tests run only when requested explicitly)" | tee -a test-out; \
+		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || exit 1; \
 	else \
 		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..." | tee -a test-out; \
 		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
 		echo "Running tuplespace tests first with single thread (to avoid env var race conditions)..." | tee -a test-out; \
-		echo "Running all tests including those marked #[ignore] (--include-ignored)" | tee -a test-out; \
+		echo "Running default test suite (ignored tests run only when requested explicitly)" | tee -a test-out; \
 		TIMEOUT_CMD=""; \
 		if command -v timeout >/dev/null 2>&1; then \
 			TIMEOUT_CMD="timeout 14400"; \
@@ -638,14 +633,14 @@ test:
 			TIMEOUT_CMD="gtimeout 14400"; \
 		fi; \
 		if [ -n "$$TIMEOUT_CMD" ]; then \
-			$$TIMEOUT_CMD $(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
+			$$TIMEOUT_CMD $(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
 			$$TIMEOUT_CMD $(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
-				--exclude plexspaces-tuplespace -- --include-ignored 2>&1 | tee -a test-out || exit 1; \
+				--exclude plexspaces-tuplespace 2>&1 | tee -a test-out || exit 1; \
 		else \
 			echo "Warning: timeout command not found, running without timeout (install coreutils for timeout: brew install coreutils)" | tee -a test-out; \
-			$(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored 2>&1 | tee -a test-out || exit 1; \
+			$(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
 			$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
-				--exclude plexspaces-tuplespace -- --include-ignored 2>&1 | tee -a test-out || exit 1; \
+				--exclude plexspaces-tuplespace 2>&1 | tee -a test-out || exit 1; \
 		fi; \
 	fi; \
 	echo "" | tee -a test-out; \
@@ -708,7 +703,7 @@ test-fast:
 		export RUSTC_WRAPPER=sccache; \
 	fi; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --run-ignored all; \
+		cargo nextest run --fail-fast --profile $(NEXTTEST_PROFILE) --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
 	else \
 		TIMEOUT_CMD=""; \
 		if command -v timeout >/dev/null 2>&1; then \
@@ -717,12 +712,12 @@ test-fast:
 			TIMEOUT_CMD="gtimeout 14400"; \
 		fi; \
 		if [ -n "$$TIMEOUT_CMD" ]; then \
-			$$TIMEOUT_CMD $(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored || exit 1; \
-			$$TIMEOUT_CMD $(CARGO) test --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --exclude plexspaces-tuplespace -- --include-ignored || exit 1; \
+			$$TIMEOUT_CMD $(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 || exit 1; \
+			$$TIMEOUT_CMD $(CARGO) test --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --exclude plexspaces-tuplespace || exit 1; \
 		else \
 			echo "Warning: timeout not found; running cargo test without outer timeout (brew install coreutils for gtimeout)"; \
-			$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 --include-ignored || exit 1; \
-			$(CARGO) test --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --exclude plexspaces-tuplespace -- --include-ignored || exit 1; \
+			$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 || exit 1; \
+			$(CARGO) test --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --exclude plexspaces-tuplespace || exit 1; \
 		fi; \
 	fi; \
 	echo "test-fast: done."

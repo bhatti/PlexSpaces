@@ -84,9 +84,10 @@
 //! ```
 
 use crate::{
-    Checkpoint, CheckpointConfig, CheckpointManager, DurabilityConfig, ExecutionContextImpl,
-    ExecutionMode, JournalEntry, JournalError, JournalResult, JournalStorage, MessageProcessed,
-    MessageReceived, ProcessingResult, ReplayHandler, SideEffectExecuted, StateLoader,
+    Checkpoint, CheckpointConfig, CheckpointManager, CheckpointStateAdapter, DurabilityConfig,
+    ExecutionContextImpl, ExecutionMode, JournalEntry, JournalError, JournalResult, JournalStorage,
+    MessageProcessed, MessageReceived, ProcessingResult, ReplayHandler, SideEffectExecuted,
+    StateLoader,
 };
 use async_trait::async_trait;
 use plexspaces_core::ActorContext;
@@ -162,6 +163,9 @@ pub struct DurabilityFacet {
 
     /// State loader for automatic checkpoint state deserialization (optional)
     state_loader: Arc<RwLock<Option<Box<dyn StateLoader>>>>,
+
+    /// Framework-owned adapter for automatic checkpoint capture and restore.
+    checkpoint_state_adapter: Arc<RwLock<Option<Box<dyn CheckpointStateAdapter>>>>,
 }
 
 /// Default priority for DurabilityFacet
@@ -237,6 +241,7 @@ impl DurabilityFacet {
             replay_handler: Arc::new(RwLock::new(None)),
             actor_context: Arc::new(RwLock::new(None)),
             state_loader: Arc::new(RwLock::new(None)),
+            checkpoint_state_adapter: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -313,6 +318,12 @@ impl DurabilityFacet {
     pub async fn set_state_loader(&self, loader: Box<dyn StateLoader>) {
         let mut l = self.state_loader.write().await;
         *l = Some(loader);
+    }
+
+    /// Set framework-owned checkpoint adapter for automatic state capture and restore.
+    pub async fn set_checkpoint_state_adapter(&self, adapter: Box<dyn CheckpointStateAdapter>) {
+        let mut state_adapter = self.checkpoint_state_adapter.write().await;
+        *state_adapter = Some(adapter);
     }
 
     /// Get latest checkpoint (for manual state loading)
@@ -881,19 +892,11 @@ impl Facet for DurabilityFacet {
                         )));
                     }
 
-                    // Step 3: Attempt automatic state loading (if StateLoader provided)
-                    let state_loader = self.state_loader.read().await;
-                    if let Some(loader) = state_loader.as_ref() {
-                        // Automatic loading (Azure Durable Functions style)
-                        match loader.deserialize(&checkpoint.state_data) {
-                            Ok(state_value) => {
-                                // Restore state to actor
-                                if let Err(e) = loader.restore_state(&state_value).await {
-                                    return Err(FacetError::InvalidConfig(format!(
-                                        "Failed to restore checkpoint state: {}",
-                                        e
-                                    )));
-                                }
+                    // Step 3: Attempt automatic state loading.
+                    let state_adapter = self.checkpoint_state_adapter.read().await;
+                    if let Some(adapter) = state_adapter.as_ref() {
+                        match adapter.restore_state(&checkpoint.state_data).await {
+                            Ok(true) => {
                                 tracing::info!(
                                     actor_id = %actor_id,
                                     sequence = checkpoint.sequence,
@@ -901,23 +904,51 @@ impl Facet for DurabilityFacet {
                                     "Checkpoint state automatically restored"
                                 );
                             }
+                            Ok(false) => {}
                             Err(e) => {
                                 return Err(FacetError::InvalidConfig(format!(
-                                    "Failed to deserialize checkpoint state: {}",
+                                    "Failed to restore checkpoint state: {}",
                                     e
                                 )));
                             }
                         }
                     } else {
-                        // Manual loading (Restate style) - store checkpoint for actor to load
-                        let mut latest_checkpoint = self.latest_checkpoint.write().await;
-                        *latest_checkpoint = Some(checkpoint.clone());
-                        drop(latest_checkpoint);
-                        tracing::info!(
-                            actor_id = %actor_id,
-                            sequence = checkpoint.sequence,
-                            "Checkpoint available for manual loading"
-                        );
+                        drop(state_adapter);
+                        let state_loader = self.state_loader.read().await;
+                        if let Some(loader) = state_loader.as_ref() {
+                            match loader.deserialize(&checkpoint.state_data) {
+                                Ok(state_value) => {
+                                    if let Err(e) = loader.restore_state(&state_value).await {
+                                        return Err(FacetError::InvalidConfig(format!(
+                                            "Failed to restore checkpoint state: {}",
+                                            e
+                                        )));
+                                    }
+                                    tracing::info!(
+                                        actor_id = %actor_id,
+                                        sequence = checkpoint.sequence,
+                                        schema_version = checkpoint.state_schema_version,
+                                        "Checkpoint state automatically restored"
+                                    );
+                                }
+                                Err(e) => {
+                                    return Err(FacetError::InvalidConfig(format!(
+                                        "Failed to deserialize checkpoint state: {}",
+                                        e
+                                    )));
+                                }
+                            }
+                        } else {
+                            // Manual loading (Restate style) - store checkpoint for actor to load
+                            let mut latest_checkpoint = self.latest_checkpoint.write().await;
+                            *latest_checkpoint = Some(checkpoint.clone());
+                            drop(latest_checkpoint);
+                            tracing::info!(
+                                actor_id = %actor_id,
+                                sequence = checkpoint.sequence,
+                                "Checkpoint available for manual loading"
+                            );
+                        }
                     }
 
                     let checkpoint_seq = checkpoint.sequence + 1; // Replay from after checkpoint
@@ -1159,6 +1190,65 @@ impl Facet for DurabilityFacet {
             let mut ctx = self.execution_context.write().await;
             *ctx = None;
         }
+        {
+            let mut adapter = self.checkpoint_state_adapter.write().await;
+            *adapter = None;
+        }
+
+        Ok(())
+    }
+
+    async fn on_terminate_start(
+        &mut self,
+        actor_id: &str,
+        _reason: &plexspaces_facet::ExitReason,
+    ) -> Result<(), FacetError> {
+        let state_adapter = self.checkpoint_state_adapter.read().await;
+        let Some(adapter) = state_adapter.as_ref() else {
+            return Ok(());
+        };
+        let Some(state_data) = adapter
+            .capture_state()
+            .await
+            .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?
+        else {
+            return Ok(());
+        };
+
+        let current_sequence = *self.message_sequence.read().await;
+        let checkpoint_size = state_data.len();
+        let start = Instant::now();
+        self.checkpoint_manager
+            .save_checkpoint_now(actor_id, current_sequence, state_data)
+            .await
+            .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?;
+        let duration = start.elapsed();
+
+        metrics::counter!("plexspaces_journaling_stop_checkpoints_created_total",
+            "actor_id" => actor_id.to_string()
+        )
+        .increment(1);
+        metrics::histogram!("plexspaces_journaling_stop_checkpoint_duration_seconds",
+            "actor_id" => actor_id.to_string()
+        )
+        .record(duration.as_secs_f64());
+        metrics::histogram!("plexspaces_journaling_stop_checkpoint_size_bytes",
+            "actor_id" => actor_id.to_string()
+        )
+        .record(checkpoint_size as f64);
+        metrics::gauge!("plexspaces_journaling_latest_checkpoint_sequence",
+            "actor_id" => actor_id.to_string()
+        )
+        .set(current_sequence as f64);
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                actor_id = %actor_id,
+                sequence = current_sequence,
+                size_bytes = checkpoint_size,
+                duration_ms = duration.as_millis(),
+                "Checkpoint created during graceful stop"
+            );
+        }
 
         Ok(())
     }
@@ -1347,9 +1437,17 @@ impl Facet for DurabilityFacet {
         if self.config.checkpoint_interval > 0
             && current_sequence % self.config.checkpoint_interval == 0
         {
-            // For simplicity, checkpoint with empty state
-            // In real implementation, this would serialize actor state
-            let state_data = vec![];
+            let checkpoint_state_adapter = self.checkpoint_state_adapter.read().await;
+            let Some(adapter) = checkpoint_state_adapter.as_ref() else {
+                return Ok(InterceptResult::Continue);
+            };
+            let Some(state_data) = adapter
+                .capture_state()
+                .await
+                .map_err(|e| FacetError::InterceptionFailed(e.to_string()))?
+            else {
+                return Ok(InterceptResult::Continue);
+            };
             let checkpoint_size = state_data.len();
 
             let start = Instant::now();

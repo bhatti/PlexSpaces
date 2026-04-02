@@ -64,9 +64,9 @@ async fn register_behavior_registry(node: &Node, types: &[&str]) {
         let type_str = actor_type.to_string();
         registry
             .register_simple(&type_str, move || {
-                Box::pin(async move {
-                    Ok(Box::new(NoopBehavior) as Box<dyn plexspaces_core::Actor>)
-                })
+                Box::pin(
+                    async move { Ok(Box::new(NoopBehavior) as Box<dyn plexspaces_core::Actor>) },
+                )
             })
             .await;
     }

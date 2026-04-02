@@ -147,8 +147,7 @@ impl ObjectRegistryTrait for ObjectRegistryAdapter {
 async fn test_remote_actor_ref_node_not_found() {
     // Test: Remote ActorRef should handle node not found in registry
     use plexspaces_node::create_default_service_locator;
-    let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await
@@ -189,8 +188,7 @@ async fn test_remote_actor_ref_node_not_found() {
 async fn test_remote_actor_ref_connection_failure() {
     // Test: Remote ActorRef should handle connection failures gracefully
     use plexspaces_node::create_default_service_locator;
-    let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await
@@ -253,8 +251,7 @@ async fn test_remote_actor_ref_connection_failure() {
 async fn test_remote_actor_ref_ask_timeout() {
     // Test: Remote ActorRef.ask() should timeout when no response
     use plexspaces_node::create_default_service_locator;
-    let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await
@@ -315,8 +312,7 @@ async fn test_remote_actor_ref_ask_timeout() {
 async fn test_remote_actor_ref_service_locator_client_caching() {
     // Test: Multiple ActorRefs to same node should share gRPC client via ServiceLocator
     use plexspaces_node::create_default_service_locator;
-    let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let object_repo = Arc::new(
         plexspaces_object_registry::SqliteObjectRegistryRepository::new(":memory:")
             .await

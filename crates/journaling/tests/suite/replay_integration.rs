@@ -41,7 +41,6 @@ mod sqlite_integration_tests {
         checkpoint_interval: u64,
         replay_on_activation: bool,
     ) -> DurabilityConfig {
-
         DurabilityConfig {
             checkpoint_interval,
             checkpoint_timeout: None,

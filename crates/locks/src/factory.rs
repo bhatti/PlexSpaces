@@ -46,8 +46,11 @@ pub enum LockBackend {
 }
 
 /// Create a lock manager from runtime storage configuration.
-pub async fn create_lock_manager_from_runtime(runtime: &RuntimeConfig) -> LockResult<Arc<dyn LockManager>> {
-    create_lock_manager_from_storage_config(runtime.locks_provider.as_ref(), runtime.db.as_ref()).await
+pub async fn create_lock_manager_from_runtime(
+    runtime: &RuntimeConfig,
+) -> LockResult<Arc<dyn LockManager>> {
+    create_lock_manager_from_storage_config(runtime.locks_provider.as_ref(), runtime.db.as_ref())
+        .await
 }
 
 /// Create a lock manager from storage provider config with shared-db fallback.
@@ -118,7 +121,9 @@ pub async fn create_lock_manager_from_storage_config(
                             })
                             .or(shared_db),
                         provider_config.config.as_ref().and_then(|cfg| match cfg {
-                            storage_provider_config::Config::Sqlite(config) => Some(config.database_path.clone()),
+                            storage_provider_config::Config::Sqlite(config) => {
+                                Some(config.database_path.clone())
+                            }
                             _ => None,
                         }),
                     )

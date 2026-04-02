@@ -1924,13 +1924,17 @@ async fn initialize_services_impl(
     }
 
     let node_id_str = final_node_config.id.clone();
+    let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
 
     let final_runtime_config = release_config
         .as_ref()
         .and_then(|r| r.runtime.clone())
         .unwrap_or_else(|| plexspaces_proto::node::v1::RuntimeConfig {
             db: Some(plexspaces_proto::storage::v1::SharedDbConfig {
-                connection_string: "sqlite::memory:".to_string(),
+                connection_string: format!(
+                    "sqlite:///tmp/plexspaces-{}.db?mode=rwc",
+                    sanitized_node_id
+                ),
                 auto_migrate: true,
                 ..Default::default()
             }),
@@ -2095,7 +2099,7 @@ async fn initialize_services_impl(
     let process_group_factory = StdArc::new(ProcessGroupFacetFactory::new(
         service_locator_for_factories.clone(),
     ));
-    facet_registry.register("process_groups".to_string(), process_group_factory);
+    facet_registry.register("process_group".to_string(), process_group_factory);
     let keyvalue_factory = StdArc::new(KeyValueFacetFactory::new(
         service_locator_for_factories.clone(),
     ));
@@ -2249,7 +2253,9 @@ async fn initialize_services_impl(
         .register_runtime_config(final_runtime_config.clone())
         .await;
 
-    if let Some(ref default_virtual_actor_config) = final_runtime_config.default_virtual_actor_config {
+    if let Some(ref default_virtual_actor_config) =
+        final_runtime_config.default_virtual_actor_config
+    {
         use plexspaces_common::virtual_actor_config::get_max_pool_per_actor_type;
         let max_pool = get_max_pool_per_actor_type(Some(default_virtual_actor_config));
         if let Some(manager) = service_locator.virtual_actor_manager().await {
@@ -2472,8 +2478,11 @@ mod tests {
     async fn test_initialize_services_registers_effective_runtime_config_without_release_runtime() {
         use plexspaces_core::ServiceLocator as _;
         use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec};
+        use std::path::Path;
 
         let locator = Arc::new(ServiceLocatorImpl::new());
+        let db_path = "/tmp/plexspaces-runtime-config-test.db";
+        let _ = std::fs::remove_file(db_path);
         let release = ReleaseSpec {
             node: Some(NodeConfig {
                 id: "runtime-config-test".to_string(),
@@ -2488,9 +2497,7 @@ mod tests {
             ..Default::default()
         };
 
-        locator
-            .initialize_services(Some(release))
-            .await;
+        locator.initialize_services(Some(release)).await;
 
         let runtime = locator
             .get_runtime_config()
@@ -2500,11 +2507,21 @@ mod tests {
             .db
             .expect("effective runtime config should include shared db");
 
-        assert_eq!(shared_db.connection_string, "sqlite::memory:");
+        assert_eq!(
+            shared_db.connection_string,
+            "sqlite:///tmp/plexspaces-runtime-config-test.db?mode=rwc"
+        );
         assert!(locator.actor_registry().await.is_some());
         assert!(locator.get_lock_manager().await.is_some());
         assert!(locator.get_journal_storage().await.is_some());
         assert!(locator.get_object_registry().await.is_some());
         assert!(locator.get_keyvalue_store().await.is_some());
+
+        assert!(
+            Path::new(db_path).exists(),
+            "default shared sqlite DB should exist after initialization"
+        );
+
+        let _ = std::fs::remove_file(db_path);
     }
 }

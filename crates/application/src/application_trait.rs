@@ -158,6 +158,15 @@ pub trait Application: Send + Sync {
     /// If exceeded, node may force kill the application.
     async fn stop(&mut self) -> Result<(), ApplicationError>;
 
+    /// Cleanup application-owned durable state during explicit undeploy.
+    ///
+    /// ## Purpose
+    /// Removes registrations and persisted state that should not survive a full undeploy.
+    /// This is distinct from `stop()`, which only performs graceful runtime shutdown.
+    async fn cleanup_for_undeploy(&mut self) -> Result<(), ApplicationError> {
+        Ok(())
+    }
+
     /// Health check for application
     ///
     /// ## Purpose

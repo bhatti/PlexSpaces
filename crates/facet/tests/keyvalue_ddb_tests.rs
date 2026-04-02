@@ -62,10 +62,7 @@ mod ddb_tests {
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         // Set a value
-        store
-            .put(&ctx, "key1", b"value1".to_vec())
-            .await
-            .unwrap();
+        store.put(&ctx, "key1", b"value1".to_vec()).await.unwrap();
 
         // Get the value
         let value = store.get(&ctx, "key1").await.unwrap();
@@ -92,14 +89,8 @@ mod ddb_tests {
         let store = create_ddb_store().await;
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
-        store
-            .put(&ctx, "key1", b"value1".to_vec())
-            .await
-            .unwrap();
-        store
-            .put(&ctx, "key1", b"value2".to_vec())
-            .await
-            .unwrap();
+        store.put(&ctx, "key1", b"value1".to_vec()).await.unwrap();
+        store.put(&ctx, "key1", b"value2".to_vec()).await.unwrap();
 
         let value = store.get(&ctx, "key1").await.unwrap();
         assert_eq!(value, Some(b"value2".to_vec()));
@@ -113,10 +104,7 @@ mod ddb_tests {
         let store = create_ddb_store().await;
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
-        store
-            .put(&ctx, "key1", b"value1".to_vec())
-            .await
-            .unwrap();
+        store.put(&ctx, "key1", b"value1".to_vec()).await.unwrap();
         store.delete(&ctx, "key1").await.unwrap();
 
         let value = store.get(&ctx, "key1").await.unwrap();
@@ -143,10 +131,7 @@ mod ddb_tests {
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         assert!(!store.exists(&ctx, "key1").await.unwrap());
-        store
-            .put(&ctx, "key1", b"value1".to_vec())
-            .await
-            .unwrap();
+        store.put(&ctx, "key1", b"value1".to_vec()).await.unwrap();
         assert!(store.exists(&ctx, "key1").await.unwrap());
         store.delete(&ctx, "key1").await.unwrap();
         assert!(!store.exists(&ctx, "key1").await.unwrap());
@@ -188,7 +173,12 @@ mod ddb_tests {
         let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
 
         store
-            .put_with_ttl(&ctx, "key1", b"value1".to_vec(), std::time::Duration::from_secs(1))
+            .put_with_ttl(
+                &ctx,
+                "key1",
+                b"value1".to_vec(),
+                std::time::Duration::from_secs(1),
+            )
             .await
             .unwrap();
 
@@ -211,14 +201,8 @@ mod ddb_tests {
         let ctx1 = RequestContext::new_without_auth("tenant1".to_string(), "default".to_string());
         let ctx2 = RequestContext::new_without_auth("tenant2".to_string(), "default".to_string());
 
-        store
-            .put(&ctx1, "key1", b"value1".to_vec())
-            .await
-            .unwrap();
-        store
-            .put(&ctx2, "key1", b"value2".to_vec())
-            .await
-            .unwrap();
+        store.put(&ctx1, "key1", b"value1".to_vec()).await.unwrap();
+        store.put(&ctx2, "key1", b"value2".to_vec()).await.unwrap();
 
         // Each tenant should see their own value
         assert_eq!(

@@ -730,9 +730,9 @@ mod tests {
     use super::*;
     use crate::SqliteJournalStorage;
     use plexspaces_core::{ActorRef, ActorService, ServiceLocator};
+    use plexspaces_services::ServiceLocatorImpl;
     use prost_types;
     use std::sync::Arc;
-    use plexspaces_services::ServiceLocatorImpl;
 
     struct MockActorService;
 

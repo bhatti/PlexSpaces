@@ -51,7 +51,6 @@ async fn actor_exists_locally(actor_registry: &ActorRegistry, actor_id: &ActorId
     }
     if actor_registry
         .registered_actor_ids()
-        .read()
         .await
         .contains(actor_id)
     {

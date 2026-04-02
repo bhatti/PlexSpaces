@@ -37,9 +37,11 @@
 //! registry.tell(&actor_id, message).await?;
 //! ```
 
+use crate::ActorStateHandle;
 use async_trait::async_trait;
 use plexspaces_proto::common::v1::Message;
 use std::any::Any;
+use std::sync::Arc;
 
 /// MessageSender trait - interface for sending messages to actors
 ///
@@ -109,6 +111,38 @@ pub trait MessageSender: Send + Sync + Any {
     fn actor_id(&self) -> Option<String> {
         None
     }
+
+    /// Returns the tenant_id carried by this sender when available.
+    ///
+    /// Local and remote `ActorRef` values return their configured tenant scope.
+    fn tenant_id(&self) -> Option<&str> {
+        None
+    }
+
+    /// Returns the namespace carried by this sender when available.
+    ///
+    /// Local and remote `ActorRef` values return their configured namespace scope.
+    fn namespace(&self) -> Option<&str> {
+        None
+    }
+
+    /// Returns the actor type carried by this sender when available.
+    fn actor_type(&self) -> Option<String> {
+        None
+    }
+
+    /// Updates the actor type carried by this sender when supported.
+    async fn set_actor_type(&self, _actor_type: Option<String>) {}
+
+    /// Returns local lifecycle/state access when this sender points to a local actor runtime.
+    ///
+    /// Remote senders always return `None`.
+    fn local_state_handle(&self) -> Option<Arc<dyn ActorStateHandle>> {
+        None
+    }
+
+    /// Updates the local lifecycle/state handle carried by this sender when supported.
+    async fn set_local_state_handle(&self, _handle: Option<Arc<dyn ActorStateHandle>>) {}
 
     /// Returns a reference to `self` as `dyn Any`.
     ///

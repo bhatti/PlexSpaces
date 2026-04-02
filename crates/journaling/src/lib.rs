@@ -310,7 +310,7 @@ pub use replay_handler::ReplayHandler;
 
 // Phase 9.1: State loader for automatic checkpoint loading
 mod state_loader;
-pub use state_loader::StateLoader;
+pub use state_loader::{CheckpointStateAdapter, StateLoader};
 
 // Phase 8.5: Virtual Actor facet for Orleans-style lifecycle
 mod virtual_actor_facet;
@@ -332,7 +332,7 @@ pub use timer_facet::{TimerError, TimerFacet};
 
 // Phase 8.5: Reminder facet for Orleans-style durable reminders
 mod reminder_facet;
-pub use reminder_facet::{ReminderError, ReminderFacet};
+pub use reminder_facet::{ReminderError, ReminderFacet, REMINDER_FACET_DEFAULT_PRIORITY};
 
 // Facet factories for journaling-related facets
 pub mod facet_factories;

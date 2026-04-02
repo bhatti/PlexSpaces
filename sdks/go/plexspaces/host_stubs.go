@@ -7,7 +7,7 @@
 // In WASM builds (tinygo.wasm), host_imports.go provides the real implementations
 // via //go:wasmimport directives. This file is excluded from WASM builds.
 
-//go:build !tinygo.wasm
+//go:build !wasm
 
 package plexspaces
 
@@ -20,20 +20,31 @@ import (
 
 // stubState holds test stub state for verification in tests.
 var stubState = struct {
-	mu       sync.Mutex
-	sent     []stubMessage
-	logs     []stubLog
-	kvStore  map[string]string
-	selfID   string
-	nowMs    uint64
+	mu         sync.Mutex
+	sent       []stubMessage
+	stopped    []string
+	groupSent  []stubGroupMessage
+	logs       []stubLog
+	kvStore    map[string]string
+	tupleStore [][]any
+	blobStore  map[string]string
+	pgMembers  map[string][]string
+	selfID     string
+	nowMs      uint64
 	useRealTime bool
 }{
-	kvStore: make(map[string]string),
-	selfID:  "test-actor:test@test-node",
+	kvStore:   make(map[string]string),
+	blobStore: make(map[string]string),
+	pgMembers: make(map[string][]string),
+	selfID:    "test-actor:test@test-node",
 }
 
 type stubMessage struct {
 	To, MsgType, Payload string
+}
+
+type stubGroupMessage struct {
+	Group, MsgType, Payload string
 }
 
 type stubLog struct {
@@ -45,11 +56,25 @@ func ResetStubs() {
 	stubState.mu.Lock()
 	defer stubState.mu.Unlock()
 	stubState.sent = nil
+	stubState.stopped = nil
+	stubState.groupSent = nil
 	stubState.logs = nil
 	stubState.kvStore = make(map[string]string)
+	stubState.tupleStore = nil
+	stubState.blobStore = make(map[string]string)
+	stubState.pgMembers = make(map[string][]string)
 	stubState.selfID = "test-actor:test@test-node"
 	stubState.nowMs = 0
 	stubState.useRealTime = false
+}
+
+// GetStubStoppedActors returns actor IDs passed to hostStop.
+func GetStubStoppedActors() []string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	result := make([]string, len(stubState.stopped))
+	copy(result, stubState.stopped)
+	return result
 }
 
 // SetStubSelfID sets the actor ID returned by hostSelfID.
@@ -73,6 +98,15 @@ func GetStubSentMessages() []stubMessage {
 	defer stubState.mu.Unlock()
 	result := make([]stubMessage, len(stubState.sent))
 	copy(result, stubState.sent)
+	return result
+}
+
+// GetStubGroupMessages returns process-group broadcasts sent via hostPGBroadcast.
+func GetStubGroupMessages() []stubGroupMessage {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	result := make([]stubGroupMessage, len(stubState.groupSent))
+	copy(result, stubState.groupSent)
 	return result
 }
 
@@ -113,7 +147,12 @@ func hostSpawn(moduleRef, actorID, initConfigJSON string) string {
 	return actorID
 }
 
-func hostStop(actorID string) string { return "" }
+func hostStop(actorID string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	stubState.stopped = append(stubState.stopped, actorID)
+	return ""
+}
 
 func hostLink(actorID string) string   { return "" }
 func hostUnlink(actorID string) string { return "" }
@@ -173,10 +212,81 @@ func hostKVList(prefix string) string {
 	return string(data)
 }
 
-func hostTSWrite(tupleJSON string) string     { return "" }
-func hostTSRead(patternJSON string) string     { return "" }
-func hostTSTake(patternJSON string) string     { return "" }
-func hostTSReadAll(patternJSON string) string  { return "[]" }
+func tupleMatches(tupleValue []any, pattern []any) bool {
+	if len(tupleValue) != len(pattern) {
+		return false
+	}
+	for i := range tupleValue {
+		if pattern[i] == nil || pattern[i] == "*" {
+			continue
+		}
+		if tupleValue[i] != pattern[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func hostTSWrite(tupleJSON string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	var tupleValue []any
+	if err := json.Unmarshal([]byte(tupleJSON), &tupleValue); err != nil {
+		return "ERROR: " + err.Error()
+	}
+	stubState.tupleStore = append(stubState.tupleStore, tupleValue)
+	return ""
+}
+
+func hostTSRead(patternJSON string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	var pattern []any
+	if err := json.Unmarshal([]byte(patternJSON), &pattern); err != nil {
+		return "ERROR: " + err.Error()
+	}
+	for _, tupleValue := range stubState.tupleStore {
+		if tupleMatches(tupleValue, pattern) {
+			data, _ := json.Marshal(tupleValue)
+			return string(data)
+		}
+	}
+	return ""
+}
+
+func hostTSTake(patternJSON string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	var pattern []any
+	if err := json.Unmarshal([]byte(patternJSON), &pattern); err != nil {
+		return "ERROR: " + err.Error()
+	}
+	for index, tupleValue := range stubState.tupleStore {
+		if tupleMatches(tupleValue, pattern) {
+			stubState.tupleStore = append(stubState.tupleStore[:index], stubState.tupleStore[index+1:]...)
+			data, _ := json.Marshal(tupleValue)
+			return string(data)
+		}
+	}
+	return ""
+}
+
+func hostTSReadAll(patternJSON string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	var pattern []any
+	if err := json.Unmarshal([]byte(patternJSON), &pattern); err != nil {
+		return "ERROR: " + err.Error()
+	}
+	matches := make([][]any, 0)
+	for _, tupleValue := range stubState.tupleStore {
+		if tupleMatches(tupleValue, pattern) {
+			matches = append(matches, tupleValue)
+		}
+	}
+	data, _ := json.Marshal(matches)
+	return string(data)
+}
 
 func hostLockAcquire(tenantID, namespace, holderID, lockName string, leaseDurationSecs uint32, timeoutMs uint64) string {
 	return `{"lock_key":"test-lock","version":"v1","holder_id":"` + holderID + `","locked":true}`
@@ -187,17 +297,73 @@ func hostLockRenew(lockID, tenantID, namespace, holderID, lockVersion string, le
 	return "v2"
 }
 
-func hostBlobUpload(blobID, data, contentType string) string { return "" }
-func hostBlobDownload(blobID string) string                   { return "" }
-func hostBlobDelete(blobID string) string                     { return "" }
-func hostBlobList(prefix string) string                       { return "[]" }
-
-func hostPGJoin(groupName string) string  { return "" }
-func hostPGLeave(groupName string) string { return "" }
-func hostPGMembers(groupName string) string {
-	return `["actor-1","actor-2"]`
+func hostBlobUpload(blobID, data, contentType string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	stubState.blobStore[blobID] = data
+	return ""
 }
-func hostPGBroadcast(groupName, msgType, payloadJSON string) string { return "" }
+func hostBlobDownload(blobID string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	return stubState.blobStore[blobID]
+}
+func hostBlobDelete(blobID string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	delete(stubState.blobStore, blobID)
+	return ""
+}
+func hostBlobList(prefix string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	keys := make([]string, 0)
+	for key := range stubState.blobStore {
+		if len(prefix) == 0 || len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+			keys = append(keys, key)
+		}
+	}
+	data, _ := json.Marshal(keys)
+	return string(data)
+}
+
+func hostPGJoin(groupName string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	members := stubState.pgMembers[groupName]
+	for _, member := range members {
+		if member == stubState.selfID {
+			return ""
+		}
+	}
+	stubState.pgMembers[groupName] = append(members, stubState.selfID)
+	return ""
+}
+func hostPGLeave(groupName string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	members := stubState.pgMembers[groupName]
+	filtered := make([]string, 0, len(members))
+	for _, member := range members {
+		if member != stubState.selfID {
+			filtered = append(filtered, member)
+		}
+	}
+	stubState.pgMembers[groupName] = filtered
+	return ""
+}
+func hostPGMembers(groupName string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	data, _ := json.Marshal(stubState.pgMembers[groupName])
+	return string(data)
+}
+func hostPGBroadcast(groupName, msgType, payloadJSON string) string {
+	stubState.mu.Lock()
+	defer stubState.mu.Unlock()
+	stubState.groupSent = append(stubState.groupSent, stubGroupMessage{groupName, msgType, payloadJSON})
+	return ""
+}
 
 func hostPoolCheckout(poolName string, timeoutMs uint64) string {
 	out, _ := json.Marshal(map[string]any{

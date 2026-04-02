@@ -5,7 +5,7 @@
 // Virtual actors are created lazily on first message; use SpawnActorOnNode
 // only for non-virtual workers.
 //
-//go:build !tinygo.wasm
+//go:build !wasm
 
 package plexspaces
 

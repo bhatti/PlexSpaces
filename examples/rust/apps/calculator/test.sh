@@ -56,7 +56,7 @@ sleep 2
 send_op() {
   local payload="$1"
   local timeout="${2:-15}"
-  curl -s --max-time "$timeout" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/${ACTOR_TYPE}:${INSTANCE_ID}?timeout=$timeout" \
+  curl -s --max-time "$timeout" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/${ACTOR_TYPE}:${INSTANCE_ID}/ask?timeout=$timeout" \
     -H "Content-Type: application/json" -d "$payload" 2>/dev/null || echo '{"error":"timeout"}'
 }
 

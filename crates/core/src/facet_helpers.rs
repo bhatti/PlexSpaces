@@ -50,6 +50,33 @@ pub use plexspaces_facet::facet_helpers::{
     extract_facet_config, has_facet_attached, has_facet_type,
 };
 
+/// Return the config object for a specific facet type or an empty object when absent.
+pub fn facet_config_value(config: &Value, facet_type: &str) -> Value {
+    config
+        .get(facet_type)
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+/// Build the canonical default virtual actor facet config.
+pub fn default_virtual_actor_facet_config(config: Option<&Value>) -> Value {
+    use plexspaces_common::to_config_str;
+    use plexspaces_common::virtual_actor_config::{
+        format_duration, DEFAULT_ACTIVATION_STRATEGY, DEFAULT_IDLE_TIMEOUT_SECONDS,
+    };
+    use std::time::Duration;
+
+    config
+        .and_then(|value| value.get("virtual_actor"))
+        .cloned()
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "idle_timeout": format_duration(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS)),
+                "activation_strategy": to_config_str(&DEFAULT_ACTIVATION_STRATEGY)
+            })
+        })
+}
+
 /// Convert proto Facet configuration to facet instance
 ///
 /// ## Purpose

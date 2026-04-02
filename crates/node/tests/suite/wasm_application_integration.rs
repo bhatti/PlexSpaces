@@ -26,20 +26,34 @@
 //! - Error handling (invalid modules, missing runtime, etc.)
 
 use super::test_helpers::app_request_with_tenant;
-use plexspaces_core::{ApplicationManager, ServiceLocator};
+use async_trait::async_trait;
+use plexspaces_core::JournalStorage as _;
+use plexspaces_core::{
+    actor_id::build_actor_id, ActorStateHandle, ApplicationManager, Message, MessageSender,
+    ServiceLocator,
+};
+use plexspaces_journaling::{virtual_actor_facet_to_lifecycle_facet, VirtualActorFacet};
 use plexspaces_node::{Node, NodeId};
+use plexspaces_proto::actor::v1::{
+    actor_service_server::ActorService as ActorServiceTrait, AskReplyRequest,
+};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
     ChildType, DeployApplicationRequest, GetApplicationStatusRequest, ListApplicationsRequest,
     RestartPolicy, ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
 };
-use plexspaces_proto::common::v1::Metadata;
+use plexspaces_proto::common::v1::{Facet, Metadata};
+use plexspaces_proto::v1::journaling::Checkpoint;
 use plexspaces_proto::wasm::v1::WasmModule;
+use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_services::application_service::ApplicationServiceImpl;
 use prost_types::Duration as ProstDuration;
 use std::collections::HashMap;
+use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+use tonic::metadata::MetadataValue;
 use tonic::Request;
 
 // Simple WASM module: (module (func (export "test") (result i32) i32.const 42))
@@ -71,6 +85,118 @@ async fn create_test_node_with_service() -> (Arc<Node>, String) {
         .await;
     // For now, we test directly via ApplicationServiceImpl instead of gRPC (avoids port binding issues)
     (node, String::new())
+}
+
+fn app_request_in_scope<T: Send>(body: T, tenant_id: &str, namespace: &str) -> Request<T> {
+    let mut request = Request::new(body);
+    request
+        .metadata_mut()
+        .insert("x-tenant-id", MetadataValue::try_from(tenant_id).unwrap());
+    request
+        .metadata_mut()
+        .insert("x-namespace", MetadataValue::try_from(namespace).unwrap());
+    request
+}
+
+struct TestActorStateHandle {
+    stopped: AtomicBool,
+}
+
+impl TestActorStateHandle {
+    fn new() -> Self {
+        Self {
+            stopped: AtomicBool::new(false),
+        }
+    }
+
+    fn was_stopped(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl ActorStateHandle for TestActorStateHandle {
+    async fn actor_state(&self) -> plexspaces_proto::v1::actor::ActorState {
+        if self.was_stopped() {
+            plexspaces_proto::v1::actor::ActorState::ActorStateTerminated
+        } else {
+            plexspaces_proto::v1::actor::ActorState::ActorStateActive
+        }
+    }
+
+    async fn stop_actor(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.stopped.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+struct TestMessageSender {
+    actor_id: String,
+    tenant_id: String,
+    namespace: String,
+    actor_type: std::sync::RwLock<Option<String>>,
+    local_state_handle: std::sync::RwLock<Option<Arc<dyn ActorStateHandle>>>,
+}
+
+impl TestMessageSender {
+    fn new(actor_id: String, tenant_id: String, namespace: String) -> Self {
+        Self {
+            actor_id,
+            tenant_id,
+            namespace,
+            actor_type: std::sync::RwLock::new(None),
+            local_state_handle: std::sync::RwLock::new(None),
+        }
+    }
+}
+
+#[async_trait]
+impl MessageSender for TestMessageSender {
+    async fn tell(
+        &self,
+        _message: Message,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+
+    fn actor_id(&self) -> Option<String> {
+        Some(self.actor_id.clone())
+    }
+
+    fn tenant_id(&self) -> Option<&str> {
+        Some(&self.tenant_id)
+    }
+
+    fn namespace(&self) -> Option<&str> {
+        Some(&self.namespace)
+    }
+
+    fn actor_type(&self) -> Option<String> {
+        self.actor_type.read().ok().and_then(|guard| guard.clone())
+    }
+
+    async fn set_actor_type(&self, actor_type: Option<String>) {
+        if let Ok(mut guard) = self.actor_type.write() {
+            *guard = actor_type;
+        }
+    }
+
+    fn local_state_handle(&self) -> Option<Arc<dyn ActorStateHandle>> {
+        self.local_state_handle
+            .read()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+
+    async fn set_local_state_handle(&self, handle: Option<Arc<dyn ActorStateHandle>>) {
+        if let Ok(mut guard) = self.local_state_handle.write() {
+            *guard = handle;
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Create a WASM module with supervisor tree in ApplicationSpec
@@ -659,6 +785,127 @@ fn load_wasm_fixture(name: &str) -> Vec<u8> {
         .unwrap_or_else(|e| panic!("Failed to load WASM fixture {}: {}", fixture_path, e))
 }
 
+fn build_go_abstractions_example_wasm() -> Vec<u8> {
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("repo root")
+        .to_path_buf();
+    let example_dir = repo_root.join("examples/go/apps/abstractions");
+    let output_path = repo_root.join("target/examples/go/abstractions/abstractions_actor.wasm");
+
+    let status = Command::new("bash")
+        .arg("build.sh")
+        .current_dir(&example_dir)
+        .env("GOCACHE", "/tmp/plexspaces-go-cache")
+        .status()
+        .expect("Go abstractions build.sh should start");
+    assert!(status.success(), "Go abstractions build.sh should succeed");
+
+    std::fs::read(&output_path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to load built Go example wasm {}: {}",
+            output_path.display(),
+            e
+        )
+    })
+}
+
+fn build_python_abstractions_example_wasm() -> Vec<u8> {
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("repo root")
+        .to_path_buf();
+    let example_dir = repo_root.join("examples/python/apps/abstractions");
+    let output_path = repo_root.join("target/examples/python/abstractions/abstractions_actor.wasm");
+
+    let status = Command::new("bash")
+        .arg("build.sh")
+        .current_dir(&example_dir)
+        .status()
+        .expect("Python abstractions build.sh should start");
+    assert!(
+        status.success(),
+        "Python abstractions build.sh should succeed"
+    );
+
+    std::fs::read(&output_path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to load built Python example wasm {}: {}",
+            output_path.display(),
+            e
+        )
+    })
+}
+
+fn build_typescript_abstractions_example_wasm() -> Vec<u8> {
+    let repo_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("repo root")
+        .to_path_buf();
+    let example_dir = repo_root.join("examples/typescript/apps/abstractions");
+    let output_path =
+        repo_root.join("target/examples/typescript/abstractions/abstractions_actor.wasm");
+
+    let status = Command::new("bash")
+        .arg("build.sh")
+        .current_dir(&example_dir)
+        .status()
+        .expect("TypeScript abstractions build.sh should start");
+    assert!(
+        status.success(),
+        "TypeScript abstractions build.sh should succeed"
+    );
+
+    std::fs::read(&output_path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to load built TypeScript example wasm {}: {}",
+            output_path.display(),
+            e
+        )
+    })
+}
+
+async fn actor_ask_json(
+    actor_service: &ActorServiceImpl,
+    tenant_id: &str,
+    namespace: &str,
+    actor_type: &str,
+    payload: serde_json::Value,
+) -> serde_json::Value {
+    let request = AskReplyRequest {
+        namespace: namespace.to_string(),
+        actor_type: actor_type.to_string(),
+        http_method: "POST".to_string(),
+        payload: serde_json::to_vec(&payload).expect("payload JSON should serialize"),
+        headers: HashMap::new(),
+        query_params: HashMap::new(),
+        path: format!("/api/v1/actors/{}/{}/ask", namespace, actor_type),
+        subpath: String::new(),
+        sender_id: String::new(),
+        message_type: "call".to_string(),
+        correlation_id: String::new(),
+        reply_to: String::new(),
+        message_id: String::new(),
+        timeout: None,
+    };
+
+    let response = ActorServiceTrait::ask_reply(
+        actor_service,
+        app_request_in_scope(request, tenant_id, namespace),
+    )
+    .await
+    .expect("actor ask should succeed")
+    .into_inner();
+
+    assert!(
+        response.success,
+        "actor ask should succeed, got error_message={}",
+        response.error_message
+    );
+
+    serde_json::from_slice(&response.payload).expect("actor payload should be valid JSON")
+}
+
 /// Create WasmModule from fixture with supervisor spec
 fn create_wasm_module_from_fixture_with_supervisor(
     fixture_name: &str,
@@ -930,4 +1177,1018 @@ async fn test_supervisor_created_with_correct_strategy() {
     let _ = service
         .undeploy_application(app_request_with_tenant(undeploy_request))
         .await;
+}
+
+#[tokio::test]
+async fn test_undeploy_missing_application_still_cleans_namespace_state() {
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let service_locator = node.service_locator();
+    let namespace = "abstractions-rust";
+    let actor_type = "abstractions";
+    let actor_id = "cart-1//abstractions::abstractions-rust@test-node".to_string();
+
+    let virtual_actor_manager = service_locator
+        .virtual_actor_manager()
+        .await
+        .expect("VirtualActorManager should be registered");
+    virtual_actor_manager
+        .register_virtual_actor_type(
+            actor_type.to_string(),
+            None,
+            namespace.to_string(),
+            serde_json::json!({
+                "virtual_actor": {
+                    "idle_timeout": "10m",
+                    "activation_strategy": "lazy"
+                },
+                "durability": {
+                    "checkpoint_interval": 5
+                }
+            }),
+            None,
+            None,
+        )
+        .await
+        .expect("type registration should succeed");
+    virtual_actor_manager
+        .register(
+            actor_id.clone(),
+            Arc::new(tokio::sync::RwLock::new(
+                virtual_actor_facet_to_lifecycle_facet(VirtualActorFacet::new(
+                    serde_json::json!({
+                        "idle_timeout": "10m",
+                        "activation_strategy": "lazy"
+                    }),
+                    100,
+                )),
+            )),
+            actor_type.to_string(),
+            None,
+            String::new(),
+            namespace.to_string(),
+            Vec::new(),
+            HashMap::new(),
+            plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
+        )
+        .await
+        .expect("instance registration should succeed");
+
+    let journal_storage = service_locator
+        .get_journal_storage()
+        .await
+        .expect("JournalStorage should be registered");
+    journal_storage
+        .save_checkpoint(&Checkpoint {
+            actor_id: actor_id.clone(),
+            sequence: 2,
+            timestamp: Some(prost_types::Timestamp {
+                seconds: 1,
+                nanos: 0,
+            }),
+            state_data: br#"{"count":2}"#.to_vec(),
+            compression: 0,
+            metadata: HashMap::new(),
+            state_schema_version: 1,
+        })
+        .await
+        .expect("checkpoint should be saved");
+
+    let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        application_id: namespace.to_string(),
+        timeout: None,
+    };
+    let response = service
+        .undeploy_application(app_request_with_tenant(undeploy_request))
+        .await
+        .expect("stateless undeploy cleanup should succeed");
+    assert!(response.into_inner().success);
+
+    assert!(
+        virtual_actor_manager
+            .get_virtual_actor_type(actor_type)
+            .await
+            .is_none(),
+        "virtual actor type should be removed by stateless undeploy cleanup"
+    );
+    assert!(
+        virtual_actor_manager
+            .get_metadata(&actor_id)
+            .await
+            .is_none(),
+        "virtual actor instance metadata should be removed by stateless undeploy cleanup"
+    );
+    assert!(
+        journal_storage
+            .get_latest_checkpoint(&actor_id)
+            .await
+            .is_err(),
+        "checkpoint should be purged by stateless undeploy cleanup"
+    );
+}
+
+#[tokio::test]
+async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let service_locator = node.service_locator();
+    let app_id = "abstractions-rust";
+    let tenant_id = "test-tenant";
+    let actor_type = "abstractions";
+    let actor_id = "cart-1//abstractions::abstractions-rust@test-node".to_string();
+    let (wasm_module, mut app_spec) =
+        create_wasm_module_from_fixture_with_supervisor("calculator_actor.wasm", actor_type);
+    app_spec.namespace = app_id.to_string();
+    app_spec.name = app_id.to_string();
+
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+    let deploy_response = service
+        .deploy_application(app_request_in_scope(deploy_request, tenant_id, app_id))
+        .await
+        .expect("initial deployment should succeed");
+    assert!(deploy_response.into_inner().success);
+
+    let virtual_actor_manager = service_locator
+        .virtual_actor_manager()
+        .await
+        .expect("VirtualActorManager should be registered");
+    virtual_actor_manager
+        .register_virtual_actor_type(
+            actor_type.to_string(),
+            None,
+            app_id.to_string(),
+            serde_json::json!({
+                "virtual_actor": {
+                    "idle_timeout": "10m",
+                    "activation_strategy": "lazy"
+                },
+                "durability": {
+                    "checkpoint_interval": 5
+                }
+            }),
+            None,
+            None,
+        )
+        .await
+        .expect("type registration should succeed");
+    virtual_actor_manager
+        .register(
+            actor_id.clone(),
+            Arc::new(tokio::sync::RwLock::new(
+                virtual_actor_facet_to_lifecycle_facet(VirtualActorFacet::new(
+                    serde_json::json!({
+                        "idle_timeout": "10m",
+                        "activation_strategy": "lazy"
+                    }),
+                    100,
+                )),
+            )),
+            actor_type.to_string(),
+            None,
+            tenant_id.to_string(),
+            app_id.to_string(),
+            Vec::new(),
+            HashMap::new(),
+            plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
+        )
+        .await
+        .expect("instance registration should succeed");
+
+    let journal_storage = service_locator
+        .get_journal_storage()
+        .await
+        .expect("JournalStorage should be registered");
+    journal_storage
+        .save_checkpoint(&Checkpoint {
+            actor_id: actor_id.clone(),
+            sequence: 2,
+            timestamp: Some(prost_types::Timestamp {
+                seconds: 1,
+                nanos: 0,
+            }),
+            state_data: br#"{"count":2,"timer_ticks":1,"reminder_ticks":1}"#.to_vec(),
+            compression: 0,
+            metadata: HashMap::new(),
+            state_schema_version: 1,
+        })
+        .await
+        .expect("checkpoint should be saved");
+
+    let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        application_id: app_id.to_string(),
+        timeout: None,
+    };
+    let undeploy_response = service
+        .undeploy_application(app_request_in_scope(undeploy_request, tenant_id, app_id))
+        .await
+        .expect("undeploy should succeed");
+    assert!(undeploy_response.into_inner().success);
+
+    assert!(
+        journal_storage
+            .get_latest_checkpoint(&actor_id)
+            .await
+            .is_err(),
+        "checkpoint should be removed after undeploy"
+    );
+    assert!(
+        virtual_actor_manager
+            .get_metadata(&actor_id)
+            .await
+            .is_none(),
+        "virtual actor instance metadata should be removed after undeploy"
+    );
+    assert!(
+        virtual_actor_manager
+            .get_virtual_actor_type(actor_type)
+            .await
+            .is_none(),
+        "virtual actor type should be removed after undeploy"
+    );
+
+    let (redeploy_wasm_module, mut redeploy_app_spec) =
+        create_wasm_module_from_fixture_with_supervisor("calculator_actor.wasm", actor_type);
+    redeploy_app_spec.namespace = app_id.to_string();
+    redeploy_app_spec.name = app_id.to_string();
+    let redeploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(redeploy_wasm_module),
+        config: Some(redeploy_app_spec),
+        initial_state: vec![],
+    };
+    let redeploy_response = service
+        .deploy_application(app_request_in_scope(redeploy_request, tenant_id, app_id))
+        .await
+        .expect("redeployment should succeed");
+    assert!(redeploy_response.into_inner().success);
+
+    assert!(
+        journal_storage
+            .get_latest_checkpoint(&actor_id)
+            .await
+            .is_err(),
+        "redeploy should start with fresh namespace state"
+    );
+}
+
+#[tokio::test]
+async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let service_locator = node.service_locator();
+    let app_id = "abstractions-rust";
+    let tenant_id = "test-tenant";
+    let actor_type = "abstractions";
+    let actor_id = build_actor_id("cart-1", actor_type, Some(app_id), "test-node");
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        tenant_id.to_string(),
+        app_id.to_string(),
+    );
+
+    let (wasm_module, mut app_spec) =
+        create_wasm_module_from_fixture_with_supervisor("calculator_actor.wasm", actor_type);
+    app_spec.namespace = app_id.to_string();
+    app_spec.name = app_id.to_string();
+
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+    let deploy_response = service
+        .deploy_application(app_request_in_scope(deploy_request, tenant_id, app_id))
+        .await
+        .expect("deployment should succeed");
+    assert!(deploy_response.into_inner().success);
+
+    let virtual_actor_manager = service_locator
+        .virtual_actor_manager()
+        .await
+        .expect("VirtualActorManager should be registered");
+    virtual_actor_manager
+        .register_virtual_actor_type(
+            actor_type.to_string(),
+            None,
+            app_id.to_string(),
+            serde_json::json!({
+                "virtual_actor": {
+                    "idle_timeout": "10m",
+                    "activation_strategy": "lazy"
+                },
+                "durability": {
+                    "checkpoint_interval": 5
+                }
+            }),
+            None,
+            None,
+        )
+        .await
+        .expect("type registration should succeed");
+    virtual_actor_manager
+        .register(
+            actor_id.clone(),
+            Arc::new(tokio::sync::RwLock::new(
+                virtual_actor_facet_to_lifecycle_facet(VirtualActorFacet::new(
+                    serde_json::json!({
+                        "idle_timeout": "10m",
+                        "activation_strategy": "lazy"
+                    }),
+                    100,
+                )),
+            )),
+            actor_type.to_string(),
+            None,
+            tenant_id.to_string(),
+            app_id.to_string(),
+            Vec::new(),
+            HashMap::new(),
+            plexspaces_common::ActivationStrategy::ActivationStrategyLazy,
+        )
+        .await
+        .expect("instance registration should succeed");
+
+    let journal_storage = service_locator
+        .get_journal_storage()
+        .await
+        .expect("JournalStorage should be registered");
+    journal_storage
+        .save_checkpoint(&Checkpoint {
+            actor_id: actor_id.clone(),
+            sequence: 2,
+            timestamp: Some(prost_types::Timestamp {
+                seconds: 1,
+                nanos: 0,
+            }),
+            state_data: br#"{"count":2}"#.to_vec(),
+            compression: 0,
+            metadata: HashMap::new(),
+            state_schema_version: 1,
+        })
+        .await
+        .expect("checkpoint should be saved");
+
+    let actor_registry = service_locator
+        .actor_registry()
+        .await
+        .expect("ActorRegistry should be registered");
+    let state_handle = Arc::new(TestActorStateHandle::new());
+    let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(
+        actor_id.clone(),
+        tenant_id.to_string(),
+        app_id.to_string(),
+    ));
+    actor_registry
+        .register_actor(
+            &ctx,
+            actor_id.clone(),
+            sender,
+            actor_type.to_string(),
+            None,
+            Some(state_handle.clone()),
+            None,
+        )
+        .await;
+
+    assert!(
+        actor_registry
+            .lookup_actor_in_scope(tenant_id, app_id, &actor_id)
+            .await
+            .is_some(),
+        "live actor should be registered before undeploy"
+    );
+
+    let undeploy_request = plexspaces_proto::application::v1::UndeployApplicationRequest {
+        application_id: app_id.to_string(),
+        timeout: None,
+    };
+    let undeploy_response = service
+        .undeploy_application(app_request_in_scope(undeploy_request, tenant_id, app_id))
+        .await
+        .expect("undeploy should succeed");
+    assert!(undeploy_response.into_inner().success);
+
+    assert!(
+        state_handle.was_stopped(),
+        "undeploy should stop live namespace actors before purge"
+    );
+    assert!(
+        actor_registry
+            .lookup_actor_in_scope(tenant_id, app_id, &actor_id)
+            .await
+            .is_none(),
+        "live actor should be removed from registry after undeploy"
+    );
+    assert!(
+        journal_storage
+            .get_latest_checkpoint(&actor_id)
+            .await
+            .is_err(),
+        "checkpoint should be removed after undeploy"
+    );
+    assert!(
+        virtual_actor_manager
+            .get_metadata(&actor_id)
+            .await
+            .is_none(),
+        "virtual actor instance metadata should be removed after undeploy"
+    );
+}
+
+#[tokio::test]
+async fn test_wasm_supervisor_registers_plain_controller_child_in_scope() {
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let service_locator = node.service_locator();
+    let app_id = "abstractions-go";
+    let tenant_id = "test-tenant";
+
+    let wasm_bytes = load_wasm_fixture("calculator_actor.wasm");
+    let wasm_module = WasmModule {
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        module_bytes: wasm_bytes,
+        module_hash: String::new(),
+        ..Default::default()
+    };
+
+    let supervisor_spec = SupervisorSpec {
+        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
+        max_restarts: 5,
+        max_restart_window: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        children: vec![
+            ChildSpec {
+                id: "controller".to_string(),
+                r#type: ChildType::ChildTypeWorker.into(),
+                args: HashMap::from([("role".to_string(), "controller".to_string())]),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 5,
+                    nanos: 0,
+                }),
+                supervisor: None,
+                facets: vec![],
+                behavior_kind: Some("GenServer".to_string()),
+            },
+            ChildSpec {
+                id: "ephemeral".to_string(),
+                r#type: ChildType::ChildTypeWorker.into(),
+                args: HashMap::from([
+                    ("role".to_string(), "ephemeral".to_string()),
+                    ("initial_count".to_string(), "5".to_string()),
+                ]),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 5,
+                    nanos: 0,
+                }),
+                supervisor: None,
+                facets: vec![Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: HashMap::from([
+                        ("idle_timeout".to_string(), "10m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    priority: 0,
+                    state: HashMap::new(),
+                    metadata: None,
+                }],
+                behavior_kind: Some("GenServer".to_string()),
+            },
+        ],
+    };
+
+    let app_spec = ApplicationSpec {
+        name: app_id.to_string(),
+        tenant_id: String::new(),
+        namespace: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        description: "Controller + virtual child deployment".to_string(),
+        r#type: ApplicationType::ApplicationTypeActive.into(),
+        dependencies: vec![],
+        env: HashMap::new(),
+        supervisor: Some(supervisor_spec),
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
+        metadata: None,
+    };
+
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+    let deploy_response = service
+        .deploy_application(app_request_in_scope(deploy_request, tenant_id, app_id))
+        .await
+        .expect("deployment should succeed");
+    assert!(deploy_response.into_inner().success);
+
+    let actor_registry = service_locator
+        .actor_registry()
+        .await
+        .expect("ActorRegistry should be registered");
+    let ctx = plexspaces_core::RequestContext::new_without_auth(
+        tenant_id.to_string(),
+        app_id.to_string(),
+    );
+
+    let controllers = actor_registry
+        .discover_actors_by_type(&ctx, "controller")
+        .await;
+    assert_eq!(
+        controllers.len(),
+        1,
+        "controller child should be registered once"
+    );
+    assert!(
+        controllers[0].contains("//controller::abstractions-go@test-node"),
+        "controller child should use canonical in-scope actor id, got {:?}",
+        controllers
+    );
+}
+
+#[tokio::test]
+async fn test_go_wasm_controller_stop_resets_nondurable_virtual_actor() {
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let actor_service =
+        ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
+    let app_id = "abstractions-go-sdk-it";
+    let tenant_id = "test-tenant";
+
+    let wasm_bytes = build_go_abstractions_example_wasm();
+    let wasm_module = WasmModule {
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        module_bytes: wasm_bytes,
+        module_hash: String::new(),
+        ..Default::default()
+    };
+
+    let supervisor_spec = SupervisorSpec {
+        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
+        max_restarts: 5,
+        max_restart_window: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        children: vec![
+            ChildSpec {
+                id: "controller".to_string(),
+                r#type: ChildType::ChildTypeWorker.into(),
+                args: HashMap::from([("role".to_string(), "controller".to_string())]),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 5,
+                    nanos: 0,
+                }),
+                supervisor: None,
+                facets: vec![],
+                behavior_kind: Some("GenServer".to_string()),
+            },
+            ChildSpec {
+                id: "ephemeral".to_string(),
+                r#type: ChildType::ChildTypeWorker.into(),
+                args: HashMap::from([
+                    ("role".to_string(), "ephemeral".to_string()),
+                    ("initial_count".to_string(), "5".to_string()),
+                ]),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 5,
+                    nanos: 0,
+                }),
+                supervisor: None,
+                facets: vec![Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: HashMap::from([
+                        ("idle_timeout".to_string(), "10m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    priority: 0,
+                    state: HashMap::new(),
+                    metadata: None,
+                }],
+                behavior_kind: Some("GenServer".to_string()),
+            },
+        ],
+    };
+
+    let app_spec = ApplicationSpec {
+        name: app_id.to_string(),
+        tenant_id: String::new(),
+        namespace: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        description: "Go SDK controller stop integration".to_string(),
+        r#type: ApplicationType::ApplicationTypeActive.into(),
+        dependencies: vec![],
+        env: HashMap::new(),
+        supervisor: Some(supervisor_spec),
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
+        metadata: None,
+    };
+
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+    let deploy_response = service
+        .deploy_application(app_request_in_scope(deploy_request, tenant_id, app_id))
+        .await
+        .expect("deployment should succeed");
+    assert!(deploy_response.into_inner().success);
+
+    let initial_status = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert_eq!(initial_status["count"], serde_json::json!(5));
+    assert_eq!(initial_status["role"], serde_json::json!("ephemeral"));
+
+    let incremented = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "increment", "amount": 2 }),
+    )
+    .await;
+    assert_eq!(incremented["count"], serde_json::json!(7));
+
+    let stop_target = initial_status["self_id"]
+        .as_str()
+        .unwrap_or("session-1//ephemeral::abstractions-go-sdk-it@test-node")
+        .to_string();
+    let stop_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "controller",
+        serde_json::json!({
+            "op": "stop_actor",
+            "actor_id": stop_target,
+        }),
+    )
+    .await;
+    assert_eq!(stop_result["ok"], serde_json::json!(true));
+
+    sleep(Duration::from_millis(250)).await;
+
+    let reactivated = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert_eq!(reactivated["count"], serde_json::json!(5));
+    assert_eq!(reactivated["role"], serde_json::json!("ephemeral"));
+}
+
+#[tokio::test]
+async fn test_python_wasm_controller_stop_resets_nondurable_virtual_actor() {
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let actor_service =
+        ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
+    let app_id = "abstractions-python-sdk-it";
+    let tenant_id = "test-tenant";
+
+    let wasm_bytes = build_python_abstractions_example_wasm();
+    let wasm_module = WasmModule {
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        module_bytes: wasm_bytes,
+        module_hash: String::new(),
+        ..Default::default()
+    };
+
+    let supervisor_spec = SupervisorSpec {
+        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
+        max_restarts: 5,
+        max_restart_window: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        children: vec![
+            ChildSpec {
+                id: "controller".to_string(),
+                r#type: ChildType::ChildTypeWorker.into(),
+                args: HashMap::from([("role".to_string(), "controller".to_string())]),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 5,
+                    nanos: 0,
+                }),
+                supervisor: None,
+                facets: vec![],
+                behavior_kind: Some("GenServer".to_string()),
+            },
+            ChildSpec {
+                id: "ephemeral".to_string(),
+                r#type: ChildType::ChildTypeWorker.into(),
+                args: HashMap::from([
+                    ("role".to_string(), "ephemeral".to_string()),
+                    ("initial_count".to_string(), "5".to_string()),
+                ]),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 5,
+                    nanos: 0,
+                }),
+                supervisor: None,
+                facets: vec![Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: HashMap::from([
+                        ("idle_timeout".to_string(), "10m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    priority: 0,
+                    state: HashMap::new(),
+                    metadata: None,
+                }],
+                behavior_kind: Some("GenServer".to_string()),
+            },
+        ],
+    };
+
+    let app_spec = ApplicationSpec {
+        name: app_id.to_string(),
+        tenant_id: String::new(),
+        namespace: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        description: "Python SDK controller stop integration".to_string(),
+        r#type: ApplicationType::ApplicationTypeActive.into(),
+        dependencies: vec![],
+        env: HashMap::new(),
+        supervisor: Some(supervisor_spec),
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
+        metadata: None,
+    };
+
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+    let deploy_response = service
+        .deploy_application(app_request_in_scope(deploy_request, tenant_id, app_id))
+        .await
+        .expect("deployment should succeed");
+    assert!(deploy_response.into_inner().success);
+
+    let initial_status = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert_eq!(initial_status["count"], serde_json::json!(5));
+    assert_eq!(initial_status["role"], serde_json::json!("ephemeral"));
+
+    let incremented = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "increment", "amount": 2 }),
+    )
+    .await;
+    assert_eq!(incremented["count"], serde_json::json!(7));
+
+    let stop_target = initial_status["self_id"]
+        .as_str()
+        .unwrap_or("session-1//ephemeral::abstractions-python-sdk-it@test-node")
+        .to_string();
+    let stop_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "controller",
+        serde_json::json!({
+            "op": "stop_actor",
+            "actor_id": stop_target,
+        }),
+    )
+    .await;
+    assert_eq!(stop_result["ok"], serde_json::json!(true));
+
+    sleep(Duration::from_millis(250)).await;
+
+    let reactivated = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert_eq!(reactivated["count"], serde_json::json!(5));
+    assert_eq!(reactivated["role"], serde_json::json!("ephemeral"));
+}
+
+#[tokio::test]
+async fn test_typescript_wasm_controller_stop_resets_nondurable_virtual_actor() {
+    let (node, _) = create_test_node_with_service().await;
+    let service = ApplicationServiceImpl::new(node.service_locator().clone(), None);
+    let actor_service =
+        ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
+    let app_id = "abstractions-typescript-sdk-it";
+    let tenant_id = "test-tenant";
+
+    let wasm_bytes = build_typescript_abstractions_example_wasm();
+    let wasm_module = WasmModule {
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        module_bytes: wasm_bytes,
+        module_hash: String::new(),
+        ..Default::default()
+    };
+
+    let supervisor_spec = SupervisorSpec {
+        strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
+        max_restarts: 5,
+        max_restart_window: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        children: vec![
+            ChildSpec {
+                id: "controller".to_string(),
+                r#type: ChildType::ChildTypeWorker.into(),
+                args: HashMap::from([("role".to_string(), "controller".to_string())]),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 5,
+                    nanos: 0,
+                }),
+                supervisor: None,
+                facets: vec![],
+                behavior_kind: Some("GenServer".to_string()),
+            },
+            ChildSpec {
+                id: "ephemeral".to_string(),
+                r#type: ChildType::ChildTypeWorker.into(),
+                args: HashMap::from([
+                    ("role".to_string(), "ephemeral".to_string()),
+                    ("initial_count".to_string(), "5".to_string()),
+                ]),
+                restart: RestartPolicy::RestartPolicyPermanent.into(),
+                shutdown_timeout: Some(ProstDuration {
+                    seconds: 5,
+                    nanos: 0,
+                }),
+                supervisor: None,
+                facets: vec![Facet {
+                    r#type: "virtual_actor".to_string(),
+                    config: HashMap::from([
+                        ("idle_timeout".to_string(), "10m".to_string()),
+                        ("activation_strategy".to_string(), "lazy".to_string()),
+                    ]),
+                    priority: 0,
+                    state: HashMap::new(),
+                    metadata: None,
+                }],
+                behavior_kind: Some("GenServer".to_string()),
+            },
+        ],
+    };
+
+    let app_spec = ApplicationSpec {
+        name: app_id.to_string(),
+        tenant_id: String::new(),
+        namespace: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        description: "TypeScript SDK controller stop integration".to_string(),
+        r#type: ApplicationType::ApplicationTypeActive.into(),
+        dependencies: vec![],
+        env: HashMap::new(),
+        supervisor: Some(supervisor_spec),
+        enabled: true,
+        auto_start: true,
+        shutdown_timeout: Some(ProstDuration {
+            seconds: 60,
+            nanos: 0,
+        }),
+        shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+        seed_nodes: vec![],
+        metadata: None,
+    };
+
+    let deploy_request = DeployApplicationRequest {
+        application_id: app_id.to_string(),
+        name: app_id.to_string(),
+        version: "1.0.0".to_string(),
+        wasm_module: Some(wasm_module),
+        config: Some(app_spec),
+        initial_state: vec![],
+    };
+    let deploy_response = service
+        .deploy_application(app_request_in_scope(deploy_request, tenant_id, app_id))
+        .await
+        .expect("deployment should succeed");
+    assert!(deploy_response.into_inner().success);
+
+    let initial_status = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert_eq!(initial_status["count"], serde_json::json!(5));
+    assert_eq!(initial_status["role"], serde_json::json!("ephemeral"));
+
+    let incremented = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "increment", "amount": 2 }),
+    )
+    .await;
+    assert_eq!(incremented["count"], serde_json::json!(7));
+
+    let stop_target = initial_status["self_id"]
+        .as_str()
+        .unwrap_or("session-1//ephemeral::abstractions-typescript-sdk-it@test-node")
+        .to_string();
+    let stop_result = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "controller",
+        serde_json::json!({
+            "op": "stop_actor",
+            "actor_id": stop_target,
+        }),
+    )
+    .await;
+    assert_eq!(stop_result["ok"], serde_json::json!(true));
+
+    sleep(Duration::from_millis(250)).await;
+
+    let reactivated = actor_ask_json(
+        &actor_service,
+        tenant_id,
+        app_id,
+        "ephemeral:session-1",
+        serde_json::json!({ "op": "status" }),
+    )
+    .await;
+    assert_eq!(reactivated["count"], serde_json::json!(5));
+    assert_eq!(reactivated["role"], serde_json::json!("ephemeral"));
 }

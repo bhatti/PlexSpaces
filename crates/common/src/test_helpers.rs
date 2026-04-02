@@ -510,12 +510,18 @@ mod http_endpoint_parse_tests {
 
     #[test]
     fn parses_host_port_without_scheme() {
-        assert_eq!(http_endpoint_to_tcp_addr("127.0.0.1:8000"), "127.0.0.1:8000");
+        assert_eq!(
+            http_endpoint_to_tcp_addr("127.0.0.1:8000"),
+            "127.0.0.1:8000"
+        );
     }
 
     #[test]
     fn adds_default_http_port() {
-        assert_eq!(http_endpoint_to_tcp_addr("http://ddb.local"), "ddb.local:80");
+        assert_eq!(
+            http_endpoint_to_tcp_addr("http://ddb.local"),
+            "ddb.local:80"
+        );
     }
 
     #[test]

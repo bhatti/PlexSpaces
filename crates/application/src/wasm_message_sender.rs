@@ -344,7 +344,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     #[instrument(skip(self), fields(from = %from, actor_id = %actor_id))]
     async fn stop_actor(&self, from: &str, actor_id: &str, _timeout_ms: u64) -> Result<(), String> {
-        use plexspaces_core::{ActorFactory, ActorId, RequestContext};
+        use plexspaces_core::{actor_id::parse_actor_id, ActorFactory, ActorId, RequestContext};
 
         let actor_factory: Arc<dyn ActorFactory> =
             self.service_locator
@@ -352,20 +352,24 @@ impl MessageSender for ActorServiceMessageSender {
                 .await
                 .ok_or_else(|| "ActorFactory not found in ServiceLocator".to_string())?;
 
-        // Get caller's tenant/namespace from ActorRegistry metadata for tenant isolation.
-        // This ensures stop_actor respects namespace boundaries.
+        // Resolve caller scope from the registered sender so stop_actor respects
+        // tenant and namespace boundaries without relying on parallel registry maps.
         let ctx = if let Some(registry) = self.service_locator.actor_registry().await {
-            if let Some((tenant_id, namespace)) =
+            if let Some(sender) = registry.lookup_actor(&from.to_string()).await {
+                let tenant_id = sender.tenant_id().unwrap_or_default().to_string();
+                let namespace = sender.namespace().unwrap_or_default().to_string();
+                RequestContext::new_without_auth(tenant_id, namespace)
+            } else if let Some((tenant_id, namespace)) =
                 registry.get_actor_metadata(&from.to_string()).await
             {
-                debug!(tenant_id = %tenant_id, namespace = %namespace, "stop_actor: resolved caller metadata");
                 RequestContext::new_without_auth(tenant_id, namespace)
+            } else if let Ok(parsed) = parse_actor_id(from) {
+                let namespace = parsed.namespace.unwrap_or_default();
+                RequestContext::new_without_auth(String::new(), namespace)
             } else {
-                warn!(from = %from, "stop_actor: no metadata found for caller, using empty context");
                 RequestContext::new_without_auth(String::new(), String::new())
             }
         } else {
-            warn!("stop_actor: ActorRegistry not available");
             RequestContext::new_without_auth(String::new(), String::new())
         };
 
@@ -373,12 +377,7 @@ impl MessageSender for ActorServiceMessageSender {
         actor_factory
             .stop_actor(&ctx, &actor_id_typed)
             .await
-            .map_err(|e| {
-                warn!(actor_id = %actor_id, error = %e, "stop_actor failed");
-                format!("Failed to stop actor: {}", e)
-            })?;
-
-        debug!(actor_id = %actor_id, "stop_actor: success");
+            .map_err(|e| format!("Failed to stop actor: {}", e))?;
         Ok(())
     }
 

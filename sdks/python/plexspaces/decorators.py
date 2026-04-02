@@ -90,6 +90,13 @@ class HandlerInfo:
     msg_types: List[str]
     invocation: str = "call"  # "call" (request-reply) or "cast" (fire-and-forget)
 
+
+@dataclass
+class WorkflowHandlerInfo:
+    """Metadata for workflow-specific handlers."""
+    method: Callable
+    names: List[str] = field(default_factory=list)
+
 def handler(*args, invocation: str = "call") -> Callable:
     """
     Decorator to mark a method as a message handler.
@@ -161,6 +168,34 @@ def init_handler(method: Callable) -> Callable:
     return method
 
 
+def run_handler(method: Callable) -> Callable:
+    """Decorator to mark a workflow run handler."""
+    method._plexspaces_run_handler = True
+    return method
+
+
+def signal_handler(*names: str) -> Callable:
+    """Decorator to mark a workflow signal handler."""
+    def decorator(method: Callable) -> Callable:
+        method._plexspaces_signal_handler = WorkflowHandlerInfo(
+            method=method,
+            names=list(names),
+        )
+        return method
+    return decorator
+
+
+def query_handler(*names: str) -> Callable:
+    """Decorator to mark a workflow query handler."""
+    def decorator(method: Callable) -> Callable:
+        method._plexspaces_query_handler = WorkflowHandlerInfo(
+            method=method,
+            names=list(names),
+        )
+        return method
+    return decorator
+
+
 class ActorMeta(type):
     """Metaclass for PlexSpaces actors."""
     
@@ -174,6 +209,9 @@ class ActorMeta(type):
         # Collect handlers
         handlers: Dict[str, Callable] = {}
         init_handler_method: Optional[Callable] = None
+        run_handler_method: Optional[Callable] = None
+        signal_handlers: Dict[str, Callable] = {}
+        query_handlers: Dict[str, Callable] = {}
         for attr_name, attr_value in namespace.items():
             if callable(attr_value):
                 if hasattr(attr_value, '_plexspaces_handler'):
@@ -182,11 +220,24 @@ class ActorMeta(type):
                         handlers[msg_type] = attr_value
                 if hasattr(attr_value, '_plexspaces_init_handler'):
                     init_handler_method = attr_value
-        
+                if hasattr(attr_value, '_plexspaces_run_handler'):
+                    run_handler_method = attr_value
+                if hasattr(attr_value, '_plexspaces_signal_handler'):
+                    info: WorkflowHandlerInfo = attr_value._plexspaces_signal_handler
+                    for signal_name in info.names:
+                        signal_handlers[signal_name] = attr_value
+                if hasattr(attr_value, '_plexspaces_query_handler'):
+                    info: WorkflowHandlerInfo = attr_value._plexspaces_query_handler
+                    for query_name in info.names:
+                        query_handlers[query_name] = attr_value
+
         # Store metadata in class
         namespace['_plexspaces_state_fields'] = state_fields
         namespace['_plexspaces_handlers'] = handlers
         namespace['_plexspaces_init_handler'] = init_handler_method
+        namespace['_plexspaces_run_handler'] = run_handler_method
+        namespace['_plexspaces_signal_handlers'] = signal_handlers
+        namespace['_plexspaces_query_handlers'] = query_handlers
         namespace['_plexspaces_is_actor'] = True
         
         return super().__new__(mcs, name, bases, namespace)
@@ -534,23 +585,56 @@ def dispatch_message(instance: Any, from_actor: str, msg_type: str, payload: Dic
     # Workflow behavior: route workflow_run / workflow_signal:name / workflow_query:name to run/signal/query (aligned with Rust Workflow trait)
     if getattr(instance, "_plexspaces_workflow", False):
         if effective_type == "workflow_run":
-            run_fn = getattr(instance, "run", None)
+            run_handler_method = getattr(instance, "_plexspaces_run_handler", None)
+            run_fn = (
+                getattr(instance, run_handler_method.__name__, None)
+                if callable(run_handler_method)
+                else None
+            ) or getattr(instance, "run", None)
             if callable(run_fn):
-                result = run_fn(handler_payload if isinstance(handler_payload, dict) else payload)
+                workflow_payload = handler_payload if isinstance(handler_payload, dict) else payload
+                if run_fn == getattr(instance, "run", None):
+                    result = run_fn(workflow_payload)
+                else:
+                    kwargs = _filter_kwargs(run_fn, workflow_payload if isinstance(workflow_payload, dict) else {})
+                    kwargs = _inject_from_actor(run_fn, kwargs)
+                    result = run_fn(**kwargs) if kwargs else run_fn()
                 return result if result is not None else {}
             return {"error": "Workflow actor must implement run(payload)"}
         if effective_type.startswith("workflow_signal:"):
             signal_name = effective_type[len("workflow_signal:"):].strip()
-            signal_fn = getattr(instance, "signal", None)
+            signal_handler_method = getattr(instance, "_plexspaces_signal_handlers", {}).get(signal_name)
+            signal_fn = (
+                getattr(instance, signal_handler_method.__name__, None)
+                if callable(signal_handler_method)
+                else None
+            ) or getattr(instance, "signal", None)
             if callable(signal_fn):
-                signal_fn(signal_name, handler_payload if isinstance(handler_payload, dict) else payload)
+                workflow_payload = handler_payload if isinstance(handler_payload, dict) else payload
+                if signal_fn == getattr(instance, "signal", None):
+                    signal_fn(signal_name, workflow_payload)
+                else:
+                    kwargs = _filter_kwargs(signal_fn, workflow_payload if isinstance(workflow_payload, dict) else {})
+                    kwargs = _inject_from_actor(signal_fn, kwargs)
+                    signal_fn(**kwargs)
                 return {}
             return {"error": "Workflow actor must implement signal(name, data)"}
         if effective_type.startswith("workflow_query:"):
             query_name = effective_type[len("workflow_query:"):].strip()
-            query_fn = getattr(instance, "query", None)
+            query_handler_method = getattr(instance, "_plexspaces_query_handlers", {}).get(query_name)
+            query_fn = (
+                getattr(instance, query_handler_method.__name__, None)
+                if callable(query_handler_method)
+                else None
+            ) or getattr(instance, "query", None)
             if callable(query_fn):
-                result = query_fn(query_name, handler_payload if isinstance(handler_payload, dict) else payload)
+                workflow_payload = handler_payload if isinstance(handler_payload, dict) else payload
+                if query_fn == getattr(instance, "query", None):
+                    result = query_fn(query_name, workflow_payload)
+                else:
+                    kwargs = _filter_kwargs(query_fn, workflow_payload if isinstance(workflow_payload, dict) else {})
+                    kwargs = _inject_from_actor(query_fn, kwargs)
+                    result = query_fn(**kwargs) if kwargs else query_fn()
                 return result if result is not None else {}
             return {"error": "Workflow actor must implement query(name, params)"}
 
@@ -559,12 +643,14 @@ def dispatch_message(instance: Any, from_actor: str, msg_type: str, payload: Dic
         handler_method = handlers[effective_type]
         kwargs = _filter_kwargs(handler_method, handler_payload)
         kwargs = _inject_from_actor(handler_method, kwargs)
-        return handler_method(instance, **kwargs)
+        result = handler_method(instance, **kwargs)
+        return result if result is not None else {}
     if msg_type in handlers:
         handler_method = handlers[msg_type]
         kwargs = _filter_kwargs(handler_method, payload)
         kwargs = _inject_from_actor(handler_method, kwargs)
-        return handler_method(instance, **kwargs)
+        result = handler_method(instance, **kwargs)
+        return result if result is not None else {}
 
     # Check for "call" or "get_state" which might return state
     if effective_type in ("call", "get_state") or msg_type in ("call", "get_state"):

@@ -891,6 +891,99 @@ impl JournalStorage for SqliteJournalStorage {
         Ok(())
     }
 
+    async fn purge_actor(&self, actor_id: &str) -> JournalResult<u64> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?;
+
+        let journal_deleted = sqlx::query("DELETE FROM journal_entries WHERE actor_id = ?")
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?
+            .rows_affected();
+        let checkpoint_deleted = sqlx::query("DELETE FROM checkpoints WHERE actor_id = ?")
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?
+            .rows_affected();
+        let event_deleted = sqlx::query("DELETE FROM actor_events WHERE actor_id = ?")
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?
+            .rows_affected();
+        let reminder_deleted = sqlx::query("DELETE FROM reminders WHERE actor_id = ?")
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?
+            .rows_affected();
+
+        tx.commit()
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?;
+
+        let mut sequences = self.sequences.write().await;
+        sequences.remove(actor_id);
+        sequences.remove(&format!("{}:events", actor_id));
+
+        Ok(journal_deleted + checkpoint_deleted + event_deleted + reminder_deleted)
+    }
+
+    async fn purge_namespace(&self, namespace: &str) -> JournalResult<u64> {
+        let qualified_pattern = format!("%::{}@%", namespace);
+        let simple_pattern = format!("%:{}@%", namespace);
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?;
+
+        let journal_deleted =
+            sqlx::query("DELETE FROM journal_entries WHERE actor_id LIKE ? OR actor_id LIKE ?")
+                .bind(&qualified_pattern)
+                .bind(&simple_pattern)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| JournalError::Storage(e.to_string()))?
+                .rows_affected();
+        let checkpoint_deleted =
+            sqlx::query("DELETE FROM checkpoints WHERE actor_id LIKE ? OR actor_id LIKE ?")
+                .bind(&qualified_pattern)
+                .bind(&simple_pattern)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| JournalError::Storage(e.to_string()))?
+                .rows_affected();
+        let event_deleted =
+            sqlx::query("DELETE FROM actor_events WHERE actor_id LIKE ? OR actor_id LIKE ?")
+                .bind(&qualified_pattern)
+                .bind(&simple_pattern)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| JournalError::Storage(e.to_string()))?
+                .rows_affected();
+        let reminder_deleted =
+            sqlx::query("DELETE FROM reminders WHERE actor_id LIKE ? OR actor_id LIKE ?")
+                .bind(&qualified_pattern)
+                .bind(&simple_pattern)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| JournalError::Storage(e.to_string()))?
+                .rows_affected();
+
+        tx.commit()
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?;
+
+        Ok(journal_deleted + checkpoint_deleted + event_deleted + reminder_deleted)
+    }
+
     // ==================== Event Sourcing Methods ====================
 
     async fn append_event(&self, event: &ActorEvent) -> JournalResult<u64> {
@@ -1991,6 +2084,99 @@ impl JournalStorage for PostgresJournalStorage {
         Ok(())
     }
 
+    async fn purge_actor(&self, actor_id: &str) -> JournalResult<u64> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?;
+
+        let journal_deleted = sqlx::query("DELETE FROM journal_entries WHERE actor_id = $1")
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?
+            .rows_affected();
+        let checkpoint_deleted = sqlx::query("DELETE FROM checkpoints WHERE actor_id = $1")
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?
+            .rows_affected();
+        let event_deleted = sqlx::query("DELETE FROM actor_events WHERE actor_id = $1")
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?
+            .rows_affected();
+        let reminder_deleted = sqlx::query("DELETE FROM reminders WHERE actor_id = $1")
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?
+            .rows_affected();
+
+        tx.commit()
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?;
+
+        let mut sequences = self.sequences.write().await;
+        sequences.remove(actor_id);
+        sequences.remove(&format!("{}:events", actor_id));
+
+        Ok(journal_deleted + checkpoint_deleted + event_deleted + reminder_deleted)
+    }
+
+    async fn purge_namespace(&self, namespace: &str) -> JournalResult<u64> {
+        let qualified_pattern = format!("%::{}@%", namespace);
+        let simple_pattern = format!("%:{}@%", namespace);
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?;
+
+        let journal_deleted =
+            sqlx::query("DELETE FROM journal_entries WHERE actor_id LIKE $1 OR actor_id LIKE $2")
+                .bind(&qualified_pattern)
+                .bind(&simple_pattern)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| JournalError::Storage(e.to_string()))?
+                .rows_affected();
+        let checkpoint_deleted =
+            sqlx::query("DELETE FROM checkpoints WHERE actor_id LIKE $1 OR actor_id LIKE $2")
+                .bind(&qualified_pattern)
+                .bind(&simple_pattern)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| JournalError::Storage(e.to_string()))?
+                .rows_affected();
+        let event_deleted =
+            sqlx::query("DELETE FROM actor_events WHERE actor_id LIKE $1 OR actor_id LIKE $2")
+                .bind(&qualified_pattern)
+                .bind(&simple_pattern)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| JournalError::Storage(e.to_string()))?
+                .rows_affected();
+        let reminder_deleted =
+            sqlx::query("DELETE FROM reminders WHERE actor_id LIKE $1 OR actor_id LIKE $2")
+                .bind(&qualified_pattern)
+                .bind(&simple_pattern)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| JournalError::Storage(e.to_string()))?
+                .rows_affected();
+
+        tx.commit()
+            .await
+            .map_err(|e| JournalError::Storage(e.to_string()))?;
+
+        Ok(journal_deleted + checkpoint_deleted + event_deleted + reminder_deleted)
+    }
+
     // ==================== Event Sourcing Methods ====================
 
     async fn append_event(&self, event: &ActorEvent) -> JournalResult<u64> {
@@ -2941,6 +3127,58 @@ mod tests {
         let latest = storage.get_latest_checkpoint("actor-1").await.unwrap();
         assert_eq!(latest.sequence, 50);
         assert_eq!(latest.state_data, vec![5]);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_purge_namespace_removes_matching_actor_state() {
+        let storage = SqliteJournalStorage::new(":memory:").await.unwrap();
+
+        let matching_checkpoint = Checkpoint {
+            actor_id: "cart-1//abstractions::abstractions-rust@test-node".to_string(),
+            sequence: 1,
+            timestamp: Some(prost_types::Timestamp {
+                seconds: 1000,
+                nanos: 0,
+            }),
+            state_data: vec![1, 2, 3],
+            compression: 0,
+            metadata: HashMap::new(),
+            state_schema_version: 0,
+        };
+        let non_matching_checkpoint = Checkpoint {
+            actor_id: "cart-1//abstractions::other-app@test-node".to_string(),
+            sequence: 1,
+            timestamp: Some(prost_types::Timestamp {
+                seconds: 1001,
+                nanos: 0,
+            }),
+            state_data: vec![4, 5, 6],
+            compression: 0,
+            metadata: HashMap::new(),
+            state_schema_version: 0,
+        };
+
+        storage.save_checkpoint(&matching_checkpoint).await.unwrap();
+        storage
+            .save_checkpoint(&non_matching_checkpoint)
+            .await
+            .unwrap();
+
+        let deleted = storage.purge_namespace("abstractions-rust").await.unwrap();
+        assert!(deleted >= 1);
+
+        assert!(matches!(
+            storage
+                .get_latest_checkpoint("cart-1//abstractions::abstractions-rust@test-node")
+                .await,
+            Err(JournalError::CheckpointNotFound(_))
+        ));
+
+        let remaining = storage
+            .get_latest_checkpoint("cart-1//abstractions::other-app@test-node")
+            .await
+            .unwrap();
+        assert_eq!(remaining.state_data, vec![4, 5, 6]);
     }
 
     #[tokio::test]

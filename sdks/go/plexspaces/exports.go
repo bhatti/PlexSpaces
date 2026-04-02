@@ -22,7 +22,7 @@
 //
 // This file is excluded from native Go builds (only compiled for wasm).
 
-//go:build tinygo.wasm
+//go:build wasm
 
 package plexspaces
 

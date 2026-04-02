@@ -8,9 +8,7 @@
 // the ObjectRegistry from ServiceLocator (based on node config).
 
 use plexspaces_actor::ActorRef;
-use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, ServiceLocator,
-};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, BehaviorError, ServiceLocator};
 use plexspaces_facet::capabilities::registry::RegistryFacet;
 use plexspaces_mailbox::{new_message, Mailbox, Message};
 use plexspaces_node::{Node, NodeBuilder};
@@ -84,9 +82,7 @@ async fn shared_registry_test_node() -> Arc<Node> {
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("GenServer", || {
-            Box::pin(async move {
-                Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>)
-            })
+            Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>) })
         })
         .await;
     node.service_locator()

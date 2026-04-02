@@ -8,11 +8,11 @@
 // an in-memory ProcessGroupRegistry.
 
 use plexspaces_actor::ActorRef;
+use plexspaces_common::RequestContext;
 use plexspaces_core::{service_locator_trait::ServiceLocator, ActorId};
 use plexspaces_facet::capabilities::process_groups::{ProcessGroupFacet, ProcessGroupRegistry};
 use plexspaces_mailbox::{new_message, Message};
 use plexspaces_node::{Node, NodeBuilder};
-use plexspaces_common::RequestContext;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -170,9 +170,7 @@ async fn get_shared_node() -> Arc<Node> {
     let registry = BehaviorRegistry::new();
     registry
         .register_simple("GenServer", || {
-            Box::pin(async move {
-                Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>)
-            })
+            Box::pin(async move { Ok(Box::new(EchoBehavior) as Box<dyn plexspaces_core::Actor>) })
         })
         .await;
     node.service_locator()
@@ -229,11 +227,8 @@ enum ProcessGroupCase {
 }
 
 async fn run_process_group_case(node: &Arc<Node>, case: ProcessGroupCase, run_id: &str) {
-    let process_group_facet = ProcessGroupFacet::new(
-        Arc::new(TestProcessGroupRegistry::new()),
-        json!({}),
-        50,
-    );
+    let process_group_facet =
+        ProcessGroupFacet::new(Arc::new(TestProcessGroupRegistry::new()), json!({}), 50);
 
     let node_id = node.id();
     let actor_name = format!("pg-tbl-{}", ulid::Ulid::new());
@@ -262,7 +257,10 @@ async fn run_process_group_case(node: &Arc<Node>, case: ProcessGroupCase, run_id
         ProcessGroupCase::CreateJoinAndMembers => {
             let group_name = format!("tbl-{run_id}-g1");
             let reply = actor_ref
-                .ask(json_message(&json!(group_name), "create_group"), ASK_TIMEOUT)
+                .ask(
+                    json_message(&json!(group_name), "create_group"),
+                    ASK_TIMEOUT,
+                )
                 .await
                 .expect("Failed to create group");
             let response: serde_json::Value =

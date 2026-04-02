@@ -517,61 +517,6 @@
         ]
       }
     },
-    "/api/v1/actors/{namespace}/{actorId}": {
-      "delete": {
-        "summary": "Terminate Actor",
-        "description": "Gracefully terminate an actor by ID (permanent termination, pairs with SpawnActor)",
-        "operationId": "TerminateActor",
-        "responses": {
-          "200": {
-            "description": "A successful response.",
-            "schema": {
-              "$ref": "#/definitions/TerminateActorResponse"
-            }
-          },
-          "default": {
-            "description": "An unexpected error response.",
-            "schema": {
-              "$ref": "#/definitions/Status"
-            }
-          }
-        },
-        "parameters": [
-          {
-            "name": "namespace",
-            "description": "Namespace of the actor",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "actorId",
-            "description": "Actor ID to terminate",
-            "in": "path",
-            "required": true,
-            "type": "string"
-          },
-          {
-            "name": "force",
-            "description": "Optional: Force termination even if actor has pending messages\nWhen false (default): Actor completes pending messages before terminating\nWhen true: Actor terminates immediately, pending messages may be lost",
-            "in": "query",
-            "required": false,
-            "type": "boolean"
-          },
-          {
-            "name": "timeoutMs",
-            "description": "Optional: Timeout for graceful shutdown (in milliseconds)\nDefault: 5000ms (5 seconds)\nAfter timeout, actor is forcefully terminated",
-            "in": "query",
-            "required": false,
-            "type": "string",
-            "format": "uint64"
-          }
-        ],
-        "tags": [
-          "Actors"
-        ]
-      }
-    },
     "/api/v1/actors/{namespace}/{actorType}": {
       "get": {
         "summary": "Ask Reply",
@@ -8663,7 +8608,7 @@
           "title": "Error message (if success is false)"
         }
       },
-      "description": "Response from actor ask invocation",
+      "description": "Response from an actor ask request",
       "title": "Ask Reply Response"
     },
     "BackupInfo": {
@@ -11900,7 +11845,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "title": "Custom headers/metadata (extensible key-value pairs)\nExamples: \"content-type\", \"x-trace-id\", \"x-tenant-id\""
+          "title": "Custom headers/metadata (extensible key-value pairs)\nExamples: \"content-type\", \"x-trace-id\", \"x-request-id\""
         },
         "priority": {
           "type": "integer",
@@ -11934,11 +11879,11 @@
         },
         "uriPath": {
           "type": "string",
-          "title": "URI path for HTTP-based invocations (optional)\nPopulated when message originates from HTTP gateway\nExample: \"/api/v1/actors/default/counter/metrics\""
+          "title": "URI path for HTTP-based requests (optional)\nPopulated when message originates from HTTP gateway\nExample: \"/api/v1/actors/default/counter/metrics\""
         },
         "uriMethod": {
           "type": "string",
-          "title": "HTTP method for HTTP-based invocations (optional)\nExample: \"GET\", \"POST\", \"PUT\", \"DELETE\""
+          "title": "HTTP method for HTTP-based requests (optional)\nExample: \"GET\", \"POST\", \"PUT\", \"DELETE\""
         }
       },
       "description": "Universal message envelope for actor, channel, and pub/sub communication",
@@ -16127,35 +16072,6 @@
       },
       "description": "System performance metrics snapshot",
       "title": "System Metrics"
-    },
-    "TerminateActorResponse": {
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean",
-          "title": "Whether the actor was successfully terminated"
-        },
-        "actorId": {
-          "type": "string",
-          "title": "Actor ID that was terminated"
-        },
-        "messagesProcessed": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Number of pending messages that were processed before termination"
-        },
-        "messagesDropped": {
-          "type": "string",
-          "format": "uint64",
-          "title": "Number of pending messages that were dropped (if force=true)"
-        },
-        "errorMessage": {
-          "type": "string",
-          "title": "Error message if success is false"
-        }
-      },
-      "description": "Response from terminating an actor",
-      "title": "Terminate Actor Response"
     },
     "TimerRegistration": {
       "type": "object",

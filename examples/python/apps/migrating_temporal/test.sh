@@ -45,7 +45,7 @@ echo -e "${GREEN}Deployed $APP_ID${NC}"
 sleep 2
 
 send_op() {
-    curl -s --max-time "${3:-60}" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE:$1?timeout=${3:-60}" \
+    curl -s --max-time "${3:-60}" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE:$1/ask?timeout=${3:-60}" \
         -H "Content-Type: application/json" -d "$2" 2>/dev/null || echo '{"error":"timeout"}'
 }
 

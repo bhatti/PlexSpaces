@@ -47,6 +47,9 @@ from .decorators import (
     handler,
     state,
     init_handler,
+    run_handler,
+    signal_handler,
+    query_handler,
 )
 from .host import host
 from .workflow import default_retry_config, with_retry
@@ -62,6 +65,9 @@ __all__ = [
     "handler",
     "state",
     "init_handler",
+    "run_handler",
+    "signal_handler",
+    "query_handler",
     "host",
     "with_retry",
     "LeaderWorkerClient",

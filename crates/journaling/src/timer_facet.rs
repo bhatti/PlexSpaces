@@ -735,9 +735,9 @@ fn proto_duration_to_std(duration: &Option<prost_types::Duration>) -> Option<Dur
 mod tests {
     use super::*;
     use plexspaces_core::{ActorRef, ActorService, ServiceLocator};
+    use plexspaces_services::ServiceLocatorImpl;
     use prost_types;
     use std::sync::Arc;
-    use plexspaces_services::ServiceLocatorImpl;
 
     struct MockActorService;
     #[async_trait::async_trait]
@@ -768,7 +768,11 @@ mod tests {
     }
 
     async fn create_test_facet() -> TimerFacet {
-        TimerFacet::new(serde_json::json!({}), 75, create_test_service_locator().await)
+        TimerFacet::new(
+            serde_json::json!({}),
+            75,
+            create_test_service_locator().await,
+        )
     }
 
     fn create_test_timer_registration(

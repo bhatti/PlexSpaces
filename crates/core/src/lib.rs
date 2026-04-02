@@ -70,7 +70,7 @@ pub mod virtual_actor_manager;
 pub mod virtual_actor_registration;
 pub use virtual_actor_lifecycle_facet::{VirtualActorLifecycleFacet, VirtualActorLifecycleState};
 pub mod actor_state_checker;
-pub use actor_state_checker::ActorHandle;
+pub use actor_state_checker::ActorStateHandle;
 pub mod facet_service_wrapper;
 pub use facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 pub mod message_metrics;
@@ -130,7 +130,11 @@ pub use actor_registry::{ActorRegistry, ActorRegistryError, MonitorLink, Tempora
 // Re-export VirtualActorManager and VirtualActorMetadata (source of truth for virtual actors)
 pub use virtual_actor_manager::{VirtualActorError, VirtualActorManager, VirtualActorMetadata};
 // Re-export virtual actor registration helper
-pub use virtual_actor_registration::register_virtual_actor_type_consistent;
+pub use virtual_actor_registration::{
+    materialize_init_config_template, proto_facets_for_registration,
+    register_virtual_actor_definition, register_virtual_actor_type_consistent,
+    VirtualActorDefinitionRegistration,
+};
 // FacetManager re-exported from plexspaces-facet crate for convenience
 pub use plexspaces_facet::FacetManager;
 // Re-export MessageSender trait (for sending messages to actors)
@@ -401,6 +405,29 @@ pub trait Actor: Send + Sync {
         _reason: &ExitReason,
     ) -> Result<(), ActorError> {
         Ok(())
+    }
+
+    /// Capture actor state for durability checkpointing.
+    ///
+    /// Behaviors that can provide serialized checkpoint state override this
+    /// framework hook. Most actors use the default no-op implementation.
+    async fn capture_checkpoint_state(
+        &mut self,
+        _ctx: &ActorContext,
+    ) -> Result<Option<Vec<u8>>, ActorError> {
+        Ok(None)
+    }
+
+    /// Restore actor state from a serialized checkpoint.
+    ///
+    /// Behaviors that can restore from checkpoint bytes override this
+    /// framework hook. Most actors use the default no-op implementation.
+    async fn restore_checkpoint_state(
+        &mut self,
+        _ctx: &ActorContext,
+        _state_data: &[u8],
+    ) -> Result<bool, ActorError> {
+        Ok(false)
     }
 
     /// Called after all facets are attached and initialized (for behavior-specific initialization)

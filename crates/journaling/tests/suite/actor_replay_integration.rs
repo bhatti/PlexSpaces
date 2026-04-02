@@ -59,15 +59,7 @@ mod actor_integration_tests {
             service_locator,
             None,
         ));
-        ActorStruct::new(
-            id,
-            behavior,
-            mailbox,
-            tenant_id,
-            namespace,
-            None,
-        )
-        .set_context(context)
+        ActorStruct::new(id, behavior, mailbox, tenant_id, namespace, None).set_context(context)
     }
 
     /// Test actor: Counter with state

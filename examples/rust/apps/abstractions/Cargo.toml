@@ -1,0 +1,35 @@
+[workspace]
+
+[package]
+name = "abstractions-rust"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.1-or-later"
+publish = false
+description = "Unified Rust SDK abstractions example with native contract tests and deployable WASM app"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", default-features = false }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wit-bindgen = "0.51.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk" }
+plexspaces-actor = { path = "../../../../crates/actor" }
+plexspaces-behavior = { path = "../../../../crates/behavior" }
+plexspaces-core = { path = "../../../../crates/core" }
+plexspaces-journaling = { path = "../../../../crates/journaling" }
+async-trait = "0.1"
+serde_json = "1.0"
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

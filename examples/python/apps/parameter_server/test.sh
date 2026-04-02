@@ -128,7 +128,7 @@ sleep 2
 echo "Step 2: Trigger leader on ${ENTRY_NODE}"
 run_start=$(date +%s%N)
 RUN_RESPONSE=$(curl -s --max-time 120 -X POST \
-  "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$LEADER_ACTOR?timeout=120" \
+  "http://${ENTRY_HOST}:${ENTRY_PORT}/api/v1/actors/$APP_ID/$LEADER_ACTOR/ask?timeout=120" \
   -H "Content-Type: application/json" \
   -d "{\"op\":\"train\",\"iterations\":$TRAIN_ITERATIONS}" 2>/dev/null || echo '{"error":"timeout"}')
 run_end=$(date +%s%N)

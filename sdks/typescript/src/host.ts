@@ -218,7 +218,7 @@ export class Host {
   // ========================================================================
 
   /**
-   * Spawn a new actor. Delegates to ActorFactory::spawn_actor() via the host.
+   * Spawn a new actor through the framework-owned actor spawn path exposed by the host.
    * @param moduleRef - Actor type/module reference (must be deployed)
    * @param actorId - Unique ID for the new actor (empty = auto-generated ULID)
    * @param initConfig - Optional config passed to the new actor's init()

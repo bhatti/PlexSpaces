@@ -227,6 +227,11 @@ node:
   wasm_apps_directory: "/app/wasm"
 
 runtime:
+  db:
+    connection_string: "sqlite:///tmp/plexspaces-{}.db?mode=rwc"
+    pool_size: 10
+    auto_migrate: true
+
   grpc:
     enabled: true
     address: {}
@@ -272,7 +277,7 @@ shutdown:
   graceful_timeout_seconds: 30
   force_timeout_seconds: 10
 "#,
-        release_spec.name, release_spec.version, node, node, addr, addr, cert_dir
+        release_spec.name, release_spec.version, node, node, addr, node, addr, cert_dir
     );
 
     std::fs::write(&output, yaml.as_bytes())

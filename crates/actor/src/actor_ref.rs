@@ -264,7 +264,7 @@
 //! - No shared mutable state (immutable after creation)
 
 use async_trait::async_trait;
-use plexspaces_core::{ActorId, MessageSender, ReplyWaiter, RequestContext};
+use plexspaces_core::{ActorId, ActorStateHandle, MessageSender, ReplyWaiter, RequestContext};
 use plexspaces_mailbox::Mailbox;
 use plexspaces_proto::common::v1::Message;
 use std::sync::Arc;
@@ -352,6 +352,18 @@ pub struct ActorRef {
     /// Location-specific implementation (local vs remote)
     inner: ActorRefInner,
 
+    /// Actor type for typed discovery and observability.
+    ///
+    /// This is populated by framework registration once the concrete runtime type
+    /// is known. It is optional because temporary senders and some early lifecycle
+    /// paths do not have a meaningful actor type.
+    actor_type: Arc<RwLock<Option<String>>>,
+
+    /// Local-only runtime lifecycle/state access.
+    ///
+    /// Present only for local actors. Remote refs never expose local runtime state.
+    local_state_handle: Arc<RwLock<Option<Arc<dyn ActorStateHandle>>>>,
+
     /// Current temporary sender ID (if any)
     ///
     /// ## Purpose
@@ -425,6 +437,8 @@ impl ActorRef {
                 mailbox,
                 service_locator,
             },
+            actor_type: Arc::new(RwLock::new(None)),
+            local_state_handle: Arc::new(RwLock::new(None)),
             temporary_sender: Arc::new(RwLock::new(None)),
         }
     }
@@ -471,6 +485,8 @@ impl ActorRef {
                 node_id: node_id.into(),
                 service_locator,
             },
+            actor_type: Arc::new(RwLock::new(None)),
+            local_state_handle: Arc::new(RwLock::new(None)),
             temporary_sender: Arc::new(RwLock::new(None)),
         }
     }
@@ -658,6 +674,28 @@ impl ActorRef {
     /// - **tenant_id**: Stored in ActorRef. Source of truth is API → ActorBuilder → ActorRef.
     pub fn tenant_id(&self) -> &str {
         &self.tenant_id
+    }
+
+    /// Returns the registered actor type when known.
+    pub async fn actor_type(&self) -> Option<String> {
+        self.actor_type.read().await.clone()
+    }
+
+    /// Sets the registered actor type for this ref.
+    pub async fn set_actor_type(&self, actor_type: Option<String>) {
+        *self.actor_type.write().await = actor_type;
+    }
+
+    /// Returns the local lifecycle/state handle when this is a local actor.
+    pub async fn local_state_handle(&self) -> Option<Arc<dyn ActorStateHandle>> {
+        self.local_state_handle.read().await.clone()
+    }
+
+    /// Sets the local lifecycle/state handle for this ref.
+    ///
+    /// This is only used by the framework for local actor registration.
+    pub async fn set_local_state_handle(&self, handle: Option<Arc<dyn ActorStateHandle>>) {
+        *self.local_state_handle.write().await = handle;
     }
 
     /// Create RequestContext with tenant_id and namespace from this ActorRef.
@@ -1401,6 +1439,36 @@ impl MessageSender for ActorRef {
         Some(self.id().to_string())
     }
 
+    fn tenant_id(&self) -> Option<&str> {
+        Some(&self.tenant_id)
+    }
+
+    fn namespace(&self) -> Option<&str> {
+        Some(&self.namespace)
+    }
+
+    fn actor_type(&self) -> Option<String> {
+        self.actor_type
+            .try_read()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+
+    fn local_state_handle(&self) -> Option<Arc<dyn ActorStateHandle>> {
+        self.local_state_handle
+            .try_read()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+
+    async fn set_actor_type(&self, actor_type: Option<String>) {
+        ActorRef::set_actor_type(self, actor_type).await;
+    }
+
+    async fn set_local_state_handle(&self, handle: Option<Arc<dyn ActorStateHandle>>) {
+        ActorRef::set_local_state_handle(self, handle).await;
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -1414,6 +1482,7 @@ impl MessageSender for ActorRef {
 mod tests {
     use super::*;
     use plexspaces_core::ActorContext;
+    use plexspaces_core::ActorStateHandle;
     use plexspaces_mailbox::MailboxConfig;
     use ulid::Ulid;
 
@@ -1423,6 +1492,19 @@ mod tests {
             id: Ulid::new().to_string(),
             payload,
             ..Default::default()
+        }
+    }
+
+    struct TestStateHandle;
+
+    #[async_trait]
+    impl ActorStateHandle for TestStateHandle {
+        async fn actor_state(&self) -> plexspaces_proto::v1::actor::ActorState {
+            plexspaces_proto::v1::actor::ActorState::ActorStateActive
+        }
+
+        async fn stop_actor(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
         }
     }
 
@@ -1515,6 +1597,49 @@ mod tests {
         // Verify received
         let received = mailbox_clone.dequeue().await.unwrap();
         assert_eq!(received.id, format!("req-{}", message_id));
+    }
+
+    #[tokio::test]
+    async fn test_actor_ref_exposes_scope_and_local_state_handle_via_message_sender() {
+        let mailbox = Arc::new(
+            Mailbox::new(MailboxConfig::default(), "test-actor".to_string())
+                .await
+                .unwrap(),
+        );
+        let service_locator = create_test_service_locator().await;
+        let actor_ref = ActorRef::local("test-actor", "tenant-a", "ns-a", mailbox, service_locator);
+        actor_ref.set_actor_type(Some("Counter".to_string())).await;
+        actor_ref
+            .set_local_state_handle(Some(Arc::new(TestStateHandle)))
+            .await;
+
+        let sender: Arc<dyn MessageSender> = Arc::new(actor_ref);
+        assert_eq!(sender.tenant_id(), Some("tenant-a"));
+        assert_eq!(sender.namespace(), Some("ns-a"));
+        assert_eq!(sender.actor_type(), Some("Counter".to_string()));
+        let handle = sender
+            .local_state_handle()
+            .expect("local handle should exist");
+        assert_eq!(
+            handle.actor_state().await,
+            plexspaces_proto::v1::actor::ActorState::ActorStateActive
+        );
+    }
+
+    #[tokio::test]
+    async fn test_remote_actor_ref_does_not_expose_local_state_handle() {
+        let service_locator = create_test_service_locator().await;
+        let actor_ref = ActorRef::remote(
+            "test-actor@test-node-2",
+            "tenant-a",
+            "ns-a",
+            "test-node-2",
+            service_locator,
+        );
+        let sender: Arc<dyn MessageSender> = Arc::new(actor_ref);
+        assert_eq!(sender.tenant_id(), Some("tenant-a"));
+        assert_eq!(sender.namespace(), Some("ns-a"));
+        assert!(sender.local_state_handle().is_none());
     }
 
     // Helper struct for testing - need to make it accessible

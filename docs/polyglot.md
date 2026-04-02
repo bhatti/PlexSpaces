@@ -11,7 +11,7 @@ PlexSpaces supports **polyglot development** - you can write actors, application
 - ✅ **Isolation**: Each WASM module runs in isolation with resource limits
 - ✅ **Dynamic Deployment**: Deploy applications at runtime without restarting nodes
 
-> **📦 SDKs Available!** For Python, use the [PlexSpaces Python SDK](sdk.md) (decorator-based: `@actor`, `@handler`, `state()`). For TypeScript, use the [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) (inheritance-based: extend `PlexSpacesActor`, implement `on<Op>()` handlers). For Go, use the [PlexSpaces Go SDK](sdk.md#go-sdk) (interface-based: implement `Actor`, embed `BaseActor`). All target the same `plexspaces-simple-actor` WIT world.
+> **📦 SDKs Available!** For Python, use the [PlexSpaces Python SDK](sdk.md) (decorator-based: `@actor`, `@event_actor`, `@workflow_actor`, `@handler`, `state()`). For TypeScript, use the [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) (decorators for actor metadata plus base classes/runtime helpers). For Go, use the [PlexSpaces Go SDK](sdk.md#go-sdk) (typed actor definitions such as `GenServerActor`, `EventActor`, `WorkflowActorDefinition`). All target the same `plexspaces-simple-actor` WIT world.
 
 ### Protocol buffers and typed SDK models
 
@@ -127,6 +127,12 @@ Queues and pub/sub:
 - `queue_depth(ctx: context, queue: string) -> u32`
 
 **Use Cases**: Task queues, event streaming, pub/sub patterns
+
+At the SDK layer, most application-facing channel consumers should be modeled as **event actors**:
+
+- directed delivery: `send` to an `event_actor`
+- fan-out delivery: publish with process-group broadcast to a set of `event_actor` instances
+- framework queues and topics remain host/service capabilities rather than a second actor model in the SDK
 
 #### 6. **Durability** (`durability.wit`)
 State persistence and recovery:
@@ -1002,4 +1008,3 @@ brew install tinygo
 - [Javy](https://github.com/bytecodealliance/javy) - JavaScript/TypeScript to WASM compiler
 - [TinyGo](https://tinygo.org/) - Go to WASM compiler
 - [wasmtime](https://docs.wasmtime.dev/) - WASM runtime documentation
-

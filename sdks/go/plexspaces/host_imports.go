@@ -20,7 +20,7 @@
 //
 //	tinygo build -target=wasi -o actor.wasm .
 
-//go:build tinygo.wasm
+//go:build wasm
 
 package plexspaces
 

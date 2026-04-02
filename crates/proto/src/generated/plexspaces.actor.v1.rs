@@ -1579,51 +1579,6 @@ pub struct UnlinkActorResponse {
 // EntitySpace event notification and channel/subscriber architecture.
 // This is the foundation for metrics, tracing, and monitoring integration.
 
-/// Request to terminate an actor gracefully
-///
-/// ## Purpose
-/// Permanently terminates an actor, completing pending work and removing from system.
-/// Pairs with SpawnActorRequest for complete lifecycle management.
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct TerminateActorRequest {
-    /// Namespace of the actor
-    #[prost(string, tag="1")]
-    pub namespace: ::prost::alloc::string::String,
-    /// Actor ID to terminate
-    #[prost(string, tag="2")]
-    pub actor_id: ::prost::alloc::string::String,
-    /// Optional: Force termination even if actor has pending messages
-    /// When false (default): Actor completes pending messages before terminating
-    /// When true: Actor terminates immediately, pending messages may be lost
-    #[prost(bool, tag="3")]
-    pub force: bool,
-    /// Optional: Timeout for graceful shutdown (in milliseconds)
-    /// Default: 5000ms (5 seconds)
-    /// After timeout, actor is forcefully terminated
-    #[prost(uint64, tag="4")]
-    pub timeout_ms: u64,
-}
-/// Response from terminating an actor
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct TerminateActorResponse {
-    /// Whether the actor was successfully terminated
-    #[prost(bool, tag="1")]
-    pub success: bool,
-    /// Actor ID that was terminated
-    #[prost(string, tag="2")]
-    pub actor_id: ::prost::alloc::string::String,
-    /// Number of pending messages that were processed before termination
-    #[prost(uint64, tag="3")]
-    pub messages_processed: u64,
-    /// Number of pending messages that were dropped (if force=true)
-    #[prost(uint64, tag="4")]
-    pub messages_dropped: u64,
-    /// Error message if success is false
-    #[prost(string, tag="5")]
-    pub error_message: ::prost::alloc::string::String,
-}
 /// Request to check if actor exists
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

@@ -60,7 +60,9 @@ stateDiagram-v2
 
 ### ActorRef
 
-Lightweight, location-transparent handle to an actor:
+Lightweight, location-transparent handle to an actor. For local actors it can also carry
+framework-only lifecycle/state access used by the runtime; remote refs never expose that local
+state handle.
 
 ```rust
 pub struct ActorRef {
@@ -172,7 +174,7 @@ All message routing logic is centralized in `crates/actor/src/routing.rs` to ens
 1. **Generic Functions**: Not tied to specific instances (ActorRef, ActorService)
 2. **RequestContext First**: All functions take `RequestContext` as first parameter for tenant/namespace isolation
 3. **Return Futures**: All async functions return `Pin<Box<dyn Future>>` for parallel operations (map/reduce)
-4. **No Cyclic Dependencies**: Routing module doesn't depend on ActorRef or ActorService
+4. **No Cyclic Dependencies**: Routing module stays dependency-light and works with framework traits plus `RequestContext`
 
 **Parallel Operations**:
 
@@ -200,9 +202,9 @@ All routing functions include comprehensive metrics:
 - `plexspaces_routing_remote_route_error_total` - Counter for failed remote routes (by error code)
 - `plexspaces_routing_route_total` - Counter for routing decisions (by actor_id, node_id, local flag)
 
-**Tenant ID Propagation**:
+**Tenant and Namespace Propagation**:
 
-All routing functions accept `RequestContext` as the first parameter, ensuring proper tenant/namespace isolation. The `tenant_id` flows from API → ActorBuilder → ActorRef → RequestContext → routing functions.
+All routing functions accept `RequestContext` as the first parameter, ensuring proper tenant/namespace isolation. Tenant identity comes from authenticated request context, while namespace follows the actor/application scope carried through `ActorRef` and `RequestContext`.
 
 **Hash-Based Sharding**:
 
@@ -2245,19 +2247,21 @@ The endpoint determines semantics directly. There is no HTTP-level `invocation` 
 ### Actor Lookup
 
 **Efficient O(1) Lookup**:
-- `ActorRegistry` maintains `actor_type_index: HashMap<(tenant_id, actor_type), Vec<ActorId>>`
-- `discover_actors_by_type(tenant_id, actor_type)` returns matching actor IDs
+- `ActorRegistry` maintains `actor_type_index: HashMap<(tenant_id, namespace, actor_type), Vec<ActorId>>`
+- `discover_actors_by_type(ctx, actor_type)` returns matching actor IDs for the caller scope
 - Random selection if multiple actors found (load balancing)
 - Returns 404 if no actors found
 
 **Registration**:
 ```rust
 actor_registry.register_actor(
+    &ctx,                         // carries tenant_id + namespace
     actor_id,
     message_sender,
-    Some("counter".to_string()),  // actor_type
-    Some("tenant-1".to_string()), // tenant_id (from RequestContext or node config)
-    Some("ns-1".to_string()),     // namespace (from RequestContext or node config, can be empty)
+    "counter".to_string(),        // actor_type
+    config,
+    instance,
+    behavior_kind,
 ).await;
 ```
 
@@ -2444,8 +2448,12 @@ match message_type {
 ```rust
 // In ActorRef::ask() and ActorRef::tell()
 if target_actor_id.node_id == self.node_id {
-    // Local routing: direct mailbox enqueue
-    self.mailbox.enqueue(message).await?;
+    // Local routing: resolve scoped local ActorRef and deliver through the actor runtime
+    let sender = registry
+        .lookup_actor_in_scope(ctx.tenant_id(), ctx.namespace(), &target_actor_id)
+        .await
+        .ok_or_else(|| anyhow!("actor not found in scope"))?;
+    sender.tell(message).await?;
 } else {
     // Remote routing: gRPC client call
     let client = self.get_or_create_client(&target_actor_id.node_id).await?;

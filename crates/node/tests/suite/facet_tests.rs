@@ -46,7 +46,9 @@ async fn create_test_node() -> Node {
     NodeBuilder::new("test-node").build().await
 }
 
-fn create_timer_facet(service_locator: Arc<dyn plexspaces_core::ServiceLocator>) -> Box<TimerFacet> {
+fn create_timer_facet(
+    service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+) -> Box<TimerFacet> {
     Box::new(TimerFacet::new(serde_json::json!({}), 50, service_locator))
 }
 

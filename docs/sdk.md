@@ -13,6 +13,8 @@ The SDK is a **thin decorator layer** over the core framework crates. Core funct
 - **gRPC APIs**: Can be built separately for remote access
 - **No Duplication**: SDK doesn't reimplement core functionality, only simplifies usage
 
+Across languages, the authoring vocabulary is shared deliberately: `actor`, `gen_server_actor`, `event_actor`, `fsm_actor`, `workflow_actor`, plus `handler`, `init_handler`, `run_handler`, `signal_handler`, and `query_handler`. Rust exposes these as macros, Python and TypeScript as decorators, and Go as typed definition helpers.
+
 ## Available SDKs
 
 | Language | Status | Location | Build Target |
@@ -41,6 +43,15 @@ Generated code is **checked in** (same idea as `crates/proto/src/generated/`): e
 ### Virtual actor type registration (SDK parity)
 
 For native Rust, **`spawn_with_facets`** calls **`register_virtual_actor_type_consistent`** so virtual actor metadata (including all facet configs) is registered for reactivation. WASM application deploy does the same from `app-config.toml` / child specs. **`VirtualActorManager::get_virtual_actor_type`** returns type-level metadata; it **persists** when an instance is deactivated (vacation) and is removed when the application is **undeployed**.
+
+### Event actors as the channel abstraction
+
+For application code, prefer **`event_actor`** as the primary abstraction for channel-style workloads:
+
+- Use `event_actor` plus `handler(..., "cast")` for fire-and-forget event handling.
+- Use directed messaging for point-to-point delivery: `host.send(...)` in Python and TypeScript, `host.Send(...)` in Go, and the native actor APIs in Rust.
+- Use process-group broadcast for publish-style fan-out: `host.process_groups.broadcast(...)` in Python, `host.processGroups.broadcast(...)` in TypeScript, and `host.PG().Broadcast(...)` in Go.
+- Keep queue/topic implementation details in framework services and host bindings. SDKs should present event-oriented APIs rather than separate business-logic implementations of channels.
 
 ### Cross-SDK consistency: TupleSpace and Process Groups
 
@@ -165,13 +176,14 @@ When deploying via the HTTP API, the namespace is specified in the deploy reques
 |-----------|-------------|---------|
 | `@actor` | Define a PlexSpaces actor class (GenServer) | `@actor class MyActor:` |
 | `@actor(facets=[...])` | Actor with facet declaration | `@actor(facets=["durability"]) class DurableActor:` |
-| `@event_actor` | Event-handler (GenEvent): fire-and-forget, no request-reply | `@event_actor class AuditLog:` |
+| `@event_actor` | Event-handler (GenEvent): fire-and-forget, no request-reply; ideal for channel-style consumers | `@event_actor class AuditLog:` |
 | `@fsm_actor` | FSM actor (GenStateMachine): stateful transitions | `@fsm_actor class OrderFSM:` |
 | `@gen_server_actor` | Explicit GenServer (same as `@actor`) | `@gen_server_actor class Worker:` |
 | `@workflow_actor` | Workflow/orchestration actor | `@workflow_actor class Pipeline:` |
 | `@handler(*msg_types)` | Route messages to this method | `@handler("deposit")` |
 | `state(default=None, default_factory=None)` | Define persistent state field | `balance: int = state(default=0)` |
 | `@init_handler` | Custom initialization handler | `@init_handler def on_init(self, config):` |
+| `@run_handler` / `@signal_handler` / `@query_handler` | Workflow run, signal, and query entrypoints | `@signal_handler("cancel")` |
 
 #### Behavior Types
 
@@ -211,10 +223,10 @@ class OrderWorkflow:
 
 | Facet | WASM Behavior | Rust Behavior |
 |-------|---------------|---------------|
-| `durability` | Checkpoint-based persistence via `WasmConfig.durability_enabled` | `DurabilityFacet` attachment |
+| `durability` | `DurabilityFacet` with `get_state` / `set_state` adapter | `DurabilityFacet` attachment |
 | `registry` | Service discovery via `RegistryFacet` in app-config | `RegistryFacet` attachment |
 
-**WASM Durability**: WASM actors use checkpoint-based persistence (get_state/set_state pattern), not the Rust `DurabilityFacet`. The `facets=["durability"]` declaration documents that the actor expects durability to be enabled via `durability_enabled: true` in release.yaml or WasmConfig. For full mapping (facets → WasmConfig, where to set it), see [Durability: WASM Actor Durability and Durability Facet Parameter](durability.md#durability-facet-parameter-python-sdk).
+**WASM Durability**: WASM actors use the same `DurabilityFacet` lifecycle as native actors. The runtime automatically bridges the facet to the behavior's `get_state()` / `set_state()` implementation, so durable stop/reactivate restores the last checkpoint while non-durable stop/reactivate rebuilds from init-config. For full details, see [Durability: WASM Actor Durability](durability.md#wasm-actor-durability).
 
 #### State Persistence
 
@@ -443,9 +455,26 @@ class PaymentHandler:
             host.lock_release(f"refund:{tx_id}", lock_version)
 ```
 
-### Local Development with MinIO
+### Local Blob Storage
 
-For blob storage testing, run MinIO locally:
+The checked-in `release.yaml` used by [`scripts/server.sh`](/Users/shahzadbhatti/workspace/myspaces/scripts/server.sh) now uses the built-in local blob backend, so SDK examples can exercise blob APIs without extra services:
+
+```yaml
+runtime:
+  blob:
+    backend: local
+    bucket: plexspaces-blobs
+    endpoint: ""
+    region: ""
+    access_key_id: ""
+    secret_access_key: ""
+    use_ssl: false
+    prefix: "/tmp/plexspaces-blobs"
+```
+
+### Optional MinIO for S3-Compatible Testing
+
+For S3-compatible blob storage testing, run MinIO locally:
 
 ```bash
 # Start MinIO
@@ -467,13 +496,14 @@ Configure in `release.yaml`:
 ```yaml
 runtime:
   blob:
-    storage_type: s3
+    backend: minio
     bucket: plexspaces-blobs  # Must create this bucket in MinIO first
     endpoint: http://localhost:9000
     region: us-east-1
     access_key_id: minioadmin
     secret_access_key: minioadmin
-    force_path_style: true
+    use_ssl: false
+    prefix: "/plexspaces"
 ```
 
 ### Migration from Legacy Examples

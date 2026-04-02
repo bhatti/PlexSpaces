@@ -37,15 +37,13 @@
 #[cfg(feature = "sqs-backend")]
 mod tests {
     use plexspaces_channel::{Channel, SQSChannel};
-    use plexspaces_proto::channel::v1::{
-        ChannelConfig, DeliveryGuarantee, OrderingGuarantee,
+    use plexspaces_common::test_helpers::{
+        get_sqs_endpoint, setup_aws_local_env, sqs_simulator_available,
     };
+    use plexspaces_proto::channel::v1::{ChannelConfig, DeliveryGuarantee, OrderingGuarantee};
     use plexspaces_proto::common::v1::Message;
     use std::sync::Arc;
     use std::time::Duration;
-    use plexspaces_common::test_helpers::{
-        setup_aws_local_env, sqs_simulator_available, get_sqs_endpoint,
-    };
     use tokio::time::sleep;
 
     /// Same runtime pattern as DynamoDB integration tests: short TCP check to

@@ -195,7 +195,6 @@ impl TupleSpace {
 
         Self::from_config(config).await
     }
-
 }
 
 /// Helper function to parse JSON value into TupleSpaceConfig
@@ -261,5 +260,4 @@ mod tests {
         let space = TupleSpace::from_config(config).await.unwrap();
         drop(space);
     }
-
 }

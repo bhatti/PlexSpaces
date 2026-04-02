@@ -834,7 +834,6 @@ impl SpecApplication {
 
         Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -861,8 +860,7 @@ mod tests {
         async fn new(id: impl Into<String>) -> Self {
             use plexspaces_node::create_default_service_locator;
             let id_str = id.into();
-            let service_locator =
-                create_default_service_locator(Some(id_str.clone()), None).await;
+            let service_locator = create_default_service_locator(Some(id_str.clone()), None).await;
 
             // Register ActorFactory for tests (required by SpecApplication::initialize_supervisor_tree)
             use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;

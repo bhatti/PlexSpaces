@@ -348,7 +348,7 @@ async fn test_activate_virtual_actor_already_active() {
             wrapper,
             "TestActor".to_string(),
             None,
-            Some(Arc::new(actor) as Arc<dyn plexspaces_core::ActorHandle>),
+            Some(Arc::new(actor) as Arc<dyn plexspaces_core::ActorStateHandle>),
             None,
         )
         .await;
@@ -544,7 +544,8 @@ async fn test_spawn_built_actor_regular() {
 #[tokio::test]
 async fn test_spawn_built_actor_virtual_eager() {
     let service_locator = create_test_service_locator().await;
-    let factory = ActorFactoryImpl::new_arc(service_locator).await;
+    let registry = service_locator.actor_registry().await.unwrap();
+    let factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
 
     // Create virtual actor with eager activation
     let behavior = Box::new(TestBehavior::new());
@@ -576,6 +577,13 @@ async fn test_spawn_built_actor_virtual_eager() {
         result.is_ok(),
         "Spawn virtual actor with eager activation should succeed"
     );
+    assert!(
+        registry
+            .get_actor_instance(&"virtual-eager@test-node".to_string())
+            .await
+            .is_some(),
+        "eager virtual actor should use the same live runtime registration path as regular actors"
+    );
 
     // Wait a bit for actor to start
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -589,7 +597,8 @@ async fn test_spawn_built_actor_virtual_lazy() {
     let actor_id = format!("virtual-lazy-{}@test-node", test_id);
 
     let service_locator = create_test_service_locator().await;
-    let factory = ActorFactoryImpl::new_arc(service_locator).await;
+    let registry = service_locator.actor_registry().await.unwrap();
+    let factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
 
     // Create virtual actor with lazy activation
     let behavior = Box::new(TestBehavior::new());
@@ -622,6 +631,10 @@ async fn test_spawn_built_actor_virtual_lazy() {
         result.is_ok(),
         "Spawn virtual actor with lazy activation should succeed"
     );
+    assert!(
+        registry.get_actor_instance(&actor_id).await.is_none(),
+        "lazy virtual actor should register only metadata until first activation"
+    );
 }
 
 #[tokio::test]
@@ -632,7 +645,8 @@ async fn test_spawn_built_actor_virtual_prewarm() {
     let actor_id = format!("virtual-prewarm-{}@test-node", test_id);
 
     let service_locator = create_test_service_locator().await;
-    let factory = ActorFactoryImpl::new_arc(service_locator).await;
+    let registry = service_locator.actor_registry().await.unwrap();
+    let factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
 
     // Create virtual actor with prewarm activation
     let behavior = Box::new(TestBehavior::new());
@@ -664,6 +678,10 @@ async fn test_spawn_built_actor_virtual_prewarm() {
     assert!(
         result.is_ok(),
         "Spawn virtual actor with prewarm activation should succeed"
+    );
+    assert!(
+        registry.get_actor_instance(&actor_id).await.is_some(),
+        "prewarm virtual actor should use the unified live runtime spawn path"
     );
 }
 

@@ -517,7 +517,8 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-tenant-id", "test-tenant".parse().unwrap());
 
-        let result = effective_tenant_id_from_jwt_or_headers(&None, false, Some("secret"), &headers);
+        let result =
+            effective_tenant_id_from_jwt_or_headers(&None, false, Some("secret"), &headers);
         assert_eq!(result, "");
     }
 }

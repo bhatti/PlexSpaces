@@ -161,7 +161,9 @@ fn kv_config_from_storage_provider(
     provider_config: &StorageProviderConfig,
     shared_db: Option<&SharedDbConfig>,
 ) -> KVResult<KVConfig> {
-    match StorageProvider::try_from(provider_config.provider).unwrap_or(StorageProvider::StorageProviderUnspecified) {
+    match StorageProvider::try_from(provider_config.provider)
+        .unwrap_or(StorageProvider::StorageProviderUnspecified)
+    {
         StorageProvider::StorageProviderSqlite => {
             let sqlite = match provider_config.config.as_ref() {
                 Some(storage_provider_config::Config::Sqlite(sqlite)) => sqlite,
@@ -255,11 +257,8 @@ pub async fn create_keyvalue_stores_from_storage_config(
     Arc<dyn KeyValueStore>,
     Arc<dyn plexspaces_common::KeyValueStore>,
 )> {
-    create_keyvalue_stores_from_config(kv_config_from_storage_provider(
-        provider_config,
-        shared_db,
-    )?)
-    .await
+    create_keyvalue_stores_from_config(kv_config_from_storage_provider(provider_config, shared_db)?)
+        .await
 }
 
 /// Create both rich and common KeyValue store trait objects from explicit configuration.
@@ -525,7 +524,9 @@ mod tests {
             ..Default::default()
         };
 
-        let (kv, _) = create_keyvalue_stores_from_shared_db(&shared_db).await.unwrap();
+        let (kv, _) = create_keyvalue_stores_from_shared_db(&shared_db)
+            .await
+            .unwrap();
         let ctx = plexspaces_common::RequestContext::new_without_auth(
             "test-tenant".to_string(),
             "default".to_string(),

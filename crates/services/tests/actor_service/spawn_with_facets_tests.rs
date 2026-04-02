@@ -162,8 +162,7 @@ async fn create_test_service_locator_with_facets() -> Arc<ServiceLocatorImpl> {
         "test-node".to_string(),
     ));
 
-    let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())

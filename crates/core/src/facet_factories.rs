@@ -404,7 +404,7 @@ impl FacetFactory for ProcessGroupFacetFactory {
 
     fn metadata(&self) -> FacetMetadata {
         FacetMetadata {
-            facet_type: "process_groups".to_string(),
+            facet_type: "process_group".to_string(),
             attached_at: std::time::Instant::now(),
             config: serde_json::Value::Null,
             priority:
@@ -1236,10 +1236,10 @@ mod tests {
         let facet = factory.create(config).await;
         assert!(facet.is_ok());
         let facet = facet.unwrap();
-        assert_eq!(facet.facet_type(), "process_groups");
+        assert_eq!(facet.facet_type(), "process_group");
 
         let metadata = factory.metadata();
-        assert_eq!(metadata.facet_type, "process_groups");
+        assert_eq!(metadata.facet_type, "process_group");
     }
 
     #[tokio::test]

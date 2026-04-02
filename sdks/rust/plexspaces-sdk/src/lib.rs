@@ -473,27 +473,25 @@ where
     // Uses centralized helper for consistent behavior across SDK, WASM, and app-config.toml
     let has_virtual_actor_facet = facets.iter().any(|f| f.facet_type() == "virtual_actor");
     if has_virtual_actor_facet {
-        // Get actor_type from behavior.behavior_type()
         let behavior_type = behavior.behavior_type();
-        let actor_type = match behavior_type {
-            plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
-            plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
-            plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
-            plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
-            plexspaces_core::BehaviorType::Custom(s) => s,
-        };
+        let actor_type = actor_type_from_behavior(&behavior_type);
 
-        // Use centralized helper for consistent registration
-        // Errors are logged but non-fatal (actor will still work, just no auto-activation)
-        let _ = plexspaces_core::register_virtual_actor_type_consistent(
+        let _ = plexspaces_core::register_virtual_actor_definition(
             &service_locator,
-            actor_type,
-            namespace_str.clone(),
-            Some(&facets),
-            None,                              // No proto facets for SDK
-            None,                              // config - can be provided later if needed
-            Some(ctx.tenant_id().to_string()), // tenant_id from context
-            None, // init_config_template - not used for SDK actors (only WASM actors)
+            plexspaces_core::VirtualActorDefinitionRegistration {
+                actor_type: actor_type.clone(),
+                behavior_kind: Some(actor_type),
+                namespace: namespace_str.clone(),
+                actor_config: None,
+                proto_facets: plexspaces_core::proto_facets_for_registration(Some(&facets), None),
+                facet_config:
+                    plexspaces_facet::facet_helpers::extract_facet_config_for_registration(
+                        Some(&facets),
+                        None,
+                    ),
+                tenant_id: Some(ctx.tenant_id().to_string()),
+                init_config_template: None,
+            },
         )
         .await;
     }
@@ -522,7 +520,7 @@ where
 /// in main crates; SDK provides a typed wrapper around the framework-owned spawn result.
 ///
 /// ## Design Notes
-/// - **Core Functionality**: `ActorFactory::spawn_actor()` handles BehaviorRegistry lookup and actor creation
+/// - **Core Functionality**: the framework-owned spawn path handles BehaviorRegistry lookup and actor creation
 /// - **SDK Role**: Converts the spawned `MessageSender` into the framework's canonical `ActorRef`
 /// - **Local Spawn Contract**: BehaviorRegistry-based spawns are local, so the returned sender must already be a local `ActorRef`
 ///
@@ -584,6 +582,17 @@ pub async fn spawn_with_behavior_type(
     Ok(actor_ref)
 }
 
+#[cfg(feature = "native")]
+fn actor_type_from_behavior(behavior_type: &plexspaces_core::BehaviorType) -> String {
+    match behavior_type {
+        plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
+        plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
+        plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
+        plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
+        plexspaces_core::BehaviorType::Custom(s) => s.clone(),
+    }
+}
+
 // ============================================================================
 // Facet creation helper
 // ============================================================================
@@ -619,28 +628,20 @@ pub fn create_facets(
     for name in facet_names {
         match *name {
             "timer" => {
+                let timer_config =
+                    plexspaces_core::facet_helpers::facet_config_value(config, "timer");
                 let timer = plexspaces_journaling::TimerFacet::new(
-                    serde_json::json!({}),
+                    timer_config,
                     50,
                     service_locator.clone(),
                 );
                 facets.push(Box::new(timer));
             }
             "virtual_actor" => {
-                // VirtualActorFacet with default config (uses constants from plexspaces-common)
-                // TODO: Use runtime config from ServiceLocator when available (Phase 1.4)
-                use plexspaces_common::to_config_str;
-                use plexspaces_common::virtual_actor_config::{
-                    DEFAULT_ACTIVATION_STRATEGY, DEFAULT_IDLE_TIMEOUT_SECONDS,
-                };
-                let facet_config = if config.get("virtual_actor").is_some() {
-                    config["virtual_actor"].clone()
-                } else {
-                    serde_json::json!({
-                        "idle_timeout": format!("{}s", DEFAULT_IDLE_TIMEOUT_SECONDS),
-                        "activation_strategy": to_config_str(&DEFAULT_ACTIVATION_STRATEGY)
-                    })
-                };
+                let facet_config =
+                    plexspaces_core::facet_helpers::default_virtual_actor_facet_config(Some(
+                        config,
+                    ));
                 use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
                 let virtual_facet = plexspaces_journaling::VirtualActorFacet::new(
                     facet_config,
@@ -704,28 +705,20 @@ pub fn create_facets_with_storage(
     for name in facet_names {
         match *name {
             "timer" => {
+                let timer_config =
+                    plexspaces_core::facet_helpers::facet_config_value(config, "timer");
                 let timer = plexspaces_journaling::TimerFacet::new(
-                    serde_json::json!({}),
+                    timer_config,
                     50,
                     service_locator.clone(),
                 );
                 facets.push(Box::new(timer));
             }
             "virtual_actor" => {
-                // VirtualActorFacet with default config (uses constants from plexspaces-common)
-                // TODO: Use runtime config from ServiceLocator when available (Phase 1.4)
-                use plexspaces_common::to_config_str;
-                use plexspaces_common::virtual_actor_config::{
-                    DEFAULT_ACTIVATION_STRATEGY, DEFAULT_IDLE_TIMEOUT_SECONDS,
-                };
-                let facet_config = if config.get("virtual_actor").is_some() {
-                    config["virtual_actor"].clone()
-                } else {
-                    serde_json::json!({
-                        "idle_timeout": format!("{}s", DEFAULT_IDLE_TIMEOUT_SECONDS),
-                        "activation_strategy": to_config_str(&DEFAULT_ACTIVATION_STRATEGY)
-                    })
-                };
+                let facet_config =
+                    plexspaces_core::facet_helpers::default_virtual_actor_facet_config(Some(
+                        config,
+                    ));
                 use plexspaces_journaling::VIRTUAL_ACTOR_FACET_DEFAULT_PRIORITY;
                 let virtual_facet = plexspaces_journaling::VirtualActorFacet::new(
                     facet_config,
@@ -735,17 +728,27 @@ pub fn create_facets_with_storage(
             }
             "durability" => {
                 if let Some(ref storage) = storage {
-                    let facet_config = if config.get("durability").is_some() {
-                        config["durability"].clone()
-                    } else {
-                        serde_json::json!({})
-                    };
+                    let facet_config =
+                        plexspaces_core::facet_helpers::facet_config_value(config, "durability");
                     let durability_facet = plexspaces_journaling::DurabilityFacet::new(
                         storage.clone(),
                         facet_config,
                         90, // priority
                     );
                     facets.push(Box::new(durability_facet));
+                }
+            }
+            "reminder" => {
+                if let Some(ref storage) = storage {
+                    let facet_config =
+                        plexspaces_core::facet_helpers::facet_config_value(config, "reminder");
+                    let reminder_facet = plexspaces_journaling::ReminderFacet::new(
+                        storage.clone(),
+                        facet_config,
+                        plexspaces_journaling::REMINDER_FACET_DEFAULT_PRIORITY,
+                        service_locator.clone(),
+                    );
+                    facets.push(Box::new(reminder_facet));
                 }
             }
             _ => {
@@ -973,10 +976,11 @@ where
 
 #[cfg(all(test, feature = "native"))]
 mod tests {
-    use super::actor_ref_from_sender;
+    use super::{actor_ref_from_sender, create_facets, create_facets_with_storage};
     use async_trait::async_trait;
     use plexspaces_actor::{ActorRef, TestServiceLocatorStub};
     use plexspaces_core::{Message, MessageSender, ServiceLocator};
+    use plexspaces_journaling::SqliteJournalStorage;
     use std::sync::Arc;
 
     struct NonActorRefSender;
@@ -1022,5 +1026,51 @@ mod tests {
             error.to_string().contains("not a local ActorRef"),
             "unexpected error: {error}"
         );
+    }
+
+    #[tokio::test]
+    async fn create_facets_uses_shared_virtual_actor_defaults() {
+        let service_locator: Arc<dyn ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+        let facets = create_facets(&["virtual_actor"], &serde_json::json!({}), service_locator)
+            .expect("expected virtual actor facet");
+
+        assert_eq!(facets.len(), 1);
+        let config = facets[0].get_config();
+        assert_eq!(
+            config["activation_strategy"].as_str(),
+            Some("lazy"),
+            "shared default activation strategy should be used"
+        );
+        assert!(
+            config.get("idle_timeout").is_some(),
+            "shared default idle timeout should be present"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_facets_with_storage_builds_reminder_and_durability_facets() {
+        let service_locator: Arc<dyn ServiceLocator> = Arc::new(TestServiceLocatorStub::new());
+        let storage = Arc::new(
+            SqliteJournalStorage::new(":memory:")
+                .await
+                .expect("sqlite journal storage"),
+        );
+
+        let facets = create_facets_with_storage(
+            &["reminder", "durability", "virtual_actor"],
+            &serde_json::json!({
+                "reminder": { "tick_interval_ms": 2500 },
+                "durability": { "checkpoint_interval": 5 }
+            }),
+            Some(storage),
+            service_locator,
+        )
+        .expect("expected reminder and durability facets");
+
+        assert_eq!(facets.len(), 3);
+        let facet_types: Vec<&str> = facets.iter().map(|facet| facet.facet_type()).collect();
+        assert!(facet_types.contains(&"reminder"));
+        assert!(facet_types.contains(&"durability"));
+        assert!(facet_types.contains(&"virtual_actor"));
     }
 }

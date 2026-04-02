@@ -95,6 +95,69 @@ fn parse_behavior_kind(s: Option<&str>) -> plexspaces_core::BehaviorType {
     }
 }
 
+fn actor_id_from_initial_state(
+    initial_state: &[u8],
+    child_id: &str,
+    namespace: &str,
+    node_id: &str,
+) -> String {
+    serde_json::from_slice::<serde_json::Value>(initial_state)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("actor_id")
+                .and_then(|actor_id| actor_id.as_str())
+                .map(str::trim)
+                .filter(|actor_id| !actor_id.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| {
+            plexspaces_core::actor_id::build_actor_id(child_id, child_id, Some(namespace), node_id)
+        })
+}
+
+fn init_config_from_initial_state_or_child_spec(
+    initial_state: &[u8],
+    child_spec: &plexspaces_proto::application::v1::ChildSpec,
+    actor_id: &str,
+) -> Vec<u8> {
+    if !initial_state.is_empty() {
+        return initial_state.to_vec();
+    }
+
+    let mut init_config = serde_json::Map::new();
+    init_config.insert(
+        "actor_id".to_string(),
+        serde_json::Value::String(actor_id.to_string()),
+    );
+    if let Some(ref bk) = child_spec.behavior_kind {
+        init_config.insert(
+            "behavior_kind".to_string(),
+            serde_json::Value::String(bk.clone()),
+        );
+    }
+    if !child_spec.args.is_empty() {
+        let args_obj: serde_json::Map<String, serde_json::Value> = child_spec
+            .args
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+            .collect();
+        init_config.insert("args".to_string(), serde_json::Value::Object(args_obj));
+    }
+    serde_json::to_vec(&serde_json::Value::Object(init_config)).unwrap_or_default()
+}
+
+fn wasm_config_for_child_spec(
+    child_spec: &plexspaces_proto::application::v1::ChildSpec,
+) -> plexspaces_wasm_runtime::WasmConfig {
+    let mut config = plexspaces_wasm_runtime::WasmConfig::default();
+    config.durability_enabled = child_spec
+        .facets
+        .iter()
+        .any(|facet| facet.r#type == "durability");
+    config
+}
+
 /// - Wraps a WasmInstance (which holds the WASM module and state)
 /// - Forwards handle_message calls to WASM instance
 /// - Handles serialization/deserialization of messages
@@ -106,84 +169,6 @@ struct WasmActorBehavior {
 
 #[async_trait]
 impl Actor for WasmActorBehavior {
-    /// Initialize actor by restoring state from checkpoint if available
-    ///
-    /// ## Purpose
-    /// Implements Cloudflare Durable Objects pattern for WASM actors.
-    /// On startup, loads latest checkpoint and calls set-state() to restore state.
-    async fn init(
-        &mut self,
-        _ctx: &plexspaces_core::ActorContext,
-    ) -> Result<(), plexspaces_core::ActorError> {
-        // Load checkpoint if available (Cloudflare DO pattern)
-        match self.instance.load_checkpoint().await {
-            Ok(bytes_loaded) => {
-                if bytes_loaded > 0 {
-                    tracing::info!(
-                        actor_type = %self.actor_type,
-                        bytes = bytes_loaded,
-                        "WASM actor state restored from checkpoint"
-                    );
-                }
-                Ok(())
-            }
-            Err(e) => {
-                // Log warning but don't fail init - actor can start fresh
-                tracing::warn!(
-                    actor_type = %self.actor_type,
-                    error = %e,
-                    "WASM actor checkpoint load failed, starting fresh"
-                );
-                Ok(())
-            }
-        }
-    }
-
-    /// Cleanup by saving state checkpoint before actor stops
-    ///
-    /// ## Purpose
-    /// Saves actor state to checkpoint storage for durability.
-    /// On restart, init() will restore this checkpoint.
-    async fn terminate(
-        &mut self,
-        _ctx: &plexspaces_core::ActorContext,
-        _reason: &plexspaces_core::ExitReason,
-    ) -> Result<(), plexspaces_core::ActorError> {
-        // Save checkpoint on shutdown (Cloudflare DO pattern)
-        match self.instance.save_checkpoint().await {
-            Ok(bytes_saved) => {
-                if bytes_saved > 0 {
-                    tracing::info!(
-                        actor_type = %self.actor_type,
-                        bytes = bytes_saved,
-                        "WASM actor state checkpointed on shutdown"
-                    );
-                }
-                Ok(())
-            }
-            Err(e) => {
-                let err_str = e.to_string();
-                // Component may be poisoned (cannot enter) after trap; log WARN and skip
-                if err_str.to_lowercase().contains("cannot enter")
-                    || err_str.to_lowercase().contains("cannot enter component")
-                {
-                    tracing::warn!(
-                        actor_type = %self.actor_type,
-                        error = %err_str,
-                        "WASM checkpoint save skipped (component poisoned or busy)"
-                    );
-                } else {
-                    tracing::error!(
-                        actor_type = %self.actor_type,
-                        error = %e,
-                        "WASM actor checkpoint save failed on shutdown"
-                    );
-                }
-                Ok(())
-            }
-        }
-    }
-
     async fn handle_message(
         &mut self,
         ctx: &plexspaces_core::ActorContext,
@@ -318,6 +303,36 @@ impl Actor for WasmActorBehavior {
     fn behavior_kind(&self) -> BehaviorType {
         self.behavior_kind.clone()
     }
+
+    async fn capture_checkpoint_state(
+        &mut self,
+        _ctx: &plexspaces_core::ActorContext,
+    ) -> Result<Option<Vec<u8>>, plexspaces_core::ActorError> {
+        let state = self
+            .instance
+            .get_state_component()
+            .await
+            .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))?;
+        Ok(Some(state))
+    }
+
+    async fn restore_checkpoint_state(
+        &mut self,
+        _ctx: &plexspaces_core::ActorContext,
+        state_data: &[u8],
+    ) -> Result<bool, plexspaces_core::ActorError> {
+        let state_json = String::from_utf8(state_data.to_vec()).map_err(|e| {
+            plexspaces_core::ActorError::BehaviorError(format!(
+                "Checkpoint state is not valid UTF-8 JSON: {}",
+                e
+            ))
+        })?;
+        self.instance
+            .set_state_component(&state_json)
+            .await
+            .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))?;
+        Ok(true)
+    }
 }
 
 /// WASM-based application implementation
@@ -342,6 +357,8 @@ pub struct WasmApplication {
     spec: Option<ApplicationSpec>,
     /// Spawned actor IDs (for graceful shutdown)
     spawned_actor_ids: Arc<RwLock<Vec<String>>>,
+    /// Actor IDs most recently stopped during shutdown, retained for undeploy cleanup.
+    last_stopped_actor_ids: Arc<RwLock<Vec<String>>>,
     /// Node reference for stopping actors
     node: Arc<RwLock<Option<Arc<dyn ApplicationNode>>>>,
     /// Root supervisor for actor management and restart
@@ -379,6 +396,7 @@ impl WasmApplication {
             root_supervisor: Arc::new(RwLock::new(None)),
             spec,
             spawned_actor_ids: Arc::new(RwLock::new(Vec::new())),
+            last_stopped_actor_ids: Arc::new(RwLock::new(Vec::new())),
             node: Arc::new(RwLock::new(None)),
             tenant_id: Arc::new(RwLock::new(String::new())),
             namespace: Arc::new(RwLock::new(String::new())),
@@ -446,6 +464,7 @@ impl WasmApplication {
         module_hash: &str,
         runtime: Arc<dyn plexspaces_core::WasmRuntimeTrait>,
         actor_id: &str,
+        initial_state: &[u8],
     ) -> Result<Arc<WasmInstance>, ApplicationError> {
         // Get ServiceLocator from node
         let service_locator = node
@@ -503,7 +522,7 @@ impl WasmApplication {
 
         let module_any: Arc<dyn std::any::Any + Send + Sync> = module.clone();
         let config_any: Arc<dyn std::any::Any + Send + Sync> =
-            Arc::new(plexspaces_wasm_runtime::WasmConfig::default());
+            Arc::new(wasm_config_for_child_spec(child_spec));
 
         // Create MessageSender for inter-actor communication (host.ask, host.tell)
         let message_sender: Option<Arc<dyn std::any::Any + Send + Sync>> = {
@@ -519,32 +538,10 @@ impl WasmApplication {
             }
         };
 
-        // Build init config from child_spec so actors know their role.
-        // This enables Erlang-style ApplicationSpec where one WASM module
-        // serves multiple actor types (e.g., ParameterServer + DataWorker).
-        // actor_id is the full name:namespace@node_id so WASM actors can
-        // construct full sibling IDs for inter-actor messaging.
-        let mut init_config = serde_json::Map::new();
-        init_config.insert(
-            "actor_id".to_string(),
-            serde_json::Value::String(actor_id.to_string()),
-        );
-        if let Some(ref bk) = child_spec.behavior_kind {
-            init_config.insert(
-                "behavior_kind".to_string(),
-                serde_json::Value::String(bk.clone()),
-            );
-        }
-        if !child_spec.args.is_empty() {
-            let args_obj: serde_json::Map<String, serde_json::Value> = child_spec
-                .args
-                .iter()
-                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-                .collect();
-            init_config.insert("args".to_string(), serde_json::Value::Object(args_obj));
-        }
+        // Virtual actor reactivation must reuse the original/materialized init payload so the
+        // guest sees the same identity, role, and facet-facing config as the framework runtime.
         let init_config_json =
-            serde_json::to_vec(&serde_json::Value::Object(init_config)).unwrap_or_default();
+            init_config_from_initial_state_or_child_spec(initial_state, child_spec, actor_id);
 
         let instance_any = runtime
             .instantiate(
@@ -673,7 +670,7 @@ impl WasmApplication {
             // Register async behavior constructor
             let behavior_name_for_error = behavior_name.clone();
             registry
-                .register(behavior_name.clone(), move |_initial_state: &[u8]| {
+                .register(behavior_name.clone(), move |initial_state: &[u8]| {
                     // Clone captured variables for async block
                     let rt = runtime_clone.clone();
                     let hash = module_hash_clone.clone();
@@ -681,15 +678,21 @@ impl WasmApplication {
                     let node_ref = node_clone.clone();
                     let nid = node_id_clone.clone();
                     let name_for_error = behavior_name_for_error.clone();
+                    let initial_state = initial_state.to_vec();
 
                     // Create WASM instance asynchronously (no block_on deadlock)
                     let ns = namespace_clone.clone();
                     Box::pin(async move {
-                        // Generate actor_id with consistent name:namespace@node_id format
-                        let actor_id = format!("{}:{}@{}", spec.id, ns, nid);
+                        let actor_id =
+                            actor_id_from_initial_state(&initial_state, &spec.id, &ns, &nid);
 
                         let instance = Self::create_wasm_instance_for_behavior(
-                            node_ref, &spec, &hash, rt, &actor_id,
+                            node_ref,
+                            &spec,
+                            &hash,
+                            rt,
+                            &actor_id,
+                            &initial_state,
                         )
                         .await
                         .map_err(|e| {
@@ -1271,6 +1274,7 @@ impl WasmApplication {
             module_hash,
             runtime,
             actor_id,
+            &[],
         )
         .await?;
         let behavior_kind = parse_behavior_kind(child_spec.behavior_kind.as_deref());
@@ -1521,34 +1525,7 @@ impl WasmApplication {
 
         // Register in ActorRegistry
         if let Some(registry) = service_locator.actor_registry().await {
-            use plexspaces_core::RequestContext;
-            // Use tenant_id/namespace from API request (passed as parameters), not "internal"
-            let ctx = RequestContext::new_without_auth(tenant_id.clone(), namespace.clone());
-
-            // Create ActorRef for registry
-            let mailbox = actor.mailbox().clone();
-            let actor_ref_for_registry: Arc<dyn plexspaces_core::MessageSender> = Arc::new(
-                // CRITICAL: Pass tenant_id from RequestContext to ActorRef (empty for WASM applications)
-                plexspaces_actor::ActorRef::local(
-                    actor_id.clone(),
-                    String::new(),
-                    namespace.clone(),
-                    mailbox,
-                    service_locator.clone(),
-                ),
-            );
-
-            registry
-                .register_actor(
-                    &ctx,
-                    actor_id.clone(),
-                    actor_ref_for_registry,
-                    child_spec.id.clone(),
-                    actor.context().config.clone(),
-                    Some(Arc::new(actor) as Arc<dyn plexspaces_core::ActorHandle>),
-                    None, // behavior_kind not available from application spawn path
-                )
-                .await;
+            actor.register_started(&registry).await;
         }
 
         Ok(actor_id)
@@ -1662,7 +1639,12 @@ impl WasmApplication {
     /// - Default timeout: 5 seconds per actor
     /// - If timeout is reached, logs a warning and continues (doesn't fail)
     /// - If actor not found, treats as success (already stopped)
-    async fn stop_actor_gracefully(&self, actor_id: &str) -> Result<(), ApplicationError> {
+    async fn stop_actor_gracefully(
+        &self,
+        actor_id: &str,
+        progress_index: usize,
+        total_actors: usize,
+    ) -> Result<(), ApplicationError> {
         use plexspaces_core::RequestContext;
         use tokio::time::{timeout, Duration};
 
@@ -1675,15 +1657,6 @@ impl WasmApplication {
         if let Some(node) = node_ref {
             // Stop actor with timeout (default: 5 seconds per actor)
             let timeout_duration = Duration::from_secs(5);
-
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                    application = %self.name,
-                    actor_id = %actor_id,
-                    timeout_seconds = timeout_duration.as_secs(),
-                    "Stopping actor with timeout"
-                );
-            }
 
             // Use ActorFactory directly from ServiceLocator
             let _service_locator = node.service_locator().ok_or_else(|| {
@@ -1707,7 +1680,7 @@ impl WasmApplication {
             // Application owns its actors, so it can stop them
             let tenant_id = self.tenant_id.read().await.clone();
             let namespace = self.namespace.read().await.clone();
-            let ctx = RequestContext::new_without_auth(tenant_id, namespace);
+            let ctx = RequestContext::new_without_auth(tenant_id, namespace.clone());
 
             let actor_id_string = actor_id.to_string();
             match timeout(
@@ -1717,11 +1690,19 @@ impl WasmApplication {
             .await
             {
                 Ok(Ok(())) => {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
+                    if tracing::enabled!(tracing::Level::INFO) {
+                        let node_id = actor_id
+                            .rsplit_once('@')
+                            .map(|(_, node_id)| node_id)
+                            .unwrap_or("");
+                        tracing::info!(
                             application = %self.name,
                             actor_id = %actor_id,
-                            "Actor stopped successfully"
+                            node_id = %node_id,
+                            namespace = %namespace,
+                            progress = format!("{}/{}", progress_index, total_actors),
+                            timeout_seconds = timeout_duration.as_secs(),
+                            "Actor stopped successfully during application shutdown"
                         );
                     }
                     Ok(())
@@ -1925,16 +1906,10 @@ impl Application for WasmApplication {
             let mut stopped_count = 0;
 
             for (idx, actor_id) in actor_ids.iter().rev().enumerate() {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(
-                        application = %self.name,
-                        actor_id = %actor_id,
-                        progress = format!("{}/{}", idx + 1, actor_ids.len()),
-                        "Stopping actor"
-                    );
-                }
-
-                if let Err(e) = self.stop_actor_gracefully(actor_id).await {
+                if let Err(e) = self
+                    .stop_actor_gracefully(actor_id, idx + 1, actor_ids.len())
+                    .await
+                {
                     let error_msg = format!("Failed to stop actor '{}': {}", actor_id, e);
                     tracing::warn!(
                         application = %self.name,
@@ -1994,6 +1969,8 @@ impl Application for WasmApplication {
         // Clear spawned actor IDs
         {
             let mut spawned = self.spawned_actor_ids.write().await;
+            let mut last_stopped = self.last_stopped_actor_ids.write().await;
+            *last_stopped = spawned.clone();
             spawned.clear();
         }
 
@@ -2037,6 +2014,117 @@ impl Application for WasmApplication {
 
     fn module_hash_for_cleanup(&self) -> Option<String> {
         Some(self.module_hash().to_string())
+    }
+
+    async fn cleanup_for_undeploy(&mut self) -> Result<(), ApplicationError> {
+        let node = {
+            let node_opt = self.node.read().await;
+            node_opt
+                .clone()
+                .ok_or_else(|| ApplicationError::Other("Node reference not set".to_string()))?
+        };
+        let service_locator = node
+            .service_locator()
+            .ok_or_else(|| ApplicationError::Other("ServiceLocator not available".to_string()))?;
+        let tenant_id = self.tenant_id.read().await.clone();
+        let namespace = self.namespace.read().await.clone();
+        let ctx = plexspaces_core::RequestContext::new_without_auth(tenant_id, namespace.clone());
+
+        let mut actor_ids = {
+            let last_stopped = self.last_stopped_actor_ids.read().await;
+            last_stopped.clone()
+        };
+
+        let live_actor_ids = if let Some(actor_registry) = service_locator.actor_registry().await {
+            actor_registry
+                .live_actor_entries()
+                .await
+                .into_iter()
+                .filter_map(|(entry_tenant_id, entry_namespace, actor_id)| {
+                    if entry_tenant_id == ctx.tenant_id() && entry_namespace == namespace {
+                        Some(actor_id)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        let mut stopped_live_actors = 0usize;
+        if !live_actor_ids.is_empty() {
+            use plexspaces_actor::ActorFactory;
+
+            let actor_factory: Arc<dyn ActorFactory> =
+                node.actor_factory().await.ok_or_else(|| {
+                    ApplicationError::Other("ActorFactory not found in ServiceLocator".to_string())
+                })?;
+
+            for actor_id in &live_actor_ids {
+                match actor_factory.stop_actor(&ctx, actor_id).await {
+                    Ok(()) => {
+                        stopped_live_actors += 1;
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            application = %self.name,
+                            namespace = %namespace,
+                            actor_id = %actor_id,
+                            error = %error,
+                            "Failed to stop live actor during undeploy cleanup"
+                        );
+                    }
+                }
+            }
+        }
+        actor_ids.extend(live_actor_ids);
+
+        let virtual_cleanup = if let Some(manager) = service_locator.virtual_actor_manager().await {
+            manager.unregister_namespace(&namespace).await
+        } else {
+            plexspaces_core::virtual_actor_manager::VirtualActorNamespaceCleanup::default()
+        };
+        actor_ids.extend(virtual_cleanup.actor_ids.clone());
+        actor_ids.sort();
+        actor_ids.dedup();
+
+        let mut purged_records = 0_u64;
+        if let Some(journal_storage) = service_locator.get_journal_storage().await {
+            for actor_id in &actor_ids {
+                purged_records += journal_storage
+                    .purge_actor(actor_id)
+                    .await
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?;
+            }
+            purged_records += journal_storage
+                .purge_namespace(&namespace)
+                .await
+                .map_err(|e| ApplicationError::Other(e.to_string()))?;
+        }
+
+        let removed_registrations =
+            if let Some(object_registry) = service_locator.get_object_registry().await {
+                object_registry
+                    .unregister_all(&ctx)
+                    .await
+                    .map_err(|e| ApplicationError::Other(e.to_string()))?
+            } else {
+                0
+            };
+
+        tracing::info!(
+            application = %self.name,
+            namespace = %namespace,
+            actor_count = actor_ids.len(),
+            stopped_live_actors = stopped_live_actors,
+            removed_virtual_types = virtual_cleanup.actor_types.len(),
+            purged_records = purged_records,
+            removed_registrations = removed_registrations,
+            "Application undeploy cleanup completed"
+        );
+
+        Ok(())
     }
 }
 
@@ -2665,6 +2753,128 @@ mod tests {
         // 3. Crash one actor
         // 4. Only crashed actor should restart (one-for-one)
         // 5. Other actors should continue running
+    }
+
+    #[test]
+    fn test_actor_id_from_initial_state_prefers_materialized_actor_id() {
+        let actor_id = super::actor_id_from_initial_state(
+            br#"{"actor_id":"cart-1//abstractions::abstractions-rust@test-node-8091"}"#,
+            "abstractions",
+            "abstractions-rust",
+            "test-node-8091",
+        );
+        assert_eq!(
+            actor_id,
+            "cart-1//abstractions::abstractions-rust@test-node-8091"
+        );
+    }
+
+    #[test]
+    fn test_actor_id_from_initial_state_falls_back_to_canonical_actor_id() {
+        let actor_id = super::actor_id_from_initial_state(
+            br#"{"behavior_kind":"GenServer"}"#,
+            "abstractions",
+            "abstractions-rust",
+            "test-node-8091",
+        );
+        assert_eq!(
+            actor_id,
+            "abstractions//abstractions::abstractions-rust@test-node-8091"
+        );
+    }
+
+    #[test]
+    fn test_init_config_from_initial_state_preserves_materialized_virtual_actor_config() {
+        let child_spec = plexspaces_proto::application::v1::ChildSpec {
+            id: "abstractions".to_string(),
+            behavior_kind: Some("GenServer".to_string()),
+            ..Default::default()
+        };
+        let init_config = super::init_config_from_initial_state_or_child_spec(
+            br#"{"actor_id":"cart-1//abstractions::abstractions-rust@test-node-8091","role":"abstractions"}"#,
+            &child_spec,
+            "abstractions//abstractions::abstractions-rust@test-node-8091",
+        );
+        assert_eq!(
+            std::str::from_utf8(&init_config).unwrap(),
+            r#"{"actor_id":"cart-1//abstractions::abstractions-rust@test-node-8091","role":"abstractions"}"#
+        );
+    }
+
+    #[test]
+    fn test_init_config_from_child_spec_builds_default_actor_config() {
+        let mut child_spec = plexspaces_proto::application::v1::ChildSpec {
+            id: "channel".to_string(),
+            behavior_kind: Some("GenEvent".to_string()),
+            ..Default::default()
+        };
+        child_spec
+            .args
+            .insert("role".to_string(), "channel".to_string());
+
+        let init_config = super::init_config_from_initial_state_or_child_spec(
+            &[],
+            &child_spec,
+            "channel:abstractions-rust@test-node-8091",
+        );
+        let value: serde_json::Value = serde_json::from_slice(&init_config).unwrap();
+        assert_eq!(
+            value.get("actor_id").and_then(|value| value.as_str()),
+            Some("channel:abstractions-rust@test-node-8091")
+        );
+        assert_eq!(
+            value.get("behavior_kind").and_then(|value| value.as_str()),
+            Some("GenEvent")
+        );
+        assert_eq!(
+            value
+                .get("args")
+                .and_then(|value| value.get("role"))
+                .and_then(|value| value.as_str()),
+            Some("channel")
+        );
+    }
+
+    #[test]
+    fn test_wasm_config_for_child_spec_enables_durability_from_facets() {
+        let child_spec = plexspaces_proto::application::v1::ChildSpec {
+            id: "abstractions".to_string(),
+            facets: vec![plexspaces_proto::common::v1::Facet {
+                r#type: "durability".to_string(),
+                priority: 90,
+                config: std::collections::HashMap::from([(
+                    "checkpoint_interval".to_string(),
+                    "5".to_string(),
+                )]),
+                metadata: std::collections::HashMap::new(),
+                state: std::collections::HashMap::new(),
+            }],
+            ..Default::default()
+        };
+
+        let config = super::wasm_config_for_child_spec(&child_spec);
+        assert!(config.durability_enabled);
+    }
+
+    #[test]
+    fn test_wasm_config_for_child_spec_keeps_non_durable_actor_fresh() {
+        let child_spec = plexspaces_proto::application::v1::ChildSpec {
+            id: "ephemeral".to_string(),
+            facets: vec![plexspaces_proto::common::v1::Facet {
+                r#type: "virtual_actor".to_string(),
+                priority: 100,
+                config: std::collections::HashMap::from([(
+                    "activation_strategy".to_string(),
+                    "lazy".to_string(),
+                )]),
+                metadata: std::collections::HashMap::new(),
+                state: std::collections::HashMap::new(),
+            }],
+            ..Default::default()
+        };
+
+        let config = super::wasm_config_for_child_spec(&child_spec);
+        assert!(!config.durability_enabled);
     }
 
     /// Test: initialize_supervisor_tree creates proper supervisor with add_child

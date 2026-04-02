@@ -23,6 +23,7 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-expect-error - Virtual import - types are optional (generated in src/generated/)
 import { log as hostLog } from 'plexspaces:simple-actor/host@0.1.0';
+import { getActorDefinition } from './decorators.js';
 
 /**
  * Log levels matching the WIT host implementation
@@ -120,9 +121,13 @@ export abstract class PlexSpacesActor<TState extends object = Record<string, unk
   handle(_fromActor: string, msgType: string, payloadJson: string): string {
     try {
       const payload = payloadJson && payloadJson.trim() ? (JSON.parse(payloadJson) as Record<string, unknown>) : {};
+      const definition = getActorDefinition(this);
       // Workflow behavior: route by msgType when actor implements run/signal/query (aligned with crates/behavior Workflow trait)
       if (msgType === "workflow_run") {
-        const runFn = (this as unknown as Record<string, (p: Record<string, unknown>) => unknown>).run;
+        const runMethod = definition?.runHandler;
+        const runFn = runMethod
+          ? (this as unknown as Record<string, (p: Record<string, unknown>) => unknown>)[runMethod]
+          : (this as unknown as Record<string, (p: Record<string, unknown>) => unknown>).run;
         if (typeof runFn === "function") {
           const result = runFn.call(this, payload);
           this.cachedStateJson = null;
@@ -131,18 +136,30 @@ export abstract class PlexSpacesActor<TState extends object = Record<string, unk
       }
       if (msgType.startsWith("workflow_signal:")) {
         const name = msgType.slice("workflow_signal:".length).trim();
-        const signalFn = (this as unknown as Record<string, (n: string, p: Record<string, unknown>) => void>).signal;
+        const signalMethod = definition?.signalHandlers?.[name];
+        const signalFn = signalMethod
+          ? (this as unknown as Record<string, Function>)[signalMethod]
+          : (this as unknown as Record<string, Function>).signal;
         if (typeof signalFn === "function") {
-          signalFn.call(this, name, payload);
+          if (signalMethod) {
+            (signalFn as (payload: Record<string, unknown>) => void).call(this, payload);
+          } else {
+            (signalFn as (name: string, payload: Record<string, unknown>) => void).call(this, name, payload);
+          }
           this.cachedStateJson = null;
           return "{}";
         }
       }
       if (msgType.startsWith("workflow_query:")) {
         const name = msgType.slice("workflow_query:".length).trim();
-        const queryFn = (this as unknown as Record<string, (n: string, p: Record<string, unknown>) => unknown>).query;
+        const queryMethod = definition?.queryHandlers?.[name];
+        const queryFn = queryMethod
+          ? (this as unknown as Record<string, Function>)[queryMethod]
+          : (this as unknown as Record<string, Function>).query;
         if (typeof queryFn === "function") {
-          const result = queryFn.call(this, name, payload);
+          const result = queryMethod
+            ? (queryFn as (payload: Record<string, unknown>) => unknown).call(this, payload)
+            : (queryFn as (name: string, payload: Record<string, unknown>) => unknown).call(this, name, payload);
           return iterativeStringify(result ?? {});
         }
       }
@@ -150,8 +167,9 @@ export abstract class PlexSpacesActor<TState extends object = Record<string, unk
       // Payload key order: message_type -> op -> msg_type; fallback to msgType so data-only payloads route by message type (e.g. tasks_ready)
       const opRaw = payload.message_type ?? payload.op ?? payload.msg_type;
       const op = (typeof opRaw === "string" && opRaw ? opRaw : msgType) as string;
+      const decoratedMethod = this.resolveDecoratedHandler(op, definition);
       const opKey = typeof op === "string" ? this.capitalize(op) : "";
-      const methodName = opKey ? `on${opKey}` : "";
+      const methodName = decoratedMethod ?? (opKey ? `on${opKey}` : "");
       const method = methodName && typeof (this as unknown as Record<string, unknown>)[methodName] === "function"
         ? (this as unknown as Record<string, (p: Record<string, unknown>) => unknown>)[methodName]
         : null;
@@ -222,6 +240,11 @@ export abstract class PlexSpacesActor<TState extends object = Record<string, unk
     // This matches handler naming: onLoad_model, onPredict_batch, etc.
     // Only capitalize the first character, keep the rest as-is (preserves underscores and case)
     return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  protected resolveDecoratedHandler(op: string, definition = getActorDefinition(this)): string | null {
+    if (!definition) return null;
+    return definition.handlers[op]?.methodName ?? null;
   }
 
   /**

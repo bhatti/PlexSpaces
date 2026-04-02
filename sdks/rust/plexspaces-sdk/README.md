@@ -96,7 +96,7 @@ Actor annotations define the behavior type and optional facets:
 
 Facets add capabilities to actors:
 
-- `"virtual_actor"` - Virtual actor (suspends when idle, reactivates on message). With `#[gen_server_actor(facets = ["virtual_actor", ...])]`, **`spawn_with_facets`** registers the actor type (including facet configs) so reactivation matches the original registration after vacation.
+- `"virtual_actor"` - Virtual actor (suspends when idle, reactivates on message). With `#[gen_server_actor(facets = ["virtual_actor", ...])]`, **`spawn_with_facets`** registers the actor definition through the shared core registration path, preserving behavior kind plus proto-shaped facet metadata/config so reactivation matches the original registration after vacation.
 - `"durability"` - Durable state (persisted to storage)
 - `"timer"` - Timer support (periodic tasks, timeouts)
 - `"supervisor"` - Supervisor tree (fault tolerance)

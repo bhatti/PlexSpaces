@@ -64,6 +64,72 @@ impl ActorFactoryImpl {
         Arc::new(Self::new(service_locator))
     }
 
+    async fn start_registered_local_actor(
+        &self,
+        mut actor: Actor,
+        actor_id: &ActorId,
+        ctx: &RequestContext,
+        registry: &Arc<ActorRegistry>,
+        facet_manager: &Arc<plexspaces_facet::FacetManager>,
+    ) -> Result<(Arc<Actor>, ActorRef), Box<dyn std::error::Error + Send + Sync>> {
+        let facets_clone = actor.facets().clone();
+        let mailbox = actor.mailbox().clone();
+
+        let join_handle = actor.start().await.map_err(|e| {
+            tracing::warn!(
+                actor_id = %actor_id,
+                error = %e,
+                "Actor start() failed (init() error) - actor not registered"
+            );
+            format!("Failed to start actor: {}", e)
+        })?;
+
+        let state_after_start = actor.state().await;
+        if state_after_start != crate::ActorState::Active {
+            return Err(format!(
+                "Actor {} did not reach Active state after start(), current state: {:?}",
+                actor_id, state_after_start
+            )
+            .into());
+        }
+
+        let actor_arc = Arc::new(actor);
+        let exit_reason_arc = actor_arc.exit_reason();
+
+        facet_manager
+            .store_facets(actor_id.to_string(), facets_clone)
+            .await;
+        actor_arc.register_started(registry).await;
+
+        let actor_ref = ActorRef::local(
+            actor_id.clone(),
+            ctx.tenant_id().to_string(),
+            ctx.namespace().to_string(),
+            mailbox,
+            self.service_locator.clone(),
+        );
+
+        registry
+            .publish_lifecycle_event(ActorLifecycleEvent {
+                actor_id: actor_id.clone(),
+                timestamp: Some(Timestamp {
+                    seconds: chrono::Utc::now().timestamp(),
+                    nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
+                }),
+                event_type: Some(
+                    plexspaces_proto::actor_lifecycle_event::EventType::Activated(
+                        plexspaces_proto::v1::actor::ActorActivated {},
+                    ),
+                ),
+            })
+            .await;
+
+        self.watch_actor_termination(actor_id.clone(), join_handle, exit_reason_arc)
+            .await;
+
+        Ok((actor_arc, actor_ref))
+    }
+
     /// Normalize actor ID to include node ID
     ///
     /// ## Purpose
@@ -90,21 +156,6 @@ impl ActorFactoryImpl {
 
     async fn take_actor_stopping(&self, actor_id: &ActorId) -> bool {
         self.stopping_actors.write().await.remove(actor_id)
-    }
-
-    async fn passivate_virtual_actor(
-        &self,
-        actor_id: &ActorId,
-        registry: &Arc<ActorRegistry>,
-        manager: &Arc<VirtualActorManager>,
-    ) {
-        if let Ok(facet_arc) = manager.get_facet(actor_id).await {
-            let mut facet_guard = facet_arc.write().await;
-            facet_guard.mark_deactivated().await;
-        }
-
-        registry.remove_live_actor_runtime(actor_id).await;
-        manager.remove_from_active_tracking(actor_id).await;
     }
 
     /// Create temporary sender ActorRef for ask() pattern
@@ -547,7 +598,11 @@ impl ActorFactory for ActorFactoryImpl {
             // (e.g. {"initial_count":7}). For type-level registrations, initial_state is
             // always empty so init_config_template is the correct source.
             let initial_state = if metadata.initial_state.is_empty() {
-                metadata.init_config_template.unwrap_or_default()
+                plexspaces_core::materialize_init_config_template(
+                    metadata.init_config_template,
+                    &actor_id,
+                )
+                .unwrap_or_default()
             } else {
                 metadata.initial_state
             };
@@ -564,12 +619,10 @@ impl ActorFactory for ActorFactoryImpl {
             // For type-level registration, use facet_config; for instance-level, use stored facet
             let mut facets_to_attach: Vec<Box<dyn plexspaces_facet::Facet>> = vec![];
 
-            if let Some(_facet_arc) = metadata.facet.clone() {
-                // Instance-level registration: original facet config not reused here;
-                // the rebuild VirtualActorFacet is added below.
-            } else if let Some(facet_config) = metadata.facet_config.clone() {
-                // Type-level registration: recreate non-virtual facets from stored config.
-                // Non-virtual facets recreated; VirtualActorFacet added below.
+            if let Some(facet_config) = metadata.facet_config.clone() {
+                // Recreate all non-virtual facets from canonical stored config.
+                // This must work for both type-level metadata and instance-level metadata,
+                // because explicit stop removes live facet storage from FacetManager.
                 if let Some(facet_registry_wrapper) =
                     self.service_locator.get_facet_registry().await
                 {
@@ -591,7 +644,7 @@ impl ActorFactory for ActorFactoryImpl {
                     .into());
                 }
             }
-            // Default (no stored facet or facet_config): VirtualActorFacet is added below.
+            // Default (no stored facet_config): VirtualActorFacet is added below.
 
             // Build the VirtualActorFacet with EAGER strategy so the actor starts immediately.
             // This EAGER facet is used only for the current rebuild (starts the actor running).
@@ -610,7 +663,9 @@ impl ActorFactory for ActorFactoryImpl {
                 let idle_timeout_str = {
                     let configured: Option<String> =
                         if let Some(va_mgr) = self.service_locator.virtual_actor_manager().await {
-                            va_mgr.get_virtual_actor_type(&actor_type).await
+                            va_mgr
+                                .get_virtual_actor_type(&actor_type)
+                                .await
                                 .and_then(|meta| meta.facet_config)
                                 .and_then(|fc| {
                                     fc.get("virtual_actor")
@@ -621,7 +676,9 @@ impl ActorFactory for ActorFactoryImpl {
                         } else {
                             None
                         };
-                    configured.unwrap_or_else(|| format_duration(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS)))
+                    configured.unwrap_or_else(|| {
+                        format_duration(Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS))
+                    })
                 };
                 // Use to_config_str with the enum variant so this never drifts from the canonical string.
                 use plexspaces_common::ActivationStrategy;
@@ -1193,96 +1250,20 @@ impl ActorFactoryImpl {
                     .map_err(|e| format!("Failed to update virtual actor metadata: {}", e))?;
             }
 
-            // Get mailbox (for creating ActorRef)
-            let mailbox = actor.mailbox().clone();
-
-            // Create ActorRef (for return value - not used for lazy virtual actors)
-            // CRITICAL: Pass tenant_id from RequestContext to ActorRef
-            let _actor_ref = ActorRef::local(
-                actor_id.clone(),
-                ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
-                ctx.namespace().to_string(),
-                mailbox.clone(),
-                self.service_locator.clone(),
-            );
-
             // Handle eager vs lazy activation
             if should_activate_eagerly {
                 if tracing::enabled!(tracing::Level::DEBUG) {
                     tracing::debug!(actor_id = %actor_id, "Virtual actor with eager activation - starting immediately");
                 }
-
-                // Create ActorRef for return value
-                // Note: Registration happens INSIDE Actor::start() AFTER init() succeeds
-                let mailbox = actor.mailbox().clone();
-                // CRITICAL: Pass tenant_id from RequestContext to ActorRef
-                let actor_ref = ActorRef::local(
-                    actor_id.clone(),
-                    ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
-                    ctx.namespace().to_string(),
-                    mailbox.clone(),
-                    self.service_locator.clone(),
-                );
-
-                // CRITICAL: Check actor state before calling start() to ensure we only call it once
-                use crate::ActorState;
-                let _current_state = actor.state().await;
-
-                // Start the actor (calls init() internally, then registers in ActorRegistry)
-                // If init() fails, actor is not registered (prevents memory leaks)
-                let join_handle = actor.start().await.map_err(|e| {
-                    tracing::warn!(
-                        actor_id = %actor_id,
-                        error = %e,
-                        "Virtual actor start() failed (init() error) - actor not registered"
-                    );
-                    format!("Failed to start actor: {}", e)
-                })?;
-
-                // Verify actor reached Active state
-                let state_after_start = actor.state().await;
-
-                if state_after_start != ActorState::Active {
-                    return Err(format!("Eager virtual actor {} did not reach Active state after start(), current state: {:?}", actor_id, state_after_start).into());
-                }
-
-                // Actor is now registered (registration happened inside Actor::start() after init() succeeded)
-
-                // Wrap in Arc after starting
-                let actor_arc = Arc::new(actor);
-
-                // Clone exit_reason before wrapping in Arc (needed for watch_actor_termination)
-                let exit_reason_arc = actor_arc.exit_reason();
+                let (actor_arc, actor_ref) = self
+                    .start_registered_local_actor(actor, &actor_id, &ctx, &registry, &facet_manager)
+                    .await?;
 
                 // Mark as activated
                 manager
                     .mark_activated(&actor_id)
                     .await
                     .map_err(|e| format!("Failed to mark actor as activated: {}", e))?;
-
-                // Store facets
-                let facets_clone = actor_arc.facets();
-                facet_manager
-                    .store_facets(actor_id.clone(), facets_clone)
-                    .await;
-
-                // Update registration with config and instance (idempotent - ActorRef already registered in Actor::start())
-                // This ensures config and instance are stored for resource tracking and ask() pattern
-                registry
-                    .register_actor(
-                        &ctx,
-                        actor_id.clone(),
-                        Arc::new(actor_ref.clone()) as Arc<dyn MessageSender>,
-                        actor_type.clone(),
-                        actor_config.clone(), // Config for resource tracking
-                        Some(actor_arc.clone() as Arc<dyn plexspaces_core::ActorHandle>),
-                        None, // behavior_kind already set at registration
-                    )
-                    .await;
-
-                // Watch termination (with exit_reason for proper propagation)
-                self.watch_actor_termination(actor_id.clone(), join_handle, exit_reason_arc)
-                    .await;
 
                 // Process pending messages - send them to the now-activated actor
                 // IMPORTANT: For eager virtual actors, pending messages must be processed after activation
@@ -1310,6 +1291,15 @@ impl ActorFactoryImpl {
 
                 return Ok(actor_ref);
             } else {
+                let mailbox = actor.mailbox().clone();
+                let actor_ref = ActorRef::local(
+                    actor_id.clone(),
+                    ctx.tenant_id().to_string(),
+                    ctx.namespace().to_string(),
+                    mailbox,
+                    self.service_locator.clone(),
+                );
+
                 // Lazy activation keeps only metadata in the registry and virtual manager.
                 // The running sender is created on first local ask/tell or explicit activation.
                 drop(actor); // Arc<Actor> dropped; metadata in VirtualActorManager is the rebuild source
@@ -1317,6 +1307,8 @@ impl ActorFactoryImpl {
                 registry
                     .register_virtual_actor_index(&ctx, actor_id.clone(), actor_type.clone())
                     .await;
+
+                return Ok(actor_ref);
             }
 
             // OBSERVABILITY: Log actor spawn with full context (after determining activation strategy)
@@ -1342,18 +1334,6 @@ impl ActorFactoryImpl {
                 "Actor spawned{}",
                 activation_info
             );
-
-            // Create ActorRef for return value.
-            // CRITICAL: Pass tenant_id from RequestContext to ActorRef
-            let actor_ref = ActorRef::local(
-                actor_id.clone(),
-                ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
-                ctx.namespace().to_string(),
-                mailbox.clone(),
-                self.service_locator.clone(),
-            );
-
-            return Ok(actor_ref);
         }
 
         // OBSERVABILITY: Log actor spawn with full context (for non-virtual actors)
@@ -1366,104 +1346,72 @@ impl ActorFactoryImpl {
             "Actor spawned"
         );
 
-        // Normal actor - start immediately
-        // Store facets
-        let facets_clone = actor.facets().clone();
-        facet_manager
-            .store_facets(&actor_id.to_string(), facets_clone)
-            .await;
+        let (_actor_arc, actor_ref) = self
+            .start_registered_local_actor(actor, &actor_id, &ctx, &registry, &facet_manager)
+            .await?;
 
-        // Get mailbox (for creating ActorRef)
-        let mailbox = actor.mailbox().clone();
-
-        // Create ActorRef for return value
-        // Note: Registration happens INSIDE Actor::start() AFTER init() succeeds
-        // This ensures failed actors are never registered (prevents memory leaks)
-        // and allows supervisor to wait for init() before starting next child
-
-        // CRITICAL: Check actor state before calling start() to ensure we only call it once
-        use crate::ActorState;
-        let _current_state = actor.state().await;
-
-        // Start actor (calls init() internally, then registers in ActorRegistry)
-        // If init() fails, actor is not registered (prevents memory leaks)
-        let join_handle = actor.start().await.map_err(|e| {
-            // OBSERVABILITY: Log start failure due to init() error
-            tracing::warn!(
-                actor_id = %actor_id,
-                error = %e,
-                "Actor start() failed (init() error) - actor not registered"
-            );
-            format!("Failed to start actor: {}", e)
-        })?;
-
-        // Verify actor reached Active state
-        let state_after_start = actor.state().await;
-        if state_after_start != ActorState::Active {
-            return Err(format!(
-                "Regular actor {} did not reach Active state after start(), current state: {:?}",
-                actor_id, state_after_start
-            )
-            .into());
-        }
-
-        // Actor is now registered (registration happened inside Actor::start() after init() succeeded)
-        // Store actor in Arc after starting
-        let actor_arc = Arc::new(actor);
-
-        // Create ActorRef - this is what will be returned
-        // Note: The ActorRef was already registered in Actor::start() via register_in_registry()
-        // We just need to ensure config and instance are stored (idempotent update)
-        // CRITICAL: Pass tenant_id from RequestContext to ActorRef
-        let actor_ref = ActorRef::local(
-            actor_id.clone(),
-            ctx.tenant_id().to_string(), // CRITICAL: tenant_id flows from API → ActorBuilder → ActorRef
-            ctx.namespace().to_string(),
-            mailbox.clone(),
-            self.service_locator.clone(),
-        );
-
-        // Update registration with config and instance (idempotent - ActorRef already registered)
-        // This ensures config and instance are stored for resource tracking and ask() pattern
-        registry
-            .register_actor(
-                &ctx,
-                actor_id.clone(),
-                Arc::new(actor_ref.clone()) as Arc<dyn MessageSender>,
-                actor_type.clone(),
-                actor_config.clone(), // Config for resource tracking
-                Some(actor_arc.clone() as Arc<dyn plexspaces_core::ActorHandle>),
-                None, // behavior_kind already set at registration
-            )
-            .await;
-
-        // Emit Activated event
-        registry
-            .publish_lifecycle_event(ActorLifecycleEvent {
-                actor_id: actor_id.clone(),
-                timestamp: Some(Timestamp {
-                    seconds: chrono::Utc::now().timestamp(),
-                    nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
-                }),
-                event_type: Some(
-                    plexspaces_proto::actor_lifecycle_event::EventType::Activated(
-                        plexspaces_proto::v1::actor::ActorActivated {},
-                    ),
-                ),
-            })
-            .await;
-
-        // Watch termination (with exit_reason_arc so stored exit reasons can be read)
-        let exit_reason_arc = actor_arc.exit_reason();
-        self.watch_actor_termination(actor_id.clone(), join_handle, exit_reason_arc)
-            .await;
-
-        // Return ActorRef directly
         Ok(actor_ref)
     }
 }
 
 impl ActorFactoryImpl {
+    fn validate_actor_scope(
+        ctx: &RequestContext,
+        actor_id: &ActorId,
+        actor_tenant_id: &str,
+        actor_namespace: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let caller_tenant = ctx.tenant_id();
+        if !caller_tenant.is_empty() && caller_tenant != actor_tenant_id {
+            return Err(format!(
+                "Tenant isolation violation: caller tenant '{}' cannot access actor '{}' owned by tenant '{}'",
+                caller_tenant, actor_id, actor_tenant_id
+            )
+            .into());
+        }
+
+        let caller_namespace = ctx.namespace();
+        if !caller_namespace.is_empty() && caller_namespace != actor_namespace {
+            return Err(format!(
+                "Namespace isolation violation: caller namespace '{}' cannot access actor '{}' in namespace '{}'",
+                caller_namespace, actor_id, actor_namespace
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+
+    async fn resolve_actor_stop_scope(
+        registry: &Arc<ActorRegistry>,
+        actor_id: &ActorId,
+        ctx: &RequestContext,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(sender) = registry.lookup_actor(actor_id).await {
+            let actor_tenant_id = sender.tenant_id().unwrap_or_default().to_string();
+            let actor_namespace = sender.namespace().unwrap_or_default().to_string();
+            Self::validate_actor_scope(ctx, actor_id, &actor_tenant_id, &actor_namespace)?;
+            return Ok(actor_namespace);
+        }
+
+        if let Some((actor_tenant_id, actor_namespace)) =
+            registry.get_actor_metadata(actor_id).await
+        {
+            Self::validate_actor_scope(ctx, actor_id, &actor_tenant_id, &actor_namespace)?;
+            return Ok(actor_namespace);
+        }
+
+        if !ctx.tenant_id().is_empty() || !ctx.namespace().is_empty() {
+            return Err(format!(
+                "Actor '{}' not found or metadata missing - cannot verify tenant isolation",
+                actor_id
+            )
+            .into());
+        }
+
+        Ok(String::new())
+    }
+
     /// stop_actor implementation with tenant isolation validation
     ///
     /// This method is separate because we already closed the main impl block.
@@ -1487,43 +1435,16 @@ impl ActorFactoryImpl {
 
         let local_node_id = registry.local_node_id();
 
-        // CRITICAL: Validate tenant isolation
-        // Get actor's stored tenant_id and namespace, then validate against caller's context
-        let namespace: String = {
-            if let Some((actor_tenant_id, actor_namespace)) =
-                registry.get_actor_metadata(actor_id).await
-            {
-                // Validate tenant_id matches (unless caller is system/empty tenant)
-                let caller_tenant = ctx.tenant_id();
-                if !caller_tenant.is_empty() && caller_tenant != actor_tenant_id {
-                    return Err(format!(
-                        "Tenant isolation violation: caller tenant '{}' cannot access actor '{}' owned by tenant '{}'",
-                        caller_tenant, actor_id, actor_tenant_id
-                    ).into());
-                }
-
-                // Validate namespace matches (unless caller is system/empty namespace)
-                let caller_namespace = ctx.namespace();
-                if !caller_namespace.is_empty() && caller_namespace != actor_namespace {
-                    return Err(format!(
-                        "Namespace isolation violation: caller namespace '{}' cannot access actor '{}' in namespace '{}'",
-                        caller_namespace, actor_id, actor_namespace
-                    ).into());
-                }
-
-                actor_namespace
-            } else {
-                // Actor not found in metadata - might be a system actor or not registered
-                // For safety, only allow if caller has empty tenant/namespace (system-level)
-                if !ctx.tenant_id().is_empty() || !ctx.namespace().is_empty() {
-                    return Err(format!(
-                        "Actor '{}' not found or metadata missing - cannot verify tenant isolation",
-                        actor_id
-                    )
-                    .into());
-                }
-                String::new()
-            }
+        let namespace = if let Some(sender) = registry
+            .lookup_actor_in_scope(ctx.tenant_id(), ctx.namespace(), actor_id)
+            .await
+        {
+            let actor_tenant_id = sender.tenant_id().unwrap_or_default().to_string();
+            let actor_namespace = sender.namespace().unwrap_or_default().to_string();
+            Self::validate_actor_scope(ctx, actor_id, &actor_tenant_id, &actor_namespace)?;
+            actor_namespace
+        } else {
+            Self::resolve_actor_stop_scope(&registry, actor_id, ctx).await?
         };
 
         let is_local = match plexspaces_core::actor_id::parse_actor_id(actor_id) {
@@ -1535,12 +1456,14 @@ impl ActorFactoryImpl {
         }
 
         // OBSERVABILITY: Log actor stop attempt
-        tracing::info!(
-            actor_id = %actor_id,
-            node_id = %local_node_id,
-            namespace = %namespace,
-            "Stopping actor"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                actor_id = %actor_id,
+                node_id = %local_node_id,
+                namespace = %namespace,
+                "Stopping actor"
+            );
+        }
 
         let is_virtual = if let Some(manager) = &virtual_actor_manager {
             manager.is_virtual(actor_id).await
@@ -1548,7 +1471,8 @@ impl ActorFactoryImpl {
             false
         };
 
-        let had_instance = registry.get_actor_instance(actor_id).await.is_some();
+        let instance = registry.get_actor_instance(actor_id).await;
+        let had_instance = instance.is_some();
         if had_instance {
             self.mark_actor_stopping(actor_id).await;
         }
@@ -1556,7 +1480,7 @@ impl ActorFactoryImpl {
         // CRITICAL: Get actor instance and stop it BEFORE unregistering
         // This ensures the message loop is stopped before we remove the instance
         // Production-grade: Use stop_from_arc() which properly stops the message loop
-        if let Some(instance) = registry.get_actor_instance(actor_id).await {
+        if let Some(instance) = instance {
             if let Err(e) = instance.stop_actor().await {
                 tracing::warn!(
                     actor_id = %actor_id,
@@ -1592,26 +1516,26 @@ impl ActorFactoryImpl {
             })
             .await;
 
+        registry
+            .handle_actor_termination(actor_id, ExitReason::Shutdown)
+            .await;
+
+        registry
+            .unregister_with_cleanup(actor_id)
+            .await
+            .map_err(|e| format!("Failed to unregister actor: {}", e))?;
+
         if is_virtual {
             let manager = virtual_actor_manager
                 .ok_or_else(|| "VirtualActorManager not found in ServiceLocator".to_string())?;
-            self.passivate_virtual_actor(actor_id, &registry, &manager)
-                .await;
-            if !had_instance {
-                self.take_actor_stopping(actor_id).await;
+            if let Ok(facet_arc) = manager.get_facet(actor_id).await {
+                let mut facet_guard = facet_arc.write().await;
+                facet_guard.mark_deactivated().await;
             }
-        } else {
-            registry
-                .handle_actor_termination(actor_id, ExitReason::Shutdown)
-                .await;
-
-            registry
-                .unregister_with_cleanup(actor_id)
-                .await
-                .map_err(|e| format!("Failed to unregister actor: {}", e))?;
-            if !had_instance {
-                self.take_actor_stopping(actor_id).await;
-            }
+            manager.remove_from_active_tracking(actor_id).await;
+        }
+        if !had_instance {
+            self.take_actor_stopping(actor_id).await;
         }
 
         // OBSERVABILITY: Update Prometheus-style metrics
@@ -1630,8 +1554,8 @@ impl ActorFactoryImpl {
         {
             use plexspaces_core::message_metrics::ActorMetricsExt;
             let actor_metrics = registry.actor_metrics().read().await;
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
                     actor_id = %actor_id,
                     active_actors = actor_metrics.active,
                     "ActorMetrics updated after stop"
@@ -1658,12 +1582,14 @@ impl ActorFactoryImpl {
             .await;
 
         // OBSERVABILITY: Log successful stop
-        tracing::info!(
-            actor_id = %actor_id,
-            node_id = %local_node_id,
-            namespace = %namespace,
-            "Actor stopped successfully"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                actor_id = %actor_id,
+                node_id = %local_node_id,
+                namespace = %namespace,
+                "Actor stopped successfully"
+            );
+        }
 
         Ok(())
     }

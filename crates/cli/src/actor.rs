@@ -25,9 +25,7 @@
 //! - `list` - List deployed actors
 
 use anyhow::{Context, Result};
-use plexspaces_proto::v1::actor::{
-    actor_service_client::ActorServiceClient, SendMessageRequest,
-};
+use plexspaces_proto::v1::actor::{actor_service_client::ActorServiceClient, SendMessageRequest};
 use plexspaces_proto::wasm::v1::{
     wasm_runtime_service_client::WasmRuntimeServiceClient, DeployWasmModuleRequest,
     InstantiateActorRequest, WasmModule,

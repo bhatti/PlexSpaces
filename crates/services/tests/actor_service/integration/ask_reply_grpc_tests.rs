@@ -25,7 +25,9 @@ async fn test_ask_reply_get_counter_real_grpc() {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "GET".to_string(),
-        payload: serde_json::json!({ "action": "get" }).to_string().into_bytes(),
+        payload: serde_json::json!({ "action": "get" })
+            .to_string()
+            .into_bytes(),
         headers: HashMap::new(),
         query_params: HashMap::new(),
         path: "/api/v1/actors/default/counter".to_string(),
@@ -119,7 +121,9 @@ async fn test_ask_reply_post_counter_real_grpc() {
         namespace: "default".to_string(),
         actor_type: "counter".to_string(),
         http_method: "POST".to_string(),
-        payload: serde_json::json!({ "action": "get" }).to_string().into_bytes(),
+        payload: serde_json::json!({ "action": "get" })
+            .to_string()
+            .into_bytes(),
         headers: HashMap::new(),
         query_params: HashMap::new(),
         path: "/api/v1/actors/default/counter/ask".to_string(),

@@ -170,10 +170,12 @@ mod tests {
     async fn test_create_repository_from_storage_config_sqlite() {
         let provider = StorageProviderConfig {
             provider: StorageProvider::StorageProviderSqlite as i32,
-            config: Some(storage_provider_config::Config::Sqlite(SqliteBackendConfig {
-                database_path: ":memory:".to_string(),
-                ..Default::default()
-            })),
+            config: Some(storage_provider_config::Config::Sqlite(
+                SqliteBackendConfig {
+                    database_path: ":memory:".to_string(),
+                    ..Default::default()
+                },
+            )),
         };
 
         let repo = create_repository_from_storage_config(&provider, None)

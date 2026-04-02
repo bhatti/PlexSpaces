@@ -143,8 +143,7 @@ async fn test_spawn_actor_always_uses_local_node_id() {
     ));
 
     // Create ServiceLocator and register services
-    let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
@@ -190,12 +189,19 @@ async fn test_spawn_actor_always_uses_local_node_id() {
         )
         .await;
     // With ActorFactory registered, spawn_actor should succeed or fail with a different error
-    // The key is that it should use local node_id
+    // The key is that client input is treated as a base actor id and normalized
+    // through build_actor_id() with the request namespace and local node id.
     if let Ok(actor_ref) = result {
-        // If it succeeds, verify the actor_ref uses local node_id
         assert!(
-            actor_ref.id().contains("@local-node"),
-            "Should use local node_id"
+            actor_ref
+                .id()
+                .contains(&plexspaces_core::actor_id::build_actor_id(
+                    "test-actor",
+                    "test-type",
+                    Some("test-namespace"),
+                    "local-node"
+                )),
+            "spawn should normalize a base actor id with build_actor_id"
         );
     } else {
         // If it fails, the error should mention local node_id, not a different node
@@ -233,6 +239,27 @@ async fn test_spawn_actor_always_uses_local_node_id() {
             "Should not use remote node_id"
         );
     }
+
+    // Test 3: canonical actor ids should remain canonical after normalization
+    let canonical_actor_id = plexspaces_core::actor_id::build_actor_id(
+        "explicit-id",
+        "test-type",
+        Some("test-namespace"),
+        "local-node",
+    );
+    let result = actor_service
+        .spawn_actor(
+            &ctx,
+            &canonical_actor_id,
+            "test-type",
+            vec![],
+            None,
+            std::collections::HashMap::new(),
+        )
+        .await;
+    if let Ok(actor_ref) = result {
+        assert_eq!(actor_ref.id(), canonical_actor_id);
+    }
 }
 
 #[tokio::test]
@@ -254,8 +281,7 @@ async fn test_spawn_actor_rejects_remote_node_id() {
     ));
 
     // Create ServiceLocator and register services
-    let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
@@ -315,8 +341,7 @@ async fn test_spawn_actor_design_principle() {
     ));
 
     // Create ServiceLocator and register services
-    let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())
@@ -398,8 +423,7 @@ async fn test_spawn_actor_with_callback() {
     ));
 
     use plexspaces_node::create_default_service_locator;
-    let service_locator =
-        create_default_service_locator(Some("test-node".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let reply_waiter_registry = Arc::new(plexspaces_core::ReplyWaiterRegistry::new());
     service_locator
         .register_service(actor_registry.clone())

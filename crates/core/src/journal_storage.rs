@@ -276,6 +276,31 @@ pub trait JournalStorage: Send + Sync {
     /// - Some backends (Memory) may no-op this
     async fn flush(&self) -> JournalResult<()>;
 
+    /// Purge all persisted state for a single actor.
+    ///
+    /// ## Purpose
+    /// Removes checkpoints, journal entries, events, and reminders for a fully undeployed actor.
+    ///
+    /// ## Returns
+    /// Total number of deleted records across all persisted actor state tables.
+    async fn purge_actor(&self, actor_id: &str) -> JournalResult<u64> {
+        Err(JournalError::Configuration(format!(
+            "purge_actor is not implemented for actor_id={}",
+            actor_id
+        )))
+    }
+
+    /// Purge all persisted state for actors in a namespace.
+    ///
+    /// ## Purpose
+    /// Supports full application undeploy cleanup for storage backends that only index by actor_id.
+    async fn purge_namespace(&self, namespace: &str) -> JournalResult<u64> {
+        Err(JournalError::Configuration(format!(
+            "purge_namespace is not implemented for namespace={}",
+            namespace
+        )))
+    }
+
     // ==================== Event Sourcing Methods ====================
 
     /// Append a single event to the event log

@@ -172,7 +172,7 @@ async fn test_wasm_ask_single_message_id_flow() {
 
     // Actor ID follows name:namespace@node_id — find it from the registry
     let all_actor_ids: Vec<String> = {
-        let ids = registry.registered_actor_ids().read().await;
+        let ids = registry.registered_actor_ids().await;
         ids.iter().map(|id| id.to_string()).collect()
     };
     eprintln!("Registered actors: {:?}", all_actor_ids);

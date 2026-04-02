@@ -30,8 +30,7 @@ use plexspaces_actor::child_spec::StartedChild;
 use plexspaces_actor::supervisor::{SupervisionStrategy, Supervisor, SupervisorEvent};
 use plexspaces_actor::{Actor, ChildSpec};
 use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, ActorError, ActorRef as CoreActorRef, BehaviorError,
-    Message,
+    Actor as ActorTrait, ActorContext, ActorError, ActorRef as CoreActorRef, BehaviorError, Message,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;

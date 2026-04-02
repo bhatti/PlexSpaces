@@ -116,7 +116,7 @@ facets = [
         .await
         .expect("ActorRegistry should be available");
 
-    let registered_ids = actor_registry.registered_actor_ids().read().await;
+    let registered_ids = actor_registry.registered_actor_ids().await;
     let task_queue_actors: Vec<_> = registered_ids
         .iter()
         .filter(|id| id.contains("task-queue"))

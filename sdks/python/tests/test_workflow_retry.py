@@ -17,11 +17,11 @@ class TestDefaultRetryConfig:
 
     def test_returns_single_attempt(self):
         c = default_retry_config()
-        assert c["max_attempts"] == 1
-        assert c["initial_interval_ms"] == 100
-        assert c["backoff_rate"] == 2.0
-        assert c["max_interval_ms"] == 30000
-        assert c["retryable_errors"] == []
+        assert c.max_attempts == 1
+        assert c.initial_interval_ms == 100
+        assert c.backoff_rate == 2.0
+        assert c.max_interval_ms == 30000
+        assert c.retryable_errors == []
 
 
 class TestWithRetry:
@@ -108,9 +108,8 @@ class TestRetryConfigType:
         cfg: RetryConfigDict = {"max_attempts": 5, "initial_interval_ms": 50}
         assert with_retry(lambda: 1, cfg) == 1
 
-    def test_default_retry_config_dict_compatible(self):
-        # default_retry_config() returns a dict — dict access still works
+    def test_default_retry_config_proto_compatible(self):
+        # default_retry_config() returns the canonical proto-shaped object
         cfg = default_retry_config()
-        assert cfg["max_attempts"] == 1
-        # Can be passed to with_retry (dict interface)
+        assert cfg.max_attempts == 1
         assert with_retry(lambda: "ok", cfg) == "ok"

@@ -542,11 +542,6 @@ impl WasmInstance {
                                 }
                             };
 
-                        tracing::debug!(
-                            actor_id = %actor_id,
-                            "Simple-actor component instantiated (Python-compatible, WASI bindings)"
-                        );
-
                         // Call init() function with initial state if provided
                         // For components, we'll call init after storing the instance
                         // (handled in handle_message method for components)
@@ -692,7 +687,7 @@ impl WasmInstance {
                                         tracing::debug!(
                                             actor_id = %actor_id,
                                             config_len = config_json.len(),
-                                            "Init config stored for re-instantiation"
+                                            "Simple-actor component initialized for re-instantiation"
                                         );
                                     }
                                 }
@@ -2336,12 +2331,6 @@ impl WasmInstance {
 
                 // Step 2: Create fresh instance (saved_state and instance_ctx were captured above while holding lock).
                 // No component_state lock held here - avoids deadlock.
-                tracing::info!(
-                    actor_id = %self.actor_id,
-                    message_id = %message_id,
-                    saved_state_len = saved_state.as_ref().map(|s| s.len()).unwrap_or(0),
-                    "SimpleActor reinstantiation: creating fresh instance (state already captured)"
-                );
                 // Acquire global reinstantiation cap (if set) so we stay under Wasmtime's memory-stripe limit.
                 // CRITICAL: Both per-actor lock (already held above) AND global semaphore must be held.
                 // Per-actor lock serializes re-instantiations per actor; global semaphore caps total concurrent.
@@ -2466,11 +2455,14 @@ impl WasmInstance {
                     // We use original_init_config to ensure proper initialization, but state changes
                     // from handle() are lost. For proper state preservation, we need fix #2 (return
                     // state from handle) or fix #3 (host function persistence).
-                    tracing::debug!(
-                        actor_id = %self.actor_id,
-                        message_id = %message_id,
-                        "SimpleActor handle() succeeded, re-instantiated with original config"
-                    );
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        tracing::debug!(
+                            actor_id = %self.actor_id,
+                            message_id = %message_id,
+                            saved_state_len = saved_state.as_ref().map(|s| s.len()).unwrap_or(0),
+                            "SimpleActor handle() succeeded after re-instantiation"
+                        );
+                    }
                     metrics::histogram!("plexspaces_wasm_component_message_duration_seconds")
                         .record(duration.as_secs_f64());
                     metrics::counter!("plexspaces_wasm_component_message_success_total")

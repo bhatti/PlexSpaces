@@ -89,6 +89,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_register_outbound_service_link() {
+        use plexspaces_proto::node::v1::{OutboundTransport, ServiceLinkConfig};
+
+        let registry = create_test_registry().await;
+        let ctx = create_test_context();
+        let link = ServiceLinkConfig {
+            name: "payments-api".to_string(),
+            transport: OutboundTransport::OutboundTransportHttp as i32,
+            base_url: "https://api.example.test".to_string(),
+            publish_to_registry: true,
+            ..Default::default()
+        };
+        register_outbound_service_link(&registry, &ctx, &link, "node-a")
+            .await
+            .unwrap();
+        let all = registry
+            .discover(
+                &ctx,
+                Some(ObjectType::ObjectTypeService),
+                None,
+                None,
+                None,
+                None,
+                0,
+                100,
+            )
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].grpc_address, "https://api.example.test");
+        assert!(all[0].object_id.contains("payments-api"));
+    }
+
+    #[tokio::test]
     async fn test_discover_nodes_caching() {
         let registry = create_test_registry().await;
         let ctx = create_test_context();

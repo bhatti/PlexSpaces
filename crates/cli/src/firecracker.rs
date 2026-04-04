@@ -285,6 +285,7 @@ async fn deploy_app_to_node(node_addr: &str, vm_id: &str, wasm_path: &PathBuf) -
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         metadata: None,
         seed_nodes: vec![],
+        required_service_links: vec![],
     };
 
     // Create deployment request

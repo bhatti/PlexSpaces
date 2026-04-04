@@ -42,6 +42,7 @@ mod tests {
             Some(journal_storage),
             None, // No blob service
             None, // No elastic pool service
+            None, // No outbound HTTP client
         ))
     }
 

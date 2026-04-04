@@ -19,11 +19,6 @@ CARGO_TEST_JOBS ?= $(CARGO_BUILD_JOBS)
 # Override with: make proto-python VENV_PATH=/path/to/venv
 VENV_PATH ?= $(HOME)/venv
 
-# Workspace members under examples/ (path = true deps) — excluded from make build / make test.
-# Build them explicitly: cargo build -p temporal-comparison   or   cd examples/rust/embedded/<name> && cargo build
-# Clear to include them in those targets: make build CARGO_EXCLUDE_EXAMPLES=
-CARGO_EXCLUDE_EXAMPLES ?= --exclude temporal-comparison --exclude skypilot-comparison
-
 # Default target
 all: proto build build-examples test test-examples
 
@@ -328,7 +323,7 @@ build:
 	export CARGO_INCREMENTAL=1; \
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
-	$(CARGO) build $(CARGO_BUILD_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
+	$(CARGO) build $(CARGO_BUILD_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
 	@echo "Building SDKs..."
 	@if [ -d "sdks/typescript" ] && [ -f "sdks/typescript/package.json" ]; then \
 		echo "  Building TypeScript SDK..."; \
@@ -381,7 +376,7 @@ build-fast:
 	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
 	export CARGO_INCREMENTAL=1; \
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
-	$(CARGO) check $(CARGO_BUILD_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --lib --bins --tests --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
+	$(CARGO) check $(CARGO_BUILD_FEATURES) --workspace --lib --bins --tests --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
 
 check: build-fast
 
@@ -396,7 +391,7 @@ release:
 	export CARGO_INCREMENTAL=1; \
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
-	$(CARGO) build --release --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=short
+	$(CARGO) build --release --all-features --workspace --jobs $$CARGO_JOBS --message-format=short
 	@echo "Release build complete!"
 
 # Build all examples
@@ -413,7 +408,7 @@ build-examples:
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
 	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
 	echo "Pre-building workspace dependencies for faster example builds..."; \
-	$(CARGO) build --lib --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=short || true; \
+	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
 	echo ""; \
 	echo "Building examples with shared target directory..."; \
 	PROJECT_ROOT=$$(pwd); \
@@ -535,7 +530,7 @@ run-all-standalone-examples:
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4); \
 	fi; \
 	echo "Pre-building workspace dependencies for faster example builds..."; \
-	$(CARGO) build --lib --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=short || true; \
+	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
 	echo ""; \
 	for example in byzantine heat_diffusion heat_diffusion_wasm wasm-calculator order-processing finance-risk genomics-pipeline genomic-workflow-pipeline matrix_multiply matrix_vector_mpi wasm_showcase; do \
 		if [ -d "examples/$$example" ] && [ -f "examples/$$example/Cargo.toml" ]; then \
@@ -608,7 +603,7 @@ test:
 	fi; \
 	if [ "$${TEST_SKIP_PREBUILD:-0}" = "0" ]; then \
 		echo "Building workspace first for faster test execution (incremental build enabled)..." | tee -a test-out; \
-		$(CARGO) build --lib $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out; \
+		$(CARGO) build --lib $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out; \
 		echo "Building node_runner binary (required by plexspaces-services integration_tests)..." | tee -a test-out; \
 		$(CARGO) build --bin node_runner $(CARGO_TEST_FEATURES) -p plexspaces-services --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out; \
 	else \
@@ -620,7 +615,7 @@ test:
 		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
 		echo "Note: tuplespace tests run with single thread (configured in nextest.toml)" | tee -a test-out; \
 		echo "Running default test suite (ignored tests run only when requested explicitly)" | tee -a test-out; \
-		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || exit 1; \
+		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || exit 1; \
 	else \
 		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..." | tee -a test-out; \
 		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
@@ -634,12 +629,12 @@ test:
 		fi; \
 		if [ -n "$$TIMEOUT_CMD" ]; then \
 			$$TIMEOUT_CMD $(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
-			$$TIMEOUT_CMD $(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			$$TIMEOUT_CMD $(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
 				--exclude plexspaces-tuplespace 2>&1 | tee -a test-out || exit 1; \
 		else \
 			echo "Warning: timeout command not found, running without timeout (install coreutils for timeout: brew install coreutils)" | tee -a test-out; \
 			$(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
-			$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
 				--exclude plexspaces-tuplespace 2>&1 | tee -a test-out || exit 1; \
 		fi; \
 	fi; \
@@ -703,7 +698,7 @@ test-fast:
 		export RUSTC_WRAPPER=sccache; \
 	fi; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run --fail-fast --profile $(NEXTTEST_PROFILE) --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
+		cargo nextest run --fail-fast --profile $(NEXTTEST_PROFILE) --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT; \
 	else \
 		TIMEOUT_CMD=""; \
 		if command -v timeout >/dev/null 2>&1; then \
@@ -713,11 +708,11 @@ test-fast:
 		fi; \
 		if [ -n "$$TIMEOUT_CMD" ]; then \
 			$$TIMEOUT_CMD $(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 || exit 1; \
-			$$TIMEOUT_CMD $(CARGO) test --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --exclude plexspaces-tuplespace || exit 1; \
+			$$TIMEOUT_CMD $(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --exclude plexspaces-tuplespace || exit 1; \
 		else \
 			echo "Warning: timeout not found; running cargo test without outer timeout (brew install coreutils for gtimeout)"; \
 			$(CARGO) test --lib --all-features -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 || exit 1; \
-			$(CARGO) test --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --exclude plexspaces-tuplespace || exit 1; \
+			$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --exclude plexspaces-tuplespace || exit 1; \
 		fi; \
 	fi; \
 	echo "test-fast: done."
@@ -741,9 +736,9 @@ test-filter:
 	fi; \
 	echo "Running tests matching filter: $(FILTER) (including ignored)"; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS --run-ignored all --filter "$(FILTER)" || exit 1; \
+		cargo nextest run --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS --run-ignored all --filter "$(FILTER)" || exit 1; \
 	else \
-		$(CARGO) test --lib --tests --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS "$(FILTER)" -- --include-ignored || exit 1; \
+		$(CARGO) test --lib --tests --all-features --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT --test-threads=$$CARGO_JOBS "$(FILTER)" -- --include-ignored || exit 1; \
 	fi; \
 	echo "Filtered tests completed!"
 
@@ -794,7 +789,7 @@ test-examples:
 	echo "Fail-fast: enabled (stops on first error)"; \
 	echo ""; \
 	echo "Pre-building workspace dependencies for faster example builds (incremental build enabled)..."; \
-	$(CARGO) build --lib --all-features --workspace $(CARGO_EXCLUDE_EXAMPLES) --jobs $$CARGO_JOBS --message-format=short || true; \
+	$(CARGO) build --lib --all-features --workspace --jobs $$CARGO_JOBS --message-format=short || true; \
 	echo ""; \
 	PROJECT_ROOT=$$(pwd); \
 	# NOTE: Keep this list in sync with ~/.cursor/plans/reorganize_examples_structure_a51cf7c7.plan.md \

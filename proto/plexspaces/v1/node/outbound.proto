@@ -1,0 +1,288 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+// Copyright (C) 2025 Shahzad A. Bhatti <bhatti@plexobject.com>
+//
+// Outbound service links and HTTP/gRPC client transport policy for RuntimeConfig.
+// Follows AIP-style field documentation; OpenAPI and buf validate for gateways and config lint.
+
+syntax = "proto3";
+
+package plexspaces.node.v1;
+
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "plexspaces/prv/circuitbreaker/circuitbreaker.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+
+option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/node;plexspaces_node_v1";
+
+// Wire transport for an external service link (HTTP implemented first; GRPC/CHANNEL reserved).
+enum OutboundTransport {
+  OUTBOUND_TRANSPORT_UNSPECIFIED = 0;
+  OUTBOUND_TRANSPORT_HTTP = 1;
+  OUTBOUND_TRANSPORT_GRPC = 2;
+  OUTBOUND_TRANSPORT_CHANNEL = 3;
+}
+
+// Retry policy for outbound HTTP calls (exponential backoff with optional full jitter).
+message HttpRetryPolicy {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "HttpRetryPolicy"
+      description: "Retry configuration for outbound HTTP; idempotent methods only unless allow_non_idempotent_retry is set."
+    }
+  };
+
+  // Maximum attempts including the first try (1 = no retry).
+  uint32 max_attempts = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).uint32 = {gte: 1, lte: 20},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Max attempts including the first request; use 1 to disable retry."
+      minimum: 1
+      maximum: 20
+      default: "1"
+    }
+  ];
+
+  google.protobuf.Duration initial_backoff = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Initial backoff before first retry (e.g. 100ms)."
+    }
+  ];
+
+  google.protobuf.Duration max_backoff = 3 [
+    (google.api.field_behavior) = OPTIONAL,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Upper bound for backoff cap before jitter."
+    }
+  ];
+
+  // Multiplier for exponential backoff (e.g. 2.0).
+  double backoff_multiplier = 4 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).double = {gte: 1.0, lte: 64.0},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Exponential multiplier per retry attempt."
+      minimum: 1
+      maximum: 64
+    }
+  ];
+
+  // Jitter in [0,1] applied as full jitter on the backoff cap (AWS-style).
+  double jitter_ratio = 5 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).double = {gte: 0.0, lte: 1.0},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Fraction of full jitter applied to backoff (0 = none, 1 = full jitter)."
+      minimum: 0
+      maximum: 1
+    }
+  ];
+
+  // When false, only GET/HEAD/OPTIONS/TRACE are retried. When true, non-idempotent methods may retry.
+  bool allow_non_idempotent_retry = 6 [
+    (google.api.field_behavior) = OPTIONAL,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "If false (default proto bool), only safe/idempotent HTTP methods are retried."
+      default: "false"
+    }
+  ];
+}
+
+// Timeouts, retry, and circuit breaker for outbound HTTP clients (connection vs request timeout).
+message ClientTransportPolicy {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "ClientTransportPolicy"
+      description: "Merged defaults and templates for resilient outbound HTTP clients on the node."
+    }
+  };
+
+  google.protobuf.Duration connect_timeout = 1 [
+    (google.api.field_behavior) = OPTIONAL,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "TCP/TLS connect handshake timeout."
+    }
+  ];
+
+  google.protobuf.Duration request_timeout = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Per-request deadline including body transfer."
+    }
+  ];
+
+  HttpRetryPolicy retry = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  plexspaces.circuitbreaker.prv.CircuitBreakerConfig circuit_breaker = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // Maximum HTTP redirects (0 = HTTP client library default).
+  uint32 max_redirects = 5 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).uint32 = {lte: 32},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Max redirects to follow; 0 uses implementation default."
+      maximum: 32
+    }
+  ];
+}
+
+// Declarative external dependency: logical name to base URL, optional auth from environment, policy template.
+message ServiceLinkConfig {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "ServiceLinkConfig"
+      description: "Named outbound service link (wasmCloud-style); resolved by ServiceLocator for HTTP/gRPC clients."
+    }
+  };
+
+  // Unique link name for ServiceLocator resolution (e.g. "payments-api").
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 256, pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Logical name used by applications and code to obtain a client (AIP-style resource identifier segment)."
+      example: "\"payments-api\""
+    }
+  ];
+
+  OutboundTransport transport = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Wire protocol; HTTP is supported for outbound client; GRPC/CHANNEL reserved."
+    }
+  ];
+
+  // Base URL e.g. https://api.example.com (no trailing slash required).
+  string base_url = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 2048, uri: true},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Absolute HTTP(S) or gRPC-compatible origin URL for the external service."
+      format: "uri"
+      example: "\"https://api.example.com\""
+    }
+  ];
+
+  bool publish_to_registry = 4 [
+    (google.api.field_behavior) = OPTIONAL,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "If true, node may publish this link to ObjectRegistry for discovery."
+      default: "false"
+    }
+  ];
+
+  map<string, string> default_headers = 5 [(google.api.field_behavior) = OPTIONAL];
+
+  optional string api_key_header_name = 6 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 256},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "HTTP header name for API key when api_key_env_var is set (e.g. X-Api-Key)."
+    }
+  ];
+
+  optional string api_key_env_var = 7 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 256, pattern: "^[A-Z][A-Z0-9_]*$"},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Process environment variable holding the API key value (secret not stored in proto)."
+      example: "\"PAYMENTS_API_KEY\""
+    }
+  ];
+
+  optional string bearer_token_env_var = 8 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 256, pattern: "^[A-Z][A-Z0-9_]*$"},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Environment variable for Bearer token (Authorization: Bearer …)."
+      example: "\"PAYMENTS_BEARER_TOKEN\""
+    }
+  ];
+
+  optional string policy_template = 9 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 128},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Key in RuntimeConfig.outbound_policy_templates; merged with default_outbound_client_policy."
+    }
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// ServiceLinkService — runtime management of outbound service links
+// ---------------------------------------------------------------------------
+
+message AddServiceLinkRequest {
+  ServiceLinkConfig link = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message AddServiceLinkResponse {
+  ServiceLinkConfig link = 1;
+}
+
+message RemoveServiceLinkRequest {
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 256}
+  ];
+}
+
+message GetServiceLinkRequest {
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 256}
+  ];
+}
+
+message GetServiceLinkResponse {
+  ServiceLinkConfig link = 1;
+}
+
+message ListServiceLinksRequest {
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+message ListServiceLinksResponse {
+  repeated ServiceLinkConfig links = 1;
+  string next_page_token = 2;
+}
+
+// ServiceLinkService manages outbound service links at runtime.
+// Links declared in RuntimeConfig are registered at startup; this service
+// allows adding, removing, and querying links without restarting the node.
+service ServiceLinkService {
+  // Add or replace a named service link.
+  rpc AddServiceLink(AddServiceLinkRequest) returns (AddServiceLinkResponse) {
+    option (google.api.http) = {
+      post: "/v1/service-links"
+      body: "*"
+    };
+  }
+
+  // Remove a service link by name.
+  rpc RemoveServiceLink(RemoveServiceLinkRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/service-links/{name}"
+    };
+  }
+
+  // Get a single service link by name.
+  rpc GetServiceLink(GetServiceLinkRequest) returns (GetServiceLinkResponse) {
+    option (google.api.http) = {
+      get: "/v1/service-links/{name}"
+    };
+  }
+
+  // List all registered service links.
+  rpc ListServiceLinks(ListServiceLinksRequest) returns (ListServiceLinksResponse) {
+    option (google.api.http) = {
+      get: "/v1/service-links"
+    };
+  }
+}

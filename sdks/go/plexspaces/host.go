@@ -535,6 +535,42 @@ func (h *Host) ApplicationMetricsAdd(applicationID string, metrics any) (map[str
 	return out, nil
 }
 
+// HTTPFetch executes an outbound HTTP request via a named service link.
+//
+// The link must be pre-configured in RuntimeConfig.service_links.
+// The host handles retries, circuit breaking, and auth injection.
+//
+// linkName: Service link name (e.g. "payments-api")
+// method: HTTP method ("GET", "POST", "PUT", "DELETE", "PATCH")
+// pathAndQuery: Path and optional query string (e.g. "/v1/users?limit=10")
+// headers: Optional extra headers (nil = no extra headers)
+// body: Optional request body (nil = empty body)
+//
+// Returns a map with "status" (float64), "headers" (map), "body" (string).
+func (h *Host) HTTPFetch(linkName, method, pathAndQuery string, headers map[string]string, body []byte) (map[string]any, error) {
+	headersJSON := "{}"
+	if len(headers) > 0 {
+		data, err := json.Marshal(headers)
+		if err != nil {
+			return nil, err
+		}
+		headersJSON = string(data)
+	}
+	bodyStr := ""
+	if len(body) > 0 {
+		bodyStr = string(body)
+	}
+	result := hostHTTPFetch(linkName, method, pathAndQuery, headersJSON, bodyStr)
+	if isHostError(result) {
+		return nil, &HostError{result}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ApplicationGetStatus returns application status for a participating node.
 func (h *Host) ApplicationGetStatus(applicationID, nodeID string) (map[string]any, error) {
 	result := hostApplicationGetStatus(applicationID, nodeID)
@@ -546,6 +582,50 @@ func (h *Host) ApplicationGetStatus(applicationID, nodeID string) (map[string]an
 		return nil, err
 	}
 	return out, nil
+}
+
+// ========================================================================
+// ServiceHTTPClient — ergonomic outbound HTTP client for actors
+// ========================================================================
+
+// ServiceHTTPClient is an ergonomic outbound HTTP client backed by a named service link.
+//
+// The link must be pre-configured in RuntimeConfig.service_links.
+// The host handles retries, circuit breaking, and auth injection.
+//
+// Usage:
+//
+//	h := plexspaces.NewHost()
+//	client := plexspaces.NewServiceHTTPClient(h, "payments-api")
+//	resp, err := client.Get("/v1/balance?account=123", nil)
+type ServiceHTTPClient struct {
+	host     *Host
+	linkName string
+}
+
+// NewServiceHTTPClient creates a new ServiceHTTPClient bound to a named service link.
+func NewServiceHTTPClient(h *Host, linkName string) *ServiceHTTPClient {
+	return &ServiceHTTPClient{host: h, linkName: linkName}
+}
+
+// Get sends a GET request. Returns response map with "status", "headers", "body".
+func (c *ServiceHTTPClient) Get(pathAndQuery string, headers map[string]string) (map[string]any, error) {
+	return c.host.HTTPFetch(c.linkName, "GET", pathAndQuery, headers, nil)
+}
+
+// Post sends a POST request with a JSON body. Returns response map.
+func (c *ServiceHTTPClient) Post(pathAndQuery string, body []byte, headers map[string]string) (map[string]any, error) {
+	return c.host.HTTPFetch(c.linkName, "POST", pathAndQuery, headers, body)
+}
+
+// Put sends a PUT request with a JSON body. Returns response map.
+func (c *ServiceHTTPClient) Put(pathAndQuery string, body []byte, headers map[string]string) (map[string]any, error) {
+	return c.host.HTTPFetch(c.linkName, "PUT", pathAndQuery, headers, body)
+}
+
+// Delete sends a DELETE request. Returns response map.
+func (c *ServiceHTTPClient) Delete(pathAndQuery string, headers map[string]string) (map[string]any, error) {
+	return c.host.HTTPFetch(c.linkName, "DELETE", pathAndQuery, headers, nil)
 }
 
 // ========================================================================

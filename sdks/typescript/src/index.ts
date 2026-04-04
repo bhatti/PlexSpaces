@@ -19,7 +19,7 @@ export {
   query_handler,
   getActorDefinition,
 } from "./decorators.js";
-export { Host, ProcessGroups, TupleSpace, host } from "./host.js";
+export { Host, ProcessGroups, TupleSpace, host, ServiceHttpClient } from "./host.js";
 export { ActorRouter } from "./router.js";
 export {
   defaultRetryConfig,

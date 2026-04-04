@@ -108,6 +108,7 @@ pub fn create_default_application_spec(
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         metadata: None,
         seed_nodes: vec![],
+        required_service_links: vec![],
     }
 }
 
@@ -392,6 +393,23 @@ impl ApplicationService for ApplicationServiceImpl {
                 ));
             }
 
+            if !merged_config.required_service_links.is_empty() {
+                let rt = self
+                    .service_locator
+                    .get_runtime_config()
+                    .await
+                    .ok_or_else(|| {
+                        Status::failed_precondition(
+                            "ApplicationSpec.required_service_links set but RuntimeConfig not available",
+                        )
+                    })?;
+                plexspaces_http_client::validate_application_service_links(
+                    &rt,
+                    &merged_config.required_service_links,
+                )
+                .map_err(Status::failed_precondition)?;
+            }
+
             // Clone values for observability logging before moving them
             let module_hash_for_log = module_hash.clone();
             let namespace_for_log = final_namespace.clone();
@@ -581,6 +599,22 @@ impl ApplicationService for ApplicationServiceImpl {
         })?;
 
         let merged_config = config.clone();
+        if !merged_config.required_service_links.is_empty() {
+            let rt = self
+                .service_locator
+                .get_runtime_config()
+                .await
+                .ok_or_else(|| {
+                    Status::failed_precondition(
+                        "ApplicationSpec.required_service_links set but RuntimeConfig not available",
+                    )
+                })?;
+            plexspaces_http_client::validate_application_service_links(
+                &rt,
+                &merged_config.required_service_links,
+            )
+            .map_err(Status::failed_precondition)?;
+        }
         let seed_nodes = merged_config.seed_nodes.clone();
 
         // Create Application instance from config

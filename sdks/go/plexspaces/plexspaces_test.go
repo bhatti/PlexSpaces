@@ -1218,6 +1218,67 @@ func TestHostScatterGather(t *testing.T) {
 	}
 }
 
+func TestHostHTTPFetch(t *testing.T) {
+	h := NewHost()
+	resp, err := h.HTTPFetch("test-link", "GET", "/v1/items", nil, nil)
+	if err != nil {
+		t.Fatalf("HTTPFetch failed: %v", err)
+	}
+	status, ok := resp["status"].(float64)
+	if !ok || int(status) != 200 {
+		t.Errorf("expected status 200, got %v", resp["status"])
+	}
+}
+
+func TestHostHTTPFetchWithHeaders(t *testing.T) {
+	h := NewHost()
+	headers := map[string]string{"Authorization": "Bearer test-token"}
+	resp, err := h.HTTPFetch("test-link", "POST", "/v1/items", headers, []byte(`{"name":"test"}`))
+	if err != nil {
+		t.Fatalf("HTTPFetch failed: %v", err)
+	}
+	if resp["status"] == nil {
+		t.Error("expected status in response")
+	}
+}
+
+func TestServiceHTTPClientGet(t *testing.T) {
+	h := NewHost()
+	client := NewServiceHTTPClient(h, "test-api")
+	resp, err := client.Get("/v1/items", nil)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if resp["status"] == nil {
+		t.Error("expected status in response")
+	}
+}
+
+func TestServiceHTTPClientPost(t *testing.T) {
+	h := NewHost()
+	client := NewServiceHTTPClient(h, "test-api")
+	body, _ := json.Marshal(map[string]string{"name": "test"})
+	resp, err := client.Post("/v1/items", body, nil)
+	if err != nil {
+		t.Fatalf("Post failed: %v", err)
+	}
+	if resp["status"] == nil {
+		t.Error("expected status in response")
+	}
+}
+
+func TestServiceHTTPClientDelete(t *testing.T) {
+	h := NewHost()
+	client := NewServiceHTTPClient(h, "test-api")
+	resp, err := client.Delete("/v1/items/1", nil)
+	if err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+	if resp["status"] == nil {
+		t.Error("expected status in response")
+	}
+}
+
 func TestActorRouterEchoActorInit(t *testing.T) {
 	router := NewActorRouter()
 	router.Route("echo", func() Actor { return newEchoActor() })

@@ -149,6 +149,7 @@ pub async fn deploy(
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
             seed_nodes: vec![],
+            required_service_links: vec![],
         })
     } else if wasm_module.is_none() {
         // Config required if not WASM
@@ -171,6 +172,7 @@ pub async fn deploy(
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             metadata: None,
             seed_nodes: vec![],
+            required_service_links: vec![],
         })
     };
 

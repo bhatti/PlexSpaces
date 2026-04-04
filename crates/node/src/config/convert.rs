@@ -4,11 +4,11 @@
 // Conversion from YAML intermediate representation to proto ReleaseSpec
 
 use super::yaml::{JwtConfigYaml, MtlsConfigYaml, *};
-use plexspaces_proto::application::v1::ApplicationSpec;
+use plexspaces_proto::application::v1::{ApplicationServiceLinkRequirement, ApplicationSpec};
 use plexspaces_proto::channel::v1::ChannelProvider;
 use plexspaces_proto::node::v1::{
-    GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, ReleaseSpec, RuntimeConfig,
-    SecurityConfig, ShutdownConfig,
+    GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, OutboundTransport, ReleaseSpec,
+    RuntimeConfig, SecurityConfig, ServiceLinkConfig, ShutdownConfig,
 };
 use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
 use plexspaces_proto::storage::v1::{
@@ -50,6 +50,14 @@ pub fn convert_yaml_to_proto(yaml: ReleaseYaml) -> Result<ReleaseSpec, String> {
             wasm_apps_directory: yaml.runtime.wasm_apps_directory, // Set by config_manager::initialize if empty
             save_wasm_apps: false, // Default: disabled (only for testing)
             default_virtual_actor_config: None, // Defaults applied in code when None (5m, pool 100, lazy)
+            service_links: yaml
+                .runtime
+                .service_links
+                .into_iter()
+                .map(convert_service_link_config)
+                .collect::<Result<Vec<_>, _>>()?,
+            default_outbound_client_policy: None,
+            outbound_policy_templates: std::collections::HashMap::new(),
         }),
         system_applications: yaml.system_applications,
         applications: yaml
@@ -107,6 +115,36 @@ fn convert_health_config(yaml: HealthConfigYaml) -> HealthConfig {
         heartbeat_timeout_seconds: yaml.heartbeat_timeout_seconds,
         registry_url: yaml.registry_url,
     }
+}
+
+fn convert_service_link_config(yaml: ServiceLinkConfigYaml) -> Result<ServiceLinkConfig, String> {
+    let transport = match yaml.transport.trim().to_uppercase().as_str() {
+        "" | "HTTP" | "OUTBOUND_TRANSPORT_HTTP" => OutboundTransport::OutboundTransportHttp as i32,
+        "GRPC" | "OUTBOUND_TRANSPORT_GRPC" => OutboundTransport::OutboundTransportGrpc as i32,
+        "CHANNEL" | "OUTBOUND_TRANSPORT_CHANNEL" => {
+            OutboundTransport::OutboundTransportChannel as i32
+        }
+        "UNSPECIFIED" | "OUTBOUND_TRANSPORT_UNSPECIFIED" => {
+            OutboundTransport::OutboundTransportUnspecified as i32
+        }
+        other => {
+            return Err(format!(
+                "runtime.service_links: unknown transport {other:?} (use HTTP, GRPC, or CHANNEL)"
+            ));
+        }
+    };
+
+    Ok(ServiceLinkConfig {
+        name: yaml.name,
+        transport,
+        base_url: yaml.base_url,
+        publish_to_registry: yaml.publish_to_registry,
+        default_headers: yaml.default_headers,
+        api_key_header_name: yaml.api_key_header_name,
+        api_key_env_var: yaml.api_key_env_var,
+        bearer_token_env_var: yaml.bearer_token_env_var,
+        policy_template: yaml.policy_template,
+    })
 }
 
 fn convert_security_config(yaml: SecurityConfigYaml) -> Result<SecurityConfig, String> {
@@ -288,6 +326,14 @@ fn convert_application_config(yaml: ApplicationSpecYaml) -> ApplicationSpec {
         shutdown_strategy,
         metadata: None,
         seed_nodes: vec![],
+        required_service_links: yaml
+            .required_service_links
+            .into_iter()
+            .map(|link| ApplicationServiceLinkRequirement {
+                link_name: link.link_name,
+                policy_template: link.policy_template,
+            })
+            .collect(),
     }
 }
 
@@ -396,5 +442,131 @@ fn convert_dynamodb_config(
         endpoint_url: yaml.endpoint_url,
         access_key_id: yaml.access_key_id,
         secret_access_key: yaml.secret_access_key,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn convert_yaml_to_proto_preserves_service_links_and_requirements() {
+        let release_yaml = ReleaseYaml {
+            name: "my-cluster".to_string(),
+            version: "1.0.0".to_string(),
+            description: "test".to_string(),
+            node: NodeConfigYaml {
+                id: "node-1".to_string(),
+                listen_addr: "0.0.0.0:8091".to_string(),
+                cluster_seed_nodes: vec![],
+            },
+            runtime: RuntimeConfigYaml {
+                grpc: GrpcConfigYaml::default(),
+                health: HealthConfigYaml::default(),
+                security: SecurityConfigYaml::default(),
+                blob: None,
+                db: None,
+                locks_provider: None,
+                channel_provider: None,
+                mailbox_provider: None,
+                base_dir: String::new(),
+                wasm_apps_directory: String::new(),
+                service_links: vec![ServiceLinkConfigYaml {
+                    name: "weather-api".to_string(),
+                    transport: "HTTP".to_string(),
+                    base_url: "https://api.open-meteo.com".to_string(),
+                    publish_to_registry: true,
+                    default_headers: HashMap::new(),
+                    api_key_header_name: None,
+                    api_key_env_var: None,
+                    bearer_token_env_var: None,
+                    policy_template: None,
+                }],
+            },
+            system_applications: vec![],
+            applications: vec![ApplicationSpecYaml {
+                name: "weather".to_string(),
+                version: "1.0.0".to_string(),
+                description: "weather app".to_string(),
+                config_path: "app-config.toml".to_string(),
+                enabled: true,
+                auto_start: true,
+                shutdown_timeout_seconds: 30,
+                shutdown_strategy: "graceful".to_string(),
+                dependencies: vec![],
+                required_service_links: vec![ApplicationServiceLinkRequirementYaml {
+                    link_name: "weather-api".to_string(),
+                    policy_template: None,
+                }],
+            }],
+            env: HashMap::new(),
+            shutdown: ShutdownConfigYaml::default(),
+        };
+
+        let release = convert_yaml_to_proto(release_yaml).expect("convert release");
+        let runtime = release.runtime.expect("runtime");
+
+        assert_eq!(runtime.service_links.len(), 1);
+        assert_eq!(runtime.service_links[0].name, "weather-api");
+        assert_eq!(
+            runtime.service_links[0].transport,
+            OutboundTransport::OutboundTransportHttp as i32
+        );
+        assert_eq!(
+            runtime.service_links[0].base_url,
+            "https://api.open-meteo.com"
+        );
+        assert!(runtime.service_links[0].publish_to_registry);
+
+        assert_eq!(release.applications.len(), 1);
+        assert_eq!(release.applications[0].required_service_links.len(), 1);
+        assert_eq!(
+            release.applications[0].required_service_links[0].link_name,
+            "weather-api"
+        );
+    }
+
+    #[test]
+    fn convert_yaml_to_proto_rejects_unknown_service_link_transport() {
+        let release_yaml = ReleaseYaml {
+            name: "my-cluster".to_string(),
+            version: "1.0.0".to_string(),
+            description: "test".to_string(),
+            node: NodeConfigYaml {
+                id: "node-1".to_string(),
+                listen_addr: "0.0.0.0:8091".to_string(),
+                cluster_seed_nodes: vec![],
+            },
+            runtime: RuntimeConfigYaml {
+                grpc: GrpcConfigYaml::default(),
+                health: HealthConfigYaml::default(),
+                security: SecurityConfigYaml::default(),
+                blob: None,
+                db: None,
+                locks_provider: None,
+                channel_provider: None,
+                mailbox_provider: None,
+                base_dir: String::new(),
+                wasm_apps_directory: String::new(),
+                service_links: vec![ServiceLinkConfigYaml {
+                    name: "weather-api".to_string(),
+                    transport: "SMTP".to_string(),
+                    base_url: "https://api.open-meteo.com".to_string(),
+                    publish_to_registry: false,
+                    default_headers: HashMap::new(),
+                    api_key_header_name: None,
+                    api_key_env_var: None,
+                    bearer_token_env_var: None,
+                    policy_template: None,
+                }],
+            },
+            system_applications: vec![],
+            applications: vec![],
+            env: HashMap::new(),
+            shutdown: ShutdownConfigYaml::default(),
+        };
+
+        let error = convert_yaml_to_proto(release_yaml).expect_err("invalid transport");
+        assert!(error.contains("unknown transport"));
     }
 }

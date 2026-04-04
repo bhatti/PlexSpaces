@@ -51,7 +51,7 @@ from .decorators import (
     signal_handler,
     query_handler,
 )
-from .host import host
+from .host import host, ServiceHttpClient
 from .workflow import default_retry_config, with_retry
 from .leader_worker import LeaderWorkerClient, list_worker_node_ids
 
@@ -69,6 +69,7 @@ __all__ = [
     "signal_handler",
     "query_handler",
     "host",
+    "ServiceHttpClient",
     "with_retry",
     "LeaderWorkerClient",
     "list_worker_node_ids",

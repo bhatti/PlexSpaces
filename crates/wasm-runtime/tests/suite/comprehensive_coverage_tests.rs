@@ -269,6 +269,7 @@ async fn test_handle_request_error() {
         None,           // journal_storage
         None,           // blob_service
         None,           // elastic_pool_service
+        None, // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
     )
@@ -333,6 +334,7 @@ async fn test_handle_event_error() {
         None,           // journal_storage
         None,           // blob_service
         None,           // elastic_pool_service
+        None, // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
     )
@@ -420,6 +422,7 @@ async fn test_channel_host_function_error_handling() {
         None,  // journal_storage
         None,  // blob_service
         None,  // elastic_pool_service
+        None, // outbound_http_client
         false, // durability_enabled
         None,  // global_reinstantiation_semaphore
     )

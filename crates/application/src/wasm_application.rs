@@ -543,6 +543,8 @@ impl WasmApplication {
         let init_config_json =
             init_config_from_initial_state_or_child_spec(initial_state, child_spec, actor_id);
 
+        let outbound_http_client = service_locator.get_outbound_http_client().await;
+
         let instance_any = runtime
             .instantiate(
                 module_any,
@@ -558,6 +560,7 @@ impl WasmApplication {
                 object_registry,
                 journal_storage,
                 blob_service,
+                outbound_http_client,
             )
             .await
             .map_err(|e| ApplicationError::Other(format!("WASM instantiation failed: {}", e)))?;
@@ -1581,6 +1584,7 @@ impl WasmApplication {
                 None, // No object registry for temporary instance
                 None, // No journal storage for temporary instance
                 None, // No blob service for temporary instance
+                None, // No outbound HTTP client for temporary instance
             )
             .await
             .map_err(|e| {

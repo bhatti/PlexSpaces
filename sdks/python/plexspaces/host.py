@@ -426,6 +426,23 @@ class _MockHost:
             },
         })
 
+    def http_fetch(
+        self,
+        link_name: str,
+        method: str,
+        path_and_query: str,
+        headers_json: str,
+        body: str,
+    ) -> str:
+        """Outbound HTTP fetch via named service link (mock).
+        Returns JSON: {"status":200,"headers":{},"body":""} or "ERROR:..."
+        """
+        return json.dumps({
+            "status": 200,
+            "headers": {},
+            "body": "",
+        })
+
 
 class _TupleSpaceHelper:
     """
@@ -1209,6 +1226,112 @@ class Host:
         h = _get_host()
         payload_json = json.dumps(payload) if payload is not None else "{}"
         return h.send_after(delay_ms, msg_type, payload_json)
+
+    # ========================================================================
+    # Outbound HTTP (service links)
+    # ========================================================================
+
+    def http_fetch(
+        self,
+        link_name: str,
+        method: str,
+        path_and_query: str,
+        headers: Optional[Dict[str, str]] = None,
+        body: Optional[Union[str, bytes]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute an outbound HTTP request via a named service link.
+
+        The link must be pre-configured in RuntimeConfig.service_links.
+        The host handles retries, circuit breaking, and auth injection.
+
+        Args:
+            link_name: Service link name (e.g. "payments-api")
+            method: HTTP method ("GET", "POST", "PUT", "DELETE", "PATCH")
+            path_and_query: Path and optional query string (e.g. "/v1/users?limit=10")
+            headers: Optional extra headers dict
+            body: Optional request body (string or bytes; bytes are base64-encoded)
+
+        Returns:
+            Dict with "status" (int), "headers" (dict), "body" (str, base64-encoded).
+
+        Raises:
+            RuntimeError: If the host returns an ERROR: response.
+        """
+        import base64
+        h = _get_host()
+        headers_json = json.dumps(headers or {})
+        if isinstance(body, bytes):
+            body_str = base64.b64encode(body).decode("ascii")
+        else:
+            body_str = body or ""
+        fn = getattr(h, "http_fetch", None) or getattr(h, "http-fetch", None)
+        if fn is None:
+            raise RuntimeError("http_fetch not available (no service links configured)")
+        result = fn(link_name, method, path_and_query, headers_json, body_str)
+        if isinstance(result, str) and result.startswith("ERROR:"):
+            raise RuntimeError(result)
+        if isinstance(result, str):
+            return json.loads(result)
+        return result
+
+
+class ServiceHttpClient:
+    """
+    Ergonomic outbound HTTP client backed by a named service link.
+
+    The link must be pre-configured in RuntimeConfig.service_links.
+    The host handles retries, circuit breaking, and auth injection.
+
+    Usage::
+
+        from plexspaces import host
+
+        http = ServiceHttpClient("payments-api")
+        balance = http.get("/v1/balance?account=123")
+        result = http.post("/v1/transfer", {"amount": 100})
+
+    """
+
+    def __init__(self, link_name: str):
+        self._link_name = link_name
+        self._host = Host()
+
+    def get(
+        self,
+        path_and_query: str,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """GET request. Returns response dict with status, headers, body."""
+        return self._host.http_fetch(self._link_name, "GET", path_and_query, headers)
+
+    def post(
+        self,
+        path_and_query: str,
+        body: Any = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """POST JSON request. body is serialized to JSON."""
+        body_str = json.dumps(body) if body is not None else ""
+        return self._host.http_fetch(self._link_name, "POST", path_and_query, headers, body_str)
+
+    def put(
+        self,
+        path_and_query: str,
+        body: Any = None,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """PUT JSON request."""
+        body_str = json.dumps(body) if body is not None else ""
+        return self._host.http_fetch(self._link_name, "PUT", path_and_query, headers, body_str)
+
+    def delete(
+        self,
+        path_and_query: str,
+        headers: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """DELETE request."""
+        return self._host.http_fetch(self._link_name, "DELETE", path_and_query, headers)
 
 
 # Global host instance

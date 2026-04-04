@@ -797,6 +797,7 @@ fn create_application_spec_with_multiple_facets(name: &str, version: &str) -> Ap
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     }
 }
@@ -854,6 +855,7 @@ fn create_application_spec_with_single_facet(
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     }
 }

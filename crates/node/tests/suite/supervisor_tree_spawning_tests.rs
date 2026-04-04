@@ -593,6 +593,7 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 
@@ -696,6 +697,7 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 
@@ -980,6 +982,7 @@ async fn test_deeply_nested_supervisor_tree() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 
@@ -1076,6 +1079,7 @@ async fn test_actors_tracked_in_application() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 
@@ -1154,6 +1158,7 @@ async fn test_complex_supervisor_hierarchy() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 
@@ -1328,6 +1333,7 @@ async fn test_multiple_sibling_supervisors() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 
@@ -1429,6 +1435,7 @@ async fn test_auto_generated_supervisor_tree() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 
@@ -1518,6 +1525,7 @@ async fn test_graceful_shutdown_of_supervisor_tree() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 
@@ -1608,6 +1616,7 @@ async fn test_actor_type_tracking_complex_tree() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 
@@ -1753,6 +1762,7 @@ async fn test_erlang_style_supervision_structure() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 

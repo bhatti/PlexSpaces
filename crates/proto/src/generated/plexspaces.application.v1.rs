@@ -104,6 +104,18 @@ pub struct ApplicationSpec {
     /// Example: \["localhost:8091", "localhost:8093"\]
     #[prost(string, repeated, tag="15")]
     pub seed_nodes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// External service links this application expects at deploy time (validated against node catalog).
+    #[prost(message, repeated, tag="16")]
+    pub required_service_links: ::prost::alloc::vec::Vec<ApplicationServiceLinkRequirement>,
+}
+/// Reference to a runtime service link by logical name (see RuntimeConfig.service_links).
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ApplicationServiceLinkRequirement {
+    #[prost(string, tag="1")]
+    pub link_name: ::prost::alloc::string::String,
+    #[prost(string, optional, tag="2")]
+    pub policy_template: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// Supervisor specification (Erlang/OTP supervisor)
 ///

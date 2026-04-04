@@ -300,6 +300,9 @@ pub struct HostFunctions {
     blob_service: Option<Arc<BlobService>>,
     /// Elastic pool service for checkout/checkin (optional)
     elastic_pool_service: Option<Arc<dyn ElasticPoolService>>,
+    /// Resilient outbound HTTP client for named service links (optional).
+    /// Populated from RuntimeConfig.service_links via ServiceLocator.
+    outbound_http_client: Option<Arc<dyn plexspaces_core::OutboundHttpClient>>,
 }
 
 impl HostFunctions {
@@ -315,6 +318,7 @@ impl HostFunctions {
             journal_storage: None,
             blob_service: None,
             elastic_pool_service: None,
+            outbound_http_client: None,
         }
     }
 
@@ -330,6 +334,7 @@ impl HostFunctions {
             journal_storage: None,
             blob_service: None,
             elastic_pool_service: None,
+            outbound_http_client: None,
         }
     }
 
@@ -345,6 +350,7 @@ impl HostFunctions {
             journal_storage: None,
             blob_service: None,
             elastic_pool_service: None,
+            outbound_http_client: None,
         }
     }
 
@@ -363,6 +369,7 @@ impl HostFunctions {
             journal_storage: None,
             blob_service: None,
             elastic_pool_service: None,
+            outbound_http_client: None,
         }
     }
 
@@ -377,6 +384,7 @@ impl HostFunctions {
         journal_storage: Option<Arc<dyn JournalStorage>>,
         blob_service: Option<Arc<BlobService>>,
         elastic_pool_service: Option<Arc<dyn ElasticPoolService>>,
+        outbound_http_client: Option<Arc<dyn plexspaces_core::OutboundHttpClient>>,
     ) -> Self {
         Self {
             message_sender: sender,
@@ -388,6 +396,7 @@ impl HostFunctions {
             journal_storage,
             blob_service,
             elastic_pool_service,
+            outbound_http_client,
         }
     }
 
@@ -434,6 +443,89 @@ impl HostFunctions {
     /// Get journal storage if available
     pub fn journal_storage(&self) -> Option<&Arc<dyn JournalStorage>> {
         self.journal_storage.as_ref()
+    }
+
+    /// Get outbound HTTP client if available
+    pub fn outbound_http_client(
+        &self,
+    ) -> Option<&Arc<dyn plexspaces_core::OutboundHttpClient>> {
+        self.outbound_http_client.as_ref()
+    }
+
+    /// Execute an outbound HTTP request via a named service link.
+    ///
+    /// Returns JSON string: `{"status":200,"headers":{...},"body":"base64..."}` on success,
+    /// or `"ERROR:message"` on failure (unknown link, circuit open, network error, etc.).
+    pub async fn http_fetch(
+        &self,
+        link_name: &str,
+        method: &str,
+        path_and_query: &str,
+        headers_json: &str,
+        body_b64: &str,
+    ) -> String {
+        use base64::Engine as _;
+        use plexspaces_core::{OutboundHttpRequest, OutboundHttpResponse};
+
+        let client = match &self.outbound_http_client {
+            Some(c) => c,
+            None => {
+                return format!("ERROR:outbound HTTP client not configured (no service links in RuntimeConfig)");
+            }
+        };
+
+        // Parse extra headers from JSON object (or empty)
+        let extra_headers: Vec<(String, String)> = if headers_json.is_empty() {
+            vec![]
+        } else {
+            match serde_json::from_str::<serde_json::Value>(headers_json) {
+                Ok(serde_json::Value::Object(map)) => map
+                    .into_iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
+                    .collect(),
+                _ => vec![],
+            }
+        };
+
+        // Decode base64 body
+        let body: Vec<u8> = if body_b64.is_empty() {
+            vec![]
+        } else {
+            match base64::engine::general_purpose::STANDARD.decode(body_b64) {
+                Ok(b) => b,
+                Err(e) => {
+                    return format!("ERROR:invalid base64 body: {}", e);
+                }
+            }
+        };
+
+        let req = OutboundHttpRequest {
+            method: method.to_string(),
+            path_and_query: path_and_query.to_string(),
+            headers: extra_headers,
+            body,
+        };
+
+        match client.execute(link_name, req).await {
+            Ok(OutboundHttpResponse {
+                status,
+                headers,
+                body: resp_body,
+            }) => {
+                let body_b64 = base64::engine::general_purpose::STANDARD.encode(&resp_body);
+                let headers_map: serde_json::Map<String, serde_json::Value> = headers
+                    .into_iter()
+                    .map(|(k, v)| (k, serde_json::Value::String(v)))
+                    .collect();
+                serde_json::json!({
+                    "status": status,
+                    "headers": headers_map,
+                    "body": body_b64,
+                })
+                .to_string()
+            }
+            Err(e) => format!("ERROR:{}", e),
+        }
     }
 
     /// Send message via message sender if available

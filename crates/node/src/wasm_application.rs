@@ -679,6 +679,9 @@ impl WasmApplication {
         // Get BlobService from node if available (using trait-based access)
         let blob_service = node.blob_service().await;
 
+        // Get outbound HTTP client from service locator if available
+        let outbound_http_client = service_locator.get_outbound_http_client().await;
+
         // Create WASM instance with all available services
         // TODO(instance-pool): When config.use_instance_pool is true, checkout from per-module InstancePool
         // instead of runtime.instantiate() for faster spawn. Fits lightweight actors and worker pools.
@@ -700,6 +703,7 @@ impl WasmApplication {
                 object_registry,
                 journal_storage,
                 blob_service,
+                outbound_http_client,
             )
             .await
             .map_err(|e| {
@@ -793,6 +797,7 @@ impl WasmApplication {
                 None, // No object registry for temporary instance
                 None, // No journal storage for temporary instance
                 None, // No blob service for temporary instance
+                None, // No outbound HTTP client for temporary instance
             )
             .await
             .map_err(|e| {

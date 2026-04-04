@@ -45,6 +45,10 @@ pub mod service_locator_trait;
 pub use service_locator_trait::{
     ApplicationManager, BlobServiceTrait, NodeRegistryTrait, ServiceLocator, WasmRuntimeTrait,
 };
+pub mod outbound_http_client;
+pub use outbound_http_client::{
+    OutboundHttpClient, OutboundHttpClientError, OutboundHttpRequest, OutboundHttpResponse,
+};
 pub mod node_connectivity;
 pub use node_connectivity::{ConnectNodesResult, NodeConnectivity};
 pub mod keyvalue_store;

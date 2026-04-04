@@ -960,8 +960,9 @@ mod tests {
                 nanos: 0,
             }),
             shutdown_strategy: 0, // Default graceful
-            seed_nodes: vec![],
             metadata: None,
+            seed_nodes: vec![],
+            required_service_links: vec![],
         }
     }
 
@@ -984,8 +985,9 @@ mod tests {
                 nanos: 0,
             }),
             shutdown_strategy: 0,
-            seed_nodes: vec![],
             metadata: None,
+            seed_nodes: vec![],
+            required_service_links: vec![],
         }
     }
 

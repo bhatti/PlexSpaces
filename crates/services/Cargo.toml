@@ -31,6 +31,7 @@ plexspaces-workflow = { workspace = true }
 plexspaces-firecracker = { workspace = true, optional = true }
 plexspaces-scheduler = { path = "../scheduler" }
 plexspaces-db = { path = "../../db" }
+plexspaces-http-client = { workspace = true }
 sysinfo = "0.30"
 
 # Blob service dependencies

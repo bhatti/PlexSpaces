@@ -23,6 +23,8 @@
 //! Includes LRU caching for discovery operations to reduce registry load.
 
 use crate::{actor_context::ObjectRegistry as ObjectRegistryTrait, RequestContext};
+use plexspaces_proto::common::v1::Metadata;
+use plexspaces_proto::node::v1::{OutboundTransport, ServiceLinkConfig};
 use plexspaces_proto::object_registry::v1::{HealthStatus, ObjectRegistration, ObjectType};
 use prost_types::Timestamp;
 use std::collections::{HashMap, VecDeque};
@@ -218,6 +220,78 @@ pub async fn register_node<T: ObjectRegistryTrait + ?Sized>(
     let tenant_ns_pattern = format!("node:{}:{}", ctx.tenant_id(), ctx.namespace());
     let mut cache = DISCOVERY_CACHE.write().await;
     cache.remove_matching(|key| key.starts_with(&tenant_ns_pattern));
+
+    object_registry.register(ctx, registration).await
+}
+
+/// Register a static outbound service link as [`ObjectType::ObjectTypeService`].
+///
+/// Call when `ServiceLinkConfig.publish_to_registry` is true at node startup. The primary URI is
+/// `base_url` (HTTP or gRPC origin). Metadata labels `plexspaces.link_name` and
+/// `plexspaces.transport` support discovery filters.
+pub async fn register_outbound_service_link<T: ObjectRegistryTrait + ?Sized>(
+    object_registry: &Arc<T>,
+    ctx: &RequestContext,
+    link: &ServiceLinkConfig,
+    node_id: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    let timestamp = Timestamp {
+        seconds: now.as_secs() as i64,
+        nanos: now.subsec_nanos() as i32,
+    };
+
+    let transport = match link.transport {
+        x if x == OutboundTransport::OutboundTransportGrpc as i32 => {
+            OutboundTransport::OutboundTransportGrpc
+        }
+        x if x == OutboundTransport::OutboundTransportChannel as i32 => {
+            OutboundTransport::OutboundTransportChannel
+        }
+        x if x == OutboundTransport::OutboundTransportHttp as i32 => {
+            OutboundTransport::OutboundTransportHttp
+        }
+        _ => OutboundTransport::OutboundTransportUnspecified,
+    };
+    let cap = match transport {
+        OutboundTransport::OutboundTransportGrpc => "grpc",
+        OutboundTransport::OutboundTransportChannel => "channel",
+        OutboundTransport::OutboundTransportHttp | OutboundTransport::OutboundTransportUnspecified => {
+            "http"
+        }
+    };
+    let mut labels = HashMap::new();
+    labels.insert("plexspaces.link_name".to_string(), link.name.clone());
+    labels.insert("plexspaces.transport".to_string(), cap.to_string());
+
+    let registration = ObjectRegistration {
+        object_type: ObjectType::ObjectTypeService as i32,
+        object_id: format!("service-link:{}@{}", link.name, node_id),
+        object_name: link.name.clone(),
+        version: "1".to_string(),
+        node_id: node_id.to_string(),
+        grpc_address: link.base_url.clone(),
+        object_category: "outbound-service-link".to_string(),
+        tenant_id: ctx.tenant_id().to_string(),
+        namespace: ctx.namespace().to_string(),
+        capabilities: vec![cap.to_string()],
+        health_status: HealthStatus::HealthStatusHealthy as i32,
+        created_at: Some(timestamp.clone()),
+        updated_at: Some(timestamp),
+        metadata: Some(Metadata {
+            labels,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let tenant_ns = format!("{}:{}", ctx.tenant_id(), ctx.namespace());
+    let mut cache = DISCOVERY_CACHE.write().await;
+    cache.remove_matching(|key| {
+        key.starts_with("service_link:") && key.contains(&tenant_ns)
+    });
 
     object_registry.register(ctx, registration).await
 }

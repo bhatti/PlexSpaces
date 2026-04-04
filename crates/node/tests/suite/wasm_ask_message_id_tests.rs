@@ -120,6 +120,7 @@ async fn test_wasm_ask_single_message_id_flow() {
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     };
     let wasm_module = WasmModule {

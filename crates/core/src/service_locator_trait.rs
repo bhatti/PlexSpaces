@@ -476,6 +476,27 @@ pub trait ServiceLocator: Send + Sync {
     /// * `store` - KeyValueStore to register
     async fn register_keyvalue_store(&self, store: std::sync::Arc<dyn KeyValueStore>);
 
+    /// Get resilient outbound HTTP client for runtime service links.
+    async fn get_outbound_http_client(
+        &self,
+    ) -> Option<std::sync::Arc<dyn crate::OutboundHttpClient>> {
+        None
+    }
+
+    /// Register outbound HTTP client (from `RuntimeConfig.service_links`).
+    async fn register_outbound_http_client(
+        &self,
+        _client: std::sync::Arc<dyn crate::OutboundHttpClient>,
+    ) {
+    }
+
+    /// Unregister the outbound HTTP client.
+    ///
+    /// Called when all service links are removed at runtime so that subsequent
+    /// `http_fetch` calls receive a clear "unavailable" signal rather than
+    /// routing through a stale client.
+    async fn unregister_outbound_http_client(&self) {}
+
     /// Get ProcessGroupRegistry (as Arc<dyn Any> to avoid dependency on process-groups crate)
     ///
     /// ## Purpose
@@ -591,6 +612,7 @@ pub trait WasmRuntimeTrait: Send + Sync {
         object_registry: Option<std::sync::Arc<dyn ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn JournalStorage>>,
         blob_service: Option<std::sync::Arc<dyn BlobServiceTrait>>,
+        outbound_http_client: Option<std::sync::Arc<dyn crate::OutboundHttpClient>>,
     ) -> Result<
         std::sync::Arc<dyn std::any::Any + Send + Sync>,
         Box<dyn std::error::Error + Send + Sync>,

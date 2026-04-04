@@ -162,6 +162,7 @@ async fn test_genserver_routes_call_to_handle_request() {
         None,           // journal_storage
         None,           // blob_service
         None,           // elastic_pool_service
+        None, // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
     )
@@ -210,6 +211,7 @@ async fn test_genevent_routes_cast_to_handle_event() {
         None,           // journal_storage
         None,           // blob_service
         None,           // elastic_pool_service
+        None, // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
     )
@@ -257,6 +259,7 @@ async fn test_genevent_routes_info_to_handle_event() {
         None,           // journal_storage
         None,           // blob_service
         None,           // elastic_pool_service
+        None, // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
     )
@@ -303,6 +306,7 @@ async fn test_genfsm_routes_to_handle_transition() {
         None,           // journal_storage
         None,           // blob_service
         None,           // elastic_pool_service
+        None, // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
     )
@@ -350,6 +354,7 @@ async fn test_fallback_to_handle_message() {
         None,           // journal_storage
         None,           // blob_service
         None,           // elastic_pool_service
+        None, // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
     )
@@ -396,6 +401,7 @@ async fn test_genserver_fallback_on_missing_handle_request() {
         None,           // journal_storage
         None,           // blob_service
         None,           // elastic_pool_service
+        None, // outbound_http_client
         false,          // durability_enabled
         None,           // global_reinstantiation_semaphore
     )

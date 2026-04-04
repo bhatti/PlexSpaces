@@ -542,6 +542,7 @@ impl WasmRuntime {
         journal_storage: Option<std::sync::Arc<dyn plexspaces_journaling::JournalStorage>>,
         blob_service: Option<std::sync::Arc<plexspaces_blob::BlobService>>,
         elastic_pool_service: Option<std::sync::Arc<dyn plexspaces_core::ElasticPoolService>>,
+        outbound_http_client: Option<std::sync::Arc<dyn plexspaces_core::OutboundHttpClient>>,
     ) -> WasmResult<crate::WasmInstance> {
         use wasmtime::StoreLimitsBuilder;
 
@@ -580,6 +581,7 @@ impl WasmRuntime {
             journal_storage,
             blob_service,
             elastic_pool_service,
+            outbound_http_client,
             config.durability_enabled,
             #[cfg(feature = "component-model")]
             self.global_reinstantiation_semaphore.clone(),
@@ -737,6 +739,7 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
         object_registry: Option<std::sync::Arc<dyn plexspaces_core::ObjectRegistry>>,
         journal_storage: Option<std::sync::Arc<dyn plexspaces_core::JournalStorage>>,
         blob_service: Option<std::sync::Arc<dyn plexspaces_core::BlobServiceTrait>>,
+        outbound_http_client: Option<std::sync::Arc<dyn plexspaces_core::OutboundHttpClient>>,
     ) -> Result<
         std::sync::Arc<dyn std::any::Any + Send + Sync>,
         Box<dyn std::error::Error + Send + Sync>,
@@ -829,6 +832,7 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
             journal_storage,
             concrete_blob_service,
             None,  // elastic_pool_service - caller can add via create_instance when using pool
+            outbound_http_client,
             false, // durability_enabled - caller controls via config when using instantiate()
             #[cfg(feature = "component-model")]
             self.global_reinstantiation_semaphore.clone(),

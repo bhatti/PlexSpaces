@@ -159,6 +159,9 @@ pub async fn create_default_release_config(
         base_dir: String::new(), // Set by config_manager::initialize
         wasm_apps_directory: String::new(), // Set by config_manager::initialize
         default_virtual_actor_config: None, // Defaults applied in code when None (5m, pool 100, lazy)
+        service_links: vec![],
+        default_outbound_client_policy: None,
+        outbound_policy_templates: std::collections::HashMap::new(),
     };
 
     // Create default shutdown config

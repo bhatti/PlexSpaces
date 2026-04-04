@@ -1,0 +1,24 @@
+# Weather Actor Application Configuration (Rust)
+#
+# Requires the "weather-api" service link in RuntimeConfig.
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "weather"
+type = "worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "keyvalue", priority = 80 },
+  { type = "metrics", priority = 50 }
+]
+
+[[applications.required_service_links]]
+name = "weather-api"
+description = "Outbound HTTP link to weather forecast API"

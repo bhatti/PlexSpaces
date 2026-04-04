@@ -441,3 +441,15 @@ func hostApplicationGetStatus(applicationID, nodeID string) string {
 	rawHostApplicationGetStatus(applicationID, nodeID, unsafe.Pointer(&retArea))
 	return readRetString(unsafe.Pointer(&retArea))
 }
+
+// ========================================================================
+// Outbound HTTP (service links)
+// ========================================================================
+
+//go:wasmimport plexspaces:simple-actor/host@0.1.0 http-fetch
+func rawHostHTTPFetch(linkName, method, pathAndQuery, headersJSON, body string, retptr unsafe.Pointer)
+
+func hostHTTPFetch(linkName, method, pathAndQuery, headersJSON, body string) string {
+	rawHostHTTPFetch(linkName, method, pathAndQuery, headersJSON, body, unsafe.Pointer(&retArea))
+	return readRetString(unsafe.Pointer(&retArea))
+}

@@ -62,6 +62,31 @@ pub struct RuntimeConfigYaml {
     /// Directory containing WASM applications to auto-deploy on startup
     #[serde(default)]
     pub wasm_apps_directory: String,
+    /// Named outbound service links available through ServiceLocator.
+    #[serde(default)]
+    pub service_links: Vec<ServiceLinkConfigYaml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ServiceLinkConfigYaml {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default = "default_outbound_transport")]
+    pub transport: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub publish_to_registry: bool,
+    #[serde(default)]
+    pub default_headers: HashMap<String, String>,
+    #[serde(default)]
+    pub api_key_header_name: Option<String>,
+    #[serde(default)]
+    pub api_key_env_var: Option<String>,
+    #[serde(default)]
+    pub bearer_token_env_var: Option<String>,
+    #[serde(default)]
+    pub policy_template: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -200,6 +225,16 @@ pub struct ApplicationSpecYaml {
     pub shutdown_strategy: String,
     #[serde(default)]
     pub dependencies: Vec<String>,
+    #[serde(default)]
+    pub required_service_links: Vec<ApplicationServiceLinkRequirementYaml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ApplicationServiceLinkRequirementYaml {
+    #[serde(default, alias = "name")]
+    pub link_name: String,
+    #[serde(default)]
+    pub policy_template: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -393,4 +428,8 @@ fn default_blob_bucket() -> String {
 
 fn default_blob_endpoint() -> String {
     "http://minio:9000".to_string()
+}
+
+fn default_outbound_transport() -> String {
+    "HTTP".to_string()
 }

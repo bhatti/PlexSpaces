@@ -49,11 +49,14 @@ syntax = "proto3";
 
 package plexspaces.application.v1;
 
+import "buf/validate/validate.proto";
 import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
 import "plexspaces/v1/wasm/wasm.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/application/application;plexspaces_application_v1";
 
@@ -158,6 +161,42 @@ message ApplicationSpec {
   // leader-worker and scatter/gather can use workers on other nodes.
   // Example: ["localhost:8091", "localhost:8093"]
   repeated string seed_nodes = 15;
+
+  // External service links this application expects at deploy time (validated against node catalog).
+  repeated ApplicationServiceLinkRequirement required_service_links = 16 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).repeated = {max_items: 128},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Links that must exist in RuntimeConfig.service_links (or equivalent) when the app deploys."
+    }
+  ];
+}
+
+// Reference to a runtime service link by logical name (see RuntimeConfig.service_links).
+message ApplicationServiceLinkRequirement {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "ApplicationServiceLinkRequirement"
+      description: "Application-level requirement for a named outbound service link and optional policy template."
+    }
+  };
+
+  string link_name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {min_len: 1, max_len: 256, pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Must match ServiceLinkConfig.name on the node."
+      example: "\"payments-api\""
+    }
+  ];
+
+  optional string policy_template = 2 [
+    (google.api.field_behavior) = OPTIONAL,
+    (buf.validate.field).string = {max_len: 128},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Optional RuntimeConfig.outbound_policy_templates key merged for this link."
+    }
+  ];
 }
 
 // Application type

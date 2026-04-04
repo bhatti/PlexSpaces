@@ -121,6 +121,7 @@ mod tests {
                 None,
                 None,
                 None, // elastic_pool_service
+                None, // outbound_http_client
             ),
         )
         .await
@@ -301,6 +302,7 @@ mod tests {
                     None,
                     None,
                     None, // elastic_pool_service
+                None, // outbound_http_client
                 )
             })
             .collect();
@@ -494,6 +496,7 @@ mod tests {
                 None,
                 None,
                 None, // elastic_pool_service
+                None, // outbound_http_client
             ),
         )
         .await
@@ -671,6 +674,7 @@ mod tests {
                 None,
                 None,
                 None, // elastic_pool_service
+                None, // outbound_http_client
             ),
         )
         .await

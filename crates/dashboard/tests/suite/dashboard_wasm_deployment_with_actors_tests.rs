@@ -268,6 +268,7 @@ async fn test_wasm_deployment_with_applicationspec_creates_actors() {
         shutdown_strategy:
             plexspaces_proto::application::v1::ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     };
 

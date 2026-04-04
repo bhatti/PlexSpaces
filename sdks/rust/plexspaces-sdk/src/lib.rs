@@ -65,6 +65,23 @@ pub use plexspaces_sdk_macros::query_handler;
 
 pub mod simple_actor;
 
+/// Ergonomic outbound HTTP client for actors using named service links.
+///
+/// ## Purpose
+/// Zero-boilerplate wrapper around `OutboundHttpClient` for common HTTP patterns
+/// (GET/POST/PUT/DELETE JSON) with automatic error handling.
+///
+/// ## Usage
+/// ```rust,ignore
+/// use plexspaces_sdk::http_client::ServiceHttpClient;
+/// let http = ServiceHttpClient::from_context(ctx, "payments-api").await?;
+/// let balance: serde_json::Value = http.get_json("/v1/balance").await?;
+/// ```
+pub mod http_client;
+
+#[cfg(feature = "native")]
+pub use http_client::{ServiceHttpClient, ServiceHttpClientError};
+
 // ============================================================================
 // DeclaredFacets trait - allows spawn_actor to auto-attach facets
 // ============================================================================

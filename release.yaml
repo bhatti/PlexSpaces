@@ -38,6 +38,13 @@ runtime:
     secret_access_key: ""
     use_ssl: false
     prefix: "/tmp/plexspaces-blobs"
+
+  # Default outbound HTTP links used by bundled weather_actor examples.
+  service_links:
+    - name: weather-api
+      transport: HTTP
+      base_url: "https://api.open-meteo.com"
+      publish_to_registry: false
   
   health:
     heartbeat_interval_seconds: 5

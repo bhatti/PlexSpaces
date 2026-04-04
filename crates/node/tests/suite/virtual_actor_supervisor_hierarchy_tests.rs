@@ -646,6 +646,7 @@ async fn test_application_deployment_with_eager_virtual_actors() {
             }),
             shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             metadata: None,
         };
 

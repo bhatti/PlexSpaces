@@ -901,6 +901,7 @@ mod tests {
                     },
                 ],
             }),
+            ..Default::default()
         }
     }
 

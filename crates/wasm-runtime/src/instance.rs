@@ -247,6 +247,7 @@ impl WasmInstance {
         journal_storage: Option<Arc<dyn plexspaces_core::JournalStorage>>,
         blob_service: Option<Arc<plexspaces_blob::BlobService>>,
         elastic_pool_service: Option<Arc<dyn plexspaces_core::ElasticPoolService>>,
+        outbound_http_client: Option<Arc<dyn plexspaces_core::OutboundHttpClient>>,
         durability_enabled: bool,
         global_reinstantiation_semaphore: Option<Arc<Semaphore>>,
     ) -> WasmResult<Self> {
@@ -271,6 +272,7 @@ impl WasmInstance {
             journal_storage,
             blob_service,
             elastic_pool_service,
+            outbound_http_client,
         );
 
         // Store host_functions in Arc for sharing between traditional and component contexts

@@ -63,12 +63,12 @@ use thiserror::Error;
 
 // Import proto-generated types (Proto-First Design)
 pub use plexspaces_proto::application::v1::{
-    ApplicationSpec, ChildSpec, ChildType, RestartPolicy, ShutdownStrategy, SupervisionStrategy,
-    SupervisorSpec,
+    ApplicationServiceLinkRequirement, ApplicationSpec, ChildSpec, ChildType, RestartPolicy,
+    ShutdownStrategy, SupervisionStrategy, SupervisorSpec,
 };
 pub use plexspaces_proto::node::v1::{
-    GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, ReleaseSpec, RuntimeConfig,
-    SecurityConfig, ShutdownConfig,
+    GrpcConfig, HealthConfig, MiddlewareConfig, NodeConfig, OutboundTransport, ReleaseSpec,
+    RuntimeConfig, SecurityConfig, ServiceLinkConfig, ShutdownConfig,
 };
 pub use plexspaces_proto::prost_types;
 pub use plexspaces_proto::security::v1::{ApiKey, JwtConfig, MtlsConfig, ServiceIdentity};
@@ -148,6 +148,37 @@ struct RuntimeConfigToml {
     health: HealthConfigToml,
     #[serde(default)]
     security: SecurityConfigToml,
+    /// Static outbound service links (`RuntimeConfig.service_links`).
+    #[serde(default)]
+    service_links: Vec<ServiceLinkConfigToml>,
+}
+
+/// TOML row for `[[runtime.service_links]]` → [`ServiceLinkConfig`].
+#[derive(Clone, Debug, Deserialize)]
+struct ServiceLinkConfigToml {
+    name: String,
+    #[serde(default = "default_outbound_transport_str")]
+    transport: String,
+    base_url: String,
+    #[serde(default)]
+    publish_to_registry: bool,
+    #[serde(default)]
+    default_headers: HashMap<String, String>,
+    api_key_header_name: Option<String>,
+    api_key_env_var: Option<String>,
+    bearer_token_env_var: Option<String>,
+    policy_template: Option<String>,
+}
+
+fn default_outbound_transport_str() -> String {
+    "HTTP".to_string()
+}
+
+/// TOML row under `[[applications.required_service_links]]`.
+#[derive(Clone, Debug, Deserialize)]
+struct ApplicationServiceLinkRequirementToml {
+    link_name: String,
+    policy_template: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -211,6 +242,8 @@ struct ApplicationSpecToml {
     shutdown_strategy: String,
     #[serde(default)]
     dependencies: Vec<String>,
+    #[serde(default)]
+    required_service_links: Vec<ApplicationServiceLinkRequirementToml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -439,8 +472,41 @@ impl Release {
     }
 }
 
+fn parse_outbound_transport_toml(s: &str) -> Result<i32, ReleaseError> {
+    match s.trim().to_ascii_uppercase().as_str() {
+        "HTTP" => Ok(OutboundTransport::OutboundTransportHttp as i32),
+        "GRPC" => Ok(OutboundTransport::OutboundTransportGrpc as i32),
+        "CHANNEL" => Ok(OutboundTransport::OutboundTransportChannel as i32),
+        "" => Ok(OutboundTransport::OutboundTransportHttp as i32),
+        other => Err(ReleaseError::InvalidConfig(format!(
+            "runtime.service_links: unknown transport {other:?} (use HTTP, GRPC, or CHANNEL)"
+        ))),
+    }
+}
+
+fn convert_runtime_service_links(
+    links: Vec<ServiceLinkConfigToml>,
+) -> Result<Vec<ServiceLinkConfig>, ReleaseError> {
+    let mut out = Vec::with_capacity(links.len());
+    for l in links {
+        out.push(ServiceLinkConfig {
+            name: l.name,
+            transport: parse_outbound_transport_toml(&l.transport)?,
+            base_url: l.base_url,
+            publish_to_registry: l.publish_to_registry,
+            default_headers: l.default_headers,
+            api_key_header_name: l.api_key_header_name,
+            api_key_env_var: l.api_key_env_var,
+            bearer_token_env_var: l.bearer_token_env_var,
+            policy_template: l.policy_template,
+        });
+    }
+    Ok(out)
+}
+
 /// Convert TOML representation to proto ReleaseSpec
 fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError> {
+    let service_links = convert_runtime_service_links(toml.runtime.service_links.clone())?;
     Ok(ReleaseSpec {
         name: toml.release.name,
         version: toml.release.version,
@@ -499,6 +565,9 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
             base_dir: String::new(), // Set by config_manager::initialize
             wasm_apps_directory: String::new(), // Set by config_manager::initialize
             default_virtual_actor_config: None,
+            service_links,
+            default_outbound_client_policy: None,
+            outbound_policy_templates: std::collections::HashMap::new(),
         }),
         system_applications: toml.system_applications.included,
         applications: toml
@@ -511,6 +580,14 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
                     }
                     _ => ShutdownStrategy::ShutdownStrategyGraceful as i32,
                 };
+                let required_service_links = app
+                    .required_service_links
+                    .into_iter()
+                    .map(|r| ApplicationServiceLinkRequirement {
+                        link_name: r.link_name,
+                        policy_template: r.policy_template,
+                    })
+                    .collect();
 
                 ApplicationSpec {
                     name: app.name.clone(),
@@ -531,6 +608,7 @@ fn convert_toml_to_proto(toml: ReleaseToml) -> Result<ReleaseSpec, ReleaseError>
                     shutdown_strategy: strategy,
                     metadata: None, // Not in TOML
                     seed_nodes: vec![],
+                    required_service_links,
                 }
             })
             .collect(),
@@ -776,6 +854,62 @@ mod tests {
                 .heartbeat_interval_seconds,
             2
         );
+    }
+
+    /// Test: `[[runtime.service_links]]` and `[[applications.required_service_links]]` round-trip.
+    #[test]
+    fn test_parse_release_with_service_links() {
+        let toml = r#"
+            [release]
+            name = "test-release"
+            version = "1.0.0"
+            description = "Test release"
+
+            [node]
+            id = "node1"
+            listen_addr = "0.0.0.0:9001"
+
+            [runtime.grpc]
+            enabled = true
+            address = "0.0.0.0:9001"
+            max_connections = 1000
+            keepalive_interval_seconds = 30
+
+            [runtime.health]
+            heartbeat_interval_seconds = 2
+            heartbeat_timeout_seconds = 10
+            registry_url = "http://localhost:9000"
+
+            [[runtime.service_links]]
+            name = "echo-api"
+            transport = "HTTP"
+            base_url = "https://httpbin.org"
+            publish_to_registry = true
+
+            [[applications]]
+            name = "demo"
+            version = "1.0.0"
+            config_path = "demo.toml"
+            enabled = true
+            auto_start = true
+            shutdown_timeout_seconds = 30
+            shutdown_strategy = "graceful"
+
+            [[applications.required_service_links]]
+            link_name = "echo-api"
+        "#;
+
+        let release = Release::from_toml_str(toml).expect("Failed to parse TOML");
+        let rt = release.spec().runtime.as_ref().unwrap();
+        assert_eq!(rt.service_links.len(), 1);
+        assert_eq!(rt.service_links[0].name, "echo-api");
+        assert_eq!(rt.service_links[0].base_url, "https://httpbin.org");
+        assert!(rt.service_links[0].publish_to_registry);
+
+        let apps = &release.spec().applications;
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].required_service_links.len(), 1);
+        assert_eq!(apps[0].required_service_links[0].link_name, "echo-api");
     }
 
     /// Test: Parse release with applications
@@ -1059,6 +1193,9 @@ mod tests {
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
                 default_virtual_actor_config: None,
+                service_links: vec![],
+                default_outbound_client_policy: None,
+                outbound_policy_templates: std::collections::HashMap::new(),
             }),
             system_applications: vec![],
             applications: vec![
@@ -1081,6 +1218,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
@@ -1101,6 +1239,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1205,6 +1344,9 @@ mod tests {
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
                 default_virtual_actor_config: None,
+                service_links: vec![],
+                default_outbound_client_policy: None,
+                outbound_policy_templates: std::collections::HashMap::new(),
             }),
             system_applications: vec![],
             applications: vec![
@@ -1227,6 +1369,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
@@ -1247,6 +1390,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1267,6 +1411,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1320,6 +1465,9 @@ mod tests {
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
                 default_virtual_actor_config: None,
+                service_links: vec![],
+                default_outbound_client_policy: None,
+                outbound_policy_templates: std::collections::HashMap::new(),
             }),
             system_applications: vec![],
             applications: vec![
@@ -1342,6 +1490,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
                 ApplicationSpec {
                     name: "app-a".to_string(),
@@ -1362,6 +1511,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1382,6 +1532,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
                 ApplicationSpec {
                     name: "app-c".to_string(),
@@ -1402,6 +1553,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1457,6 +1609,9 @@ mod tests {
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
                 default_virtual_actor_config: None,
+                service_links: vec![],
+                default_outbound_client_policy: None,
+                outbound_policy_templates: std::collections::HashMap::new(),
             }),
             system_applications: vec![],
             applications: vec![
@@ -1479,6 +1634,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1499,6 +1655,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
             ],
             env: std::collections::HashMap::new(),
@@ -1552,6 +1709,9 @@ mod tests {
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
                 default_virtual_actor_config: None,
+                service_links: vec![],
+                default_outbound_client_policy: None,
+                outbound_policy_templates: std::collections::HashMap::new(),
             }),
             system_applications: vec![],
             applications: vec![ApplicationSpec {
@@ -1573,6 +1733,7 @@ mod tests {
                 shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                 metadata: None,
                 seed_nodes: vec![],
+                required_service_links: vec![],
             }],
             env: std::collections::HashMap::new(),
             shutdown: None,
@@ -1630,6 +1791,9 @@ mod tests {
                 base_dir: String::new(),
                 wasm_apps_directory: String::new(),
                 default_virtual_actor_config: None,
+                service_links: vec![],
+                default_outbound_client_policy: None,
+                outbound_policy_templates: std::collections::HashMap::new(),
             }),
             system_applications: vec![],
             applications: vec![
@@ -1652,6 +1816,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
                 ApplicationSpec {
                     name: "app-b".to_string(),
@@ -1672,6 +1837,7 @@ mod tests {
                     shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful as i32,
                     metadata: None,
                     seed_nodes: vec![],
+                    required_service_links: vec![],
                 },
             ],
             env: std::collections::HashMap::new(),

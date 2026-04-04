@@ -383,6 +383,9 @@ pub struct ServiceLocatorImpl {
     /// Read-only after initialization, uses Mutex for one-time initialization
     runtime_config: Arc<tokio::sync::Mutex<Option<plexspaces_proto::node::v1::RuntimeConfig>>>,
 
+    /// Resilient outbound HTTP client for `RuntimeConfig.service_links`.
+    outbound_http_client: Arc<RwLock<Option<Arc<dyn plexspaces_core::OutboundHttpClient>>>>,
+
     /// Shutdown flag: when true, node is shutting down gracefully
     /// Components should stop accepting new requests but complete in-progress ones
     shutdown_flag: Arc<RwLock<bool>>,
@@ -472,6 +475,7 @@ impl ServiceLocatorImpl {
             node_config: Arc::new(tokio::sync::Mutex::new(None)),
             security_config: Arc::new(tokio::sync::Mutex::new(None)),
             runtime_config: Arc::new(tokio::sync::Mutex::new(None)),
+            outbound_http_client: Arc::new(RwLock::new(None)),
             shutdown_flag: Arc::new(RwLock::new(false)),
         }
     }
@@ -581,6 +585,29 @@ impl ServiceLocatorImpl {
     pub async fn register_runtime_config(&self, config: plexspaces_proto::node::v1::RuntimeConfig) {
         let mut runtime_config = self.runtime_config.lock().await;
         *runtime_config = Some(config);
+    }
+
+    /// Outbound HTTP client for configured service links.
+    pub async fn get_outbound_http_client(
+        &self,
+    ) -> Option<Arc<dyn plexspaces_core::OutboundHttpClient>> {
+        let g = self.outbound_http_client.read().await;
+        g.clone()
+    }
+
+    /// Register outbound HTTP client (normally from `RuntimeConfig.service_links`).
+    pub async fn register_outbound_http_client(
+        &self,
+        client: Arc<dyn plexspaces_core::OutboundHttpClient>,
+    ) {
+        let mut g = self.outbound_http_client.write().await;
+        *g = Some(client);
+    }
+
+    /// Unregister the outbound HTTP client (called when all service links are removed).
+    pub async fn unregister_outbound_http_client(&self) {
+        let mut g = self.outbound_http_client.write().await;
+        *g = None;
     }
 
     /// Register SecurityConfig
@@ -1846,6 +1873,23 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         let mut pg_registry = self.process_group_registry.write().await;
         *pg_registry = Some(registry);
     }
+
+    async fn get_outbound_http_client(
+        &self,
+    ) -> Option<std::sync::Arc<dyn plexspaces_core::OutboundHttpClient>> {
+        ServiceLocatorImpl::get_outbound_http_client(self).await
+    }
+
+    async fn register_outbound_http_client(
+        &self,
+        client: std::sync::Arc<dyn plexspaces_core::OutboundHttpClient>,
+    ) {
+        ServiceLocatorImpl::register_outbound_http_client(self, client).await;
+    }
+
+    async fn unregister_outbound_http_client(&self) {
+        ServiceLocatorImpl::unregister_outbound_http_client(self).await;
+    }
 }
 
 impl ServiceLocatorImpl {
@@ -2146,7 +2190,7 @@ async fn initialize_services_impl(
         .await;
     // Also register as trait object for type-safe access
     service_locator
-        .register_object_registry(object_registry_trait)
+        .register_object_registry(object_registry_trait.clone())
         .await;
     service_locator_impl
         .register_service_by_name(
@@ -2253,6 +2297,69 @@ async fn initialize_services_impl(
         .register_runtime_config(final_runtime_config.clone())
         .await;
 
+    if !final_runtime_config.service_links.is_empty() {
+        match plexspaces_http_client::ResilientOutboundHttpClient::from_runtime_config(
+            &final_runtime_config,
+        ) {
+            Ok(client) => {
+                if !client.is_empty() {
+                    service_locator
+                        .register_outbound_http_client(Arc::new(client))
+                        .await;
+                    tracing::info!(
+                        count = final_runtime_config.service_links.len(),
+                        "Registered outbound HTTP client from RuntimeConfig.service_links"
+                    );
+                }
+            }
+            Err(e) => {
+                let msg = format!(
+                    "FATAL: Invalid RuntimeConfig.service_links for outbound HTTP client: {}",
+                    e
+                );
+                tracing::error!("{}", msg);
+                fatal_exit(&msg);
+            }
+        }
+    }
+
+    // P3: optional ObjectRegistry rows for links with publish_to_registry (discovery by link name).
+    {
+        use plexspaces_core::RequestContext;
+        let link_pub_ctx = RequestContext::new_without_auth(
+            "plexspaces".to_string(),
+            "runtime".to_string(),
+        );
+        for link in &final_runtime_config.service_links {
+            if !link.publish_to_registry {
+                continue;
+            }
+            if link.name.is_empty() || link.base_url.is_empty() {
+                tracing::warn!("service_links: skip object-registry publish (empty name or base_url)");
+                continue;
+            }
+            match plexspaces_core::object_registry_helpers::register_outbound_service_link(
+                &object_registry_trait,
+                &link_pub_ctx,
+                link,
+                node_id_str.as_str(),
+            )
+            .await
+            {
+                Ok(()) => {
+                    tracing::info!(link = %link.name, "Published service link to object-registry");
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        link = %link.name,
+                        error = %e,
+                        "Failed to publish service link to object-registry"
+                    );
+                }
+            }
+        }
+    }
+
     if let Some(ref default_virtual_actor_config) =
         final_runtime_config.default_virtual_actor_config
     {
@@ -2318,6 +2425,11 @@ impl Default for ServiceLocatorImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use plexspaces_core::{
+        OutboundHttpClient, OutboundHttpClientError, OutboundHttpRequest, OutboundHttpResponse,
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct MockService {
         value: u32,
@@ -2326,6 +2438,26 @@ mod tests {
     impl Service for MockService {
         fn service_name(&self) -> String {
             "MockService".to_string()
+        }
+    }
+
+    struct CountingOutboundHttpClient {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl OutboundHttpClient for CountingOutboundHttpClient {
+        async fn execute(
+            &self,
+            _link_name: &str,
+            _request: OutboundHttpRequest,
+        ) -> Result<OutboundHttpResponse, OutboundHttpClientError> {
+            let call_number = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            Ok(OutboundHttpResponse {
+                status: 200,
+                headers: vec![],
+                body: format!("call-{call_number}").into_bytes(),
+            })
         }
     }
 
@@ -2449,6 +2581,53 @@ mod tests {
             let value = handle.await.unwrap();
             assert_eq!(value, Some(100));
         }
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_outbound_http_client_access() {
+        let locator = Arc::new(ServiceLocatorImpl::new());
+        let client = Arc::new(CountingOutboundHttpClient {
+            calls: AtomicUsize::new(0),
+        });
+        locator
+            .register_outbound_http_client(client.clone() as Arc<dyn OutboundHttpClient>)
+            .await;
+
+        let mut handles = Vec::new();
+        for _ in 0..16 {
+            let locator_clone = locator.clone();
+            handles.push(tokio::spawn(async move {
+                let client = locator_clone
+                    .get_outbound_http_client()
+                    .await
+                    .expect("outbound client should be registered");
+                let response = client
+                    .execute(
+                        "weather-api",
+                        OutboundHttpRequest {
+                            method: "GET".to_string(),
+                            path_and_query: "/forecast".to_string(),
+                            headers: vec![],
+                            body: vec![],
+                        },
+                    )
+                    .await
+                    .expect("request should succeed");
+                assert_eq!(response.status, 200);
+                String::from_utf8(response.body).expect("response body should be utf8")
+            }));
+        }
+
+        let mut bodies = Vec::new();
+        for handle in handles {
+            bodies.push(handle.await.expect("task should complete"));
+        }
+
+        bodies.sort();
+        bodies.dedup();
+
+        assert_eq!(bodies.len(), 16);
+        assert_eq!(client.calls.load(Ordering::SeqCst), 16);
     }
 
     #[tokio::test]

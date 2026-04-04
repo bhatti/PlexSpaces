@@ -201,6 +201,7 @@ mod tests {
             Some(journal_storage),
             None, // No blob service
             None, // No elastic pool service
+            None, // No outbound HTTP client
         ))
     }
 
@@ -618,6 +619,7 @@ mod tests {
             )),
             None, // blob_service
             None, // elastic_pool_service
+            None, // outbound_http_client
         ));
         let ctx_leader = test_context("", "leader-election");
         let lock_key = "leader".to_string();

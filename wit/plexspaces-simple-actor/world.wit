@@ -315,6 +315,26 @@ interface host {
     /// List blobs with prefix. Returns JSON array of blob IDs, e.g. ["blob1","blob2"].
     /// Errors return "ERROR:message".
     blob-list: func(prefix: string) -> string;
+
+    // ============================================================================
+    // Outbound HTTP (service links)
+    // ============================================================================
+
+    /// Execute an outbound HTTP request via a named service link configured in RuntimeConfig.service_links.
+    /// link-name: logical name matching a RuntimeConfig.service_links entry (e.g. "payments-api").
+    /// method: HTTP method string ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD").
+    /// path-and-query: path relative to service link base URL (e.g. "/v1/items" or "/search?q=foo").
+    /// headers-json: JSON object of extra request headers, e.g. {"X-Trace-Id":"abc"} or empty string.
+    /// body: base64-encoded request body, or empty string for no body.
+    /// Returns JSON: {"status":200,"headers":{"Content-Type":"application/json"},"body":"base64..."}
+    /// on success, or "ERROR:message" on failure (unknown link, circuit open, network error, etc.).
+    http-fetch: func(
+        link-name: string,
+        method: string,
+        path-and-query: string,
+        headers-json: string,
+        body: string
+    ) -> string;
 }
 
 world actor-world {

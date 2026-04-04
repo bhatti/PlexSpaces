@@ -166,6 +166,7 @@ async fn test_wasm_component_instantiation() {
             None, // No journal storage
             None, // No blob service
             None, // No elastic pool service
+            None, // No outbound HTTP client
         ),
     )
     .await;
@@ -269,6 +270,7 @@ async fn test_component_init_function() {
             None,
             None,
             None, // elastic_pool_service
+                None, // outbound_http_client
         ),
     )
     .await;
@@ -334,6 +336,7 @@ async fn test_component_handle_message() {
             None,
             None,
             None, // elastic_pool_service
+                None, // outbound_http_client
         ),
     )
     .await;
@@ -466,6 +469,7 @@ async fn test_component_empty_initial_state() {
             None,
             None,
             None, // elastic_pool_service
+                None, // outbound_http_client
         ),
     )
     .await;
@@ -529,6 +533,7 @@ async fn test_component_observability() {
             None,
             None,
             None, // elastic_pool_service
+                None, // outbound_http_client
         ),
     )
     .await;
@@ -600,6 +605,7 @@ async fn test_component_different_message_types() {
             None,
             None,
             None, // elastic_pool_service
+                None, // outbound_http_client
         ),
     )
     .await;

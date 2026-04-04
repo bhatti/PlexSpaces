@@ -241,6 +241,7 @@ impl WasmDeploymentService {
                 None, // object_registry
                 None, // journal_storage
                 None, // blob_service
+                None, // outbound_http_client
             )
             .await
             .map_err(|e| {

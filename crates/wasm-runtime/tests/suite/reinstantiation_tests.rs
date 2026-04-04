@@ -107,6 +107,7 @@ mod tests {
                 None,
                 None, // blob_service
                 None, // elastic_pool_service
+                None, // outbound_http_client
             ),
         )
         .await;
@@ -220,6 +221,7 @@ mod tests {
                 None,
                 None,
                 None, // blob_service, elastic_pool_service
+                None, // outbound_http_client
             ),
         )
         .await;
@@ -340,6 +342,7 @@ mod tests {
                 None,
                 None,
                 None, // blob_service, elastic_pool_service
+                None, // outbound_http_client
             ),
         )
         .await;

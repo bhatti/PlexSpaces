@@ -403,6 +403,7 @@ fn create_application_spec_with_facets(name: &str, version: &str) -> Application
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     }
 }

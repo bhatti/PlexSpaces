@@ -57,6 +57,7 @@ pub type ServiceLocator = ServiceLocatorImpl;
 // Service implementations
 pub mod actor_service;
 pub mod application_service;
+pub mod service_link_service;
 pub mod blob_service;
 pub mod dashboard_service;
 #[cfg(feature = "firecracker")]

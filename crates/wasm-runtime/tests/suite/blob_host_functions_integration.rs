@@ -84,6 +84,7 @@ mod tests {
             None,               // journal_storage
             Some(blob_service), // blob_service
             None,               // elastic_pool_service
+            None, // outbound_http_client
         ))
     }
 
@@ -432,6 +433,7 @@ mod tests {
         let host_functions = Arc::new(HostFunctions::with_all_services(
             None, None, None, None, None, None, None, None,
             None, // No blob_service, no elastic_pool
+            None, // No outbound HTTP client
         ));
         let mut blob_impl = create_test_blob_impl(host_functions);
 

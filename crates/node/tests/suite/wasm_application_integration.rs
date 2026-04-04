@@ -257,6 +257,7 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     };
 
@@ -962,6 +963,7 @@ fn create_wasm_module_from_fixture_with_supervisor(
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     };
 
@@ -1093,6 +1095,7 @@ async fn test_supervisor_adds_wasm_actors_as_children() {
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     };
 
@@ -1690,6 +1693,7 @@ async fn test_wasm_supervisor_registers_plain_controller_child_in_scope() {
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     };
 
@@ -1816,6 +1820,7 @@ async fn test_go_wasm_controller_stop_resets_nondurable_virtual_actor() {
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     };
 
@@ -1970,6 +1975,7 @@ async fn test_python_wasm_controller_stop_resets_nondurable_virtual_actor() {
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     };
 
@@ -2124,6 +2130,7 @@ async fn test_typescript_wasm_controller_stop_resets_nondurable_virtual_actor() 
         }),
         shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
         seed_nodes: vec![],
+        required_service_links: vec![],
         metadata: None,
     };
 

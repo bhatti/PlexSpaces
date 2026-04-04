@@ -127,6 +127,9 @@ mod tests {
             wasm_apps_directory: String::new(),
             default_virtual_actor_config: None,
             save_wasm_apps: false,
+            service_links: vec![],
+            default_outbound_client_policy: None,
+            outbound_policy_templates: std::collections::HashMap::new(),
         };
 
         assert!(runtime_config.security.is_some());
@@ -168,6 +171,9 @@ mod tests {
             wasm_apps_directory: String::new(),
             default_virtual_actor_config: None,
             save_wasm_apps: false,
+            service_links: vec![],
+            default_outbound_client_policy: None,
+            outbound_policy_templates: std::collections::HashMap::new(),
         };
 
         let release_spec = ReleaseSpec {

@@ -150,51 +150,73 @@ impl InstancePool {
             None, // JournalStorage not available at pool level
             None, // BlobService not available at pool level
             None, // ElasticPoolService not available at pool level
+            None, // OutboundHttpClient not available at pool level
             self.config.durability_enabled,
             None, // global_reinstantiation_semaphore - pool not tied to runtime
         )
         .await
     }
 
-    /// Checkout an instance from the pool
+    /// Checkout an instance from the pool.
     ///
-    /// Blocks until an instance is available if pool is exhausted.
+    /// If a pre-warmed instance is available (semaphore has a free permit), it is returned
+    /// immediately.  If all initial-capacity permits are taken but there is an available
+    /// instance in the queue (returned via checkin), the semaphore permit will be released
+    /// by the caller.  When the pool is fully exhausted AND all instances are in use, the
+    /// pool dynamically expands: a new instance is created and an extra permit is added to
+    /// the semaphore so future checkouts are not artificially capped.
     ///
     /// # Returns
     /// Pooled instance ready for use
     pub async fn checkout(&self) -> WasmResult<PooledInstance> {
-        // Acquire semaphore permit (blocks if pool exhausted)
-        let permit = self
-            .semaphore
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|e| WasmError::PoolExhausted(e.to_string()))?;
-
-        // Try to get instance from pool
-        let mut instances = self.instances.lock().await;
-        let instance = if let Some(inst) = instances.pop() {
-            // Update stats
-            let mut stats = self.stats.lock().await;
-            stats.available -= 1;
-            stats.in_use += 1;
-            stats.total_checkouts += 1;
-
-            inst
-        } else {
-            // Pool is empty but we have permit - create new instance
-            drop(instances); // Release lock before async operation
-
-            let actor_id = format!("pooled-instance-dynamic-{}", ulid::Ulid::new());
-            let instance = self.create_instance(&actor_id).await?;
-
-            let mut stats = self.stats.lock().await;
-            stats.total_created += 1;
-            stats.in_use += 1;
-            stats.total_checkouts += 1;
-
-            instance
+        // Try non-blocking acquire first (covers the pre-warmed / checkin path).
+        let permit = match self.semaphore.clone().try_acquire_owned() {
+            Ok(permit) => {
+                // Permit acquired — pop from pool or create new if pool is empty.
+                let mut instances = self.instances.lock().await;
+                let instance = if let Some(inst) = instances.pop() {
+                    let mut stats = self.stats.lock().await;
+                    stats.available -= 1;
+                    stats.in_use += 1;
+                    stats.total_checkouts += 1;
+                    inst
+                } else {
+                    drop(instances);
+                    let actor_id = format!("pooled-instance-dynamic-{}", ulid::Ulid::new());
+                    let instance = self.create_instance(&actor_id).await?;
+                    let mut stats = self.stats.lock().await;
+                    stats.total_created += 1;
+                    stats.in_use += 1;
+                    stats.total_checkouts += 1;
+                    instance
+                };
+                return Ok(PooledInstance {
+                    instance: Some(instance),
+                    pool: self.instances.clone(),
+                    stats: self.stats.clone(),
+                    _permit: permit,
+                });
+            }
+            Err(_) => {
+                // All initial-capacity permits are taken.  Dynamically expand: add a permit
+                // so that checkin() can release it and future checkouts are not blocked.
+                self.semaphore.add_permits(1);
+                self.semaphore
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(|e| WasmError::PoolExhausted(e.to_string()))?
+            }
         };
+
+        // We hold a newly-added permit — create a dynamic instance.
+        let actor_id = format!("pooled-instance-dynamic-{}", ulid::Ulid::new());
+        let instance = self.create_instance(&actor_id).await?;
+        let mut stats = self.stats.lock().await;
+        stats.total_created += 1;
+        stats.in_use += 1;
+        stats.total_checkouts += 1;
+        drop(stats);
 
         Ok(PooledInstance {
             instance: Some(instance),
@@ -264,20 +286,15 @@ impl PooledInstance {
 impl Drop for PooledInstance {
     fn drop(&mut self) {
         if let Some(instance) = self.instance.take() {
-            // Check if this is a component instance (components are not Send and can't be pooled)
-            if instance.is_component_instance() {
-                // Component instances can't be pooled - just drop and update stats
-                drop(instance);
-                // Note: We can't update stats from Drop (it's synchronous), so stats will be slightly inaccurate
-                // This is acceptable - component instances are not pooled anyway
-            } else {
-                // Traditional instances: try to return to pool
-                // Since we're in Drop (synchronous), we can't use async operations
-                // We'll just drop the instance - explicit return_to_pool() method can be used if needed
-                // For now, accept that instances are not automatically returned to pool
-                drop(instance);
+            // Decrement in_use counter synchronously using try_lock.
+            // If the lock is currently held we skip (benign: callers should use explicit checkin()
+            // for precise tracking; the semaphore permit released below still enforces capacity).
+            if let Ok(mut stats) = self.stats.try_lock() {
+                stats.in_use = stats.in_use.saturating_sub(1);
             }
+            drop(instance);
         }
+        // Semaphore permit is released when self is dropped, restoring pool capacity.
     }
 }
 

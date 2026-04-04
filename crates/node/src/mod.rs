@@ -2058,6 +2058,18 @@ impl Node {
             server_builder
         };
 
+        // Add ServiceLinkService for runtime management of outbound service links
+        let server_builder = {
+            use plexspaces_proto::node::v1::service_link_service_server::ServiceLinkServiceServer;
+            use plexspaces_services::service_link_service::ServiceLinkServiceImpl;
+            let sls = ServiceLinkServiceImpl::new(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>).await;
+            server_builder.add_service(
+                ServiceLinkServiceServer::new(sls)
+                    .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
+                    .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE),
+            )
+        };
+
         let grpc_server = server_builder.serve(addr);
 
         // Connect to cluster_seed_nodes if configured (non-blocking; node is already listening)
@@ -4691,6 +4703,7 @@ mod tests {
         let cluster_config = ClusterConfig {
             name: "test-cluster".to_string(),
             seed_nodes: vec![],
+            required_service_links: vec![],
             min_nodes: 1,
             auto_discovery: false,
         };

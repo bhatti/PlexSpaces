@@ -2195,6 +2195,21 @@ impl plexspaces::simple_actor::host::Host for SimpleHostImpl {
             Err(err) => format!("ERROR: {}", err),
         }
     }
+
+    /// Execute outbound HTTP request via named service link.
+    /// Delegates to HostFunctions::http_fetch which calls the OutboundHttpClient.
+    async fn http_fetch(
+        &mut self,
+        link_name: String,
+        method: String,
+        path_and_query: String,
+        headers_json: String,
+        body: String,
+    ) -> String {
+        self.host_functions
+            .http_fetch(&link_name, &method, &path_and_query, &headers_json, &body)
+            .await
+    }
 }
 
 /// Check if a WASM component uses the simple-actor interface by examining its imports.

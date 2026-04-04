@@ -55,6 +55,7 @@ import {
   spawnActors as hostSpawnActors,
   applicationMetricsAdd as hostApplicationMetricsAdd,
   applicationGetStatus as hostApplicationGetStatus,
+  httpFetch as hostHttpFetch,
   // @ts-expect-error Virtual import
 } from 'plexspaces:simple-actor/host@0.1.0';
 
@@ -481,6 +482,88 @@ export class Host {
       throw new Error(result);
     }
     return JSON.parse(result as string) as Record<string, unknown>;
+  }
+
+  /**
+   * Execute an outbound HTTP request via a named service link.
+   *
+   * The link must be pre-configured in RuntimeConfig.service_links.
+   * The host handles retries, circuit breaking, and auth injection.
+   *
+   * @param linkName  Service link name (e.g. "payments-api")
+   * @param method    HTTP method ("GET", "POST", "PUT", "DELETE", "PATCH")
+   * @param pathAndQuery  Path and optional query string (e.g. "/v1/users?limit=10")
+   * @param headers   Optional extra headers object
+   * @param body      Optional request body string (JSON or base64-encoded bytes)
+   * @returns Response object with status, headers, body
+   */
+  httpFetch(
+    linkName: string,
+    method: string,
+    pathAndQuery: string,
+    headers?: Record<string, string>,
+    body?: string,
+  ): { status: number; headers: Record<string, string>; body: string } {
+    const headersJson = JSON.stringify(headers ?? {});
+    const bodyStr = body ?? '';
+    const result = safeCall(hostHttpFetch, linkName, method, pathAndQuery, headersJson, bodyStr) as string;
+    if (typeof result === 'string' && result.startsWith('ERROR:')) {
+      throw new Error(result);
+    }
+    return JSON.parse(result as string) as { status: number; headers: Record<string, string>; body: string };
+  }
+}
+
+/**
+ * Ergonomic outbound HTTP client backed by a named service link.
+ *
+ * The link must be pre-configured in RuntimeConfig.service_links.
+ * The host handles retries, circuit breaking, and auth injection.
+ *
+ * @example
+ * ```typescript
+ * const http = new ServiceHttpClient("payments-api");
+ * const balance = http.get("/v1/balance?account=123");
+ * const result = http.post("/v1/transfer", { amount: 100 });
+ * ```
+ */
+export class ServiceHttpClient {
+  constructor(private readonly linkName: string) {}
+
+  /** GET request. Returns response object with status, headers, body. */
+  get(
+    pathAndQuery: string,
+    headers?: Record<string, string>,
+  ): { status: number; headers: Record<string, string>; body: string } {
+    return host.httpFetch(this.linkName, 'GET', pathAndQuery, headers);
+  }
+
+  /** POST JSON request. body is serialized to JSON. */
+  post(
+    pathAndQuery: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+  ): { status: number; headers: Record<string, string>; body: string } {
+    const bodyStr = body !== undefined ? JSON.stringify(body) : '';
+    return host.httpFetch(this.linkName, 'POST', pathAndQuery, headers, bodyStr);
+  }
+
+  /** PUT JSON request. */
+  put(
+    pathAndQuery: string,
+    body?: unknown,
+    headers?: Record<string, string>,
+  ): { status: number; headers: Record<string, string>; body: string } {
+    const bodyStr = body !== undefined ? JSON.stringify(body) : '';
+    return host.httpFetch(this.linkName, 'PUT', pathAndQuery, headers, bodyStr);
+  }
+
+  /** DELETE request. */
+  delete(
+    pathAndQuery: string,
+    headers?: Record<string, string>,
+  ): { status: number; headers: Record<string, string>; body: string } {
+    return host.httpFetch(this.linkName, 'DELETE', pathAndQuery, headers);
   }
 }
 

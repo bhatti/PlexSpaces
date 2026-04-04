@@ -147,6 +147,7 @@ mod tests {
             None,
             None,
             Some(svc),
+            None, // No outbound HTTP client
         ));
         SimpleHostImpl::new(
             ActorId::from("test-actor".to_string()),

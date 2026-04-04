@@ -5,32 +5,35 @@ This document provides detailed documentation for all PlexSpaces gRPC services a
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Core Services](#core-services)
+2. [Built-in and custom components (facets)](#built-in-and-custom-components-facets)
+3. [Service links and outbound HTTP](#service-links-and-outbound-http)
+4. [Unified discovery with ObjectRegistry](#unified-discovery-with-objectregistry)
+5. [Core Services](#core-services)
    - [ActorService](#actorservice)
    - [NodeService](#nodeservice)
    - [ApplicationService](#applicationservice)
-3. [Coordination Services](#coordination-services)
+6. [Coordination Services](#coordination-services)
    - [TuplePlexSpaceService](#tupleplexspaceservice)
    - [ProcessGroupService](#processgroupservice)
    - [ChannelService](#channelservice)
-4. [Workflow Services](#workflow-services)
+7. [Workflow Services](#workflow-services)
    - [WorkflowService](#workflowservice)
    - [JournalService](#journalservice)
    - [TimerService](#timerservice)
-5. [Infrastructure Services](#infrastructure-services)
+8. [Infrastructure Services](#infrastructure-services)
    - [BlobService](#blobservice)
    - [KeyValueService](#keyvalueservice)
    - [ObjectRegistry](#objectregistry)
-6. [Operational Services](#operational-services)
+9. [Operational Services](#operational-services)
    - [MetricsService](#metricsservice)
    - [DashboardService](#dashboardservice)
    - [SchedulingService](#schedulingservice)
    - [SecurityService](#securityservice)
-7. [Runtime Services](#runtime-services)
+10. [Runtime Services](#runtime-services)
    - [WasmRuntimeService](#wasmruntimeservice)
    - [FirecrackerVmService](#firecrackerervmservice)
    - [PoolService](#poolservice)
-8. [API Access](#api-access)
+11. [API Access](#api-access)
 
 ---
 
@@ -43,6 +46,8 @@ PlexSpaces exposes remote functionality through gRPC services, with optional RES
 - **Observability**: Built-in metrics, tracing, and health checks
 - **Security**: mTLS support with configurable authentication
 - **Thin Controllers**: gRPC/HTTP layers orchestrate request handling and delegate business behavior to the framework crates and ServiceLocator-registered services
+
+**Application deploy** validates `ApplicationSpec.required_service_links` against the node `RuntimeConfig.service_links` catalog. Optional `publish_to_registry` registers link metadata as `ObjectTypeService` for discovery. Internal engineering notes (binding lifecycle, WIT phases, tradeoffs) live in [archived_docs/component-services-design.md](../archived_docs/component-services-design.md); the **implementation roadmap** is [archived_docs/component-services-roadmap.md](../archived_docs/component-services-roadmap.md). Full configuration, examples, and the unified model with facets are covered in [Built-in and custom components (facets)](#built-in-and-custom-components-facets), [Service links and outbound HTTP](#service-links-and-outbound-http), and [Unified discovery with ObjectRegistry](#unified-discovery-with-objectregistry) below.
 
 ### Service Architecture
 
@@ -102,6 +107,211 @@ graph TB
     style Workflow fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
     style Infrastructure fill:#0891b2,stroke:#22d3ee,stroke-width:2px,color:#000
 ```
+
+---
+
+## Built-in and custom components (facets)
+
+In PlexSpaces, **components** attached to actors are **facets**: pluggable behavior (timers, durability, virtual-actor pooling, logging, custom factories) composed at spawn or from `app-config.toml`. There is **one** registration path for facet types—the node **`FacetRegistry`**—not a parallel “component registry.”
+
+### Built-in facet types (node startup)
+
+The node registers factories such as:
+
+| Facet type string | Role |
+|-------------------|------|
+| `timer` | Delayed `send_after` / timer facet |
+| `reminder` | Recurring reminders |
+| `durability` | Journaling / checkpoints |
+| `virtual_actor` | Idle timeout, pool size, activation strategy |
+| `logging` | Structured logging facet |
+| `caching` | Caching facet |
+| `metrics` | Metrics facet |
+| `event_sourcing` | Event-sourcing facet |
+
+Registration happens during `ServiceLocator` / node bootstrap (see `crates/services/src/service_locator.rs` and `plexspaces_facet::FacetRegistry`). WASM and native apps **only reference** these names in configuration; they do not register builtins at runtime.
+
+### Declaring facets on actors (`app-config.toml`)
+
+Each child actor under `[supervisor]` lists facets with `type` (must match a registered factory), `priority`, and optional `config`:
+
+```toml
+[[supervisor.children]]
+id = "worker"
+behavior_kind = "GenServer"
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "timer", priority = 80, config = {} },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 100 } },
+]
+```
+
+### Custom facet factories
+
+To add a **custom** component:
+
+1. Implement `FacetFactory` in Rust (`plexspaces_facet` crate) for your behavior.
+2. Register it on the node’s `FacetRegistry` under a unique type name at startup (same integration layer as built-ins).
+3. Use `type = "your_type"` in `app-config.toml` or equivalent proto `FacetConfig`.
+
+Custom facets follow the same lifecycle and supervision rules as built-ins; the difference is only **who registered the factory**.
+
+### Examples (by language)
+
+| Language | Example path | What it shows |
+|----------|--------------|----------------|
+| Rust WASM | `examples/rust/apps/calculator/` | GenServer WASM, `virtual_actor`, `durability`, WIT embed |
+| Rust WASM | `examples/rust/apps/abstractions/` | Multiple child specs, timer, reminder, workflow/event patterns, KV / tuple space / blob / process groups |
+| Python WASM | `examples/python/apps/calculator/` | SDK decorators, same facet model in `app-config.toml` |
+| TypeScript WASM | `examples/typescript/apps/bank_account/` | Durable actor, WIT / jco pipeline |
+| Go WASM | `examples/go/apps/abstractions/` | GenServer / workflow / event actors, host surface parity |
+
+**Service links + weather actor examples:** `examples/{rust,python,typescript,go}/apps/weather_actor/` demonstrate end-to-end outbound HTTP service links with KV caching. See [examples/README.md](../examples/README.md).
+
+### WASM host “services” vs facets
+
+Polyglot actors call **host functions** defined in `wit/plexspaces-simple-actor/world.wit` (import `host`). Those calls are implemented on the node using `ServiceLocator` (KV, tuple space, locks, blob, messaging, shard groups, etc.). That is the **supported** way to reach framework services from a guest—**not** ad-hoc HTTP clients inside the SDK that duplicate node policy. See [Polyglot WASM development](polyglot.md).
+
+---
+
+## Service links and outbound HTTP
+
+**Service links** map a logical name (for example `payments-api`) to an external **HTTP** origin, optional auth via **environment variable** names, and shared **resilience** policy (connect/request timeouts, retries with jitter, circuit breaker). They are declared in **`RuntimeConfig`** and can be **required** per application in **`ApplicationSpec`**.
+
+### Protocol buffers
+
+| Artifact | Location |
+|----------|----------|
+| `ServiceLinkConfig`, `ClientTransportPolicy`, `HttpRetryPolicy`, `OutboundTransport` | `proto/plexspaces/v1/node/outbound.proto` |
+| `RuntimeConfig.service_links`, `default_outbound_client_policy`, `outbound_policy_templates` | `proto/plexspaces/v1/node/release.proto` |
+| `ApplicationServiceLinkRequirement`, `ApplicationSpec.required_service_links` | `proto/plexspaces/v1/application/application.proto` |
+
+`ObjectRegistration.grpc_address` is the **primary URI** for the endpoint (HTTP(S) base URL today; gRPC transport enum exists for future channel support).
+
+### Operator configuration (`release.toml`)
+
+The release TOML parser (`plexspaces_common::release_parser`) supports:
+
+```toml
+[[runtime.service_links]]
+name = "httpbin-echo"
+transport = "HTTP"
+base_url = "https://httpbin.org"
+publish_to_registry = false
+
+[[applications]]
+name = "my-app"
+# ... other required application fields ...
+
+[[applications.required_service_links]]
+link_name = "httpbin-echo"
+# optional: policy_template = "fast"
+```
+
+Copy-ready fragment: [`examples/runtime-service-links.fragment.toml`](../examples/runtime-service-links.fragment.toml).
+
+### Deploy-time validation
+
+When `ApplicationSpec.required_service_links` is non-empty, deploy merges the app spec with the node’s `RuntimeConfig` and runs `plexspaces_http_client::validate_application_service_links`: each `link_name` must exist in `service_links`, and any `policy_template` must exist in `outbound_policy_templates`.
+
+### Runtime implementation (Rust)
+
+| Layer | Responsibility |
+|-------|----------------|
+| `plexspaces_core::OutboundHttpClient` | Trait, request/response types, errors |
+| `plexspaces_http_client::ResilientOutboundHttpClient` | reqwest, retries (idempotent methods by default), per-link circuit breaker, metrics, tracing |
+| `ServiceLocator` | Register / lookup outbound client after `RuntimeConfig` is loaded |
+
+Secrets must **not** be inlined in proto: use `api_key_env_var`, `bearer_token_env_var`, and optional `api_key_header_name` only.
+
+### ServiceLinkService — runtime management
+
+**Proto**: `proto/plexspaces/v1/node/outbound.proto`
+**Implementation**: `crates/services/src/service_link_service.rs`
+
+`ServiceLinkService` manages service links at runtime without restarting the node. Links in `RuntimeConfig.service_links` are registered at startup; this service adds, replaces, removes, and queries them dynamically. Each mutating call rebuilds and re-registers the `ResilientOutboundHttpClient` in `ServiceLocator`.
+
+#### RPCs
+
+| Method | HTTP | Description |
+|--------|------|-------------|
+| `AddServiceLink` | `POST /v1/service-links` | Add or replace a named link; rebuilds OutboundHttpClient |
+| `RemoveServiceLink` | `DELETE /v1/service-links/{name}` | Remove link by name; rebuilds OutboundHttpClient |
+| `GetServiceLink` | `GET /v1/service-links/{name}` | Retrieve a single link by name |
+| `ListServiceLinks` | `GET /v1/service-links` | Paginated list of all registered links |
+
+#### Example
+
+```bash
+# Add a new service link at runtime
+grpcurl -plaintext -d '{"link":{"name":"weather-api","transport":"OUTBOUND_TRANSPORT_HTTP","base_url":"https://api.open-meteo.com"}}' \
+    localhost:8092 plexspaces.node.v1.ServiceLinkService/AddServiceLink
+
+# List registered service links
+grpcurl -plaintext localhost:8092 plexspaces.node.v1.ServiceLinkService/ListServiceLinks
+```
+
+### WASM actor host function
+
+WASM actors call outbound HTTP via the `http-fetch` host function defined in `wit/plexspaces-simple-actor/world.wit`:
+
+```wit
+// Execute outbound HTTP request via named service link.
+// Returns JSON: {"status":200,"headers":{},"body":"..."} or "ERROR:message"
+http-fetch: func(link-name: string, method: string, path-and-query: string,
+                 headers-json: string, body: string) -> string;
+```
+
+The host resolves `link-name` against the `OutboundHttpClient` registered in `ServiceLocator`; retries, circuit breaking, and auth injection happen transparently. See the [weather actor examples](#weather-actor-examples-service-link--kv-cache) for all four languages.
+
+### Weather actor examples (service link + KV cache)
+
+End-to-end examples demonstrating outbound HTTP via a named service link combined with KV-based caching. Each example has contract tests (no live node required).
+
+| Language | Location | Contract tests |
+|----------|----------|----------------|
+| Rust | `examples/rust/apps/weather_actor/` | `cargo test --lib` (5 tests) |
+| Python | `examples/python/apps/weather_actor/` | `python test_weather_actor.py` (5 tests) |
+| TypeScript | `examples/typescript/apps/weather_actor/` | `node --test` (7 tests) |
+| Go | `examples/go/apps/weather_actor/` | `go test ./...` (8 tests) |
+
+All examples:
+- Call `http-fetch("weather-api", "GET", "/v1/forecast?...")` via the SDK `ServiceHttpClient`
+- Cache the result in KV with a 5-minute TTL (`kv_get` / `kv_put`)
+- Declare `[[applications.required_service_links]]` with `name = "weather-api"` in `app-config.toml`
+- Include `build.sh` and `test.sh` (with `--e2e` flag for live node integration)
+
+### Outbound gRPC by link (planned)
+
+`OutboundTransport::GRPC` exists in proto; exposing a pooled gRPC channel per link through `ServiceLocator` is **not** yet the same maturity as HTTP—implementations should follow internal node client patterns (`crates/node/src/grpc_client.rs`).
+
+---
+
+## Unified discovery with ObjectRegistry
+
+Use a **single** mental model:
+
+- **Facets** → configured by name on actors; factories live in **`FacetRegistry`** (built-in at startup, custom via node integration).
+- **External HTTP endpoints** → configured as **`RuntimeConfig.service_links`**; optional **`publish_to_registry`** exposes them as **`ObjectTypeService`** rows for discovery.
+- **Applications, actors, nodes, workflows, tuple spaces** → registered and discovered through the same **ObjectRegistry** API (`Register`, `Lookup`, `Discover`, …).
+
+### `ObjectTypeService` rows for published links
+
+If `ServiceLinkConfig.publish_to_registry` is `true`, the node registers a service object with:
+
+| Field | Typical value |
+|-------|----------------|
+| `object_id` | `service-link:{link_name}@{node_id}` |
+| `grpc_address` | Link `base_url` |
+| `object_category` | `outbound-service-link` |
+| `capabilities` | `http` or `grpc` according to transport |
+| `metadata.labels` | `plexspaces.link_name`, `plexspaces.transport` |
+
+Static catalog registrations for links use tenant **`plexspaces`** and namespace **`runtime`** so they are distinguishable from application-scoped registry traffic.
+
+### gRPC surface
+
+Clients use **`ObjectRegistry`** as documented in [Infrastructure Services — ObjectRegistry](#objectregistry). Filter by `ObjectType`, category, capabilities, or labels consistent with your deployment’s metadata conventions.
 
 ---
 
@@ -435,7 +645,7 @@ Backends: SQLite (`:memory:` or file), PostgreSQL, Redis, DynamoDB, S3/Blob (all
 
 **Proto**: `proto/plexspaces/v1/registry/object_registry.proto`
 
-Distributed object registry for service discovery.
+Distributed object registry for **unified discovery**: actors, tuple spaces, applications, workflows, nodes, and **published outbound service links** (`ObjectTypeService` when `ServiceLinkConfig.publish_to_registry` is true). See [Unified discovery with ObjectRegistry](#unified-discovery-with-objectregistry) for link metadata labels and conventions.
 
 #### RPCs
 
@@ -613,4 +823,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/actors/defau
 - [Architecture Overview](architecture.md)
 - [Getting Started](getting-started.md)
 - [Detailed Design](detailed-design.md)
+- [Polyglot WASM development](polyglot.md)
+- [SDK guide](sdk.md)
 - [Use Cases](use-cases.md)
+- WIT interface architecture and Component Model roadmap: [wit-design.md](wit-design.md)

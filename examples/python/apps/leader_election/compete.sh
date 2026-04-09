@@ -14,7 +14,7 @@ HTTP_PORT="${2:-8092}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ID="leader-election-${OWNER_ID}"
-ACTOR_NAME="LeaderElection"
+ACTOR_TYPE="$APP_ID"
 
 # Try to acquire for up to this long (seconds)
 ACQUIRE_TIMEOUT=300
@@ -33,7 +33,7 @@ PAYLOAD_BASE="{\"msg_type\":\"%s\",\"payload\":{\"candidate_id\":\"$OWNER_ID\"}}
 try_acquire() {
     local payload
     payload=$(printf "$PAYLOAD_BASE" "try_lead")
-    local url="http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME/ask"
+    local url="http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE/ask"
     local tmpbody; tmpbody=$(mktemp)
     curl -s -o "$tmpbody" --max-time 10 -X POST "$url" \
         -H "Content-Type: application/json" -d "$payload" 2>/dev/null || true
@@ -48,7 +48,7 @@ try_acquire() {
 do_renew() {
     local payload
     payload=$(printf "$PAYLOAD_BASE" "renew_lead")
-    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME/ask" \
+    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE/ask" \
         -H "Content-Type: application/json" -d "$payload" 2>/dev/null) || RESPONSE=""
     if echo "$RESPONSE" | grep -qE '"renewed"\s*:\s*true|\\"renewed\\":\s*true'; then
         return 0

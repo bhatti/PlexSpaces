@@ -200,11 +200,13 @@ pub async fn register_virtual_actor_definition(
                 as Box<dyn std::error::Error + Send + Sync>
         })?;
 
-    tracing::debug!(
-        actor_type = %definition.actor_type,
-        namespace = %definition.namespace,
-        "Registered virtual actor type for auto-activation"
-    );
+    if tracing::enabled!(tracing::Level::TRACE) {
+        tracing::trace!(
+            actor_type = %definition.actor_type,
+            namespace = %definition.namespace,
+            "Registered virtual actor type for auto-activation"
+        );
+    }
 
     Ok(())
 }

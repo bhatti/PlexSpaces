@@ -32,7 +32,7 @@ NC='\033[0m'
 # Use env so two terminals can set term1/term2; otherwise unique per run
 OWNER_ID="${LEADER_ELECTION_OWNER_ID:-owner-$$-${RANDOM}}"
 APP_ID="leader-election-${OWNER_ID}"
-ACTOR_NAME="LeaderElection"
+ACTOR_TYPE="$APP_ID"
 
 cleanup() {
     echo ""
@@ -78,7 +78,7 @@ check_app_deployed() {
     local payload
     payload=$(printf "$PAYLOAD_BASE" "status")
     local code
-    code=$(curl -s -o /tmp/leader_election_status.$$ -w "%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME" \
+    code=$(curl -s -o /tmp/leader_election_status.$$ -w "%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
         -H "Content-Type: application/json" -d "$payload" --max-time 10 2>/dev/null) || code="000"
     if [ "$code" = "200" ] && grep -q 'leader' /tmp/leader_election_status.$$ 2>/dev/null; then
         rm -f /tmp/leader_election_status.$$
@@ -98,7 +98,7 @@ if check_app_deployed; then
 else
     RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
         -F "application_id=$APP_ID" \
-        -F "name=$ACTOR_NAME" \
+        -F "name=$APP_ID" \
         -F "version=1.0.0" \
         -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
     if echo "$RESPONSE" | grep -qi '"success":\s*true'; then
@@ -115,7 +115,7 @@ echo ""
 try_acquire() {
     local payload
     payload=$(printf "$PAYLOAD_BASE" "try_lead")
-    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME" \
+    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
         -H "Content-Type: application/json" -d "$payload" 2>/dev/null) || RESPONSE=""
     if echo "$RESPONSE" | grep -qE '"leader"\s*:\s*true|\\"leader\\":\s*true'; then
         return 0
@@ -127,7 +127,7 @@ try_acquire() {
 do_renew() {
     local payload
     payload=$(printf "$PAYLOAD_BASE" "renew_lead")
-    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME" \
+    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
         -H "Content-Type: application/json" -d "$payload" 2>/dev/null) || RESPONSE=""
     if echo "$RESPONSE" | grep -qE '"renewed"\s*:\s*true|\\"renewed\\":\s*true'; then
         return 0
@@ -139,7 +139,7 @@ do_renew() {
 do_release() {
     local payload
     payload=$(printf "$PAYLOAD_BASE" "release_lead")
-    curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME" \
+    curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
         -H "Content-Type: application/json" -d "$payload" >/dev/null 2>&1 || true
 }
 

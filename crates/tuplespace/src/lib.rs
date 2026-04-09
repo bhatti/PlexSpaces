@@ -33,6 +33,7 @@ pub mod config;
 
 // Provider abstraction and capability system
 pub mod provider;
+pub mod proto_conversion;
 
 // Redis backend (optional)
 #[cfg(feature = "redis-backend")]
@@ -40,6 +41,10 @@ pub mod redis_space;
 
 // Re-export main types
 pub use lattice_space::LatticeTupleSpace;
+pub use proto_conversion::{
+    proto_field_to_tuple_field, proto_template_to_pattern, proto_tuple_to_tuple,
+    tuple_field_to_proto_field, tuple_to_proto_tuple, TupleProtoConversionError,
+};
 pub use r#mod::*;
 
 #[cfg(feature = "redis-backend")]

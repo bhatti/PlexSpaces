@@ -64,6 +64,12 @@ pub const ENV_LISTEN_ADDR: &str = "PLEXSPACES_LISTEN_ADDR";
 /// gRPC address advertised to other nodes
 pub const ENV_GRPC_ADDRESS: &str = "PLEXSPACES_GRPC_ADDRESS";
 
+/// Logical cluster name for node registry, placement (`from_registry`), and SWIM labels
+pub const ENV_CLUSTER_NAME: &str = "PLEXSPACES_CLUSTER_NAME";
+
+/// Default `node.cluster_name` when release config and [`ENV_CLUSTER_NAME`] are unset or empty.
+pub const DEFAULT_CLUSTER_NAME: &str = "default";
+
 /// WASM applications directory for auto-deploy
 pub const ENV_WASM_APPS_DIR: &str = "PLEXSPACES_WASM_APPS_DIR";
 
@@ -347,6 +353,8 @@ pub struct EnvConfig {
     pub listen_addr: Option<String>,
     /// gRPC address (from PLEXSPACES_GRPC_ADDRESS)
     pub grpc_address: Option<String>,
+    /// Node cluster name (from PLEXSPACES_CLUSTER_NAME)
+    pub cluster_name: Option<String>,
     /// WASM apps directory (from PLEXSPACES_WASM_APPS_DIR)
     pub wasm_apps_dir: Option<String>,
     /// Save deployed WASM apps to disk (from PLEXSPACES_SAVE_WASM_APPS)
@@ -382,6 +390,7 @@ impl EnvConfig {
             node_id: get_env(ENV_NODE_ID),
             listen_addr: get_env(ENV_LISTEN_ADDR),
             grpc_address: get_env(ENV_GRPC_ADDRESS),
+            cluster_name: get_env(ENV_CLUSTER_NAME),
             wasm_apps_dir: get_env(ENV_WASM_APPS_DIR),
             save_wasm_apps: get_env_bool(ENV_SAVE_WASM_APPS),
             base_dir: get_env(ENV_BASE_DIR),
@@ -495,6 +504,8 @@ fn mask_db_url(url: &str) -> String {
 /// ## Environment Variable Overrides
 /// - `PLEXSPACES_NODE_ID` → `spec.node.id`
 /// - `PLEXSPACES_LISTEN_ADDR` → `spec.node.listen_addr`
+/// - `PLEXSPACES_CLUSTER_NAME` → `spec.node.cluster_name` (if non-empty)
+/// - If `spec.node.cluster_name` is still empty after file + env, it becomes [`DEFAULT_CLUSTER_NAME`]
 /// - `PLEXSPACES_GRPC_ADDRESS` → `spec.runtime.grpc.address`
 /// - `PLEXSPACES_BASE_DIR` → `spec.runtime.base_dir`
 /// - `PLEXSPACES_WASM_APPS_DIR` → `spec.runtime.wasm_apps_directory`
@@ -679,6 +690,14 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
         }
         if let Some(ref grpc_addr) = config.grpc_address {
             node.grpc_address = grpc_addr.clone();
+        }
+        if let Some(ref name) = config.cluster_name {
+            if !name.is_empty() {
+                node.cluster_name = name.clone();
+            }
+        }
+        if node.cluster_name.is_empty() {
+            node.cluster_name = DEFAULT_CLUSTER_NAME.to_string();
         }
     }
 
@@ -954,6 +973,38 @@ mod tests {
             "postgres://localhost/test"
         );
         assert_eq!(spec.node.as_ref().unwrap().id, "config-node-id");
+        assert_eq!(
+            spec.node.as_ref().unwrap().cluster_name,
+            DEFAULT_CLUSTER_NAME,
+            "empty cluster_name in file and env should default"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_initialize_applies_cluster_name_from_env() {
+        use plexspaces_proto::node::v1::{NodeConfig, ReleaseSpec};
+
+        env::set_var(ENV_CLUSTER_NAME, "heat");
+
+        let mut spec = ReleaseSpec {
+            node: Some(NodeConfig {
+                id: "n1".into(),
+                cluster_name: String::new(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        initialize(&mut spec);
+
+        assert_eq!(
+            spec.node.as_ref().unwrap().cluster_name,
+            "heat",
+            "PLEXSPACES_CLUSTER_NAME should override spec.node.cluster_name"
+        );
+
+        env::remove_var(ENV_CLUSTER_NAME);
     }
 
     #[test]
@@ -968,6 +1019,7 @@ mod tests {
             node_id: Some("env-node".to_string()),
             listen_addr: None, // Not set in "env"
             grpc_address: None,
+            cluster_name: None,
             wasm_apps_dir: Some("/env/apps".to_string()),
             save_wasm_apps: false,
             base_dir: Some("/env/base".to_string()),

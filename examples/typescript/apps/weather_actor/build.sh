@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 TARGET_DIR="$REPO_ROOT/target/examples/typescript/weather_actor"
-WIT_DIR="$REPO_ROOT/wit/plexspaces-simple-actor"
+WIT_DIR="$REPO_ROOT/wit/plexspaces-actor"
 OUTPUT_WASM="$TARGET_DIR/weather_actor.wasm"
 ESBUILD_STAMP="$SCRIPT_DIR/node_modules/.esbuild-platform"
 
@@ -41,7 +41,7 @@ fi
 
 ./node_modules/.bin/tsc -p .
 node build-bundle.mjs
-./node_modules/.bin/jco componentize weather_actor_bundle.mjs --wit "$WIT_DIR" -o "$OUTPUT_WASM" --disable all
+./node_modules/.bin/jco componentize weather_actor_bundle.mjs --wit "$WIT_DIR" -n actor-world -o "$OUTPUT_WASM" --disable all
 
 SIZE=$(ls -lh "$OUTPUT_WASM" | awk '{print $5}')
 echo "  ✓ $OUTPUT_WASM ($SIZE)"

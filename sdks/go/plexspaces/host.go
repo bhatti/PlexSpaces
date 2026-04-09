@@ -7,9 +7,12 @@
 // to WASM, the //go:wasmimport directives link to the actual host functions.
 // Outside WASM, stub implementations are used.
 //
-// All communication uses JSON strings over the WIT interface boundary.
-// Payload parameters accept any JSON-serializable value (consistent with
-// Python SDK's Any and TypeScript SDK's unknown).
+// Actor message payloads and several host APIs use JSON strings at the WIT boundary.
+// TupleSpace host imports (ts-write, ts-read, …) use protobuf wire bytes (WriteRequest,
+// ReadRequest, ReadResponse) per wit/plexspaces-actor/host.wit; the SDK maps []any patterns
+// to those messages (WASM) or JSON for native test stubs.
+// Shard-group and application-metrics/status host calls use protobuf wire on WASM
+// (see host_actor_api_wire_wasm.go) and JSON for native stubs (host_actor_api_wire_native.go).
 
 package plexspaces
 
@@ -49,9 +52,9 @@ type TupleSpace struct {
 // TS returns the TupleSpace helper for list-in, list-out operations.
 func (h *Host) TS() *TupleSpace { return h.ts }
 
-// Write writes a tuple. Elements must be JSON-serializable. Returns empty on success, "ERROR:..." on failure.
+// Write writes a tuple. Elements must be JSON-serializable (WASM: encoded as tuplespace WriteRequest protobuf).
 func (ts *TupleSpace) Write(tuple []any) string {
-	data, err := json.Marshal(tuple)
+	data, err := tsWriteWire(tuple)
 	if err != nil {
 		return "ERROR: " + err.Error()
 	}
@@ -60,53 +63,32 @@ func (ts *TupleSpace) Write(tuple []any) string {
 
 // Take removes and returns one matching tuple. Returns (tuple, true) or (nil, false) if no match/error.
 func (ts *TupleSpace) Take(pattern []any) ([]any, bool) {
-	data, err := json.Marshal(pattern)
+	data, err := tsReadRequestWire(pattern, true, 1)
 	if err != nil {
 		return nil, false
 	}
 	raw := ts.host.TSTake(string(data))
-	if raw == "" || strings.HasPrefix(raw, errorPrefix) {
-		return nil, false
-	}
-	var tuple []any
-	if err := json.Unmarshal([]byte(raw), &tuple); err != nil {
-		return nil, false
-	}
-	return tuple, true
+	return tsDecodeReadResponseFirstTuple(raw)
 }
 
 // Read returns one matching tuple (non-destructive). Returns (tuple, true) or (nil, false) if no match/error.
 func (ts *TupleSpace) Read(pattern []any) ([]any, bool) {
-	data, err := json.Marshal(pattern)
+	data, err := tsReadRequestWire(pattern, false, 1)
 	if err != nil {
 		return nil, false
 	}
 	raw := ts.host.TSRead(string(data))
-	if raw == "" || strings.HasPrefix(raw, errorPrefix) {
-		return nil, false
-	}
-	var tuple []any
-	if err := json.Unmarshal([]byte(raw), &tuple); err != nil {
-		return nil, false
-	}
-	return tuple, true
+	return tsDecodeReadResponseFirstTuple(raw)
 }
 
 // ReadAll returns all matching tuples (non-destructive). Returns slice of tuples (each tuple is []any).
 func (ts *TupleSpace) ReadAll(pattern []any) [][]any {
-	data, err := json.Marshal(pattern)
+	data, err := tsReadRequestWire(pattern, false, 1024)
 	if err != nil {
 		return nil
 	}
 	raw := ts.host.TSReadAll(string(data))
-	if raw == "" || strings.HasPrefix(raw, errorPrefix) {
-		return nil
-	}
-	var out [][]any
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return nil
-	}
-	return out
+	return tsDecodeReadResponseAllTuples(raw)
 }
 
 // ========================================================================
@@ -309,7 +291,8 @@ func (h *Host) LockRenew(lockID, tenantID, namespace, holderID, lockVersion stri
 // ========================================================================
 
 // BlobUpload uploads blob data (base64-encoded).
-// Returns empty on success, "ERROR:message" on failure.
+// On success returns the server-assigned blob id (ULID on WASM); native stubs return "".
+// On failure returns "ERROR:message". Use IsHostError to tell error from success.
 func (h *Host) BlobUpload(blobID, data, contentType string) string {
 	return hostBlobUpload(blobID, data, contentType)
 }
@@ -405,134 +388,135 @@ func (h *Host) PoolGetMetrics(poolName string) map[string]any {
 	return out
 }
 
-// CreateShardGroup creates a shard group using proto field names in the JSON payload.
+// CreateShardGroup creates a shard group. Native builds send JSON to stubs; WASM sends
+// CreateShardGroupRequest protobuf wire per the actor host WIT contract.
 func (h *Host) CreateShardGroup(request any) (map[string]any, error) {
-	result := hostCreateShardGroup(marshalPayload(request))
+	wire, err := hostWireCreateShardGroupRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	result := hostCreateShardGroup(wire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeCreateShardGroupResponse(result)
 }
 
-// BulkUpdateShardGroup sends bulk updates to shards using proto field names in the JSON payload.
+// BulkUpdateShardGroup sends bulk updates to shards.
 func (h *Host) BulkUpdateShardGroup(request any) (map[string]any, error) {
-	result := hostBulkUpdateShardGroup(marshalPayload(request))
+	wire, err := hostWireBulkUpdateShardGroupRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	result := hostBulkUpdateShardGroup(wire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeBulkUpdateShardGroupResponse(result)
 }
 
-// MapShardGroup maps a query across shards using proto field names in the JSON payload.
+// MapShardGroup maps a query across shards.
 func (h *Host) MapShardGroup(request any) (map[string]any, error) {
-	result := hostMapShardGroup(marshalPayload(request))
+	wire, err := hostWireMapShardGroupRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	result := hostMapShardGroup(wire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeMapShardGroupResponse(result)
 }
 
-// ScatterGather runs scatter/gather using proto field names in the JSON payload.
+// ScatterGather runs scatter/gather across a shard group.
 func (h *Host) ScatterGather(request any) (map[string]any, error) {
-	result := hostScatterGather(marshalPayload(request))
+	wire, err := hostWireScatterGatherRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	result := hostScatterGather(wire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeScatterGatherResponse(result)
 }
 
 // BroadcastShardGroup broadcasts a message to every shard in a group.
 func (h *Host) BroadcastShardGroup(request any) (map[string]any, error) {
-	result := hostBroadcastShardGroup(marshalPayload(request))
+	wire, err := hostWireBroadcastShardGroupRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	result := hostBroadcastShardGroup(wire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeBroadcastShardGroupResponse(result)
 }
 
 // ReduceShardGroup reduces values returned by a shard-group map operation.
 func (h *Host) ReduceShardGroup(request any) (map[string]any, error) {
-	result := hostReduceShardGroup(marshalPayload(request))
+	wire, err := hostWireReduceShardGroupRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	result := hostReduceShardGroup(wire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeReduceShardGroupResponse(result)
 }
 
 // AllReduceShardGroup reduces values and broadcasts the reduced result back to all shards.
 func (h *Host) AllReduceShardGroup(request any) (map[string]any, error) {
-	result := hostAllReduceShardGroup(marshalPayload(request))
+	wire, err := hostWireAllReduceShardGroupRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	result := hostAllReduceShardGroup(wire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeAllReduceShardGroupResponse(result)
 }
 
 // BarrierShardGroup synchronizes a shard group at a framework barrier round.
 func (h *Host) BarrierShardGroup(request any) (map[string]any, error) {
-	result := hostBarrierShardGroup(marshalPayload(request))
+	wire, err := hostWireBarrierShardGroupRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	result := hostBarrierShardGroup(wire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeBarrierShardGroupResponse(result)
 }
 
 // SpawnActors spawns multiple actors using the framework actor service.
 func (h *Host) SpawnActors(request any) (map[string]any, error) {
-	result := hostSpawnActors(marshalPayload(request))
+	wire, err := hostWireSpawnActorsRequest(request)
+	if err != nil {
+		return nil, err
+	}
+	result := hostSpawnActors(wire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeSpawnActorsResponse(result)
 }
 
 // ApplicationMetricsAdd merges a node-local application metrics delta.
 func (h *Host) ApplicationMetricsAdd(applicationID string, metrics any) (map[string]any, error) {
-	result := hostApplicationMetricsAdd(applicationID, marshalPayload(metrics))
+	wire, err := hostWireApplicationMetrics(metrics)
+	if err != nil {
+		return nil, err
+	}
+	result := hostApplicationMetricsAdd(applicationID, wire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeApplicationMetricsResponse(result)
 }
 
 // HTTPFetch executes an outbound HTTP request via a named service link.
@@ -548,27 +532,20 @@ func (h *Host) ApplicationMetricsAdd(applicationID string, metrics any) (map[str
 //
 // Returns a map with "status" (float64), "headers" (map), "body" (string).
 func (h *Host) HTTPFetch(linkName, method, pathAndQuery string, headers map[string]string, body []byte) (map[string]any, error) {
-	headersJSON := "{}"
-	if len(headers) > 0 {
-		data, err := json.Marshal(headers)
-		if err != nil {
-			return nil, err
-		}
-		headersJSON = string(data)
+	reqWire, err := encodeHttpFetchRequestWire(headers, body)
+	if err != nil {
+		return nil, err
 	}
-	bodyStr := ""
-	if len(body) > 0 {
-		bodyStr = string(body)
-	}
-	result := hostHTTPFetch(linkName, method, pathAndQuery, headersJSON, bodyStr)
+	result := hostHTTPFetch(linkName, method, pathAndQuery, reqWire)
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
+	// Native stubs return JSON; WASM returns HttpFetchResponse protobuf bytes as the result string.
+	var jsonOut map[string]any
+	if err := json.Unmarshal([]byte(result), &jsonOut); err == nil {
+		return jsonOut, nil
 	}
-	return out, nil
+	return decodeHttpFetchResponseWire([]byte(result))
 }
 
 // ApplicationGetStatus returns application status for a participating node.
@@ -577,11 +554,7 @@ func (h *Host) ApplicationGetStatus(applicationID, nodeID string) (map[string]an
 	if isHostError(result) {
 		return nil, &HostError{result}
 	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(result), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return hostDecodeApplicationGetStatusResponse(result)
 }
 
 // ========================================================================
@@ -669,9 +642,14 @@ func (e *HostError) ParseErrorDetail() *ErrorDetail {
 	return &detail
 }
 
-// isHostError checks if a host function result is an error response.
-func isHostError(result string) bool {
+// IsHostError reports whether the host returned the error arm of result<T, actor-error>.
+// Success payloads are often non-empty (for example blob-upload returns the stored blob ULID).
+func IsHostError(result string) bool {
 	return strings.HasPrefix(result, errorPrefix)
+}
+
+func isHostError(result string) bool {
+	return IsHostError(result)
 }
 
 // checkError converts a host function result to an error if it's an error response.

@@ -1,6 +1,6 @@
 # Parameter Server - Rust WASM app
 #
-# Deployable WASM application using the plexspaces:simple-actor WIT host surface.
+# Deployable WASM application using the plexspaces:actor WIT host surface.
 # Build: ./build.sh
 # Test: ./test.sh [HTTP_PORT|host:port ...]
 
@@ -17,7 +17,9 @@ description = "Parameter server leader/worker WASM app with shard-group scatter-
 crate-type = ["cdylib"]
 
 [dependencies]
+plexspaces-proto = { path = "../../../../crates/proto", default-features = false }
 plexspaces-sdk = { path = "../../../../sdks/rust/plexspaces-sdk", default-features = false }
+prost = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 wit-bindgen = "0.51.0"

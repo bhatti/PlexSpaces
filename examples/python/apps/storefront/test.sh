@@ -19,23 +19,22 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 APP_ID="storefront-test"
-ACTOR_TYPE="StorefrontService"
+ACTOR_TYPE="$APP_ID"
 
-# Build request body: single JSON object. No jq here so we avoid quoting/slurpfile issues;
-# payload must be a single JSON value (object/array/number/string). SDK tolerates "Extra data" server-side.
+# Build request body: envelope with msg_type + handler args in payload (see Python dispatch_message).
 build_body() {
     local msg_type="$1"
     local payload="${2:-{}}"
     printf '{"msg_type":"%s","payload":%s}' "$msg_type" "$payload"
 }
 
-# Invoke actor; returns full JSON (success, payload, actor_id, ...)
+# Invoke actor (request-reply via /ask so the HTTP response includes handler JSON payload).
 call() {
     local msg_type="$1"
     local payload="${2:-{}}"
     local json_payload
     json_payload=$(build_body "$msg_type" "$payload")
-    curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
+    curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE/ask?timeout=15" \
         -H "Content-Type: application/json" \
         -d "$json_payload" \
         --max-time 15
@@ -122,7 +121,7 @@ trap cleanup EXIT
 
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
-    -F "name=$ACTOR_TYPE" \
+    -F "name=$APP_ID" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
 if ! echo "$RESPONSE" | grep -qi '"success":\s*true'; then

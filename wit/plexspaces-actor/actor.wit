@@ -3,7 +3,7 @@
 // Functions that WASM actors must implement.
 // The runtime calls these functions to interact with actors.
 
-interface actor {
+interface native-actor {
     use types.{actor-id, payload};
 
     /// Initialize actor with state

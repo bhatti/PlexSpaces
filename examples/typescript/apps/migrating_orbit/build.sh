@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-WIT_DIR="$REPO_ROOT/wit/plexspaces-simple-actor"
+WIT_DIR="$REPO_ROOT/wit/plexspaces-actor"
 OUTPUT_WASM="$SCRIPT_DIR/read_state_actor.wasm"
 
 cd "$SCRIPT_DIR"
@@ -55,8 +55,8 @@ else
   JCO="./node_modules/.bin/jco"
 fi
 
-# jco componentize the bundle (exports actor; no WASI so only plexspaces:simple-actor/host).
-if ! $JCO componentize read_state_actor_bundle.mjs --wit "$WIT_DIR" -o "$OUTPUT_WASM" --disable all 2>&1; then
+# jco componentize the bundle (exports actor; no WASI so only plexspaces:actor/host).
+if ! $JCO componentize read_state_actor_bundle.mjs --wit "$WIT_DIR" -n actor-world -o "$OUTPUT_WASM" --disable all 2>&1; then
   echo "  ERROR: jco componentize failed (see above)."
   exit 1
 fi

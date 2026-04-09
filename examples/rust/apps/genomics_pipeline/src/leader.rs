@@ -8,8 +8,8 @@ pub(super) struct LeaderActor;
 #[plexspaces_handlers(wasm)]
 impl LeaderActor {
     #[handler("run")]
-    fn run(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-        Ok(handle_leader_run(payload_json))
+    fn run(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(handle_leader_run(payload))
     }
 }
 
@@ -152,49 +152,28 @@ fn collect_stage(
     Ok((accumulator, stage_record))
 }
 
-pub(super) fn handle_leader_run(payload_json: &str) -> String {
-    let request: RunRequest = match serde_json::from_str(payload_json) {
+pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
+    let request: RunRequest = match serde_json::from_slice(payload) {
         Ok(request) => request,
         Err(err) => {
-            return serde_json::json!({ "error": format!("invalid run payload: {}", err) })
-                .to_string()
+            return super::json_bytes(
+                serde_json::json!({ "error": format!("invalid run payload: {}", err) }),
+            )
         }
     };
 
     let group_id = format!("genomics-pipeline-{}", host::now_ms());
-    let create_request = serde_json::json!({
-        "group_id": group_id,
-        "actor_type": "worker",
-        "shard_count": request.worker_count,
-        "partition_strategy": "hash",
-        "rebalance_policy": "manual",
-        "placement": {
-            "strategy": "from_registry"
-        },
-        "initial_state": {},
-    });
-    let create_response = host::create_shard_group(&create_request.to_string());
-    if create_response.starts_with("ERROR:") {
-        return serde_json::json!({ "error": create_response }).to_string();
-    }
-
-    let create_payload: serde_json::Value = match serde_json::from_str(&create_response) {
-        Ok(value) => value,
-        Err(err) => {
-            return serde_json::json!({
-                "error": format!("invalid create_shard_group response: {}", err)
-            })
-            .to_string()
-        }
+    let create_request_bytes =
+        shard_group_create_request_bytes(&group_id, "worker", request.worker_count);
+    let create_response = match host::create_shard_group(&create_request_bytes) {
+        Ok(response) => response,
+        Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
     };
 
-    let shard_actor_ids: Vec<String> = create_payload
-        .get("shard_actor_ids")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_str().map(str::to_string))
-        .collect();
+    let shard_actor_ids = match decode_shard_group_create_response(&create_response) {
+        Ok(actor_ids) => actor_ids,
+        Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
+    };
     let leader_node_id = actor_node_id(&host::self_id());
     let mut per_node_metrics: HashMap<String, NodeMetrics> = HashMap::new();
     let mut per_role_metrics: HashMap<String, RoleMetrics> = HashMap::new();
@@ -205,7 +184,7 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
 
     let init_start = host::now_ms();
     if let Err(err) = ensure_worker_initialization(&shard_actor_ids) {
-        return serde_json::json!({ "error": err }).to_string();
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
     leader_coordination_ms += host::now_ms().saturating_sub(init_start);
     leader_message_count += shard_actor_ids.len() as u64;
@@ -224,10 +203,9 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
                 start_statuses.insert(node_id.clone(), status);
             }
             Err(err) => {
-                return serde_json::json!({
+                return super::json_bytes(serde_json::json!({
                     "error": format!("failed to capture application status for {}: {}", node_id, err),
-                })
-                .to_string();
+                }));
             }
         }
     }
@@ -249,28 +227,27 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
 
     for stage_name in stages {
         leader_message_count += 1;
-        let scatter_request = serde_json::json!({
-            "group_id": group_id,
-            "query": stage_request(&request, stage_name),
-            "aggregation": "concat",
-            "min_responses": request.worker_count,
-            "timeout_ms": 30000,
-        });
+        let scatter_request = stage_request(&request, stage_name);
         let stage_wait_start = host::now_ms();
-        let response = host::scatter_gather(&scatter_request.to_string());
+        let scatter_request_bytes = scatter_gather_request_bytes(
+            &group_id,
+            plexspaces_proto::actor::v1::ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
+            scatter_request,
+            request.worker_count,
+            30_000,
+        );
+        let response = match host::scatter_gather(&scatter_request_bytes) {
+            Ok(response) => response,
+            Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
+        };
         leader_coordination_ms += host::now_ms().saturating_sub(stage_wait_start);
-        if response.starts_with("ERROR:") {
-            return serde_json::json!({ "error": response }).to_string();
-        }
 
-        let parsed: serde_json::Value =
-            match serde_json::from_str(&response) {
-                Ok(value) => value,
-                Err(err) => return serde_json::json!({
-                    "error": format!("invalid scatter_gather response for {}: {}", stage_name, err)
-                })
-                .to_string(),
-            };
+        let parsed = match decode_scatter_gather_response(&response) {
+            Ok(shard_responses) => serde_json::json!({ "shard_responses": shard_responses }),
+            Err(err) => return super::json_bytes(serde_json::json!({
+                "error": format!("invalid scatter_gather response for {}: {}", stage_name, err)
+            })),
+        };
 
         let stage_compute_start = host::now_ms();
         let (accumulator, record) = match collect_stage(
@@ -283,7 +260,7 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
             &mut total_errors,
         ) {
             Ok(result) => result,
-            Err(err) => return serde_json::json!({ "error": err }).to_string(),
+            Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
         };
         leader_compute_ms += host::now_ms().saturating_sub(stage_compute_start);
         stage_records.push(record);
@@ -373,7 +350,7 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
         }),
         "leader metrics update",
     ) {
-        return serde_json::json!({ "error": err }).to_string();
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
 
     let mut node_addresses = serde_json::Map::new();
@@ -392,10 +369,9 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
                 end_statuses.insert(node_id.clone(), status);
             }
             Err(err) => {
-                return serde_json::json!({
+                return super::json_bytes(serde_json::json!({
                     "error": format!("failed to collect final application status for {}: {}", node_id, err),
-                })
-                .to_string();
+                }));
             }
         }
     }
@@ -529,5 +505,5 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
     with_state(|state| {
         state.last_result = Some(result.clone());
     });
-    result.to_string()
+    super::json_bytes(result)
 }

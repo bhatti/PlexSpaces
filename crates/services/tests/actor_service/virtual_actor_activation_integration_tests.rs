@@ -384,6 +384,72 @@ impl GenServer for DurableCounterActor {
     }
 }
 
+#[async_trait]
+impl GenServer for DurableWorkflowProbeActor {
+    async fn handle_request(
+        &mut self,
+        ctx: &ActorContext,
+        msg: Message,
+    ) -> Result<(), BehaviorError> {
+        let counter_msg: CounterMessage = serde_json::from_slice(&msg.payload)
+            .map_err(|e| BehaviorError::ProcessingError(format!("Failed to parse: {}", e)))?;
+
+        match counter_msg {
+            CounterMessage::Increment => {
+                self.count += 1;
+                if !msg.sender_id.is_empty() {
+                    let correlation_id = if msg.correlation_id.is_empty() {
+                        None
+                    } else {
+                        Some(msg.correlation_id.as_str())
+                    };
+                    let reply = serde_json::json!({ "count": self.count });
+                    ctx.send_reply(
+                        correlation_id,
+                        &msg.sender_id,
+                        msg.receiver_id.clone(),
+                        Message {
+                            id: ulid::Ulid::new().to_string(),
+                            payload: serde_json::to_vec(&reply).unwrap(),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
+                    })?;
+                }
+                Ok(())
+            }
+            CounterMessage::GetCount => {
+                let reply = serde_json::json!({ "count": self.count });
+                if !msg.sender_id.is_empty() {
+                    let correlation_id = if msg.correlation_id.is_empty() {
+                        None
+                    } else {
+                        Some(msg.correlation_id.as_str())
+                    };
+                    ctx.send_reply(
+                        correlation_id,
+                        &msg.sender_id,
+                        msg.receiver_id.clone(),
+                        Message {
+                            id: ulid::Ulid::new().to_string(),
+                            payload: serde_json::to_vec(&reply).unwrap(),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        BehaviorError::ProcessingError(format!("Failed to send reply: {}", e))
+                    })?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 async fn ask_for_count(
     actor_ref: &(dyn plexspaces_core::MessageSender + Send + Sync),
 ) -> Result<i32, Box<dyn std::error::Error + Send + Sync>> {

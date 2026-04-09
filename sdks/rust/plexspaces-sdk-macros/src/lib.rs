@@ -875,6 +875,8 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
     }
 
     if is_wasm {
+        // The wasm decorator keeps the WIT boundary byte-oriented so polyglot
+        // actor-world guests can decode protobuf payloads with generated models.
         let catch_all_handler = handlers.iter().find(|h| h.op == "*" || h.op == "_");
 
         let match_arms: Vec<TokenStream2> = handlers
@@ -884,7 +886,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                 let op = &h.op;
                 let method = &h.method_name;
                 quote! {
-                    #op => self.#method(from_actor, payload_json),
+                    #op => self.#method(from_actor, payload),
                 }
             })
             .collect();
@@ -892,7 +894,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
         let default_arm = if let Some(catch_all) = catch_all_handler {
             let method = &catch_all.method_name;
             quote! {
-                self.#method(from_actor, payload_json)
+                self.#method(from_actor, payload)
             }
         } else {
             quote! {
@@ -903,8 +905,8 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
         let init_impl = if let Some(init) = init_handler {
             let method = init.method_name;
             quote! {
-                fn init(&mut self, config_json: &str) -> Result<(), String> {
-                    self.#method(config_json)
+                fn init(&mut self, config: &[u8]) -> Result<(), String> {
+                    self.#method(config)
                 }
             }
         } else {
@@ -914,15 +916,15 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
         let expanded = quote! {
             #impl_block
 
-            impl plexspaces_sdk::simple_actor::SimpleActorHandlers for #self_ty {
+            impl plexspaces_sdk::simple_actor::ActorWorldHandlers for #self_ty {
                 #init_impl
 
                 fn handle_operation(
                     &mut self,
                     from_actor: &str,
                     op: &str,
-                    payload_json: &str,
-                ) -> Result<String, String> {
+                    payload: &[u8],
+                ) -> Result<Vec<u8>, String> {
                     match op {
                         #(#match_arms)*
                         _ => #default_arm,

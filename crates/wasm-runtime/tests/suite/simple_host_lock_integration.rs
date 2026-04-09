@@ -3,16 +3,16 @@
 //
 // This file is part of PlexSpaces.
 //
-// Integration tests for the simple host lock API (string-based WASM host interface).
-// Validates lock-acquire (tenant-id, namespace, holder-id, lock-name) -> JSON,
-// lock-release (lock-id, tenant-id, namespace, holder-id, lock-version),
-// lock-renew (lock-id, tenant-id, namespace, holder-id, lock-version, lease-duration-secs).
+// Integration tests for the actor-world lock API.
+// Validates protobuf lock-acquire/renew responses and result-based errors.
 
 #[cfg(feature = "component-model")]
 mod tests {
+    use prost::Message as _;
     use plexspaces_core::ActorId;
     use plexspaces_locks::sql::SqliteLockManager;
-    use plexspaces_wasm_runtime::simple_component_host::plexspaces::simple_actor::host::Host;
+    use plexspaces_proto::locks::prv::Lock as ProtoLock;
+    use plexspaces_wasm_runtime::simple_component_host::plexspaces::actor::host::Host;
     use plexspaces_wasm_runtime::simple_component_host::SimpleHostImpl;
     use plexspaces_wasm_runtime::HostFunctions;
     use std::sync::Arc;
@@ -25,7 +25,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_simple_host_lock_acquire_returns_json() {
+    async fn test_simple_host_lock_acquire_returns_protobuf() {
         let mut host = create_simple_host_with_lock_manager().await;
         let out = host
             .lock_acquire(
@@ -36,20 +36,15 @@ mod tests {
                 30,
                 1000,
             )
-            .await;
-        assert!(
-            !out.starts_with("ERROR:"),
-            "lock_acquire should succeed, got: {}",
-            out
-        );
-        let parsed: serde_json::Value =
-            serde_json::from_str(&out).expect("lock_acquire must return valid JSON");
-        assert_eq!(parsed["lock_key"], "my-lock");
-        assert_eq!(parsed["holder_id"], "holder-1");
-        assert_eq!(parsed["locked"], true);
-        assert!(parsed["version"].as_str().unwrap().len() > 0);
-        assert!(parsed["lease_duration_secs"].as_u64().unwrap() >= 30);
-        assert!(parsed["expires_at_ms"].as_u64().unwrap() > 0);
+            .await
+            .expect("lock_acquire should succeed");
+        let parsed = ProtoLock::decode(out.as_slice()).expect("valid protobuf lock expected");
+        assert_eq!(parsed.lock_key, "my-lock");
+        assert_eq!(parsed.holder_id, "holder-1");
+        assert!(parsed.locked);
+        assert!(!parsed.version.is_empty());
+        assert!(parsed.lease_duration_secs >= 30);
+        assert!(parsed.expires_at.is_some());
     }
 
     #[tokio::test]
@@ -64,11 +59,11 @@ mod tests {
                 30,
                 1000,
             )
-            .await;
-        assert!(!out.starts_with("ERROR:"), "acquire failed: {}", out);
-        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
-        let lock_id = parsed["lock_key"].as_str().unwrap().to_string();
-        let version = parsed["version"].as_str().unwrap().to_string();
+            .await
+            .expect("acquire should succeed");
+        let parsed = ProtoLock::decode(out.as_slice()).expect("valid protobuf lock expected");
+        let lock_id = parsed.lock_key.clone();
+        let version = parsed.version.clone();
 
         let release_out = host
             .lock_release(
@@ -79,15 +74,7 @@ mod tests {
                 version,
             )
             .await;
-        assert!(
-            !release_out.starts_with("ERROR:"),
-            "lock_release should succeed, got: {}",
-            release_out
-        );
-        assert_eq!(
-            release_out, "",
-            "release should return empty string on success"
-        );
+        assert!(release_out.is_ok(), "lock_release should succeed: {release_out:?}");
     }
 
     #[tokio::test]
@@ -102,11 +89,11 @@ mod tests {
                 30,
                 1000,
             )
-            .await;
-        assert!(!out.starts_with("ERROR:"), "acquire failed: {}", out);
-        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
-        let lock_id = parsed["lock_key"].as_str().unwrap().to_string();
-        let version = parsed["version"].as_str().unwrap().to_string();
+            .await
+            .expect("acquire should succeed");
+        let parsed = ProtoLock::decode(out.as_slice()).expect("valid protobuf lock expected");
+        let lock_id = parsed.lock_key.clone();
+        let version = parsed.version.clone();
 
         let renew_out = host
             .lock_renew(
@@ -117,17 +104,11 @@ mod tests {
                 version.clone(),
                 60,
             )
-            .await;
-        assert!(
-            !renew_out.starts_with("ERROR:"),
-            "lock_renew should succeed, got: {}",
-            renew_out
-        );
-        assert_ne!(renew_out, version, "renew should return a new version");
-        assert!(
-            !renew_out.is_empty(),
-            "renew should return non-empty version"
-        );
+            .await
+            .expect("lock_renew should succeed");
+        let renewed = ProtoLock::decode(renew_out.as_slice()).expect("valid protobuf lock expected");
+        assert_ne!(renewed.version, version, "renew should return a new version");
+        assert!(!renewed.version.is_empty(), "renew should return non-empty version");
 
         // Release with the new version
         let release_out = host
@@ -136,10 +117,10 @@ mod tests {
                 "tenant1".to_string(),
                 "ns1".to_string(),
                 "holder-1".to_string(),
-                renew_out,
+                renewed.version,
             )
             .await;
-        assert_eq!(release_out, "", "release after renew should succeed");
+        assert!(release_out.is_ok(), "release after renew should succeed: {release_out:?}");
     }
 
     #[tokio::test]
@@ -154,11 +135,11 @@ mod tests {
                 30,
                 1000,
             )
-            .await;
-        assert!(!out.starts_with("ERROR:"), "acquire failed: {}", out);
-        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
-        let lock_id = parsed["lock_key"].as_str().unwrap().to_string();
-        let version = parsed["version"].as_str().unwrap().to_string();
+            .await
+            .expect("acquire should succeed");
+        let parsed = ProtoLock::decode(out.as_slice()).expect("valid protobuf lock expected");
+        let lock_id = parsed.lock_key.clone();
+        let version = parsed.version.clone();
 
         let release_out = host
             .lock_release(
@@ -169,11 +150,7 @@ mod tests {
                 version,
             )
             .await;
-        assert!(
-            release_out.starts_with("ERROR:"),
-            "release with wrong holder should fail, got: {}",
-            release_out
-        );
+        assert!(release_out.is_err(), "release with wrong holder should fail");
     }
 
     #[tokio::test]
@@ -188,11 +165,11 @@ mod tests {
                 30,
                 1000,
             )
-            .await;
-        assert!(!out.starts_with("ERROR:"), "acquire failed: {}", out);
-        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
-        let lock_id = parsed["lock_key"].as_str().unwrap().to_string();
-        let version = parsed["version"].as_str().unwrap().to_string();
+            .await
+            .expect("acquire should succeed");
+        let parsed = ProtoLock::decode(out.as_slice()).expect("valid protobuf lock expected");
+        let lock_id = parsed.lock_key.clone();
+        let version = parsed.version.clone();
 
         let renew_out = host
             .lock_renew(
@@ -204,11 +181,7 @@ mod tests {
                 60,
             )
             .await;
-        assert!(
-            renew_out.starts_with("ERROR:"),
-            "renew with wrong holder should fail, got: {}",
-            renew_out
-        );
+        assert!(renew_out.is_err(), "renew with wrong holder should fail");
     }
 
     #[tokio::test]
@@ -227,10 +200,6 @@ mod tests {
                 1000,
             )
             .await;
-        assert!(
-            out.starts_with("ERROR:"),
-            "lock_acquire without LockManager should return ERROR, got: {}",
-            out
-        );
+        assert!(out.is_err(), "lock_acquire without LockManager should fail");
     }
 }

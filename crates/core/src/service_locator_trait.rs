@@ -840,6 +840,15 @@ pub trait NodeRegistryTrait: Send + Sync {
         capacity: Option<plexspaces_proto::node::v1::NodeCapacity>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
+    /// Schedules an immediate SWIM direct ping so seed placeholders reconcile without waiting for the protocol period.
+    ///
+    /// Test doubles should return `Ok(())`. The production registry runs a background probe.
+    async fn kickoff_seed_reconcile_ping(
+        &self,
+        node_id: String,
+        node_address: String,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
     /// Start gossip protocol (if enabled and not using shared DB)
     ///
     /// ## Purpose

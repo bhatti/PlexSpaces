@@ -17,7 +17,11 @@ Guidelines for AI and human contributors. No backward compatibility, no legacy o
 
 ## 2. Build and test
 
-- **`make build`** and **`make test`** must succeed with zero errors. No committing with failing or skipped tests.
+- **`make build`** and **`make test`** must succeed with zero errors before merge or commit. No committing with failing or skipped tests.
+- **Targeted tests while iterating**: The full suite is slow. During development, run only what you need, then run the full `make test` (and `make test-examples` where applicable) before you finish or merge.
+  - `cargo test -p <crate> --lib` for a single crate’s unit tests.
+  - `cargo test -p <crate> --test <test_binary> <optional_name_filter>` for integration tests (e.g. `cargo test -p plexspaces-node --test node_integration_tests test_go_wasm_controller_stop`).
+- **AI agents**: Do **not** run `make test` or workspace-wide `cargo test` by default; use targeted commands tied to the files or crates you changed, unless the user asks for a full run.
 - Use a **single shared target directory** at the repo base. No separate `target/` for examples or tests. Use **debug** builds for examples/tests unless there is a clear reason for release.
 - Tests must be deterministic: no flaky timing; use condition variables or other robust primitives instead of sleeps. No mocking of code we own; test real behavior.
 
@@ -75,7 +79,7 @@ Guidelines for AI and human contributors. No backward compatibility, no legacy o
 
 ## 9. Checklist before considering work done
 
-- [ ] `make build` and `make test` pass; no failing or skipped tests.
+- [ ] `make build` and full `make test` pass before merge; during work you may rely on targeted `cargo test` until the final check.
 - [ ] No temporary or debug-only logging left in code.
 - [ ] No hacks, duplicate abstractions, or unresolved cyclic dependencies.
 - [ ] New/changed code has tests and meets the coverage bar (90%+ where applicable).

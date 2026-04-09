@@ -130,14 +130,16 @@ func (a *abstractionsActor) Handle(_ string, msgType, payloadJSON string) string
 		}
 		return marshal(map[string]any{"tuple": nil})
 	case "blob_upload":
-		if result := host.BlobUpload(
+		storedID := host.BlobUpload(
 			payloadString(payload, "blob_id"),
 			payloadString(payload, "data"),
 			payloadString(payload, "content_type"),
-		); result != "" {
-			return hostError("blob_upload", result)
+		)
+		if plexspaces.IsHostError(storedID) {
+			return hostError("blob_upload", storedID)
 		}
-		return marshal(map[string]any{"ok": true, "blob_id": payloadString(payload, "blob_id")})
+		// Match Rust guest: blob_id in JSON is the internal id returned by the host (ULID on WASM).
+		return marshal(map[string]any{"ok": true, "blob_id": storedID})
 	case "blob_download":
 		return marshal(map[string]any{"blob_id": payloadString(payload, "blob_id"), "data": host.BlobDownload(payloadString(payload, "blob_id"))})
 	case "group_members":

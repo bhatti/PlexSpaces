@@ -1965,13 +1965,6 @@ impl Actor {
         // Coordinate with mailbox for DurabilityFacet
         if facet_type == "durability" {
             let mailbox_stats = self.mailbox.get_stats().await;
-            tracing::info!(
-                actor_id = %self.id,
-                mailbox_backend = %mailbox_stats.backend_type,
-                mailbox_is_durable = mailbox_stats.is_durable,
-                mailbox_size = mailbox_stats.current_size,
-                "Attaching DurabilityFacet - mailbox durability status"
-            );
 
             // Record metrics
             metrics::gauge!("plexspaces_mailbox_size", "actor_id" => self.id.to_string(), "backend" => mailbox_stats.backend_type.clone())

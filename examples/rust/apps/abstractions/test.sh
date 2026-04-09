@@ -1,4 +1,4 @@
-#!/usr/bin/env bash -x
+#!/usr/bin/env bash
 # Abstractions (Rust WASM): deploy and verify GenServer, workflow, event-channel,
 # timers, virtual actor reactivation, and shared services against a running node.
 # Usage: ./test.sh [HTTP_PORT]

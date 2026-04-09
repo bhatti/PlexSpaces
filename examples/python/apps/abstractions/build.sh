@@ -38,5 +38,5 @@ if ! run_python -c "import componentize_py" 2>/dev/null; then
   run_python -m pip install "componentize-py>=0.12" --quiet
 fi
 
-run_python -m plexspaces_cli.build build "abstractions_app.py" -o "$OUTPUT_WASM" --wit-dir "$REPO_ROOT/wit/plexspaces-simple-actor"
+run_python -m plexspaces_cli.build build "abstractions_app.py" -o "$OUTPUT_WASM" --wit-dir "$REPO_ROOT/wit/plexspaces-actor"
 echo "Built Python abstractions WASM component at $OUTPUT_WASM"

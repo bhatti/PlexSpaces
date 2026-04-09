@@ -8,27 +8,28 @@ pub(super) struct WorkerActor;
 #[plexspaces_handlers(wasm)]
 impl WorkerActor {
     #[handler("init")]
-    fn init_shard(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-        Ok(handle_worker_init(payload_json))
+    fn init_shard(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(handle_worker_init(payload))
     }
 
     #[handler("ring_step")]
-    fn ring_step(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-        Ok(handle_worker_ring_step(payload_json))
+    fn ring_step(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(handle_worker_ring_step(payload))
     }
 
     #[handler("finalize_round")]
-    fn finalize_round(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-        Ok(handle_worker_finalize_round(payload_json))
+    fn finalize_round(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(handle_worker_finalize_round(payload))
     }
 }
 
-pub(super) fn handle_worker_init(payload_json: &str) -> String {
-    let payload: serde_json::Value = match serde_json::from_str(payload_json) {
+pub(super) fn handle_worker_init(payload: &[u8]) -> Vec<u8> {
+    let payload: serde_json::Value = match serde_json::from_slice(payload) {
         Ok(payload) => payload,
         Err(err) => {
-            return serde_json::json!({ "error": format!("invalid init payload: {}", err) })
-                .to_string()
+            return super::json_bytes(
+                serde_json::json!({ "error": format!("invalid init payload: {}", err) }),
+            )
         }
     };
     let shard_id = payload
@@ -81,23 +82,24 @@ pub(super) fn handle_worker_init(payload_json: &str) -> String {
         }),
         "worker init metrics update",
     ) {
-        return serde_json::json!({ "error": err }).to_string();
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
 
-    serde_json::json!({ "status": "ok", "shard_id": shard_id }).to_string()
+    super::json_bytes(serde_json::json!({ "status": "ok", "shard_id": shard_id }))
 }
 
-pub(super) fn handle_worker_ring_step(payload_json: &str) -> String {
-    let request: StepRequest = match serde_json::from_str(payload_json) {
+pub(super) fn handle_worker_ring_step(payload: &[u8]) -> Vec<u8> {
+    let request: StepRequest = match serde_json::from_slice(payload) {
         Ok(request) => request,
         Err(err) => {
-            return serde_json::json!({ "error": format!("invalid ring step payload: {}", err) })
-                .to_string()
+            return super::json_bytes(
+                serde_json::json!({ "error": format!("invalid ring step payload: {}", err) }),
+            )
         }
     };
     let mut shard = match with_state(|state| state.worker.clone()) {
         Some(shard) => shard,
-        None => return serde_json::json!({ "error": "worker not initialized" }).to_string(),
+        None => return super::json_bytes(serde_json::json!({ "error": "worker not initialized" })),
     };
 
     let compute_start = host::now_ms();
@@ -165,10 +167,10 @@ pub(super) fn handle_worker_ring_step(payload_json: &str) -> String {
         }),
         "worker ring-step metrics update",
     ) {
-        return serde_json::json!({ "error": err }).to_string();
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
 
-    serde_json::json!({
+    super::json_bytes(serde_json::json!({
         "status": "ok",
         "actor_id": host::self_id(),
         "role": "worker",
@@ -183,21 +185,21 @@ pub(super) fn handle_worker_ring_step(payload_json: &str) -> String {
         "latency_ms": latency_ms,
         "messages_processed": 1,
         "errors": 0,
-    })
-    .to_string()
+    }))
 }
 
-pub(super) fn handle_worker_finalize_round(payload_json: &str) -> String {
-    let request: FinalizeRequest = match serde_json::from_str(payload_json) {
+pub(super) fn handle_worker_finalize_round(payload: &[u8]) -> Vec<u8> {
+    let request: FinalizeRequest = match serde_json::from_slice(payload) {
         Ok(request) => request,
         Err(err) => {
-            return serde_json::json!({ "error": format!("invalid finalize payload: {}", err) })
-                .to_string()
+            return super::json_bytes(
+                serde_json::json!({ "error": format!("invalid finalize payload: {}", err) }),
+            )
         }
     };
     let mut shard = match with_state(|state| state.worker.clone()) {
         Some(shard) => shard,
-        None => return serde_json::json!({ "error": "worker not initialized" }).to_string(),
+        None => return super::json_bytes(serde_json::json!({ "error": "worker not initialized" })),
     };
 
     let round_checksum = shard
@@ -208,7 +210,7 @@ pub(super) fn handle_worker_finalize_round(payload_json: &str) -> String {
         state.worker = Some(shard);
     });
 
-    serde_json::json!({
+    super::json_bytes(serde_json::json!({
         "status": "ok",
         "actor_id": host::self_id(),
         "role": "worker",
@@ -216,6 +218,5 @@ pub(super) fn handle_worker_finalize_round(payload_json: &str) -> String {
         "round": request.round,
         "reduced_checksum": round_checksum,
         "errors": 0,
-    })
-    .to_string()
+    }))
 }

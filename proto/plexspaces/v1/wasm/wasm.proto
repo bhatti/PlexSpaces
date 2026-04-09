@@ -72,8 +72,88 @@ import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "plexspaces/v1/common.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
 option go_package = "github.com/bhatti/plexspaces/gen/go/plexspaces/v1/wasm/wasm;plexspaces_wasm_v1";
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "PlexSpaces WASM Runtime API"
+    version: "v1"
+    description: "Deployment and lifecycle APIs for the PlexSpaces WebAssembly runtime."
+  }
+  tags: {
+    name: "WasmRuntimeService"
+    description: "Module deployment, actor instantiation, and migration for WebAssembly actors."
+  }
+};
+
+// Outbound HTTP request sent by actor-world host.http-fetch.
+//
+// The WIT operation keeps link/method/path as typed arguments and exchanges
+// request metadata/body as protobuf bytes so polyglot SDKs can share one model.
+message HttpFetchRequest {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "HttpFetchRequest"
+      description: "Actor-world outbound HTTP request metadata/body exchanged as protobuf bytes."
+      required: ["headers", "body"]
+    }
+  };
+
+  // Request headers to merge with service-link defaults and auth headers.
+  map<string, string> headers = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Additional request headers merged with the configured service link."
+    }
+  ];
+
+  // Raw request body bytes.
+  bytes body = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).bytes = {max_len: 10485760},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Raw request body bytes encoded at the actor-world boundary."
+    }
+  ];
+}
+
+// Outbound HTTP response returned by actor-world host.http-fetch.
+message HttpFetchResponse {
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+    json_schema: {
+      title: "HttpFetchResponse"
+      description: "Actor-world outbound HTTP response exchanged as protobuf bytes."
+      required: ["status", "headers", "body"]
+    }
+  };
+
+  // HTTP status code.
+  uint32 status = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).uint32 = {gte: 100, lte: 599},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "HTTP status code returned by the named service link."
+    }
+  ];
+
+  // Response headers.
+  map<string, string> headers = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Response headers returned by the named service link."
+    }
+  ];
+
+  // Raw response body bytes.
+  bytes body = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).bytes = {max_len: 10485760},
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+      description: "Raw response body bytes returned by the named service link."
+    }
+  ];
+}
 
 // WebAssembly module definition
 //
@@ -724,6 +804,11 @@ service WasmRuntimeService {
       post: "/api/v1/wasm/modules"
       body: "*"
     };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "WasmRuntimeService"
+      summary: "Deploy a WebAssembly module"
+      description: "Registers a WebAssembly module and optionally pre-warms node caches."
+    };
   }
 
   // Instantiate actor from deployed module
@@ -732,6 +817,11 @@ service WasmRuntimeService {
       post: "/api/v1/wasm/actors"
       body: "*"
     };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "WasmRuntimeService"
+      summary: "Instantiate a WebAssembly actor"
+      description: "Creates a new actor instance from a deployed WebAssembly module."
+    };
   }
 
   // Migrate actor to different node
@@ -739,6 +829,11 @@ service WasmRuntimeService {
     option (google.api.http) = {
       post: "/api/v1/wasm/actors/{actor_id}:migrate"
       body: "*"
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      tags: "WasmRuntimeService"
+      summary: "Migrate a WebAssembly actor"
+      description: "Moves an actor to another node using the runtime migration workflow."
     };
   }
 }

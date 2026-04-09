@@ -156,6 +156,42 @@ class DeployWasmModuleRequestPreWarmStrategy(betterproto.Enum):
 
 
 @dataclass(eq=False, repr=False)
+class HttpFetchRequest(betterproto.Message):
+    """
+    Outbound HTTP request sent by actor-world host.http-fetch.
+
+     The WIT operation keeps link/method/path as typed arguments and exchanges
+     request metadata/body as protobuf bytes so polyglot SDKs can share one model.
+    """
+
+    headers: Dict[str, str] = betterproto.map_field(
+        1, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    """
+    Request headers to merge with service-link defaults and auth headers.
+    """
+
+    body: bytes = betterproto.bytes_field(2)
+    """Raw request body bytes."""
+
+
+@dataclass(eq=False, repr=False)
+class HttpFetchResponse(betterproto.Message):
+    """Outbound HTTP response returned by actor-world host.http-fetch."""
+
+    status: int = betterproto.uint32_field(1)
+    """HTTP status code."""
+
+    headers: Dict[str, str] = betterproto.map_field(
+        2, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    """Response headers."""
+
+    body: bytes = betterproto.bytes_field(3)
+    """Raw response body bytes."""
+
+
+@dataclass(eq=False, repr=False)
 class WasmModule(betterproto.Message):
     """
     WebAssembly module definition

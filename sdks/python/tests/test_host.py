@@ -1,4 +1,23 @@
+import json
+
+import plexspaces.host as host_module
 from plexspaces.host import host, ServiceHttpClient
+
+
+def test_kv_list_normalizes_wasm_native_list():
+    """WIT/component hosts may return list[str] for kv_list; Host must expose JSON str."""
+
+    class ListReturningHost:
+        def kv_list(self, prefix: str):
+            return [f"{prefix}a", f"{prefix}b"]
+
+    previous = host_module._host_impl
+    host_module._host_impl = ListReturningHost()
+    try:
+        out = host.kv_list("pre/")
+        assert json.loads(out) == ["pre/a", "pre/b"]
+    finally:
+        host_module._host_impl = previous
 
 
 def test_http_fetch_returns_response_dict():

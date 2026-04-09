@@ -6,8 +6,8 @@ Demonstrates **outbound HTTP via a named service link** combined with **KV-based
 
 | Feature | Details |
 |---------|---------|
-| `ServiceHttpClient` | Ergonomic HTTP client backed by `"weather-api"` service link |
-| KV caching | `host.kvGet` / `host.kvPut` to cache results for 5 minutes |
+| `ServiceHttpClient` | Ergonomic HTTP client backed by `"weather-api"` service link and shared protobuf HTTP models |
+| KV caching | `host.kvGet` / `host.kvPut` cache protobuf-backed weather entries for 5 minutes |
 | Service link config | `[[runtime.service_links]]` in `release.toml` |
 | Example harness | `./test.sh` runs contract tests, builds WASM, deploys the actor, exercises cache/API paths, and prints output + metrics |
 
@@ -25,9 +25,9 @@ cd examples/typescript/apps/weather_actor
 
 | Message | Payload | Response |
 |---------|---------|----------|
-| `get_weather` | `{"city":"London"}` | `{"city","temp_c","wind_kph","source"}` |
-| `cache_stats` | `{}` | `{"hits","misses"}` |
-| `clear_cache` | `{}` | `{"cleared":true}` |
+| `get_weather` | `WeatherRequest { city }` | `WeatherReply { city, temp_c, wind_kph, fetched_at_ms, source, error }` |
+| `cache_stats` | empty payload | `CacheStats { hits, misses }` |
+| `clear_cache` | empty payload | `ClearCacheReply { cleared }` |
 
 ## Further reading
 

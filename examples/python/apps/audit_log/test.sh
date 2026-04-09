@@ -14,7 +14,9 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 APP_ID="audit-log-test"
-ACTOR_NAME="AuditLog"
+# Multipart `name` becomes ApplicationSpec.namespace and default supervisor child id.
+# It must match the first path segment of /api/v1/actors/{namespace}/{actor_type}.
+ACTOR_TYPE="$APP_ID"
 
 # Commented out so node stays deployed for log/db inspection (backtrace, kv_store)
 # cleanup() {
@@ -55,7 +57,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
-    -F "name=$ACTOR_NAME" \
+    -F "name=$APP_ID" \
     -F "version=1.0.0" \
     -F "behavior_kind=GenEvent" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
@@ -72,7 +74,7 @@ sleep 2
 send_post() {
     local desc="$1"
     local payload="$2"
-    RESPONSE=$(curl -s --max-time 10 -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME" \
+    RESPONSE=$(curl -s --max-time 10 -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || RESPONSE=""
     HTTP_CODE=$(echo "$RESPONSE" | tail -n1)

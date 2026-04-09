@@ -193,13 +193,22 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
                 let mut registration = ObjectRegistration::decode(&blob[..])
                     .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
 
-                // Merge indexed columns that may have been updated separately (heartbeat optimization)
+                // Merge indexed columns that may have been updated separately (heartbeat optimization).
+                // Only overwrite when the indexed seconds differ from what the blob already has —
+                // this preserves nanosecond precision when the blob is authoritative.
                 let last_heartbeat: Option<i64> = row.try_get("last_heartbeat").unwrap_or(None);
                 if let Some(ts) = last_heartbeat {
-                    registration.last_heartbeat = Some(prost_types::Timestamp {
-                        seconds: ts,
-                        nanos: 0,
-                    });
+                    let blob_seconds = registration
+                        .last_heartbeat
+                        .as_ref()
+                        .map(|t| t.seconds)
+                        .unwrap_or(0);
+                    if blob_seconds != ts {
+                        registration.last_heartbeat = Some(prost_types::Timestamp {
+                            seconds: ts,
+                            nanos: 0,
+                        });
+                    }
                 }
 
                 // Also merge health_status from indexed column
@@ -596,14 +605,24 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
                 let mut registration = ObjectRegistration::decode(&blob[..])
                     .map_err(|e| RepositoryError::Serialization(e.to_string()))?;
 
-                // Merge indexed columns that may have been updated separately (heartbeat optimization)
+                // Merge indexed columns that may have been updated separately (heartbeat optimization).
+                // Only overwrite when the indexed seconds differ from what the blob already has —
+                // this preserves nanosecond precision when the blob is authoritative.
                 let last_heartbeat: Option<chrono::DateTime<chrono::Utc>> =
                     row.try_get("last_heartbeat").unwrap_or(None);
                 if let Some(ts) = last_heartbeat {
-                    registration.last_heartbeat = Some(prost_types::Timestamp {
-                        seconds: ts.timestamp(),
-                        nanos: 0,
-                    });
+                    let indexed_secs = ts.timestamp();
+                    let blob_seconds = registration
+                        .last_heartbeat
+                        .as_ref()
+                        .map(|t| t.seconds)
+                        .unwrap_or(0);
+                    if blob_seconds != indexed_secs {
+                        registration.last_heartbeat = Some(prost_types::Timestamp {
+                            seconds: indexed_secs,
+                            nanos: 0,
+                        });
+                    }
                 }
 
                 // Also merge health_status from indexed column

@@ -39,7 +39,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn, Level};
 
 use plexspaces_core::{NodeRegistryTrait, ObjectRegistry, RequestContext, ServiceLocator};
 use plexspaces_proto::common::v1::Metadata as CommonMetadata;
@@ -149,12 +149,17 @@ pub struct NodeRegistry {
 }
 
 impl NodeRegistry {
-    /// Create a new NodeRegistry
+    /// Create a new NodeRegistry.
+    ///
+    /// `service_locator` should always be `Some(...)` in production so SWIM gossip
+    /// can reach remote nodes via gRPC. Pass `None` only in unit tests that do not
+    /// exercise the gossip/ping code paths.
     pub fn new(
         object_registry: Arc<dyn ObjectRegistry>,
         local_node_id: String,
         local_address: String,
         config: NodeRegistryConfig,
+        service_locator: Option<Arc<dyn ServiceLocator>>,
     ) -> Self {
         let swim = Arc::new(SwimProtocol::new(
             local_node_id.clone(),
@@ -172,11 +177,13 @@ impl NodeRegistry {
             cache_hits: AtomicU64::new(0),
             cache_misses: AtomicU64::new(0),
             db_failures: AtomicU64::new(0),
-            service_locator: Arc::new(RwLock::new(None)),
+            service_locator: Arc::new(RwLock::new(service_locator)),
         }
     }
 
-    /// Create with simple parameters (for backward compatibility)
+    /// Create with simple parameters (for backward compatibility).
+    /// `service_locator` is `None`; callers that need gossip should use `new()` directly
+    /// or call `set_service_locator()` after construction.
     pub fn new_simple(
         object_registry: Arc<dyn ObjectRegistry>,
         local_node_id: String,
@@ -198,16 +205,18 @@ impl NodeRegistry {
             local_node_id.clone(),
             String::new(), // Address will be set later
             config,
+            None,
         )
     }
 
-    /// Create NodeRegistry from NodeConfig proto
+    /// Create NodeRegistry from NodeConfig proto.
     ///
-    /// Reads configuration from the proper proto fields in NodeConfig.node_registry
-    /// with sensible defaults if not specified.
+    /// `service_locator` should be `Some(...)` in production so SWIM gossip can reach
+    /// remote nodes. Pass `None` only in unit tests that do not exercise gossip/ping.
     pub fn from_config(
         object_registry: Arc<dyn ObjectRegistry>,
         node_config: &plexspaces_proto::node::v1::NodeConfig,
+        service_locator: Option<Arc<dyn ServiceLocator>>,
     ) -> Self {
         let config = Self::config_from_proto(node_config.node_registry.as_ref());
         let grpc_address = if node_config.grpc_address.is_empty() {
@@ -221,6 +230,7 @@ impl NodeRegistry {
             node_config.id.clone(),
             grpc_address,
             config,
+            service_locator,
         )
     }
 
@@ -475,8 +485,10 @@ impl NodeRegistry {
         registration: &ObjectRegistration,
         active_node_window: Duration,
     ) -> bool {
+        // Only use last_heartbeat for liveness. updated_at reflects when the registration record
+        // was last written (ObjectRegistryImpl::register() always stamps it with now), so it
+        // cannot distinguish a freshly-written stale node from an active one.
         Self::timestamp_within_age(registration.last_heartbeat.as_ref(), active_node_window)
-            || Self::timestamp_within_age(registration.updated_at.as_ref(), active_node_window)
     }
 
     async fn recent_node_registrations_from_registry(
@@ -575,11 +587,11 @@ impl NodeRegistry {
                     return Ok(());
                 }
                 _ => {
-                    return Err(format!(
-                        "node address '{}' is already registered to '{}'",
-                        registration.node_address, candidate.object_id
-                    )
-                    .into());
+                    // Two concrete (non-unknown) node IDs share the same canonical address.
+                    // Keep the existing registration; silently drop the new one.
+                    // This handles eventual-consistency races where the same physical node
+                    // re-registers under a slightly different address form.
+                    return Ok(());
                 }
             }
         }
@@ -654,11 +666,14 @@ impl NodeRegistry {
             .unregister(&system_ctx, ObjectType::ObjectTypeNode, node_id)
             .await
         {
-            warn!(
-                node_id = %node_id,
-                error = %e,
-                "Failed to unregister node during probe reconciliation"
-            );
+            let msg = e.to_string().to_lowercase();
+            if !msg.contains("not found") && !msg.contains("does not exist") {
+                warn!(
+                    node_id = %node_id,
+                    error = %e,
+                    "Failed to unregister node during probe reconciliation"
+                );
+            }
         }
     }
 
@@ -742,9 +757,20 @@ impl NodeRegistry {
             .await;
         }
 
+        // Peers often omit cluster_name in PingResponse even when NodeConfig.cluster_name is set.
+        // Without a cluster label, list_nodes (and from_registry placement) filters them out when
+        // this node has a non-empty local cluster — treat "same deployment" as local cluster.
+        let cluster_label = if !remote_cluster.is_empty() {
+            remote_cluster.clone()
+        } else if !local_cluster.is_empty() {
+            local_cluster.to_string()
+        } else {
+            String::new()
+        };
+
         let mut capabilities = HashMap::new();
-        if !remote_cluster.is_empty() {
-            capabilities.insert("cluster".to_string(), remote_cluster.clone());
+        if !cluster_label.is_empty() {
+            capabilities.insert("cluster".to_string(), cluster_label.clone());
         }
 
         let heartbeat = response
@@ -777,10 +803,10 @@ impl NodeRegistry {
 
         let system_ctx = Self::system_registry_context_for(
             service_locator,
-            if remote_cluster.is_empty() {
-                Some(local_cluster)
+            if cluster_label.is_empty() {
+                None
             } else {
-                Some(remote_cluster.as_str())
+                Some(cluster_label.as_str())
             },
         )
         .await;
@@ -884,11 +910,9 @@ impl NodeRegistry {
                 }
                 (false, true) => return Ok(false),
                 (false, false) => {
-                    return Err(format!(
-                        "node address '{}' is already registered to '{}'",
-                        registration.node_address, member.node_id
-                    )
-                    .into());
+                    // Two concrete node IDs share the same canonical address.
+                    // Keep the existing node; silently drop the new registration.
+                    return Ok(false);
                 }
                 (true, true) => return Ok(false),
             }
@@ -918,11 +942,9 @@ impl NodeRegistry {
                 }
                 (false, true) => return Ok(false),
                 (false, false) => {
-                    return Err(format!(
-                        "node address '{}' is already registered to '{}'",
-                        registration.node_address, existing.node_id
-                    )
-                    .into());
+                    // Two concrete node IDs share the same canonical address.
+                    // Keep the existing node; silently drop the new registration.
+                    return Ok(false);
                 }
                 (true, true) => return Ok(false),
             }
@@ -1166,10 +1188,7 @@ impl NodeRegistry {
                 metrics::counter!("plexspaces_swim_direct_ping_success").increment(1);
                 return ProbeResult::Alive;
             }
-            Err(e) => {
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    debug!("Direct ping to {} failed: {}", target.node_id, e);
-                }
+            Err(_e) => {
                 metrics::counter!("plexspaces_swim_direct_ping_failed").increment(1);
             }
         }
@@ -1303,6 +1322,42 @@ impl NodeRegistry {
 
         Ok(())
     }
+
+    /// Spawns [`Self::probe_node`] so a newly registered seed placeholder reconciles before the next SWIM tick.
+    fn kickoff_seed_reconcile_ping_background(&self, node_id: String, node_address: String) {
+        let swim = self.swim.clone();
+        let cache = self.cache.clone();
+        let cache_ttl = self.config.cache_ttl;
+        let object_registry = self.object_registry.clone();
+        let service_locator = self.service_locator.clone();
+        let config = self.config.swim_config.clone();
+
+        tokio::spawn(async move {
+            let target = SwimMember::new(node_id, node_address);
+            if !Self::should_probe_member(&target) {
+                return;
+            }
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                debug!(
+                    node_id = %target.node_id,
+                    address = %target.address,
+                    "Immediate seed reconcile ping (async)"
+                );
+            }
+            let local_cluster = Self::local_cluster_name(&service_locator).await;
+            let _ = Self::probe_node(
+                &swim,
+                &cache,
+                &object_registry,
+                cache_ttl,
+                &target,
+                &service_locator,
+                &local_cluster,
+                &config,
+            )
+            .await;
+        });
+    }
 }
 
 /// Result of a probe operation
@@ -1325,17 +1380,26 @@ impl NodeRegistryTrait for NodeRegistry {
             }
         }
 
-        // Check SWIM first (most up-to-date)
-        if let Some(member) = self.swim.get_member(target).await {
-            if member.state.is_active() {
+        // Check SWIM for liveness, but use cache for the full registration (heartbeat, etc.).
+        // SWIM's last_probe_success reflects probe timing, not the application-level heartbeat.
+        let swim_active = self
+            .swim
+            .get_member(target)
+            .await
+            .map(|m| m.state.is_active())
+            .unwrap_or(false);
+
+        // Check cache (authoritative for heartbeat and metadata)
+        if let Some(registration) = self.get_from_cache(target).await {
+            return Ok(Some(registration));
+        }
+
+        // Cache miss but SWIM knows it's alive — synthesize from SWIM state
+        if swim_active {
+            if let Some(member) = self.swim.get_member(target).await {
                 let node_reg = Self::swim_member_to_node_registration(&member);
                 return Ok(Some(node_reg));
             }
-        }
-
-        // Check cache
-        if let Some(registration) = self.get_from_cache(target).await {
-            return Ok(Some(registration));
         }
 
         // Cache miss - lookup in ObjectRegistry with backoff
@@ -1471,7 +1535,9 @@ impl NodeRegistryTrait for NodeRegistry {
             );
         }
 
-        info!("Registered node: {}", node_id);
+        if tracing::enabled!(Level::TRACE) {
+            trace!(node_id = %node_id, "Registered node");
+        }
         metrics::counter!("plexspaces_node_registry_registrations_total").increment(1);
 
         Ok(())
@@ -1711,6 +1777,15 @@ impl NodeRegistryTrait for NodeRegistry {
         self.running.load(Ordering::Relaxed)
     }
 
+    async fn kickoff_seed_reconcile_ping(
+        &self,
+        node_id: String,
+        node_address: String,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.kickoff_seed_reconcile_ping_background(node_id, node_address);
+        Ok(())
+    }
+
     async fn cache_stats(&self) -> (usize, usize, Duration) {
         let cache = self.cache.read().await;
         let cache_size = cache.len();
@@ -1761,6 +1836,7 @@ mod tests {
             "test-node".to_string(),
             "localhost:8000".to_string(),
             config,
+            None,
         )
     }
 
@@ -1783,6 +1859,7 @@ mod tests {
             "test-node".to_string(),
             "localhost:8000".to_string(),
             config,
+            None,
         )
     }
 
@@ -2368,6 +2445,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_reconcile_ping_response_stamps_local_cluster_when_remote_empty() {
+        let registry = create_test_node_registry().await;
+        let ctx =
+            RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());
+
+        registry
+            .register_node(
+                &ctx,
+                NodeRegistration {
+                    node_id: "_unknown_test".to_string(),
+                    node_address: "http://localhost:8005".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let target = registry.swim.get_member("_unknown_test").await.unwrap();
+        NodeRegistry::reconcile_ping_response(
+            &registry.cache,
+            &registry.swim,
+            &registry.object_registry,
+            &registry.service_locator,
+            registry.config.cache_ttl,
+            &target,
+            &PingResponse {
+                node_id: "node-without-remote-cluster".to_string(),
+                sequence_number: 0,
+                incarnation: 0,
+                updates: vec![],
+                cluster_name: String::new(),
+                node_address: "http://localhost:8125".to_string(),
+                last_heartbeat: None,
+            },
+            "heat",
+        )
+        .await
+        .unwrap();
+
+        let resolved = registry
+            .lookup_node(&ctx, "node-without-remote-cluster")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.node_address, "http://localhost:8125");
+        assert_eq!(
+            resolved.capabilities.get("cluster"),
+            Some(&"heat".to_string())
+        );
+
+        let heat_ctx = RequestContext::new_without_auth(String::new(), "heat".to_string()).with_admin(true);
+        let (listed, _) = registry
+            .list_nodes(&heat_ctx, Some("heat"), 100, "")
+            .await
+            .unwrap();
+        assert!(listed
+            .iter()
+            .any(|n| n.node_id == "node-without-remote-cluster"));
+    }
+
+    #[tokio::test]
     async fn test_swim_integration() {
         let registry = create_test_node_registry().await;
         let ctx =
@@ -2591,6 +2729,7 @@ mod tests {
             "test-node-2".to_string(),
             "localhost:8001".to_string(),
             config,
+            None,
         );
 
         registry2.swim().merge_full_state(state).await;
@@ -2794,7 +2933,7 @@ mod tests {
             ..Default::default()
         };
 
-        let registry = NodeRegistry::from_config(object_registry, &node_config);
+        let registry = NodeRegistry::from_config(object_registry, &node_config, None);
 
         assert_eq!(registry.local_node_id, "test-node-proto");
         assert_eq!(registry.config.cache_ttl, Duration::from_secs(90));

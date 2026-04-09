@@ -1,9 +1,27 @@
 #!/usr/bin/env bash
+# HTTP ports in NODES; gRPC seeds use port-1 per node. "Placement produced no target nodes"
+# means list_nodes was empty when the leader ran (registry / cluster / connectivity).
+#
+# Debugging:
+#   SKIP_TEST_UNDEPLOY=1 ./test.sh   — on EXIT, do not DELETE the app (trap). Otherwise a failed
+#   run still undeploys and you will see leader "shutdown lifecycle" in the gRPC node's log.
+#   Asks go only to ENTRY_NODE (default first HTTP port, e.g. 8092); the other node's HTTP log
+#   stays quiet unless you curl it or traffic routes there.
+#   DATA_LAKE_RAG_POST_DEPLOY_SECS / DATA_LAKE_RAG_PRE_LIST_NODES_SECS — extra sleep after deploy
+#   and immediately before listing nodes (helps _unknown_ peer ids and registry settle).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WASM_FILE="$SCRIPT_DIR/data_lake_rag_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
+export CARGO_PROFILE="${CARGO_PROFILE:-debug}"
+
+if [[ -f "$HOME/venv/bin/activate" ]]; then
+  # shellcheck disable=SC1090
+  source "$HOME/venv/bin/activate"
+fi
 
 if [[ -z "${1:-}" ]]; then
   NODES="localhost:8092 localhost:8094"
@@ -38,6 +56,11 @@ TEMP_CONFIG=""
 cleanup() {
   if [[ -n "${TEMP_CONFIG:-}" && -f "${TEMP_CONFIG:-}" ]]; then
     rm -f "$TEMP_CONFIG"
+  fi
+  # Undeploy on exit hides whether the leader stalled vs. was torn down by this trap.
+  if [[ -n "${SKIP_TEST_UNDEPLOY:-}" ]]; then
+    echo -e "${YELLOW}SKIP_TEST_UNDEPLOY set: leaving applications deployed (no DELETE on exit).${NC}"
+    return 0
   fi
   for node in "${NODE_LIST[@]}"; do
     local host="${node%%:*}"
@@ -91,6 +114,11 @@ echo "Step 0: Build WASM"
 "$SCRIPT_DIR/build.sh"
 echo ""
 
+if [ ! -f "$WASM_FILE" ]; then
+  echo -e "${RED}Build did not produce $WASM_FILE${NC}"
+  exit 1
+fi
+
 for node in "${NODE_LIST[@]}"; do
   host="${node%%:*}"
   port="${node##*:}"
@@ -124,9 +152,33 @@ for node in "${NODE_LIST[@]}"; do
   fi
   echo -e "  ${GREEN}Deployed${NC}"
 done
-sleep 2
+# SWIM + async seed ping need time so each node's registry lists peers (not only self).
+# Override with DATA_LAKE_RAG_POST_DEPLOY_SECS if your cluster is slower.
+sleep "${DATA_LAKE_RAG_POST_DEPLOY_SECS:-5}"
 rm -f "$TEMP_CONFIG"
 TEMP_CONFIG=""
+
+# Extra settle immediately before listing nodes so peer IDs replace _unknown_ in HTTP registry output.
+# This is in addition to POST_DEPLOY_SECS. Override with DATA_LAKE_RAG_PRE_LIST_NODES_SECS (0 to skip).
+echo "Step 1a: Pre-list settle (${DATA_LAKE_RAG_PRE_LIST_NODES_SECS:-5}s before GET /api/v1/nodes)"
+sleep "${DATA_LAKE_RAG_PRE_LIST_NODES_SECS:-5}"
+
+echo "Step 1b: ListConnectedNodes (GET /api/v1/nodes) per node — same source as gRPC ListConnectedNodes"
+echo "  (post_deploy=${DATA_LAKE_RAG_POST_DEPLOY_SECS:-5}s + pre_list=${DATA_LAKE_RAG_PRE_LIST_NODES_SECS:-5}s; _unknown_ clears after successful peer ping)"
+for node in "${NODE_LIST[@]}"; do
+  host="${node%%:*}"
+  port="${node##*:}"
+  echo "  Registered nodes from http://${host}:${port}/api/v1/nodes"
+  curl -s --connect-timeout 5 --max-time 30 "http://${host}:${port}/api/v1/nodes?page_size=100" | sed 's/^/    /' || echo "    (request failed)"
+done
+echo ""
+
+echo "Step 1c: Server logs (read on the terminals where each node process runs)"
+echo "  Set RUST_LOG=info or RUST_LOG=debug before starting nodes. Watch for gossip/SWIM peers,"
+echo "  node id resolution, and [WASM] lines from data_lake_rag (host.Info)."
+echo "  If Step 2 fails placement or metrics show workers only on the leader, logs show whether"
+echo "  remote gRPC peers and shard placement matched the registry."
+echo ""
 
 run_payload=$(cat <<EOF
 {"op":"run","worker_count":$WORKER_COUNT,"query_count":$QUERY_COUNT,"chunks_per_query":$CHUNKS_PER_QUERY,"chunk_size_bytes":$CHUNK_SIZE_BYTES,"embedding_dim":$EMBEDDING_DIM,"top_k":$TOP_K}
@@ -151,7 +203,8 @@ while true; do
     break
   fi
 
-  echo -e "  ${YELLOW}Seed nodes not reconciled yet, retrying leader run (${run_attempt}/${run_attempt_limit})...${NC}"
+  # Ask/mailbox succeeded; failure is inside payload (CreateShardGroup + from_registry needs list_nodes non-empty).
+  echo -e "  ${YELLOW}Placement still empty (node registry has no members for this cluster). Retry ${run_attempt}/${run_attempt_limit} — check gRPC peers, app seed_nodes, release cluster_seed_nodes, mTLS.${NC}"
   run_attempt=$((run_attempt + 1))
   sleep 2
 done
@@ -159,7 +212,11 @@ run_end=$(date +%s%N)
 wall_ms=$(( (run_end - run_start) / 1000000 ))
 
 if ! echo "$run_response" | grep -q '"status":"ok"'; then
-  echo -e "${RED}Leader run failed: $run_response${NC}"
+  echo -e "${RED}Leader run failed (HTTP ask may still be 200; payload missing status=ok):${NC}"
+  echo "$run_response"
+  if echo "$run_response" | grep -q "Placement produced no target nodes"; then
+    echo -e "${YELLOW}Hint: from_registry placement uses an empty node list — fix multinode membership before re-running.${NC}"
+  fi
   exit 1
 fi
 
@@ -195,7 +252,9 @@ nodes = payload.get("nodes", {})
 node_addresses = payload.get("node_addresses", {})
 roles = payload.get("roles", {})
 remote_nodes_with_work = payload.get("remote_nodes_with_work", [])
+worker_remote_shard_nodes = payload.get("worker_remote_shard_nodes") or []
 expected_nodes = int(os.environ.get("DATA_LAKE_RAG_EXPECTED_NODES", "1"))
+needed_remote_hosts = max(0, expected_nodes - 1)
 
 print("  Data Lake RAG (Go WASM)")
 print("  Data size")
@@ -211,9 +270,10 @@ print(
 )
 print("  Topology")
 print(
-    "  node_count={node_count} worker_node_count={worker_nodes} actor_count={actor_count} leader_node_id={leader} retrieval_rounds={rounds}".format(
+    "  node_count={node_count} worker_node_count={worker_nodes} worker_remote_shard_nodes={hosts} actor_count={actor_count} leader_node_id={leader} retrieval_rounds={rounds}".format(
         node_count=node_count,
         worker_nodes=worker_node_count,
+        hosts=",".join(worker_remote_shard_nodes) if worker_remote_shard_nodes else "none",
         actor_count=actor_count,
         leader=payload.get("leader_node_id", ""),
         rounds=payload.get("retrieval_rounds", 0),
@@ -286,14 +346,24 @@ for node_id in sorted(nodes):
 
 if node_count < expected_nodes:
     raise SystemExit(f"expected at least {expected_nodes} nodes in metrics but saw {node_count}")
-if worker_node_count < max(0, expected_nodes - 1):
+if expected_nodes > 1 and len(worker_remote_shard_nodes) < needed_remote_hosts:
     raise SystemExit(
-        f"expected workers to use {max(0, expected_nodes - 1)} remote nodes but metrics only reported {worker_node_count}"
+        f"expected worker shard placement on at least {needed_remote_hosts} remote host(s), got {len(worker_remote_shard_nodes)} ({worker_remote_shard_nodes!r}). "
+        "Check from_registry / cluster membership (see Step 1c logs)."
     )
-if not remote_nodes_with_work and expected_nodes > 1:
-    raise SystemExit("expected remote worker activity but metrics reported none")
+if worker_node_count < needed_remote_hosts:
+    raise SystemExit(
+        f"expected worker_node_count>={needed_remote_hosts} (from placement + status), got {worker_node_count}"
+    )
+if error_count == 0 and expected_nodes > 1 and not remote_nodes_with_work:
+    raise SystemExit(
+        "expected remote_nodes_with_work when error_count is zero (no successful shard payload from remote workers?)"
+    )
 if error_count != 0:
-    raise SystemExit(f"expected zero errors but saw {error_count}")
+    raise SystemExit(
+        f"expected zero shard/handler errors but saw {error_count}. "
+        "Check node stderr: application-metrics-add / decode ApplicationMetrics, or WASM 'worker search metrics update'."
+    )
 if chunk_ops <= 0:
     raise SystemExit("expected positive chunk operation count")
 if embed_ops <= 0:

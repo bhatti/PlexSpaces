@@ -45,7 +45,7 @@ use prost_types::Timestamp;
 use tokio::sync::RwLock;
 use tonic::transport::Channel;
 use tonic::{Request, Response, Status};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use plexspaces_core::{
     mask_release_spec, ConnectNodesResult, NodeConnectivity, NodeRegistryTrait, RequestContext,
@@ -63,7 +63,7 @@ use plexspaces_proto::node::v1::{
     UnregisterNodeResponse,
 };
 
-use crate::node_address::{canonical_node_address_key, node_addresses_equivalent};
+use crate::node_address::{canonical_node_address_key, dialable_node_address, node_addresses_equivalent};
 use crate::request_context_from_grpc_request;
 
 /// Metrics tracking for NodeService
@@ -778,7 +778,14 @@ impl NodeServiceTrait for NodeServiceImpl {
             .unwrap_or_default();
         let node_address = node_config
             .as_ref()
-            .map(|c| format!("http://{}", c.listen_addr))
+            .map(|c| {
+                let addr = if !c.grpc_address.is_empty() {
+                    &c.grpc_address
+                } else {
+                    &c.listen_addr
+                };
+                dialable_node_address(addr)
+            })
             .unwrap_or_default();
         let last_heartbeat = if let Some(registry) = self.service_locator.get_node_registry().await
         {
@@ -1074,17 +1081,20 @@ impl NodeServiceImpl {
 
     async fn local_node_address_keys(&self) -> Vec<String> {
         let mut keys = Vec::new();
+        let push_addr = |keys: &mut Vec<String>, addr: &str| {
+            if !addr.is_empty() {
+                keys.push(canonical_node_address_key(addr));
+            }
+        };
         if let Some(spec) = self.get_release_spec_internal().await {
             if let Some(node) = spec.node {
-                if !node.listen_addr.is_empty() {
-                    keys.push(canonical_node_address_key(&node.listen_addr));
-                }
+                push_addr(&mut keys, &node.listen_addr);
+                push_addr(&mut keys, &node.grpc_address);
             }
         }
         if let Some(node_config) = self.service_locator.get_node_config().await {
-            if !node_config.listen_addr.is_empty() {
-                keys.push(canonical_node_address_key(&node_config.listen_addr));
-            }
+            push_addr(&mut keys, &node_config.listen_addr);
+            push_addr(&mut keys, &node_config.grpc_address);
         }
         keys.sort();
         keys.dedup();
@@ -1229,7 +1239,7 @@ impl NodeServiceImpl {
         )
         .increment(node_addresses.len() as u64);
 
-        let effective_local_cluster = self
+        let mut effective_local_cluster = self
             .release_spec
             .read()
             .await
@@ -1237,6 +1247,13 @@ impl NodeServiceImpl {
             .and_then(|s| s.node.as_ref())
             .map(|n| n.cluster_name.clone())
             .unwrap_or_else(|| self.local_cluster.clone());
+        if effective_local_cluster.is_empty() {
+            if let Some(cfg) = self.service_locator.get_node_config().await {
+                if !cfg.cluster_name.is_empty() {
+                    effective_local_cluster = cfg.cluster_name;
+                }
+            }
+        }
         let local_address_keys = self.local_node_address_keys().await;
 
         // Only connect to nodes not already registered (lookup by address or node_id; node service logic)
@@ -1266,6 +1283,11 @@ impl NodeServiceImpl {
                         local_node_id = %self.local_node_id,
                         "Node already registered, skipping connect"
                     );
+                    if reg.node_id.starts_with(Self::UNKNOWN_NODE_ID_PREFIX) {
+                        let _ = node_registry
+                            .kickoff_seed_reconcile_ping(reg.node_id.clone(), reg.node_address.clone())
+                            .await;
+                    }
                     connected.insert(reg.node_id, reg.node_address);
                 }
                 Ok(None) => {
@@ -1276,13 +1298,16 @@ impl NodeServiceImpl {
                         let node_address = registration.node_address.clone();
                         match node_registry.register_node(&ctx, registration).await {
                             Ok(()) => {
-                                info!(
+                                trace!(
                                     node_id = %node_id,
                                     node_address = %node_address,
                                     entry = %entry,
                                     local_node_id = %self.local_node_id,
                                     "Registered seed node for background probe"
                                 );
+                                let _ = node_registry
+                                    .kickoff_seed_reconcile_ping(node_id.clone(), node_address.clone())
+                                    .await;
                                 connected.insert(node_id, node_address);
                                 metrics::counter!(
                                     "plexspaces_node_connect_success_total",
@@ -1316,7 +1341,7 @@ impl NodeServiceImpl {
             }
         }
 
-        info!(
+        trace!(
             local_node_id = %self.local_node_id,
             connected_count = connected.len(),
             failed_count = failed.len(),

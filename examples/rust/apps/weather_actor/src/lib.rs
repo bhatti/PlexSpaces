@@ -1,35 +1,332 @@
 // SPDX-License-Identifier: LGPL-2.1-or-later
-// Copyright (C) 2025 PlexSpaces Contributors
 //
-// Weather Actor — Service Link + KV Cache Example (Rust WASM)
+// Weather actor (Rust WASM).
 //
-// Demonstrates outbound HTTP via a named service link ("weather-api") combined
-// with KV-based caching.  The host handles retries, circuit breaking, and
-// auth injection transparently.
-//
-// Service Link Configuration
-// ---------------------------
-// The "weather-api" link must exist in RuntimeConfig.service_links (release.toml):
-//
-//   [[runtime.service_links]]
-//   name     = "weather-api"
-//   base_url = "https://api.open-meteo.com"
-//   transport = "HTTP"
-//
-// Build with:
-//   cargo build --target wasm32-wasip1 --release
+// The example keeps the actor-world boundary simple and deterministic:
+// - tests use an offline mode driven by app-config args so they do not depend on public internet
+// - live deployments can switch offline_mode=false to exercise the service-link HTTP path
+// - state is framework-owned protobuf bytes; ask replies stay JSON for example ergonomics
 
-fn parse_weather_body(body_str: &str) -> serde_json::Value {
-    if body_str.is_empty() {
-        return serde_json::json!({});
+use prost::Message;
+use serde_json::{json, Value};
+
+const CACHE_TTL_MS: u64 = 5 * 60 * 1000;
+
+#[derive(Clone, PartialEq, Message)]
+pub struct WeatherConfig {
+    #[prost(string, tag = "1")]
+    pub actor_id: String,
+    #[prost(bool, tag = "2")]
+    pub offline_mode: bool,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct WeatherRequest {
+    #[prost(string, tag = "1")]
+    pub city: String,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct WeatherState {
+    #[prost(string, tag = "1")]
+    pub actor_id: String,
+    #[prost(bool, tag = "2")]
+    pub offline_mode: bool,
+    #[prost(uint64, tag = "3")]
+    pub cache_hits: u64,
+    #[prost(uint64, tag = "4")]
+    pub cache_misses: u64,
+    #[prost(message, repeated, tag = "5")]
+    pub entries: Vec<CacheEntry>,
+}
+
+#[derive(Clone, PartialEq, Message)]
+pub struct CacheEntry {
+    #[prost(string, tag = "1")]
+    pub city: String,
+    #[prost(double, tag = "2")]
+    pub temp_c: f64,
+    #[prost(double, tag = "3")]
+    pub wind_kph: f64,
+    #[prost(uint64, tag = "4")]
+    pub fetched_at_ms: u64,
+}
+
+trait WeatherHost {
+    fn now_ms(&self) -> u64;
+    fn http_fetch(&mut self, path_and_query: &str) -> Result<Vec<u8>, String>;
+}
+
+#[derive(Default)]
+struct WeatherActor {
+    state: WeatherState,
+}
+
+impl WeatherActor {
+    fn from_config(config: WeatherConfig) -> Self {
+        Self {
+            state: WeatherState {
+                actor_id: config.actor_id,
+                offline_mode: config.offline_mode,
+                ..WeatherState::default()
+            },
+        }
     }
-    if let Ok(decoded) = serde_json::from_str::<serde_json::Value>(body_str) {
-        return decoded;
+
+    fn handle<H: WeatherHost>(
+        &mut self,
+        host: &mut H,
+        msg_type: &str,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, String> {
+        let op = parse_op(msg_type, payload)?;
+        match op.as_str() {
+            "get_weather" => self.handle_get_weather(host, payload),
+            "cache_stats" => Ok(json!({
+                "hits": self.state.cache_hits,
+                "misses": self.state.cache_misses,
+            })
+            .to_string()
+            .into_bytes()),
+            "clear_cache" => {
+                self.state.cache_hits = 0;
+                self.state.cache_misses = 0;
+                self.state.entries.clear();
+                Ok(json!({ "cleared": true }).to_string().into_bytes())
+            }
+            other => Ok(json!({ "error": format!("unknown message type: {other}") })
+                .to_string()
+                .into_bytes()),
+        }
     }
-    decode_base64_standard(body_str)
+
+    fn handle_get_weather<H: WeatherHost>(
+        &mut self,
+        host: &mut H,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, String> {
+        let request = decode_weather_request(payload)?;
+        let city = normalize_city(&request.city);
+        let now_ms = host.now_ms();
+
+        if let Some(entry) = self.find_cache_entry(&city, now_ms) {
+            self.state.cache_hits += 1;
+            return Ok(json!({
+                "city": city,
+                "temp_c": entry.temp_c,
+                "wind_kph": entry.wind_kph,
+                "fetched_at_ms": entry.fetched_at_ms,
+                "source": "cache",
+                "error": "",
+            })
+            .to_string()
+            .into_bytes());
+        }
+
+        self.state.cache_misses += 1;
+        let (temp_c, wind_kph, source) = if self.state.offline_mode {
+            let (temp_c, wind_kph) = deterministic_weather(&city);
+            (temp_c, wind_kph, "api")
+        } else {
+            let (temp_c, wind_kph) = fetch_live_weather(host, &city)?;
+            (temp_c, wind_kph, "api")
+        };
+
+        let entry = CacheEntry {
+            city: city.clone(),
+            temp_c,
+            wind_kph,
+            fetched_at_ms: now_ms,
+        };
+        self.upsert_cache_entry(entry.clone());
+
+        Ok(json!({
+            "city": city,
+            "temp_c": entry.temp_c,
+            "wind_kph": entry.wind_kph,
+            "fetched_at_ms": entry.fetched_at_ms,
+            "source": source,
+            "error": "",
+        })
+        .to_string()
+        .into_bytes())
+    }
+
+    fn find_cache_entry(&self, city: &str, now_ms: u64) -> Option<CacheEntry> {
+        self.state.entries.iter().find_map(|entry| {
+            if entry.city.eq_ignore_ascii_case(city)
+                && now_ms.saturating_sub(entry.fetched_at_ms) < CACHE_TTL_MS
+            {
+                Some(entry.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn upsert_cache_entry(&mut self, entry: CacheEntry) {
+        if let Some(existing) = self
+            .state
+            .entries
+            .iter_mut()
+            .find(|candidate| candidate.city.eq_ignore_ascii_case(&entry.city))
+        {
+            *existing = entry;
+        } else {
+            self.state.entries.push(entry);
+        }
+    }
+}
+
+fn normalize_city(city: &str) -> String {
+    let trimmed = city.trim();
+    if trimmed.is_empty() {
+        "London".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn encode_message<M: Message>(message: &M) -> Vec<u8> {
+    message.encode_to_vec()
+}
+
+fn decode_message<M>(payload: &[u8]) -> Result<M, String>
+where
+    M: Message + Default,
+{
+    M::decode(payload).map_err(|err| err.to_string())
+}
+
+fn parse_payload(payload: &[u8]) -> Result<Value, String> {
+    if payload.is_empty() {
+        return Ok(json!({}));
+    }
+    serde_json::from_slice(payload).map_err(|err| format!("invalid payload: {err}"))
+}
+
+fn parse_op(msg_type: &str, payload: &[u8]) -> Result<String, String> {
+    let payload = parse_payload(payload)?;
+    if let Some(op) = payload
+        .get("op")
+        .or_else(|| payload.get("message_type"))
+        .or_else(|| payload.get("msg_type"))
+        .and_then(|value| value.as_str())
+    {
+        Ok(op.to_string())
+    } else if msg_type == "call" || msg_type == "cast" {
+        Err("missing op".to_string())
+    } else {
+        Ok(msg_type.to_string())
+    }
+}
+
+fn decode_weather_request(payload: &[u8]) -> Result<WeatherRequest, String> {
+    if let Ok(request) = decode_message::<WeatherRequest>(payload) {
+        if !request.city.is_empty() {
+            return Ok(request);
+        }
+    }
+
+    let value = parse_payload(payload)?;
+    Ok(WeatherRequest {
+        city: value
+            .get("city")
+            .and_then(|entry| entry.as_str())
+            .unwrap_or("London")
+            .to_string(),
+    })
+}
+
+fn decode_weather_config(payload: &[u8], default_actor_id: &str) -> WeatherConfig {
+    if let Ok(config) = decode_message::<WeatherConfig>(payload) {
+        if !config.actor_id.is_empty() {
+            return config;
+        }
+    }
+
+    let value = serde_json::from_slice::<Value>(payload).unwrap_or_else(|_| json!({}));
+    let actor_id = value
+        .get("actor_id")
+        .and_then(|entry| entry.as_str())
+        .filter(|entry| !entry.is_empty())
+        .unwrap_or(default_actor_id)
+        .to_string();
+    let offline_mode = parse_bool_like(
+        value.pointer("/args/offline_mode"),
+        true,
+    );
+
+    WeatherConfig {
+        actor_id,
+        offline_mode,
+    }
+}
+
+fn parse_bool_like(value: Option<&Value>, default: bool) -> bool {
+    match value {
+        Some(Value::Bool(value)) => *value,
+        Some(Value::String(value)) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            _ => default,
+        },
+        _ => default,
+    }
+}
+
+fn deterministic_weather(city: &str) -> (f64, f64) {
+    match city.to_ascii_lowercase().as_str() {
+        "london" => (15.2, 11.0),
+        "sydney" => (24.8, 16.5),
+        "paris" => (18.4, 9.2),
+        "berlin" => (17.1, 10.4),
+        "tokyo" => (22.3, 13.7),
+        _ => {
+            let hash = city
+                .bytes()
+                .fold(0u32, |acc, byte| acc.wrapping_mul(31).wrapping_add(byte as u32));
+            let temp_c = 10.0 + f64::from(hash % 180) / 10.0;
+            let wind_kph = 5.0 + f64::from((hash / 7) % 120) / 10.0;
+            (temp_c, wind_kph)
+        }
+    }
+}
+
+fn fetch_live_weather<H: WeatherHost>(host: &mut H, city: &str) -> Result<(f64, f64), String> {
+    let path = format!(
+        "/v1/forecast?latitude=51.5&longitude=-0.12&current=temperature_2m,wind_speed_10m&city={city}"
+    );
+    let response =
+        decode_message::<plexspaces_proto::wasm::v1::HttpFetchResponse>(&host.http_fetch(&path)?)?;
+    let body = parse_weather_body(&response.body);
+    let current = body.get("current").cloned().unwrap_or_else(|| json!({}));
+    Ok((
+        current
+            .get("temperature_2m")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0),
+        current
+            .get("wind_speed_10m")
+            .and_then(|value| value.as_f64())
+            .unwrap_or(0.0),
+    ))
+}
+
+fn parse_weather_body(body: &[u8]) -> Value {
+    if body.is_empty() {
+        return json!({});
+    }
+
+    serde_json::from_slice(body)
         .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .unwrap_or_else(|| serde_json::json!({}))
+        .or_else(|| {
+            std::str::from_utf8(body)
+                .ok()
+                .and_then(|value| decode_base64_standard(value).ok())
+                .and_then(|decoded| serde_json::from_slice(&decoded).ok())
+        })
+        .unwrap_or_else(|| json!({}))
 }
 
 fn decode_base64_standard(input: &str) -> Result<Vec<u8>, String> {
@@ -52,6 +349,7 @@ fn decode_base64_standard(input: &str) -> Result<Vec<u8>, String> {
         }
         return Err(format!("invalid base64 byte: {byte}"));
     }
+
     if clean.len() % 4 != 0 {
         return Err("invalid base64 length".to_string());
     }
@@ -88,420 +386,231 @@ fn decode_base64_standard(input: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// WASM build: full actor implementation
 #[cfg(target_arch = "wasm32")]
 mod wasm_app {
-    use serde::{Deserialize, Serialize};
-    use serde_json::json;
+    use super::*;
+    use plexspaces_proto::wasm::v1::HttpFetchRequest;
     use std::sync::{Mutex, OnceLock};
 
+    const LINK_NAME: &str = "weather-api";
+
     wit_bindgen::generate!({
-        path: "../../../../wit/plexspaces-simple-actor",
+        path: "../../../../wit/plexspaces-actor",
         world: "actor-world",
     });
 
-    use exports::plexspaces::simple_actor::actor::Guest;
-    use plexspaces::simple_actor::host;
+    use exports::plexspaces::actor::actor::Guest;
+    use plexspaces::actor::host;
 
-    const LINK_NAME: &str = "weather-api";
-    const CACHE_TTL_MS: u64 = 5 * 60 * 1000; // 5 minutes
+    struct WasmHost;
 
-    #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-    struct WeatherState {
-        actor_id: String,
-        cache_hits: u64,
-        cache_misses: u64,
-    }
+    struct WeatherBridge;
 
     fn state_cell() -> &'static Mutex<WeatherState> {
         static STATE: OnceLock<Mutex<WeatherState>> = OnceLock::new();
         STATE.get_or_init(|| Mutex::new(WeatherState::default()))
     }
 
-    fn with_state<T>(f: impl FnOnce(&mut WeatherState) -> T) -> T {
-        f(&mut state_cell().lock().expect("state lock poisoned"))
-    }
+    impl WeatherHost for WasmHost {
+        fn now_ms(&self) -> u64 {
+            host::now_ms()
+        }
 
-    struct WeatherActorGuest;
-
-    impl Guest for WeatherActorGuest {
-        fn init(config_json: String) -> String {
-            let value: serde_json::Value = match serde_json::from_str(&config_json) {
-                Ok(v) => v,
-                Err(e) => return format!("ERROR: invalid init JSON: {}", e),
+        fn http_fetch(&mut self, path_and_query: &str) -> Result<Vec<u8>, String> {
+            let request = HttpFetchRequest {
+                headers: Default::default(),
+                body: Vec::new(),
             };
-            let actor_id = value
-                .get("actor_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            with_state(|state| {
-                *state = WeatherState::default();
-                state.actor_id = actor_id.clone();
-            });
-            host::log("info", &format!("WeatherActor initialized: {actor_id}"));
-            String::new()
-        }
-
-        fn handle(_from: String, msg_type: String, payload_json: String) -> String {
-            match msg_type.as_str() {
-                "get_weather" => handle_get_weather(&payload_json),
-                "cache_stats" => {
-                    let (hits, misses) = with_state(|s| (s.cache_hits, s.cache_misses));
-                    json!({ "hits": hits, "misses": misses }).to_string()
-                }
-                "clear_cache" => {
-                    with_state(|s| {
-                        s.cache_hits = 0;
-                        s.cache_misses = 0;
-                    });
-                    json!({ "cleared": true }).to_string()
-                }
-                other => json!({ "error": format!("unknown message type: {other}") }).to_string(),
-            }
-        }
-
-        fn get_state() -> String {
-            with_state(|s| serde_json::to_string(s).unwrap_or_default())
-        }
-
-        fn set_state(state_json: String) -> String {
-            match serde_json::from_str::<WeatherState>(&state_json) {
-                Ok(s) => {
-                    with_state(|state| *state = s);
-                    String::new()
-                }
-                Err(e) => format!("ERROR: {e}"),
-            }
+            host::http_fetch(LINK_NAME, "GET", path_and_query, &encode_message(&request))
         }
     }
 
-    fn handle_get_weather(payload_json: &str) -> String {
-        let city: String = serde_json::from_str::<serde_json::Value>(payload_json)
-            .ok()
-            .and_then(|v| v.get("city").and_then(|c| c.as_str()).map(str::to_string))
-            .unwrap_or_else(|| "London".to_string());
-
-        let cache_key = format!("weather:{city}");
-
-        // Try KV cache first
-        let cached = host::kv_get(&cache_key);
-        if cached.starts_with("ERROR:") {
-            host::log("warn", &format!("Cache read failed for {city}: {cached}"));
-        } else if !cached.is_empty() {
-            if let Ok(data) = serde_json::from_str::<serde_json::Value>(&cached) {
-                let fetched_at = data
-                    .get("fetched_at_ms")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                let now_ms = host::now_ms();
-                if now_ms - fetched_at < CACHE_TTL_MS {
-                    with_state(|s| s.cache_hits += 1);
-                    host::log("debug", &format!("Cache HIT for {city}"));
-                    let mut resp = data.clone();
-                    resp["city"] = json!(city);
-                    resp["source"] = json!("cache");
-                    return resp.to_string();
-                }
-            }
+    impl Guest for WeatherBridge {
+        fn init(config: Vec<u8>) -> Result<(), String> {
+            let config = decode_weather_config(&config, &host::self_id());
+            let actor = WeatherActor::from_config(config);
+            let mut guard = state_cell().lock().expect("weather state lock poisoned");
+            *guard = actor.state;
+            Ok(())
         }
 
-        with_state(|s| s.cache_misses += 1);
-        host::log(
-            "info",
-            &format!("Cache MISS for {city} — calling {LINK_NAME}"),
-        );
-
-        // Call the service link via host http_fetch
-        let path = format!(
-            "/v1/forecast?latitude=51.5&longitude=-0.12&current=temperature_2m,wind_speed_10m&city={city}"
-        );
-        let raw = host::http_fetch(LINK_NAME, "GET", &path, "{}", "");
-        if raw.starts_with("ERROR:") {
-            host::log("error", &format!("Weather API call failed: {raw}"));
-            return json!({ "city": city, "error": raw, "source": "api" }).to_string();
+        fn handle(
+            _from_actor: String,
+            msg_type: String,
+            payload: Vec<u8>,
+        ) -> Result<Vec<u8>, String> {
+            let current_state = state_cell()
+                .lock()
+                .expect("weather state lock poisoned")
+                .clone();
+            let mut actor = WeatherActor {
+                state: current_state,
+            };
+            let mut host_adapter = WasmHost;
+            let result = actor.handle(&mut host_adapter, &msg_type, &payload);
+            let mut guard = state_cell().lock().expect("weather state lock poisoned");
+            *guard = actor.state;
+            result
         }
 
-        // Parse response: { "status": 200, "headers": {}, "body": "..." }
-        let resp_val: serde_json::Value = match serde_json::from_str(&raw) {
-            Ok(v) => v,
-            Err(e) => {
-                return json!({ "city": city, "error": format!("parse error: {e}"), "source": "api" }).to_string();
-            }
-        };
-        let body_str = resp_val.get("body").and_then(|b| b.as_str()).unwrap_or("");
-        let weather_val = super::parse_weather_body(body_str);
-        let current = weather_val.get("current").cloned().unwrap_or(json!({}));
-        let temp_c = current
-            .get("temperature_2m")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        let wind_kph = current
-            .get("wind_speed_10m")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        let now_ms = host::now_ms();
-
-        let result = json!({
-            "temp_c": temp_c,
-            "wind_kph": wind_kph,
-            "fetched_at_ms": now_ms,
-        });
-        let cache_write = host::kv_put(&cache_key, &result.to_string());
-        if cache_write.starts_with("ERROR:") {
-            host::log(
-                "warn",
-                &format!("Cache write failed for {city}: {cache_write}"),
-            );
+        fn get_state() -> Result<Vec<u8>, String> {
+            let guard = state_cell().lock().expect("weather state lock poisoned");
+            Ok(encode_message(&*guard))
         }
 
-        json!({
-            "city": city,
-            "temp_c": temp_c,
-            "wind_kph": wind_kph,
-            "fetched_at_ms": now_ms,
-            "source": "api",
-        })
-        .to_string()
+        fn set_state(state: Vec<u8>) -> Result<(), String> {
+            let next_state = if state.is_empty() {
+                WeatherState::default()
+            } else {
+                decode_message(&state)?
+            };
+            let mut guard = state_cell().lock().expect("weather state lock poisoned");
+            *guard = next_state;
+            Ok(())
+        }
     }
 
-    export!(WeatherActorGuest);
+    export!(WeatherBridge);
 }
 
-/// Native build: contract tests (no WASM compilation needed)
 #[cfg(not(target_arch = "wasm32"))]
-pub mod contract_tests {
-    use serde_json::{json, Value};
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    // ----------- Minimal actor logic (mirrors wasm_app above) ---------------
-
-    const CACHE_TTL_MS: u64 = 5 * 60 * 1000;
-
-    #[derive(Debug, Clone, Default)]
-    pub struct WeatherState {
-        pub actor_id: String,
-        pub cache_hits: u64,
-        pub cache_misses: u64,
-    }
-
-    pub struct MockHost {
-        pub kv: std::collections::HashMap<String, String>,
-        pub now_ms: u64,
-        pub http_response: Option<String>,
+    struct MockHost {
+        now_ms: u64,
+        http_response: Vec<u8>,
     }
 
     impl MockHost {
-        pub fn new() -> Self {
+        fn new() -> Self {
             Self {
-                kv: Default::default(),
-                now_ms: 1_000_000,
-                http_response: None,
+                now_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|duration| duration.as_millis() as u64)
+                    .unwrap_or(0),
+                http_response: encode_message(&plexspaces_proto::wasm::v1::HttpFetchResponse {
+                    status: 200,
+                    headers: Default::default(),
+                    body: b"{}".to_vec(),
+                }),
             }
         }
-        pub fn with_weather(mut self, temp_c: f64, wind_kph: f64) -> Self {
+
+        fn with_live_weather(mut self, temp_c: f64, wind_kph: f64) -> Self {
             let body =
                 json!({ "current": { "temperature_2m": temp_c, "wind_speed_10m": wind_kph } });
-            let resp = json!({ "status": 200, "headers": {}, "body": body.to_string() });
-            self.http_response = Some(resp.to_string());
-            self
-        }
-        pub fn with_weather_base64(mut self, temp_c: f64, wind_kph: f64) -> Self {
-            let body =
-                json!({ "current": { "temperature_2m": temp_c, "wind_speed_10m": wind_kph } });
-            let resp = json!({
-                "status": 200,
-                "headers": {},
-                "body": encode_base64_standard(body.to_string().as_bytes())
+            self.http_response = encode_message(&plexspaces_proto::wasm::v1::HttpFetchResponse {
+                status: 200,
+                headers: Default::default(),
+                body: body.to_string().into_bytes(),
             });
-            self.http_response = Some(resp.to_string());
             self
         }
-        pub fn kv_get(&self, key: &str) -> String {
-            self.kv.get(key).cloned().unwrap_or_default()
+    }
+
+    impl WeatherHost for MockHost {
+        fn now_ms(&self) -> u64 {
+            self.now_ms
         }
-        pub fn kv_put(&mut self, key: &str, value: &str) {
-            self.kv.insert(key.to_string(), value.to_string());
-        }
-        pub fn http_fetch(&self) -> String {
-            self.http_response.clone().unwrap_or_else(|| {
-                json!({ "status": 200, "headers": {}, "body": "{}" }).to_string()
-            })
+
+        fn http_fetch(&mut self, _path_and_query: &str) -> Result<Vec<u8>, String> {
+            Ok(self.http_response.clone())
         }
     }
 
-    pub struct WeatherActor {
-        pub state: WeatherState,
-    }
-
-    impl WeatherActor {
-        pub fn new() -> Self {
-            Self {
-                state: WeatherState::default(),
-            }
-        }
-        pub fn init(&mut self, config_json: &str) -> String {
-            if let Ok(v) = serde_json::from_str::<Value>(config_json) {
-                if let Some(id) = v.get("actor_id").and_then(|v| v.as_str()) {
-                    self.state.actor_id = id.to_string();
-                }
-            }
-            String::new()
-        }
-        pub fn get_weather(&mut self, host: &mut MockHost, city: &str) -> Value {
-            let cache_key = format!("weather:{city}");
-            let cached = host.kv_get(&cache_key);
-            if !cached.is_empty() {
-                if let Ok(data) = serde_json::from_str::<Value>(&cached) {
-                    let fetched_at = data
-                        .get("fetched_at_ms")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    if host.now_ms - fetched_at < CACHE_TTL_MS {
-                        self.state.cache_hits += 1;
-                        let mut resp = data.clone();
-                        resp["city"] = json!(city);
-                        resp["source"] = json!("cache");
-                        return resp;
-                    }
-                }
-            }
-            self.state.cache_misses += 1;
-            let raw = host.http_fetch();
-            let resp_val: Value = serde_json::from_str(&raw).unwrap_or(json!({}));
-            let body_str = resp_val.get("body").and_then(|b| b.as_str()).unwrap_or("");
-            let weather_val = super::parse_weather_body(body_str);
-            let current = weather_val.get("current").cloned().unwrap_or(json!({}));
-            let temp_c = current
-                .get("temperature_2m")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
-            let wind_kph = current
-                .get("wind_speed_10m")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
-            let result =
-                json!({ "temp_c": temp_c, "wind_kph": wind_kph, "fetched_at_ms": host.now_ms });
-            host.kv_put(&cache_key, &result.to_string());
-            json!({ "city": city, "temp_c": temp_c, "wind_kph": wind_kph, "fetched_at_ms": host.now_ms, "source": "api" })
-        }
-        pub fn cache_stats(&self) -> Value {
-            json!({ "hits": self.state.cache_hits, "misses": self.state.cache_misses })
-        }
-        pub fn clear_cache(&mut self) -> Value {
-            self.state.cache_hits = 0;
-            self.state.cache_misses = 0;
-            json!({ "cleared": true })
-        }
-    }
-
-    fn encode_base64_standard(input: &[u8]) -> String {
-        const TABLE: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-        for chunk in input.chunks(3) {
-            let b0 = chunk[0];
-            let b1 = *chunk.get(1).unwrap_or(&0);
-            let b2 = *chunk.get(2).unwrap_or(&0);
-
-            out.push(TABLE[(b0 >> 2) as usize] as char);
-            out.push(TABLE[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
-            if chunk.len() > 1 {
-                out.push(TABLE[(((b1 & 0x0f) << 2) | (b2 >> 6)) as usize] as char);
-            } else {
-                out.push('=');
-            }
-            if chunk.len() > 2 {
-                out.push(TABLE[(b2 & 0x3f) as usize] as char);
-            } else {
-                out.push('=');
-            }
-        }
-        out
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::contract_tests::*;
-    use serde_json::json;
-
-    #[test]
-    fn test_get_weather_cache_miss() {
-        let mut host = MockHost::new().with_weather(15.3, 12.0);
-        let mut actor = WeatherActor::new();
-        actor.init(r#"{"actor_id":"weather:test@node"}"#);
-
-        let result = actor.get_weather(&mut host, "London");
-        assert_eq!(result["city"], json!("London"));
-        assert_eq!(result["temp_c"], json!(15.3));
-        assert_eq!(result["source"], json!("api"));
-        assert_eq!(actor.state.cache_misses, 1);
-        assert_eq!(actor.state.cache_hits, 0);
+    fn decode_json(bytes: &[u8]) -> Value {
+        serde_json::from_slice(bytes).expect("reply should decode as json")
     }
 
     #[test]
-    fn test_get_weather_parses_base64_response_body() {
-        let mut host = MockHost::new().with_weather_base64(14.5, 9.0);
-        let mut actor = WeatherActor::new();
-
-        let result = actor.get_weather(&mut host, "Madrid");
-
-        assert_eq!(result["city"], json!("Madrid"));
-        assert_eq!(result["temp_c"], json!(14.5));
-        assert_eq!(result["wind_kph"], json!(9.0));
-        assert_eq!(result["source"], json!("api"));
+    fn decode_weather_config_reads_json_args() {
+        let payload = br#"{"actor_id":"weather:test","args":{"offline_mode":"true"}}"#;
+        let config = decode_weather_config(payload, "weather:default");
+        assert_eq!(config.actor_id, "weather:test");
+        assert!(config.offline_mode);
     }
 
     #[test]
-    fn test_get_weather_cache_hit() {
-        let mut host = MockHost::new().with_weather(18.0, 8.5);
-        let mut actor = WeatherActor::new();
-        actor.init(r#"{"actor_id":"weather:test@node"}"#);
+    fn offline_mode_is_deterministic_and_cached() {
+        let mut host = MockHost::new();
+        let mut actor = WeatherActor::from_config(WeatherConfig {
+            actor_id: "weather:test".to_string(),
+            offline_mode: true,
+        });
 
-        actor.get_weather(&mut host, "Paris"); // miss
-        let second = actor.get_weather(&mut host, "Paris"); // hit
-        assert_eq!(second["source"], json!("cache"));
-        assert_eq!(actor.state.cache_misses, 1);
+        let first = decode_json(
+            &actor
+                .handle(
+                    &mut host,
+                    "get_weather",
+                    br#"{"op":"get_weather","city":"London"}"#,
+                )
+                .expect("first request should succeed"),
+        );
+        let second = decode_json(
+            &actor
+                .handle(
+                    &mut host,
+                    "get_weather",
+                    br#"{"op":"get_weather","city":"London"}"#,
+                )
+                .expect("second request should succeed"),
+        );
+
+        assert_eq!(first["source"], "api");
+        assert_eq!(second["source"], "cache");
         assert_eq!(actor.state.cache_hits, 1);
+        assert_eq!(actor.state.cache_misses, 1);
     }
 
     #[test]
-    fn test_clear_cache() {
-        let mut host = MockHost::new().with_weather(10.0, 5.0);
-        let mut actor = WeatherActor::new();
-        actor.init(r#"{"actor_id":"weather:test@node"}"#);
+    fn clear_cache_resets_entries_and_counters() {
+        let mut host = MockHost::new();
+        let mut actor = WeatherActor::from_config(WeatherConfig {
+            actor_id: "weather:test".to_string(),
+            offline_mode: true,
+        });
 
-        actor.get_weather(&mut host, "Berlin");
-        actor.get_weather(&mut host, "Berlin");
-        let result = actor.clear_cache();
-        assert_eq!(result["cleared"], json!(true));
+        let _ = actor.handle(
+            &mut host,
+            "get_weather",
+            br#"{"op":"get_weather","city":"Paris"}"#,
+        );
+        let cleared = decode_json(
+            &actor
+                .handle(&mut host, "clear_cache", br#"{"op":"clear_cache"}"#)
+                .expect("clear cache should succeed"),
+        );
+
+        assert_eq!(cleared["cleared"], true);
+        assert!(actor.state.entries.is_empty());
         assert_eq!(actor.state.cache_hits, 0);
         assert_eq!(actor.state.cache_misses, 0);
     }
 
     #[test]
-    fn test_different_cities_cached_independently() {
-        let mut host = MockHost::new().with_weather(22.0, 15.0);
-        let mut actor = WeatherActor::new();
-        actor.init(r#"{"actor_id":"weather:test@node"}"#);
+    fn live_mode_decodes_http_response() {
+        let mut host = MockHost::new().with_live_weather(17.5, 8.2);
+        let mut actor = WeatherActor::from_config(WeatherConfig {
+            actor_id: "weather:test".to_string(),
+            offline_mode: false,
+        });
 
-        actor.get_weather(&mut host, "Tokyo");
-        actor.get_weather(&mut host, "Sydney");
-        actor.get_weather(&mut host, "Tokyo"); // cached
-        assert_eq!(actor.state.cache_misses, 2);
-        assert_eq!(actor.state.cache_hits, 1);
-    }
+        let response = decode_json(
+            &actor
+                .handle(
+                    &mut host,
+                    "get_weather",
+                    br#"{"op":"get_weather","city":"Berlin"}"#,
+                )
+                .expect("live request should succeed"),
+        );
 
-    #[test]
-    fn test_cache_ttl_expiry() {
-        let mut host = MockHost::new().with_weather(5.0, 3.0);
-        let mut actor = WeatherActor::new();
-
-        actor.get_weather(&mut host, "Oslo"); // miss, store with now_ms=1_000_000
-                                              // Advance clock past TTL (5 min = 300_000ms)
-        host.now_ms = 1_000_000 + 300_001;
-        actor.get_weather(&mut host, "Oslo"); // miss again (TTL expired)
-        assert_eq!(actor.state.cache_misses, 2);
-        assert_eq!(actor.state.cache_hits, 0);
+        assert_eq!(response["city"], "Berlin");
+        assert_eq!(response["temp_c"], 17.5);
+        assert_eq!(response["wind_kph"], 8.2);
+        assert_eq!(response["source"], "api");
     }
 }

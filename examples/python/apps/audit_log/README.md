@@ -18,7 +18,7 @@ This example demonstrates:
 
 ## SDK Features Used
 
-- **plexspaces-simple-actor** WIT: `host.log`, `host.now_ms`, `host.send`.
+- **plexspaces-actor** WIT: `host.log`, `host.now_ms`, `host.send`.
 - **@event_actor**: GenEvent-style; handlers return `str` only for WASM boundary.
 
 ## Build
@@ -54,13 +54,15 @@ Deploy with `behavior_kind=GenEvent` so registry and process_message logs show `
 ```bash
 curl -s -X POST "http://localhost:8092/api/v1/applications/deploy" \
   -F "application_id=audit-log-test" \
-  -F "name=AuditLog" \
+  -F "name=audit-log-test" \
   -F "version=1.0.0" \
   -F "behavior_kind=GenEvent" \
   -F "wasm_file=@audit_log_actor.wasm;type=application/wasm"
 ```
 
 ## API
+
+Use `POST /api/v1/actors/{namespace}/{actor_type}` where `namespace` and `actor_type` match the deploy multipart `name` (default supervisor child id), e.g. `audit-log-test` for both when `name=audit-log-test`.
 
 | Handler | HTTP   | Description |
 |--------|--------|-------------|

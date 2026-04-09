@@ -336,6 +336,7 @@ plexspaces start \
 
 - `PLEXSPACES_NODE_ID`: Default node ID
 - `PLEXSPACES_LISTEN_ADDR`: Default listen address
+- `PLEXSPACES_CLUSTER_NAME`: Overrides release `node.cluster_name` via `config_manager` (multinode: use the same value on every node for registry and `from_registry` placement)
 - `PLEXSPACES_JWT_SECRET`: JWT secret for authentication (required if JWT enabled)
 - `PLEXSPACES_MTLS_CA_CERT`: Path to mTLS CA certificate
 - `PLEXSPACES_MTLS_SERVER_CERT`: Path to mTLS server certificate

@@ -4,9 +4,9 @@ Rust WASM scheduler: SkyPilot-style multi-cloud AI workload placement with a **s
 
 ## Stack (aligned with `migrating_temporal` / `data_parallel_worker`)
 
-- `wit_bindgen::generate!` → `wit/plexspaces-simple-actor`, `actor-world`
+- `wit_bindgen::generate!` → `wit/plexspaces-actor`, `actor-world`
 - `#[gen_server_actor(wasm)]` + `#[plexspaces_handlers(wasm)]` — `submit_task`, `get_best_resources`, `get_status`, `status`
-- `plexspaces::simple_actor::host` — `application_metrics_add` with **`application_id` resolved before** state updates; merges run **after** releasing the scheduler mutex (wasm32-safe)
+- `plexspaces::actor::host` — `application_metrics_add` with **`application_id` resolved before** state updates; merges run **after** releasing the scheduler mutex (wasm32-safe)
 - `SkyPilotBridge`: `impl Guest` + `export!(...)` — no Tokio, no manual exports
 
 ## Use Case

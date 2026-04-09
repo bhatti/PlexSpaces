@@ -18,6 +18,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 APP_ID="fsm-test"
+ACTOR_TYPE="$APP_ID"
 
 cleanup() {
     echo ""
@@ -66,7 +67,7 @@ sleep 1
 echo "   Deploying via HTTP multipart..."
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
-    -F "name=fsm" \
+    -F "name=$APP_ID" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
 
@@ -88,7 +89,7 @@ send_op() {
     local payload="$3"
     
     # Don't hardcode tenant_id - use path format /api/v1/actors/{namespace}/{actor_type}
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/fsm" \
+    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
         -H "Content-Type: application/json" \
         -H "X-Message-Type: $msg_type" \
         -d "$payload" 2>/dev/null) || true

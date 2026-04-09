@@ -471,7 +471,7 @@ PlexSpaces supports multiple channel backends:
 UDP channels provide low-latency, high-throughput pub/sub messaging within a cluster:
 
 - **Multicast Support**: Uses UDP multicast for efficient cluster-wide broadcasting
-- **Cluster Name**: Nodes with the same `cluster_name` can communicate via UDP
+- **Cluster Name**: Nodes with the same `cluster_name` can communicate via UDP. For runtime configuration, set `node.cluster_name` in the release file or override it with `PLEXSPACES_CLUSTER_NAME` (see [Installation](installation.md#environment-variables)).
 - **Best-Effort Delivery**: No ACK/NACK (messages may be lost)
 - **Non-Durable**: Messages lost on restart (use for real-time, non-critical messaging)
 - **Low Latency**: Sub-millisecond message delivery within cluster

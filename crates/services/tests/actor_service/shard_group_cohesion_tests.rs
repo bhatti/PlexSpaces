@@ -455,6 +455,7 @@ async fn test_capabilities_to_labels_mapping() {
         "test-node".to_string(),
         "127.0.0.1:8000".to_string(),
         config,
+        None,
     );
 
     let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "default".to_string());

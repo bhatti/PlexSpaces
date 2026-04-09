@@ -258,7 +258,7 @@ async fn test_spawn_actor_always_uses_local_node_id() {
         )
         .await;
     if let Ok(actor_ref) = result {
-        assert_eq!(actor_ref.id(), canonical_actor_id);
+        assert_eq!(actor_ref.id(), &canonical_actor_id);
     }
 }
 

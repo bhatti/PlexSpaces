@@ -102,11 +102,6 @@ pub fn scan_wasm_apps_directory(base_path: &Path) -> Result<Vec<WasmAppInfo>, Wa
         return Ok(apps);
     }
 
-    tracing::info!(
-        path = %base_path.display(),
-        "Scanning WASM apps directory for auto-deploy"
-    );
-
     for entry in std::fs::read_dir(base_path)? {
         let entry = entry?;
         let path = entry.path();
@@ -158,8 +153,9 @@ pub fn scan_wasm_apps_directory(base_path: &Path) -> Result<Vec<WasmAppInfo>, Wa
     }
 
     tracing::info!(
+        path = %base_path.display(),
         count = apps.len(),
-        "Found {} WASM applications to auto-deploy",
+        "WASM apps auto-deploy scan complete; found {} application(s)",
         apps.len()
     );
 

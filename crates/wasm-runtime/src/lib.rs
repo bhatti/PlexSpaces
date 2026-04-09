@@ -250,7 +250,7 @@ pub use instance_pool::{InstancePool, PoolStats, PooledInstance};
 pub use resource_limits::ResourceLimits;
 pub use runtime::{WasmModule, WasmRuntime};
 
-/// Canonical log message when a simple-actor handle() fails.
+/// Canonical log message when a actor-world handle() fails.
 /// Used so tests and logs can assert/check for this message; full backtrace is only at DEBUG.
 pub const SIMPLE_ACTOR_HANDLE_FAILED_LOG_MESSAGE: &str = "Simple actor handle() call failed";
 

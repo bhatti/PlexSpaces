@@ -1,6 +1,6 @@
 # Data Lake RAG (Go WASM)
 
-Synthetic retrieval-augmented generation benchmark using the Go SDK and the same multinode leader/worker shard-group design as the earlier parameter-server examples.
+Synthetic retrieval-augmented generation benchmark using the Go SDK with a multinode leader/worker shard-group layout.
 
 ## Purpose
 
@@ -54,6 +54,17 @@ cd examples/go/apps/data_lake_rag
 ./build.sh
 ./test.sh
 ```
+
+## Multinode
+
+Shard placement uses `from_registry`, which requires a non-empty node registry (`list_nodes`). If you see `Placement produced no target nodes`, check:
+
+1. **`list_nodes` cluster filter** — If `NodeConfig.cluster_name` is set but registry entries lack a matching `cluster` capability, every node is filtered out.
+2. **Shared SQLite** — Two processes using the same default DB path under `base_dir` can contend; use distinct DB URLs per process when needed (for example `PLEXSPACES_DATABASE_URL`).
+3. **Peer connectivity** — App `seed_nodes` drive `connect_to_node_addresses`; mTLS or address mistakes prevent remote members from appearing.
+4. **Release `node.cluster_seed_nodes`** — Optional static peers at node boot, in addition to app `seed_nodes`.
+
+The actor service logs a warning with `list_cluster_filter`, `node_config_cluster_name`, and `placement_cluster_field` when `list_nodes` returns no members for this placement path.
 
 ## Notes
 

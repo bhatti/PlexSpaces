@@ -5,7 +5,7 @@
 
 //! WASM MessageSender implementation
 //!
-//! Bridges WASM host function calls (JSON-in/JSON-out) to the actor framework.
+//! Bridges WASM host function calls to the actor framework.
 //! Implements [`plexspaces_wasm_runtime::MessageSender`] using:
 //! - ActorService for tell (fire-and-forget) operations
 //! - ActorRegistry for ask (request-reply) via registered ActorRef
@@ -221,13 +221,13 @@ impl MessageSender for ActorServiceMessageSender {
         from: &str,
         to: &str,
         message_type: &str,
-        message: &str,
+        message: &[u8],
     ) -> Result<(), String> {
         trace!(from = %from, to = %to, message_type = %message_type, "WASM send_message (tell)");
 
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
-            payload: message.as_bytes().to_vec(),
+            payload: message.to_vec(),
             sender_id: from.to_string(),
             receiver_id: to.to_string(),
             message_type: message_type.to_string(),

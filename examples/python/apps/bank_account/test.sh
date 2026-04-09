@@ -61,7 +61,7 @@ sleep 1
 
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
-    -F "name=account" \
+    -F "name=$APP_ID" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" \
     -F "config=@$CONFIG_FILE" 2>&1) || true
@@ -81,8 +81,9 @@ bank_op() {
     local desc="$2"
     local payload="$3"
     
-    # Use the application ID as the namespace (bank-test)
-    # Don't hardcode tenant_id - use path format /api/v1/actors/{namespace}/{actor_type}
+    # Path /api/v1/actors/{namespace}/{actor_type}: namespace must match ApplicationSpec
+    # (multipart deploy `name` defaults TOML namespace when [namespace] is omitted).
+    # Don't hardcode tenant_id - tenant from header/JWT when auth is enabled.
     # This gets tenant from header/JWT (empty when auth disabled)
     RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$account" \
         -H "Content-Type: application/json" \

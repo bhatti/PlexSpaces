@@ -91,9 +91,17 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use plexspaces_wasm_runtime::deployment_service::WasmDeploymentService;
 use plexspaces_wasm_runtime::{WasmConfig, WasmRuntime};
+use prost_types::Duration as ProtoDuration;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Runtime;
+
+fn std_duration_to_proto(d: Duration) -> ProtoDuration {
+    ProtoDuration {
+        seconds: d.as_secs() as i64,
+        nanos: d.subsec_nanos() as i32,
+    }
+}
 
 // =============================================================================
 // TEST WASM MODULES
@@ -299,6 +307,9 @@ fn bench_actor_instantiation(c: &mut Criterion) {
                         None,
                         None,
                         None,
+                        None,
+                        None,
+                        None,
                     )
                     .await
                     .unwrap();
@@ -351,6 +362,9 @@ fn bench_actor_instantiation_with_state(c: &mut Criterion) {
                             black_box(actor_id),
                             black_box(&state),
                             black_box(WasmConfig::default()),
+                            None,
+                            None,
+                            None,
                             None,
                             None,
                             None,
@@ -414,6 +428,8 @@ fn bench_concurrent_instantiation(c: &mut Criterion) {
                                 actor_id,
                                 &[],
                                 WasmConfig::default(),
+                                None,
+                                None,
                                 None,
                                 None,
                                 None,
@@ -529,6 +545,8 @@ fn bench_memory_limits(c: &mut Criterion) {
                             None,
                             None,
                             None,
+                            None,
+                            None,
                         )
                         .await
                         .unwrap();
@@ -577,7 +595,7 @@ fn bench_execution_timeouts(c: &mut Criterion) {
                     async move {
                         let mut config = WasmConfig::default();
                         if let Some(timeout) = timeout {
-                            config.limits.max_execution_time = Some(timeout);
+                            config.limits.max_execution_time = Some(std_duration_to_proto(timeout));
                         }
 
                         let module = runtime.resolve_module("test-actor@1.0.0").await.unwrap();
@@ -587,6 +605,9 @@ fn bench_execution_timeouts(c: &mut Criterion) {
                                 black_box(actor_id),
                                 &[],
                                 black_box(config),
+                                None,
+                                None,
+                                None,
                                 None,
                                 None,
                                 None,
@@ -644,6 +665,9 @@ fn bench_e2e_deployment(c: &mut Criterion) {
                         black_box(actor_id),
                         black_box(&[]),
                         black_box(WasmConfig::default()),
+                        None,
+                        None,
+                        None,
                         None,
                         None,
                         None,

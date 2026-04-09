@@ -7,7 +7,7 @@
 // getDefaultState() and onOpName(payload) methods; the base class handles
 // init/handle/getState/setState and dispatch by payload.op.
 /**
- * WIT host log function (imported from plexspaces:simple-actor/host).
+ * WIT host log function (imported from plexspaces:actor/host).
  *
  * jco componentize uses virtual imports for WIT host interfaces.
  * Pattern: import { functionName } from 'namespace:package/interface@version'
@@ -21,8 +21,9 @@
 // @ts-ignore - Virtual import provided by jco componentize at runtime
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-expect-error - Virtual import - types are optional (generated in src/generated/)
-import { log as hostLog } from 'plexspaces:simple-actor/host@0.1.0';
+import { log as hostLog } from 'plexspaces:actor/host@0.1.0';
 import { getActorDefinition } from './decorators.js';
+import { decodeWitPayloadUtf8, encodeWitPayloadUtf8 } from './wit-payload.js';
 /**
  * Safe logging helper that uses WIT host.log function.
  *
@@ -50,7 +51,7 @@ function actorLog(level, location, message, extra) {
     }
 }
 /**
- * Base class for PlexSpaces actors (simple-actor WIT: init, handle, get-state, set-state).
+ * Base class for PlexSpaces actors (actor-world WIT: init, handle, get-state, set-state).
  *
  * Subclass and override:
  * - getDefaultState(): initial state
@@ -78,23 +79,26 @@ export class PlexSpacesActor {
     onInit(_config) {
         // default: no-op; subclass can set state from config
     }
-    /** WIT init(config-json) -> string. Empty string = success, "ERROR:..." = failure. */
+    /**
+     * WIT `init(config: payload) -> result<_, actor-error>`.
+     * Success: return (unit). Failure: throw (jco maps throws to `err` for function-return `result`).
+     */
     init(configJson) {
         try {
-            const config = configJson && configJson.trim() ? JSON.parse(configJson) : {};
+            const text = decodeWitPayloadUtf8(configJson);
+            const config = text.trim() ? JSON.parse(text) : {};
             this.onInit(config);
             // Cache state after init (state is typically small/flat here)
             this.cachedStateJson = null; // Invalidate; lazy-serialize in getState()
-            return "";
         }
         catch {
-            return "ERROR:init failed";
+            throw new Error('ERROR:init failed');
         }
     }
     /**
-     * WIT handle(from-actor, msg-type, payload-json) -> result<string, string>.
+     * WIT `handle(...) -> result<payload, actor-error>` (`payload` is `list<u8>` → `Uint8Array` in jco).
      * Dispatches by msgType for Workflow behavior (workflow_run, workflow_signal:name, workflow_query:name),
-     * then by payload.op (or payload) to on<Op>(payload). Returns JSON string.
+     * then by payload.op (or payload) to on<Op>(payload). Returns UTF-8 JSON bytes.
      * Uses iterative serializer to avoid WASM recursion.
      *
      * Workflow behavior (aligned with Rust Workflow trait and Python @workflow_actor):
@@ -104,7 +108,8 @@ export class PlexSpacesActor {
      */
     handle(_fromActor, msgType, payloadJson) {
         try {
-            const payload = payloadJson && payloadJson.trim() ? JSON.parse(payloadJson) : {};
+            const text = decodeWitPayloadUtf8(payloadJson);
+            const payload = text.trim() ? JSON.parse(text) : {};
             const definition = getActorDefinition(this);
             // Workflow behavior: route by msgType when actor implements run/signal/query (aligned with crates/behavior Workflow trait)
             if (msgType === "workflow_run") {
@@ -115,7 +120,7 @@ export class PlexSpacesActor {
                 if (typeof runFn === "function") {
                     const result = runFn.call(this, payload);
                     this.cachedStateJson = null;
-                    return iterativeStringify(result ?? {});
+                    return encodeWitPayloadUtf8(iterativeStringify(result ?? {}));
                 }
             }
             if (msgType.startsWith("workflow_signal:")) {
@@ -132,7 +137,7 @@ export class PlexSpacesActor {
                         signalFn.call(this, name, payload);
                     }
                     this.cachedStateJson = null;
-                    return "{}";
+                    return encodeWitPayloadUtf8('{}');
                 }
             }
             if (msgType.startsWith("workflow_query:")) {
@@ -145,7 +150,7 @@ export class PlexSpacesActor {
                     const result = queryMethod
                         ? queryFn.call(this, payload)
                         : queryFn.call(this, name, payload);
-                    return iterativeStringify(result ?? {});
+                    return encodeWitPayloadUtf8(iterativeStringify(result ?? {}));
                 }
             }
             // Payload key order: message_type -> op -> msg_type; fallback to msgType so data-only payloads route by message type (e.g. tasks_ready)
@@ -165,7 +170,7 @@ export class PlexSpacesActor {
                 catch (handlerError) {
                     const errorMsg = handlerError instanceof Error ? handlerError.message : String(handlerError);
                     actorLog('error', 'actor.ts:handle', `Handler ${methodName} failed`, errorMsg);
-                    return "ERROR:" + errorMsg;
+                    throw new Error('ERROR:' + errorMsg);
                 }
                 // Do not cache state here. The framework re-instantiates after every handle()
                 // (wasmtime#8943 workaround), so caching is wasted work that risks stack overflow.
@@ -174,48 +179,51 @@ export class PlexSpacesActor {
                 // Use iterative serializer to avoid WASM recursion.
                 // The iterative serializer uses an explicit work stack instead of recursive function calls.
                 try {
-                    return iterativeStringify(result);
+                    return encodeWitPayloadUtf8(iterativeStringify(result ?? {}));
                 }
                 catch (jsonError) {
                     const errorMsg = jsonError instanceof Error ? jsonError.message : String(jsonError);
                     actorLog('error', 'actor.ts:handle', 'JSON serialization failed', errorMsg);
-                    return "ERROR:JSON serialization failed: " + errorMsg;
+                    throw new Error('ERROR:JSON serialization failed: ' + errorMsg);
                 }
             }
             actorLog('warn', 'actor.ts:handle', 'Unknown operation', String(op));
-            return iterativeStringify({ error: "unknown_op", op: String(op) });
+            return encodeWitPayloadUtf8(iterativeStringify({ error: 'unknown_op', op: String(op) }));
         }
         catch (e) {
             const errorMsg = e instanceof Error ? e.message : String(e);
             actorLog('error', 'actor.ts:handle', 'Handle failed', errorMsg);
-            return "ERROR:" + errorMsg;
+            if (e instanceof Error && errorMsg.startsWith('ERROR:')) {
+                throw e;
+            }
+            throw new Error('ERROR:' + errorMsg);
         }
     }
-    /** WIT get-state() -> string. Returns JSON-serialized state. */
+    /** WIT `get-state() -> result<payload, actor-error>`. Returns JSON state as UTF-8 bytes. */
     getState() {
         if (this.cachedStateJson !== null) {
-            return this.cachedStateJson;
+            return encodeWitPayloadUtf8(this.cachedStateJson);
         }
         try {
             const serialized = iterativeStringify(this.state);
             this.cachedStateJson = serialized;
-            return serialized;
+            return encodeWitPayloadUtf8(serialized);
         }
         catch {
-            return "{}";
+            return encodeWitPayloadUtf8('{}');
         }
     }
-    /** WIT set-state(state-json) -> string. Empty = success, "ERROR:..." = failure. */
+    /** WIT `set-state(state: payload) -> result<_, actor-error>`. */
     setState(stateJson) {
         try {
-            if (stateJson && stateJson.trim()) {
-                this.state = JSON.parse(stateJson);
+            const text = decodeWitPayloadUtf8(stateJson);
+            if (text.trim()) {
+                this.state = JSON.parse(text);
                 this.cachedStateJson = null; // Invalidate
             }
-            return "";
         }
         catch {
-            return "ERROR:set_state failed";
+            throw new Error('ERROR:set_state failed');
         }
     }
     capitalize(s) {

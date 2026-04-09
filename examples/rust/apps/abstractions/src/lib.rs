@@ -2,17 +2,23 @@
 
 #[cfg(target_arch = "wasm32")]
 mod wasm_app {
+    use plexspaces_proto::tuplespace::v1::{
+        tuple_field::Value as ProtoTupleValue, ReadRequest, ReadResponse, Tuple,
+        TupleField as ProtoTupleField, WriteRequest,
+    };
+    use prost::Message;
     use serde::{Deserialize, Serialize};
+    use serde_json::Value;
     use std::sync::{Mutex, OnceLock};
 
     wit_bindgen::generate!({
-        path: "../../../../wit/plexspaces-simple-actor",
+        path: "../../../../wit/plexspaces-actor",
         world: "actor-world",
     });
 
-    use exports::plexspaces::simple_actor::actor::Guest;
-    use plexspaces::simple_actor::host;
-    use plexspaces_sdk::simple_actor::SimpleActorHandlers;
+    use exports::plexspaces::actor::actor::Guest;
+    use plexspaces::actor::host;
+    use plexspaces_sdk::simple_actor::ActorWorldHandlers;
     use plexspaces_sdk::{gen_server_actor, json, plexspaces_handlers};
 
     const DEFAULT_GROUP: &str = "abstractions-group";
@@ -72,16 +78,19 @@ mod wasm_app {
                 .rsplit_once('@')
                 .map(|(_, node_id)| node_id.to_string())
                 .unwrap_or_default();
-            if !actor_name.is_empty() && !actor_type.is_empty() && !namespace.is_empty() && !node_id.is_empty() {
+            if !actor_name.is_empty()
+                && !actor_type.is_empty()
+                && !namespace.is_empty()
+                && !node_id.is_empty()
+            {
                 return format!("{actor_name}//{actor_type}::{namespace}@{node_id}");
             }
         }
         target.to_string()
     }
 
-    fn parse_op(msg_type: &str, payload_json: &str) -> Result<String, String> {
-        let payload: serde_json::Value =
-            serde_json::from_str(payload_json).map_err(|e| format!("invalid payload: {}", e))?;
+    fn parse_op(msg_type: &str, payload: &[u8]) -> Result<String, String> {
+        let payload = parse_payload(payload)?;
         if let Some(op) = payload
             .get("op")
             .and_then(|value| value.as_str())
@@ -95,41 +104,154 @@ mod wasm_app {
         }
     }
 
-    fn parse_payload(payload_json: &str) -> Result<serde_json::Value, String> {
-        serde_json::from_str(payload_json).map_err(|e| format!("invalid payload: {}", e))
+    fn parse_payload(payload: &[u8]) -> Result<Value, String> {
+        if payload.is_empty() {
+            return Ok(json!({}));
+        }
+        serde_json::from_slice(payload).map_err(|e| format!("invalid payload: {}", e))
     }
 
-    fn host_ok(response: String, context: &str) -> Result<String, String> {
-        if response.starts_with("ERROR:") {
-            Err(format!("{}: {}", context, response))
-        } else {
-            Ok(response)
+    fn host_result<T>(response: Result<T, String>, context: &str) -> Result<T, String> {
+        response.map_err(|err| format!("{context}: {err}"))
+    }
+
+    fn json_bytes(value: Value) -> Vec<u8> {
+        value.to_string().into_bytes()
+    }
+
+    fn json_error(err: impl Into<String>) -> Vec<u8> {
+        json_bytes(json!({ "error": err.into() }))
+    }
+
+    fn json_string(bytes: Vec<u8>) -> String {
+        String::from_utf8(bytes).unwrap_or_default()
+    }
+
+    fn json_value_to_proto_tuple_field(value: &Value, allow_wildcard_string: bool) -> Result<ProtoTupleField, String> {
+        let field = match value {
+            Value::Null => ProtoTupleField {
+                value: Some(ProtoTupleValue::Wildcard(true)),
+            },
+            Value::String(text) if allow_wildcard_string && text == "*" => ProtoTupleField {
+                value: Some(ProtoTupleValue::Wildcard(true)),
+            },
+            Value::Bool(boolean) => ProtoTupleField {
+                value: Some(ProtoTupleValue::Boolean(*boolean)),
+            },
+            Value::Number(number) => {
+                if let Some(integer) = number.as_i64() {
+                    ProtoTupleField {
+                        value: Some(ProtoTupleValue::Integer(integer)),
+                    }
+                } else if let Some(float) = number.as_f64() {
+                    ProtoTupleField {
+                        value: Some(ProtoTupleValue::Float(float)),
+                    }
+                } else {
+                    return Err("unsupported numeric tuple field".to_string());
+                }
+            }
+            Value::String(text) => ProtoTupleField {
+                value: Some(ProtoTupleValue::String(text.clone())),
+            },
+            Value::Array(_) | Value::Object(_) => {
+                return Err("tuplespace tuple fields must be scalar JSON values".to_string());
+            }
+        };
+        Ok(field)
+    }
+
+    fn json_array_to_proto_tuple(values: &[Value], allow_wildcard_string: bool) -> Result<Tuple, String> {
+        let mut fields = Vec::with_capacity(values.len());
+        for value in values {
+            fields.push(json_value_to_proto_tuple_field(value, allow_wildcard_string)?);
+        }
+        Ok(Tuple {
+            id: String::new(),
+            fields,
+            timestamp: None,
+            lease: None,
+            metadata: Default::default(),
+            location: None,
+        })
+    }
+
+    fn proto_tuple_field_to_json(field: &ProtoTupleField) -> Value {
+        match field.value.as_ref() {
+            Some(ProtoTupleValue::Integer(value)) => json!(value),
+            Some(ProtoTupleValue::Float(value)) => json!(value),
+            Some(ProtoTupleValue::String(value)) => json!(value),
+            Some(ProtoTupleValue::Boolean(value)) => json!(value),
+            Some(ProtoTupleValue::Binary(value)) => json!(String::from_utf8_lossy(value)),
+            Some(ProtoTupleValue::Null(_)) | Some(ProtoTupleValue::Wildcard(_)) | None => Value::Null,
         }
     }
 
+    fn proto_tuple_to_json(tuple: &Tuple) -> Value {
+        Value::Array(tuple.fields.iter().map(proto_tuple_field_to_json).collect())
+    }
+
+    fn encode_write_request(tuple_value: &Value) -> Result<Vec<u8>, String> {
+        let values = tuple_value
+            .as_array()
+            .ok_or_else(|| "tuple must be a JSON array".to_string())?;
+        let request = WriteRequest {
+            tuples: vec![json_array_to_proto_tuple(values, false)?],
+            transaction_id: String::new(),
+        };
+        Ok(request.encode_to_vec())
+    }
+
+    fn encode_read_request(pattern_value: &Value, take: bool, max_results: i32) -> Result<Vec<u8>, String> {
+        let values = pattern_value
+            .as_array()
+            .ok_or_else(|| "pattern must be a JSON array".to_string())?;
+        let request = ReadRequest {
+            template: Some(json_array_to_proto_tuple(values, true)?),
+            timeout: None,
+            blocking: false,
+            take,
+            max_results,
+            transaction_id: String::new(),
+            spatial_filter: None,
+        };
+        Ok(request.encode_to_vec())
+    }
+
+    fn decode_read_response(bytes: &[u8]) -> Result<Vec<Value>, String> {
+        let response = ReadResponse::decode(bytes)
+            .map_err(|err| format!("failed to decode tuplespace response: {}", err))?;
+        Ok(response.tuples.iter().map(proto_tuple_to_json).collect())
+    }
+
     fn config_string(value: &serde_json::Value, key: &str) -> Option<String> {
-        value.get(key)
+        value
+            .get(key)
             .and_then(|item| item.as_str())
             .map(str::to_string)
             .or_else(|| {
-                value.get("args")
+                value
+                    .get("args")
                     .and_then(|args| args.get(key))
                     .and_then(|item| item.as_str())
                     .map(str::to_string)
             })
     }
 
-    fn init_state(config_json: &str) -> Result<(), String> {
-        let value: serde_json::Value =
-            serde_json::from_str(config_json).map_err(|e| format!("invalid init JSON: {}", e))?;
+    fn init_state(config: &[u8]) -> Result<(), String> {
+        let value: Value = if config.is_empty() {
+            json!({})
+        } else {
+            serde_json::from_slice(config).map_err(|e| format!("invalid init JSON: {}", e))?
+        };
         let role = config_string(&value, "role").unwrap_or_else(|| "abstractions".to_string());
-        let group =
-            config_string(&value, "group").unwrap_or_else(|| DEFAULT_GROUP.to_string());
+        let group = config_string(&value, "group").unwrap_or_else(|| DEFAULT_GROUP.to_string());
         let initial_count = value
             .get("initial_count")
             .and_then(|item| item.as_i64())
             .or_else(|| {
-                value.get("args")
+                value
+                    .get("args")
                     .and_then(|args| args.get("initial_count"))
                     .and_then(|item| item.as_str())
                     .and_then(|item| item.parse::<i64>().ok())
@@ -149,14 +271,14 @@ mod wasm_app {
             }
         });
         if role == "channel" {
-            host_ok(host::pg_join(&group), "join group")?;
+            host_result(host::pg_join(&group), "join group")?;
         }
         Ok(())
     }
 
-    fn status_json() -> String {
+    fn status_json() -> Vec<u8> {
         with_state(|state| {
-            json!({
+            json_bytes(json!({
                 "actor_id": state.actor_id,
                 "application_id": state.application_id,
                 "role": state.role,
@@ -169,97 +291,117 @@ mod wasm_app {
                 "joined_group": state.joined_group,
                 "last_spawned_id": state.last_spawned_id,
                 "self_id": host::self_id(),
-            })
-            .to_string()
+            }))
         })
     }
 
-    fn handle_increment(payload: &serde_json::Value) -> String {
-        let amount = payload.get("amount").and_then(|value| value.as_i64()).unwrap_or(1);
+    fn handle_increment(payload: &Value) -> Vec<u8> {
+        let amount = payload
+            .get("amount")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(1);
         with_state(|state| {
             state.count += amount;
-            json!({
+            json_bytes(json!({
                 "actor_id": state.actor_id,
                 "count": state.count,
-            })
-            .to_string()
+            }))
         })
     }
 
-    fn schedule_self_message(delay_ms: u64, msg_type: &str, payload: serde_json::Value) -> String {
-        match host_ok(
-            host::send_after(delay_ms, msg_type, &payload.to_string()),
+    fn schedule_self_message(delay_ms: u64, msg_type: &str, payload: Value) -> Vec<u8> {
+        let payload_bytes = payload.to_string().into_bytes();
+        match host_result(
+            host::send_after(delay_ms, msg_type, &payload_bytes),
             msg_type,
         ) {
             Ok(timer_id) => timer_id,
-            Err(err) => json!({ "error": err }).to_string(),
+            Err(err) => return json_error(err),
         }
+        .into_bytes()
     }
 
-    fn handle_kv_put(payload: &serde_json::Value) -> String {
-        let key = payload.get("key").and_then(|value| value.as_str()).unwrap_or("");
+    fn handle_kv_put(payload: &Value) -> Vec<u8> {
+        let key = payload
+            .get("key")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         let value = payload
             .get("value")
             .and_then(|item| item.as_str())
             .unwrap_or("");
-        match host_ok(host::kv_put(key, value), "kv_put") {
-            Ok(_) => json!({ "ok": true, "key": key, "value": value }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+        match host_result(host::kv_put(key, value.as_bytes()), "kv_put") {
+            Ok(_) => json_bytes(json!({ "ok": true, "key": key, "value": value })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_kv_get(payload: &serde_json::Value) -> String {
-        let key = payload.get("key").and_then(|value| value.as_str()).unwrap_or("");
-        match host_ok(host::kv_get(key), "kv_get") {
-            Ok(value) => json!({ "key": key, "value": value }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+    fn handle_kv_get(payload: &Value) -> Vec<u8> {
+        let key = payload
+            .get("key")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        match host_result(host::kv_get(key), "kv_get") {
+            Ok(value) => json_bytes(json!({ "key": key, "value": json_string(value) })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_kv_list(payload: &serde_json::Value) -> String {
+    fn handle_kv_list(payload: &Value) -> Vec<u8> {
         let prefix = payload
             .get("prefix")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_ok(host::kv_list(prefix), "kv_list") {
-            Ok(keys_json) => json!({ "keys": serde_json::from_str::<serde_json::Value>(&keys_json).unwrap_or(json!([])) }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+        match host_result(host::kv_list(prefix), "kv_list") {
+            Ok(keys) => json_bytes(json!({ "keys": keys })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_kv_delete(payload: &serde_json::Value) -> String {
-        let key = payload.get("key").and_then(|value| value.as_str()).unwrap_or("");
-        match host_ok(host::kv_delete(key), "kv_delete") {
-            Ok(_) => json!({ "ok": true, "key": key }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+    fn handle_kv_delete(payload: &Value) -> Vec<u8> {
+        let key = payload
+            .get("key")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        match host_result(host::kv_delete(key), "kv_delete") {
+            Ok(_) => json_bytes(json!({ "ok": true, "key": key })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_ts_write(payload: &serde_json::Value) -> String {
+    fn handle_ts_write(payload: &Value) -> Vec<u8> {
         let tuple = payload.get("tuple").cloned().unwrap_or_else(|| json!([]));
-        match host_ok(host::ts_write(&tuple.to_string()), "ts_write") {
-            Ok(_) => json!({ "ok": true, "tuple": tuple }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+        let tuple_bytes = match encode_write_request(&tuple) {
+            Ok(bytes) => bytes,
+            Err(err) => return json_error(format!("ts_write: {}", err)),
+        };
+        match host_result(host::ts_write(&tuple_bytes), "ts_write") {
+            Ok(_) => json_bytes(json!({ "ok": true, "tuple": tuple })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn tuplespace_result(response: String, field: &str, context: &str) -> String {
-        match host_ok(response, context) {
+    fn tuplespace_result(response: Result<Vec<u8>, String>, field: &str, context: &str) -> Vec<u8> {
+        match host_result(response, context) {
             Ok(value) => {
-                let parsed = if value.is_empty() {
-                    json!(null)
+                let tuples = match decode_read_response(&value) {
+                    Ok(tuples) => tuples,
+                    Err(err) => return json_error(format!("{context}: {err}")),
+                };
+                let parsed = if field == "tuple" {
+                    tuples.into_iter().next().unwrap_or(Value::Null)
                 } else {
-                    serde_json::from_str::<serde_json::Value>(&value).unwrap_or_else(|_| json!(value))
+                    Value::Array(tuples)
                 };
                 let mut object = serde_json::Map::new();
                 object.insert(field.to_string(), parsed);
-                serde_json::Value::Object(object).to_string()
+                json_bytes(Value::Object(object))
             }
-            Err(err) => json!({ "error": err }).to_string(),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_blob_upload(payload: &serde_json::Value) -> String {
+    fn handle_blob_upload(payload: &Value) -> Vec<u8> {
         let blob_id = payload
             .get("blob_id")
             .and_then(|value| value.as_str())
@@ -272,55 +414,58 @@ mod wasm_app {
             .get("content_type")
             .and_then(|value| value.as_str())
             .unwrap_or("text/plain");
-        match host_ok(
-            host::blob_upload(blob_id, data, content_type),
+        match host_result(
+            host::blob_upload(blob_id, data.as_bytes(), content_type),
             "blob_upload",
         ) {
-            Ok(_) => json!({ "ok": true, "blob_id": blob_id }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+            Ok(stored_blob_id) => json_bytes(json!({ "ok": true, "blob_id": stored_blob_id })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_blob_download(payload: &serde_json::Value) -> String {
+    fn handle_blob_download(payload: &Value) -> Vec<u8> {
         let blob_id = payload
             .get("blob_id")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_ok(host::blob_download(blob_id), "blob_download") {
-            Ok(data) => json!({ "blob_id": blob_id, "data": data }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+        match host_result(host::blob_download(blob_id), "blob_download") {
+            Ok(data) => json_bytes(json!({ "blob_id": blob_id, "data": json_string(data) })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_blob_list(payload: &serde_json::Value) -> String {
+    fn handle_blob_list(payload: &Value) -> Vec<u8> {
         let prefix = payload
             .get("prefix")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_ok(host::blob_list(prefix), "blob_list") {
-            Ok(ids_json) => json!({ "blob_ids": serde_json::from_str::<serde_json::Value>(&ids_json).unwrap_or(json!([])) }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+        match host_result(host::blob_list(prefix), "blob_list") {
+            Ok(ids) => json_bytes(json!({ "blob_ids": ids })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_blob_delete(payload: &serde_json::Value) -> String {
+    fn handle_blob_delete(payload: &Value) -> Vec<u8> {
         let blob_id = payload
             .get("blob_id")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_ok(host::blob_delete(blob_id), "blob_delete") {
-            Ok(_) => json!({ "ok": true, "blob_id": blob_id }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+        match host_result(host::blob_delete(blob_id), "blob_delete") {
+            Ok(_) => json_bytes(json!({ "ok": true, "blob_id": blob_id })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_send_event(payload: &serde_json::Value) -> String {
+    fn handle_send_event(payload: &Value) -> Vec<u8> {
         let target = payload
             .get("target")
             .and_then(|value| value.as_str())
             .unwrap_or("");
         let resolved_target = canonical_actor_target(target);
-        let body = payload.get("body").and_then(|value| value.as_str()).unwrap_or("");
+        let body = payload
+            .get("body")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         let channel = payload
             .get("channel")
             .and_then(|value| value.as_str())
@@ -330,18 +475,22 @@ mod wasm_app {
             "channel": channel,
             "body": body,
         });
-        match host_ok(host::send(&resolved_target, "cast", &event.to_string()), "send") {
-            Ok(_) => json!({ "ok": true, "target": resolved_target }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+        let event_bytes = event.to_string().into_bytes();
+        match host_result(host::send(&resolved_target, "cast", &event_bytes), "send") {
+            Ok(_) => json_bytes(json!({ "ok": true, "target": resolved_target })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_broadcast_event(payload: &serde_json::Value) -> String {
+    fn handle_broadcast_event(payload: &Value) -> Vec<u8> {
         let group = payload
             .get("group")
             .and_then(|value| value.as_str())
             .unwrap_or(DEFAULT_GROUP);
-        let body = payload.get("body").and_then(|value| value.as_str()).unwrap_or("");
+        let body = payload
+            .get("body")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         let channel = payload
             .get("channel")
             .and_then(|value| value.as_str())
@@ -351,55 +500,59 @@ mod wasm_app {
             "channel": channel,
             "body": body,
         });
-        match host_ok(
-            host::pg_broadcast(group, "cast", &event.to_string()),
+        let event_bytes = event.to_string().into_bytes();
+        match host_result(
+            host::pg_broadcast(group, "cast", &event_bytes),
             "pg_broadcast",
         ) {
-            Ok(_) => json!({ "ok": true, "group": group }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+            Ok(_) => json_bytes(json!({ "ok": true, "group": group })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_join_group(payload: &serde_json::Value) -> String {
+    fn handle_join_group(payload: &Value) -> Vec<u8> {
         let group = payload
             .get("group")
             .and_then(|value| value.as_str())
             .unwrap_or(DEFAULT_GROUP);
-        match host_ok(host::pg_join(group), "pg_join") {
+        match host_result(host::pg_join(group), "pg_join") {
             Ok(_) => {
                 with_state(|state| {
                     state.joined_group = group.to_string();
                 });
-                json!({ "ok": true, "group": group }).to_string()
+                json_bytes(json!({ "ok": true, "group": group }))
             }
-            Err(err) => json!({ "error": err }).to_string(),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_group_members(payload: &serde_json::Value) -> String {
+    fn handle_group_members(payload: &Value) -> Vec<u8> {
         let group = payload
             .get("group")
             .and_then(|value| value.as_str())
             .unwrap_or(DEFAULT_GROUP);
-        match host_ok(host::pg_members(group), "pg_members") {
-            Ok(members_json) => json!({ "members": serde_json::from_str::<serde_json::Value>(&members_json).unwrap_or(json!([])) }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+        match host_result(host::pg_members(group), "pg_members") {
+            Ok(members) => json_bytes(json!({ "members": members })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_channel_publish(payload: &serde_json::Value) -> String {
+    fn handle_channel_publish(payload: &Value) -> Vec<u8> {
         let channel = payload
             .get("channel")
             .and_then(|value| value.as_str())
             .unwrap_or("alerts");
-        let body = payload.get("body").and_then(|value| value.as_str()).unwrap_or("");
+        let body = payload
+            .get("body")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         with_state(|state| {
             state.received.push(format!("{channel}:{body}"));
         });
-        json!({}).to_string()
+        json_bytes(json!({}))
     }
 
-    fn handle_workflow_run(payload: &serde_json::Value) -> String {
+    fn handle_workflow_run(payload: &Value) -> Vec<u8> {
         let order_id = payload
             .get("order_id")
             .and_then(|value| value.as_str())
@@ -407,11 +560,11 @@ mod wasm_app {
         with_state(|state| {
             state.workflow_status = format!("running:{order_id}");
             state.workflow_signals.clear();
-            json!({ "status": state.workflow_status }).to_string()
+            json_bytes(json!({ "status": state.workflow_status }))
         })
     }
 
-    fn handle_workflow_signal(payload: &serde_json::Value) -> String {
+    fn handle_workflow_signal(payload: &Value) -> Vec<u8> {
         let reason = payload
             .get("reason")
             .and_then(|value| value.as_str())
@@ -420,31 +573,30 @@ mod wasm_app {
             state.workflow_signals.push(reason.to_string());
             state.workflow_status = "cancelled".to_string();
         });
-        json!({}).to_string()
+        json_bytes(json!({}))
     }
 
-    fn handle_workflow_query() -> String {
+    fn handle_workflow_query() -> Vec<u8> {
         with_state(|state| {
-            json!({
+            json_bytes(json!({
                 "status": state.workflow_status,
                 "signals": state.workflow_signals,
-            })
-            .to_string()
+            }))
         })
     }
 
-    fn handle_stop_target(payload: &serde_json::Value) -> String {
+    fn handle_stop_target(payload: &Value) -> Vec<u8> {
         let actor_id = payload
             .get("actor_id")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match host_ok(host::stop(actor_id), "stop") {
-            Ok(_) => json!({ "ok": true, "actor_id": actor_id }).to_string(),
-            Err(err) => json!({ "error": err }).to_string(),
+        match host_result(host::stop(actor_id), "stop") {
+            Ok(_) => json_bytes(json!({ "ok": true, "actor_id": actor_id })),
+            Err(err) => json_error(err),
         }
     }
 
-    fn handle_spawn_actor(payload: &serde_json::Value) -> String {
+    fn handle_spawn_actor(payload: &Value) -> Vec<u8> {
         let module_ref = payload
             .get("module_ref")
             .and_then(|value| value.as_str())
@@ -454,17 +606,15 @@ mod wasm_app {
             .and_then(|value| value.as_str())
             .unwrap_or("");
         let init_config = payload.get("config").cloned().unwrap_or_else(|| json!({}));
-        match host_ok(
-            host::spawn(module_ref, actor_id, &init_config.to_string()),
-            "spawn",
-        ) {
+        let init_bytes = init_config.to_string().into_bytes();
+        match host_result(host::spawn(module_ref, actor_id, &init_bytes), "spawn") {
             Ok(spawned_id) => {
                 with_state(|state| {
                     state.last_spawned_id = spawned_id.clone();
                 });
-                json!({ "actor_id": spawned_id }).to_string()
+                json_bytes(json!({ "actor_id": spawned_id }))
             }
-            Err(err) => json!({ "error": err }).to_string(),
+            Err(err) => json_error(err),
         }
     }
 
@@ -475,197 +625,174 @@ mod wasm_app {
     #[plexspaces_handlers(wasm)]
     impl AbstractionsWasmActor {
         #[init_handler]
-        fn configure(&mut self, config_json: &str) -> Result<(), String> {
-            init_state(config_json)
+        fn configure(&mut self, config: &[u8]) -> Result<(), String> {
+            init_state(config)
         }
 
         #[handler("increment")]
-        fn increment(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn increment(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_increment(&payload))
         }
 
         #[handler("status")]
-        fn status(&mut self, _from_actor: &str, _payload_json: &str) -> Result<String, String> {
+        fn status(&mut self, _from_actor: &str, _payload: &[u8]) -> Result<Vec<u8>, String> {
             Ok(status_json())
         }
 
         #[handler("schedule_timer")]
-        fn schedule_timer(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn schedule_timer(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             let delay_ms = payload
                 .get("delay_ms")
                 .and_then(|value| value.as_u64())
                 .unwrap_or(100);
-            let timer_id = schedule_self_message(delay_ms, "timer_tick", json!({ "kind": "timer" }));
-            if timer_id.starts_with('{') {
+            let timer_id =
+                schedule_self_message(delay_ms, "timer_tick", json!({ "kind": "timer" }));
+            if timer_id.first() == Some(&b'{') {
                 return Ok(timer_id);
             }
             with_state(|state| {
-                state.last_timer_id = timer_id.clone();
+                state.last_timer_id = String::from_utf8(timer_id.clone()).unwrap_or_default();
             });
-            Ok(json!({ "timer_id": timer_id }).to_string())
+            Ok(json_bytes(
+                json!({ "timer_id": String::from_utf8(timer_id).unwrap_or_default() }),
+            ))
         }
 
         #[handler("schedule_reminder")]
         fn schedule_reminder(
             &mut self,
             _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+            payload: &[u8],
+        ) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             let delay_ms = payload
                 .get("delay_ms")
                 .and_then(|value| value.as_u64())
                 .unwrap_or(120);
-            let timer_id = schedule_self_message(
-                delay_ms,
-                "reminder_tick",
-                json!({ "kind": "reminder" }),
-            );
-            if timer_id.starts_with('{') {
+            let timer_id =
+                schedule_self_message(delay_ms, "reminder_tick", json!({ "kind": "reminder" }));
+            if timer_id.first() == Some(&b'{') {
                 return Ok(timer_id);
             }
             with_state(|state| {
-                state.last_reminder_id = timer_id.clone();
+                state.last_reminder_id = String::from_utf8(timer_id.clone()).unwrap_or_default();
             });
-            Ok(json!({ "reminder_id": timer_id }).to_string())
+            Ok(json_bytes(
+                json!({ "reminder_id": String::from_utf8(timer_id).unwrap_or_default() }),
+            ))
         }
 
         #[handler("timer_tick")]
-        fn timer_tick(
-            &mut self,
-            _from_actor: &str,
-            _payload_json: &str,
-        ) -> Result<String, String> {
+        fn timer_tick(&mut self, _from_actor: &str, _payload: &[u8]) -> Result<Vec<u8>, String> {
             Ok(with_state(|state| {
                 state.timer_ticks += 1;
-                json!({ "timer_ticks": state.timer_ticks }).to_string()
+                json_bytes(json!({ "timer_ticks": state.timer_ticks }))
             }))
         }
 
         #[handler("reminder_tick")]
-        fn reminder_tick(
-            &mut self,
-            _from_actor: &str,
-            _payload_json: &str,
-        ) -> Result<String, String> {
+        fn reminder_tick(&mut self, _from_actor: &str, _payload: &[u8]) -> Result<Vec<u8>, String> {
             Ok(with_state(|state| {
                 state.reminder_ticks += 1;
-                json!({ "reminder_ticks": state.reminder_ticks }).to_string()
+                json_bytes(json!({ "reminder_ticks": state.reminder_ticks }))
             }))
         }
 
         #[handler("kv_put")]
-        fn kv_put(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn kv_put(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_kv_put(&payload))
         }
 
         #[handler("kv_get")]
-        fn kv_get(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn kv_get(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_kv_get(&payload))
         }
 
         #[handler("kv_list")]
-        fn kv_list(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn kv_list(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_kv_list(&payload))
         }
 
         #[handler("kv_delete")]
-        fn kv_delete(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn kv_delete(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_kv_delete(&payload))
         }
 
         #[handler("ts_write")]
-        fn ts_write(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn ts_write(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_ts_write(&payload))
         }
 
         #[handler("ts_read")]
-        fn ts_read(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn ts_read(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             let pattern = payload.get("pattern").cloned().unwrap_or_else(|| json!([]));
-            Ok(tuplespace_result(host::ts_read(&pattern.to_string()), "tuple", "ts_read"))
+            let pattern_bytes = encode_read_request(&pattern, false, 1)?;
+            Ok(tuplespace_result(
+                host::ts_read(&pattern_bytes),
+                "tuple",
+                "ts_read",
+            ))
         }
 
         #[handler("ts_take")]
-        fn ts_take(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn ts_take(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             let pattern = payload.get("pattern").cloned().unwrap_or_else(|| json!([]));
-            Ok(tuplespace_result(host::ts_take(&pattern.to_string()), "tuple", "ts_take"))
+            let pattern_bytes = encode_read_request(&pattern, true, 1)?;
+            Ok(tuplespace_result(
+                host::ts_take(&pattern_bytes),
+                "tuple",
+                "ts_take",
+            ))
         }
 
         #[handler("ts_read_all")]
-        fn ts_read_all(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn ts_read_all(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             let pattern = payload.get("pattern").cloned().unwrap_or_else(|| json!([]));
+            let pattern_bytes = encode_read_request(&pattern, false, 1024)?;
             Ok(tuplespace_result(
-                host::ts_read_all(&pattern.to_string()),
+                host::ts_read_all(&pattern_bytes),
                 "tuples",
                 "ts_read_all",
             ))
         }
 
         #[handler("blob_upload")]
-        fn blob_upload(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn blob_upload(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_blob_upload(&payload))
         }
 
         #[handler("blob_download")]
-        fn blob_download(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn blob_download(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_blob_download(&payload))
         }
 
         #[handler("blob_list")]
-        fn blob_list(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn blob_list(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_blob_list(&payload))
         }
 
         #[handler("blob_delete")]
-        fn blob_delete(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn blob_delete(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_blob_delete(&payload))
         }
 
         #[handler("send_event")]
-        fn send_event(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn send_event(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_send_event(&payload))
         }
 
@@ -673,45 +800,33 @@ mod wasm_app {
         fn broadcast_event(
             &mut self,
             _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+            payload: &[u8],
+        ) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_broadcast_event(&payload))
         }
 
         #[handler("join_group")]
-        fn join_group(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn join_group(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_join_group(&payload))
         }
 
         #[handler("group_members")]
-        fn group_members(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn group_members(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_group_members(&payload))
         }
 
         #[handler("publish")]
-        fn publish(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn publish(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_channel_publish(&payload))
         }
 
         #[handler("workflow_run")]
-        fn workflow_run(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn workflow_run(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_workflow_run(&payload))
         }
 
@@ -719,9 +834,9 @@ mod wasm_app {
         fn workflow_signal_cancel(
             &mut self,
             _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+            payload: &[u8],
+        ) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_workflow_signal(&payload))
         }
 
@@ -729,28 +844,20 @@ mod wasm_app {
         fn workflow_query_status(
             &mut self,
             _from_actor: &str,
-            _payload_json: &str,
-        ) -> Result<String, String> {
+            _payload: &[u8],
+        ) -> Result<Vec<u8>, String> {
             Ok(handle_workflow_query())
         }
 
         #[handler("stop_actor")]
-        fn stop_actor(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn stop_actor(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_stop_target(&payload))
         }
 
         #[handler("spawn_actor")]
-        fn spawn_actor(
-            &mut self,
-            _from_actor: &str,
-            payload_json: &str,
-        ) -> Result<String, String> {
-            let payload = parse_payload(payload_json)?;
+        fn spawn_actor(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+            let payload = parse_payload(payload)?;
             Ok(handle_spawn_actor(&payload))
         }
     }
@@ -758,40 +865,43 @@ mod wasm_app {
     struct AbstractionsBridge;
 
     impl Guest for AbstractionsBridge {
-        fn init(config_json: String) -> String {
+        fn init(config: Vec<u8>) -> Result<(), String> {
             let mut actor = AbstractionsWasmActor::default();
-            match SimpleActorHandlers::init(&mut actor, &config_json) {
-                Ok(()) => String::new(),
-                Err(err) => err,
-            }
+            ActorWorldHandlers::init(&mut actor, &config)
         }
 
-        fn handle(from_actor: String, msg_type: String, payload_json: String) -> String {
-            let op = match parse_op(&msg_type, &payload_json) {
+        fn handle(
+            from_actor: String,
+            msg_type: String,
+            payload: Vec<u8>,
+        ) -> Result<Vec<u8>, String> {
+            let op = match parse_op(&msg_type, &payload) {
                 Ok(op) => op,
-                Err(err) => return json!({ "error": err }).to_string(),
+                Err(err) => return Ok(json_error(err)),
             };
             let mut actor = AbstractionsWasmActor::default();
-            actor
-                .handle_operation(&from_actor, &op, &payload_json)
-                .unwrap_or_else(|err| json!({ "error": err }).to_string())
+            Ok(actor
+                .handle_operation(&from_actor, &op, &payload)
+                .unwrap_or_else(json_error))
         }
 
-        fn get_state() -> String {
-            with_state(|state| serde_json::to_string(state).unwrap_or_else(|_| "{}".to_string()))
+        fn get_state() -> Result<Vec<u8>, String> {
+            with_state(|state| {
+                serde_json::to_vec(state).map_err(|err| format!("state encode failed: {err}"))
+            })
         }
 
-        fn set_state(state_json: String) -> String {
-            if state_json.is_empty() {
-                return String::new();
+        fn set_state(state: Vec<u8>) -> Result<(), String> {
+            if state.is_empty() {
+                return Ok(());
             }
-            match serde_json::from_str::<AbstractionsState>(&state_json) {
+            match serde_json::from_slice::<AbstractionsState>(&state) {
                 Ok(next) => {
                     let mut guard = state_cell().lock().expect("set_state lock");
                     *guard = next;
-                    String::new()
+                    Ok(())
                 }
-                Err(err) => format!("ERROR: invalid state JSON: {}", err),
+                Err(err) => Err(format!("invalid state JSON: {}", err)),
             }
         }
     }
@@ -888,22 +998,14 @@ impl AbstractionsWorkflow {
     }
 
     #[signal_handler("cancel")]
-    async fn cancel(
-        &mut self,
-        _ctx: &ActorContext,
-        _input: Message,
-    ) -> Result<(), BehaviorError> {
+    async fn cancel(&mut self, _ctx: &ActorContext, _input: Message) -> Result<(), BehaviorError> {
         self.signals.push("user".to_string());
         self.status = "cancelled".to_string();
         Ok(())
     }
 
     #[query_handler("status")]
-    async fn status(
-        &self,
-        _ctx: &ActorContext,
-        _input: Message,
-    ) -> Result<Message, BehaviorError> {
+    async fn status(&self, _ctx: &ActorContext, _input: Message) -> Result<Message, BehaviorError> {
         Ok(Message {
             payload: serde_json::to_vec(&json!({
                 "status": self.status,
@@ -919,11 +1021,7 @@ impl AbstractionsWorkflow {
 #[plexspaces_handlers(event)]
 impl AbstractionsChannel {
     #[handler("publish", cast)]
-    async fn publish(
-        &mut self,
-        _ctx: &ActorContext,
-        msg: &Message,
-    ) -> Result<(), BehaviorError> {
+    async fn publish(&mut self, _ctx: &ActorContext, msg: &Message) -> Result<(), BehaviorError> {
         let payload: serde_json::Value =
             serde_json::from_slice(&msg.payload).expect("channel payload");
         let channel = payload
@@ -966,7 +1064,10 @@ mod tests {
             status: "pending".to_string(),
             signals: vec![],
         };
-        assert_eq!(workflow.behavior_type(), plexspaces_core::BehaviorType::Workflow);
+        assert_eq!(
+            workflow.behavior_type(),
+            plexspaces_core::BehaviorType::Workflow
+        );
     }
 
     #[tokio::test]
@@ -1029,11 +1130,14 @@ mod tests {
             None,
         );
         let mut channel = AbstractionsChannel { received: vec![] };
-        let message = new_message("cast", json!({
-            "op": "publish",
-            "channel": "alerts",
-            "body": "hello"
-        }));
+        let message = new_message(
+            "cast",
+            json!({
+                "op": "publish",
+                "channel": "alerts",
+                "body": "hello"
+            }),
+        );
 
         channel
             .handle_message(&ctx, message)

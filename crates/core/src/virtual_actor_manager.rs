@@ -484,11 +484,13 @@ impl VirtualActorManager {
                 activation_strategy,
             },
         );
-        tracing::info!(
-            actor_type = %actor_type,
-            facet_types = ?facet_types,
-            "Registered virtual actor type"
-        );
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
+                actor_type = %actor_type,
+                facet_types = ?facet_types,
+                "Registered virtual actor type"
+            );
+        }
         Ok(())
     }
 

@@ -93,7 +93,7 @@ echo ""
 
 echo "Step 6: Metrics from last run"
 echo "================================================================"
-if [ -n "$LAST_RUN" ] && echo "$LAST_RUN" | grep -q '"pipeline_id"'; then
+if [ -n "$LAST_RUN" ] && echo "$LAST_RUN" | grep -q '"success":true'; then
   export WALL_MS
   export BATCH_RUNS
   export EVENTS_PER_RUN
@@ -105,6 +105,14 @@ p = d.get('payload', d)
 if isinstance(p, str):
   try: p = json.loads(p)
   except: p = {}
+if not isinstance(p, dict):
+  p = {}
+if p.get('error'):
+  print('  Last run error:', p.get('error'))
+  sys.exit(0)
+if not p.get('pipeline_id'):
+  print('  (No pipeline_id in last response; raw payload may be incomplete)')
+  sys.exit(0)
 pid = p.get('pipeline_id', 'N/A')
 status = p.get('status', 'N/A')
 written = p.get('events_written', 0)

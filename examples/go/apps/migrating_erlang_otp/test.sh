@@ -22,6 +22,13 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# Single deploy key and actor HTTP namespace.
+#
+# Root cause when they diverge: resolve_wasm_namespace() uses ApplicationSpec.namespace, then
+# request context namespace, then deploy `name` (see application_service.rs). With an empty spec
+# namespace and typical curl (no x-namespace), WASM actors register under `name`, NOT under
+# application_id. /api/v1/actors/{namespace}/... must use that same namespace — so keep
+# application_id and name identical (app-id maps to namespace).
 APP_ID="erlang-otp-rl"
 MAX_REQUESTS=100
 WINDOW_MS=60000
@@ -76,7 +83,7 @@ sleep 1
 
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
-    -F "name=erlang-otp-rate-limiter" \
+    -F "name=$APP_ID" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" \
     -F "config=@$CONFIG_FILE" 2>&1) || true

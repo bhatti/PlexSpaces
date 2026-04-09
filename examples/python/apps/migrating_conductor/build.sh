@@ -24,7 +24,7 @@ if ! python3 -c "import plexspaces" 2>/dev/null; then
     pip install -e "$SDK_DIR" --quiet
 fi
 
-plexspaces-py build "${ACTOR_NAME}.py" -o "${ACTOR_NAME}.wasm" --wit-dir "$PROJECT_ROOT/wit/plexspaces-simple-actor"
+plexspaces-py build "${ACTOR_NAME}.py" -o "${ACTOR_NAME}.wasm" --wit-dir "$PROJECT_ROOT/wit/plexspaces-actor"
 
 echo "  ✓ ${ACTOR_NAME}.wasm ($(ls -lh ${ACTOR_NAME}.wasm 2>/dev/null | awk '{print $5}' || echo 'built'))"
 echo "Run ./test.sh [HTTP_PORT] to deploy and test."

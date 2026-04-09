@@ -41,27 +41,26 @@
 
 #[cfg(feature = "redis-backend")]
 mod redis_multinode_tests {
-    use plexspaces_proto::tuplespace::v1::RedisStorageConfig;
-    use plexspaces_tuplespace::storage::StorageConfig;
+    use plexspaces_tuplespace::storage::redis::{RedisConfig, RedisStorage};
     use plexspaces_tuplespace::*;
     use std::sync::Arc;
     use std::time::Duration;
 
     /// Create a TupleSpace instance connected to shared Redis
     async fn create_redis_tuplespace(node_id: &str) -> Arc<TupleSpace> {
-        let config = StorageConfig::Redis(RedisStorageConfig {
+        let config = RedisConfig {
             connection_string: "redis://localhost:6379".to_string(),
             pool_size: 10,
             key_prefix: format!("test-multinode-{}", node_id),
             enable_pubsub: false,
-        });
+        };
 
-        let storage = storage::create_storage(config)
+        let storage = RedisStorage::new(config)
             .await
             .expect("Failed to create Redis storage");
 
         Arc::new(TupleSpace::with_storage_and_tenant(
-            storage,
+            Box::new(storage),
             "test-tenant",
             "test-namespace",
         ))
@@ -69,14 +68,14 @@ mod redis_multinode_tests {
 
     /// Helper: Check if Redis is available
     async fn is_redis_available() -> bool {
-        let config = StorageConfig::Redis(RedisStorageConfig {
+        let config = RedisConfig {
             connection_string: "redis://localhost:6379".to_string(),
             pool_size: 1,
             key_prefix: "test-health".to_string(),
             enable_pubsub: false,
-        });
+        };
 
-        storage::create_storage(config).await.is_ok()
+        RedisStorage::new(config).await.is_ok()
     }
 
     #[tokio::test]

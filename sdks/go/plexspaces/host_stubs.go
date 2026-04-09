@@ -446,7 +446,11 @@ func hostApplicationGetStatus(applicationID, nodeID string) string {
 	return `{"node_id":"` + nodeID + `","application":{"application_id":"` + applicationID + `"}}`
 }
 
-func hostHTTPFetch(linkName, method, pathAndQuery, headersJSON, body string) string {
+func hostHTTPFetch(linkName, method, pathAndQuery string, requestWire []byte) string {
+	_ = linkName
+	_ = method
+	_ = pathAndQuery
+	_ = requestWire
 	out, _ := json.Marshal(map[string]any{
 		"status":  200,
 		"headers": map[string]string{},

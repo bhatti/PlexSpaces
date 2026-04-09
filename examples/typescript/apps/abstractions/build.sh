@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-WIT_DIR="$REPO_ROOT/wit/plexspaces-simple-actor"
+WIT_DIR="$REPO_ROOT/wit/plexspaces-actor"
 TARGET_DIR="$REPO_ROOT/target/examples/typescript/abstractions"
 OUTPUT_WASM="$TARGET_DIR/abstractions_actor.wasm"
 
@@ -30,5 +30,5 @@ else
   JCO="./node_modules/.bin/jco"
 fi
 
-$JCO componentize abstractions_actor_bundle.mjs --wit "$WIT_DIR" -o "$OUTPUT_WASM" --disable all
+$JCO componentize abstractions_actor_bundle.mjs --wit "$WIT_DIR" -n actor-world -o "$OUTPUT_WASM" --disable all
 echo "Built TypeScript abstractions WASM component at $OUTPUT_WASM"

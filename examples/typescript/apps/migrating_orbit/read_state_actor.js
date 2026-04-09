@@ -45,6 +45,9 @@ export class ReadStateTrackerActor extends PlexSpacesActor {
         };
     }
     onInit(config) {
+        // user_id should be provided in config when actor is activated via HTTP
+        // For ApplicationSpec deployment, user_id comes from child_spec.args
+        // For virtual actor activation via HTTP, user_id should be built from instance_id in get_or_activate_actor_impl
         const userId = String(config.user_id ?? "");
         if (userId) {
             this.state.user_id = userId;

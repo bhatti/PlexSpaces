@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 TARGET_DIR="$REPO_ROOT/target/examples/go/weather_actor"
-WIT_DIR="$REPO_ROOT/wit/plexspaces-simple-actor"
+WIT_DIR="$REPO_ROOT/wit/plexspaces-actor"
 CORE_WASM="$TARGET_DIR/weather_actor_core.wasm"
 EMBEDDED_WASM="$TARGET_DIR/weather_actor_embedded.wasm"
 OUTPUT_WASM="$TARGET_DIR/weather_actor.wasm"

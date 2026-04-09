@@ -306,7 +306,7 @@ graph TB
 Portable, secure actors:
 
 - **Polyglot Support**: Write actors in Python, TypeScript, Go, or Rust via language-specific SDKs
-- **Two WIT Worlds**: `plexspaces-actor` (typed, for Rust) and `plexspaces:simple-actor` (JSON strings, for Python/TypeScript/Go)
+- **One Canonical WIT Package**: `plexspaces:actor@0.1.0` with `actor-world` for deployable polyglot actors and `plexspaces-actor` for native typed actors
 - **Rich Host Interface**: Messaging (send, ask), actor lifecycle (spawn, stop), linking/monitoring, timers, process groups, elastic pool (checkout/checkin), KV store, TupleSpace, distributed locks, blob storage
 - **Portable**: Run anywhere WASM runs
 - **Secure**: WASM sandbox provides isolation
@@ -604,7 +604,7 @@ Queue and topic patterns for message passing between actors and services:
 
 **UDP Multicast Channels**:
 - Uses UDP multicast for efficient cluster-wide broadcasting
-- Requires `cluster_name` configuration (nodes with same cluster_name can communicate)
+- Requires `cluster_name` configuration (nodes with same cluster_name can communicate). You can set `node.cluster_name` in the release file or override it with the `PLEXSPACES_CLUSTER_NAME` environment variable (handled in `config_manager::initialize`).
 - Best-effort delivery (no ACK/NACK, messages may be lost)
 - Non-durable (messages lost on restart)
 - Ideal for real-time, non-critical cluster messaging

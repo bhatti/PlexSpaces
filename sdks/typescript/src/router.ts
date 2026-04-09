@@ -14,6 +14,7 @@
 //   export const actor = router;
 
 import { PlexSpacesActor } from "./actor.js";
+import { decodeWitPayloadUtf8, encodeWitPayloadUtf8 } from "./wit-payload.js";
 
 /**
  * Factory function that creates an actor instance.
@@ -76,11 +77,12 @@ export class ActorRouter {
     this.factories = routes;
   }
 
-  /** WIT init(config-json) -> string */
-  init(configJson: string): string {
+  /** WIT `init(config: payload) -> result<_, actor-error>` */
+  init(configJson: string | Uint8Array | ArrayBuffer | ArrayBufferView): void {
     try {
-      const config = configJson && configJson.trim()
-        ? JSON.parse(configJson) as Record<string, unknown>
+      const text = decodeWitPayloadUtf8(configJson);
+      const config = text.trim()
+        ? JSON.parse(text) as Record<string, unknown>
         : {};
 
       const actorId = (config.actor_id as string) || "";
@@ -101,37 +103,44 @@ export class ActorRouter {
       }
 
       if (!bestFactory) {
-        return "ERROR: no actor registered for prefix: " + name;
+        throw new Error("ERROR: no actor registered for prefix: " + name);
       }
 
       this.active = bestFactory();
-      return this.active.init(configJson);
-    } catch {
-      return "ERROR: router init failed";
+      this.active.init(text);
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("ERROR:")) {
+        throw e;
+      }
+      throw new Error("ERROR: router init failed");
     }
   }
 
-  /** WIT handle(from-actor, msg-type, payload-json) -> string */
-  handle(fromActor: string, msgType: string, payloadJson: string): string {
+  /** WIT `handle(...) -> result<payload, actor-error>` */
+  handle(
+    fromActor: string,
+    msgType: string,
+    payloadJson: string | Uint8Array | ArrayBuffer | ArrayBufferView,
+  ): Uint8Array {
     if (!this.active) {
-      return '{"error":"no active actor (init not called)"}';
+      return encodeWitPayloadUtf8('{"error":"no active actor (init not called)"}');
     }
     return this.active.handle(fromActor, msgType, payloadJson);
   }
 
-  /** WIT get-state() -> string */
-  getState(): string {
+  /** WIT `get-state() -> result<payload, actor-error>` */
+  getState(): Uint8Array {
     if (!this.active) {
-      return "{}";
+      return encodeWitPayloadUtf8("{}");
     }
     return this.active.getState();
   }
 
-  /** WIT set-state(state-json) -> string */
-  setState(stateJson: string): string {
+  /** WIT `set-state(state: payload) -> result<_, actor-error>` */
+  setState(stateJson: string | Uint8Array | ArrayBuffer | ArrayBufferView): void {
     if (!this.active) {
-      return "ERROR: no active actor";
+      throw new Error("ERROR: no active actor");
     }
-    return this.active.setState(stateJson);
+    this.active.setState(stateJson);
   }
 }

@@ -28,7 +28,7 @@
 //! 3. **Concurrent Access**: Multi-threaded read/write workloads
 //! 4. **Key Patterns**: Sequential vs random access, prefix scans
 //! 5. **Value Sizes**: Small (100B), medium (10KB), large (1MB)
-//! 6. **Backend Comparison**: InMemory vs SQLite performance
+//! 6. **Backend**: SQLite `:memory:` (in-process, no separate InMemory type)
 //!
 //! ## Running Benchmarks
 //! ```bash
@@ -48,20 +48,13 @@
 //! ## Performance Targets
 //! Based on PlexSpaces performance goals (CLAUDE.md):
 //!
-//! ### InMemory Backend
-//! - Single get/put: < 1μs (microsecond)
-//! - Batch operations: > 1M ops/sec
-//! - Concurrent reads: Linear scaling with cores
-//!
-//! ### SQLite Backend
-//! - Single get/put: < 100μs
-//! - Batch operations: > 10K ops/sec
-//! - Concurrent reads: Good (WAL mode)
-//! - Concurrent writes: Sequential (single writer)
+//! ### SQLite `:memory:` (benchmark default)
+//! - Faster than on-disk SQLite; still SQL-backed (not the old pure in-memory type).
+//! - Expect higher latency than a trivial HashMap; tune targets against your baseline.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use plexspaces_core::RequestContext;
-use plexspaces_keyvalue::{InMemoryKVStore, KeyValueStore};
+use plexspaces_keyvalue::{KeyValueStore, SqliteKVStore};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Runtime;
@@ -83,6 +76,15 @@ fn test_value(size: usize) -> Vec<u8> {
 /// Create test RequestContext
 fn test_ctx() -> RequestContext {
     RequestContext::new_without_auth("bench-tenant".to_string(), "bench-namespace".to_string())
+}
+
+/// In-process KV for benchmarks (SQLite `:memory:`).
+fn new_sqlite_memory(rt: &Runtime) -> Arc<SqliteKVStore> {
+    Arc::new(rt.block_on(async {
+        SqliteKVStore::new(":memory:")
+            .await
+            .expect("SqliteKVStore :memory:")
+    }))
 }
 
 /// Benchmark configuration
@@ -122,9 +124,9 @@ fn bench_single_put(c: &mut Criterion) {
     for &size in &[config.small_value_size, config.medium_value_size] {
         group.throughput(Throughput::Bytes(size as u64));
 
-        // InMemory backend
-        group.bench_with_input(BenchmarkId::new("InMemory", size), &size, |b, &size| {
-            let store = Arc::new(InMemoryKVStore::new());
+        // SQLite :memory:
+        group.bench_with_input(BenchmarkId::new("sqlite_mem", size), &size, |b, &size| {
+            let store = new_sqlite_memory(&rt);
             let value = test_value(size);
             let mut counter = 0;
 
@@ -154,9 +156,9 @@ fn bench_single_get(c: &mut Criterion) {
     for &size in &[config.small_value_size, config.medium_value_size] {
         group.throughput(Throughput::Bytes(size as u64));
 
-        // InMemory backend - pre-populate data
-        group.bench_with_input(BenchmarkId::new("InMemory", size), &size, |b, &size| {
-            let store = Arc::new(InMemoryKVStore::new());
+        // SQLite :memory: — pre-populate data
+        group.bench_with_input(BenchmarkId::new("sqlite_mem", size), &size, |b, &size| {
+            let store = new_sqlite_memory(&rt);
             let value = test_value(size);
 
             // Pre-populate 1000 keys
@@ -191,8 +193,8 @@ fn bench_single_delete(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let config = BenchConfig::default();
 
-    group.bench_function("InMemory", |b| {
-        let store = Arc::new(InMemoryKVStore::new());
+    group.bench_function("sqlite_mem", |b| {
+        let store = new_sqlite_memory(&rt);
         let value = test_value(config.small_value_size);
 
         // Pre-populate keys to delete
@@ -226,8 +228,8 @@ fn bench_single_exists(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let config = BenchConfig::default();
 
-    group.bench_function("InMemory", |b| {
-        let store = Arc::new(InMemoryKVStore::new());
+    group.bench_function("sqlite_mem", |b| {
+        let store = new_sqlite_memory(&rt);
         let value = test_value(config.small_value_size);
 
         // Pre-populate 1000 keys
@@ -270,15 +272,18 @@ fn bench_bulk_put(c: &mut Criterion) {
     group.sample_size(10); // Fewer samples for bulk operations
     group.measurement_time(Duration::from_secs(10));
 
-    group.bench_function("InMemory_1000_ops", |b| {
+    group.bench_function("sqlite_mem_1000_ops", |b| {
         let value = test_value(config.small_value_size);
 
         b.to_async(&rt).iter(|| {
-            let store = Arc::new(InMemoryKVStore::new());
             let value = value.clone();
-
-            let ctx = test_ctx();
             async move {
+                let store = Arc::new(
+                    SqliteKVStore::new(":memory:")
+                        .await
+                        .expect("SqliteKVStore :memory:"),
+                );
+                let ctx = test_ctx();
                 for i in 0..config.operation_count {
                     let key = test_key("bulk", i);
                     store.put(&ctx, &key, value.clone()).await.unwrap();
@@ -300,8 +305,8 @@ fn bench_bulk_get(c: &mut Criterion) {
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(10));
 
-    group.bench_function("InMemory_1000_ops", |b| {
-        let store = Arc::new(InMemoryKVStore::new());
+    group.bench_function("sqlite_mem_1000_ops", |b| {
+        let store = new_sqlite_memory(&rt);
         let value = test_value(config.small_value_size);
 
         // Pre-populate data
@@ -346,10 +351,10 @@ fn bench_concurrent_reads(c: &mut Criterion) {
         ));
 
         group.bench_with_input(
-            BenchmarkId::new("InMemory", thread_count),
+            BenchmarkId::new("sqlite_mem", thread_count),
             &thread_count,
             |b, &thread_count| {
-                let store = Arc::new(InMemoryKVStore::new());
+                let store = new_sqlite_memory(&rt);
                 let value = test_value(config.small_value_size);
 
                 // Pre-populate data
@@ -400,8 +405,8 @@ fn bench_mixed_workload(c: &mut Criterion) {
     // 80% reads, 20% writes (typical production ratio)
     group.throughput(Throughput::Elements(config.operation_count as u64));
 
-    group.bench_function("InMemory_80r_20w", |b| {
-        let store = Arc::new(InMemoryKVStore::new());
+    group.bench_function("sqlite_mem_80r_20w", |b| {
+        let store = new_sqlite_memory(&rt);
         let value = test_value(config.small_value_size);
 
         // Pre-populate some data
@@ -452,8 +457,8 @@ fn bench_prefix_scan(c: &mut Criterion) {
     for &count in &[10, 100, 1000] {
         group.throughput(Throughput::Elements(count as u64));
 
-        group.bench_with_input(BenchmarkId::new("InMemory", count), &count, |b, &count| {
-            let store = Arc::new(InMemoryKVStore::new());
+        group.bench_with_input(BenchmarkId::new("sqlite_mem", count), &count, |b, &count| {
+            let store = new_sqlite_memory(&rt);
             let value = test_value(config.small_value_size);
 
             // Pre-populate with multiple prefixes
@@ -493,8 +498,8 @@ fn bench_put_with_ttl(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     let config = BenchConfig::default();
 
-    group.bench_function("InMemory", |b| {
-        let store = Arc::new(InMemoryKVStore::new());
+    group.bench_function("sqlite_mem", |b| {
+        let store = new_sqlite_memory(&rt);
         let value = test_value(config.small_value_size);
         let ttl = Duration::from_secs(60);
 

@@ -375,6 +375,7 @@ Environment variables override file configuration:
 # Set environment variables
 export PLEXSPACES_NODE_ID=node1
 export PLEXSPACES_GRPC_ADDRESS=0.0.0.0:8000
+export PLEXSPACES_CLUSTER_NAME=my-cluster
 export PLEXSPACES_JWT_SECRET=my-secret-key
 
 # Load config (env vars override file values)
@@ -389,6 +390,7 @@ Use `${VAR_NAME}` or `${VAR_NAME:-default}` in YAML:
 node:
   id: "${PLEXSPACES_NODE_ID:-node1}"
   listen_address: "${PLEXSPACES_LISTEN_ADDR:-0.0.0.0:8000}"
+  cluster_name: "${PLEXSPACES_CLUSTER_NAME:-}"
 
 runtime:
   security:

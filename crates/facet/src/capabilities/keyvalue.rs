@@ -425,7 +425,7 @@ impl Facet for KeyValueFacet {
                 }
             }
         }
-        tracing::debug!(actor_id = %actor_id, "KeyValue capability attached to actor");
+        tracing::trace!(actor_id = %actor_id, "KeyValue capability attached to actor");
         Ok(())
     }
 

@@ -10,8 +10,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$SCRIPT_DIR/feature_flags_actor.wasm"
-NODE_ADDR="${1:-localhost:8090}"
-HTTP_PORT="${2:-8091}"
+NODE_ADDR="${1:-localhost:8091}"
+HTTP_PORT="${2:-8092}"
 
 export CARGO_TARGET_DIR="$WORKSPACE_DIR/target"
 
@@ -21,6 +21,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 APP_ID="feature-flags-test"
+ACTOR_TYPE="$APP_ID"
 
 cleanup() {
     echo ""
@@ -72,7 +73,7 @@ sleep 1
 echo "   Deploying via HTTP multipart..."
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
-    -F "name=flags" \
+    -F "name=$APP_ID" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
 
@@ -96,7 +97,7 @@ send_op() {
     local payload="$2"
     
     # Don't hardcode tenant_id - use path format /api/v1/actors/{namespace}/{actor_type}
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/flags" \
+    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || true
     

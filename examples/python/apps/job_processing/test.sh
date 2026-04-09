@@ -14,7 +14,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 APP_ID="job-processing-test"
-ACTOR_NAME="JobProcessor"
+ACTOR_TYPE="$APP_ID"
 
 cleanup() {
     echo ""
@@ -59,7 +59,7 @@ sleep 1
 
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
-    -F "name=$ACTOR_NAME" \
+    -F "name=$APP_ID" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
 
@@ -79,7 +79,7 @@ send_post() {
     local payload="$2"
     
     # Use /ask for request-reply (ask pattern)
-    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME/ask" \
+    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE/ask" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || RESPONSE=""
     

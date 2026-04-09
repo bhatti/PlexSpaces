@@ -8,17 +8,17 @@ pub(super) struct WorkerActor;
 #[plexspaces_handlers(wasm)]
 impl WorkerActor {
     #[handler("init")]
-    fn init_shard(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-        Ok(handle_worker_init(payload_json))
+    fn init_shard(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(handle_worker_init(payload))
     }
 
     #[handler("process_stage")]
     fn process_stage_op(
         &mut self,
         _from_actor: &str,
-        payload_json: &str,
-    ) -> Result<String, String> {
-        Ok(handle_worker_stage(payload_json))
+        payload: &[u8],
+    ) -> Result<Vec<u8>, String> {
+        Ok(handle_worker_stage(payload))
     }
 }
 
@@ -192,12 +192,13 @@ fn process_stage(
     Ok(payload)
 }
 
-pub(super) fn handle_worker_init(payload_json: &str) -> String {
-    let payload: serde_json::Value = match serde_json::from_str(payload_json) {
+pub(super) fn handle_worker_init(payload: &[u8]) -> Vec<u8> {
+    let payload: serde_json::Value = match serde_json::from_slice(payload) {
         Ok(payload) => payload,
         Err(err) => {
-            return serde_json::json!({ "error": format!("invalid init payload: {}", err) })
-                .to_string()
+            return super::json_bytes(
+                serde_json::json!({ "error": format!("invalid init payload: {}", err) }),
+            )
         }
     };
     let shard_index = payload
@@ -222,32 +223,33 @@ pub(super) fn handle_worker_init(payload_json: &str) -> String {
         }),
         "worker init metrics update",
     ) {
-        return serde_json::json!({ "error": err }).to_string();
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
 
-    serde_json::json!({ "status": "ok", "shard_index": shard_index }).to_string()
+    super::json_bytes(serde_json::json!({ "status": "ok", "shard_index": shard_index }))
 }
 
-pub(super) fn handle_worker_stage(payload_json: &str) -> String {
-    let request: WorkerRequest = match serde_json::from_str(payload_json) {
+pub(super) fn handle_worker_stage(payload: &[u8]) -> Vec<u8> {
+    let request: WorkerRequest = match serde_json::from_slice(payload) {
         Ok(request) => request,
         Err(err) => {
-            return serde_json::json!({ "error": format!("invalid stage payload: {}", err) })
-                .to_string()
+            return super::json_bytes(
+                serde_json::json!({ "error": format!("invalid stage payload: {}", err) }),
+            )
         }
     };
 
     let worker = match with_state(|state| state.worker.clone()) {
         Some(worker) => worker,
         None => {
-            return serde_json::json!({ "error": "worker not initialized" }).to_string();
+            return super::json_bytes(serde_json::json!({ "error": "worker not initialized" }));
         }
     };
 
     let coordination_start = host::now_ms();
     let mut payload = match process_stage(&request, &worker) {
         Ok(payload) => payload,
-        Err(err) => return serde_json::json!({ "error": err }).to_string(),
+        Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
     };
     let coordination_time_ms = json_u64(&payload, "coordination_time_ms")
         + host::now_ms().saturating_sub(coordination_start);
@@ -320,8 +322,8 @@ pub(super) fn handle_worker_stage(payload_json: &str) -> String {
         }),
         "worker stage metrics update",
     ) {
-        return serde_json::json!({ "error": err }).to_string();
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
 
-    payload.to_string()
+    super::json_bytes(payload)
 }

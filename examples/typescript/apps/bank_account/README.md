@@ -2,7 +2,7 @@
 
 Same **real-world use case** as the [Python bank_account](../../../python/apps/bank_account/README.md): durable bank account actor with balance, deposit, withdraw, transaction history, and replay. Use case: banking, wallets, financial ledgers.
 
-This example mirrors the Python app: same API and operations. **Verification** runs in Node (no server) via `verify.mjs`. **E2E** runs TypeScript-only: build WASM with `jco componentize` (no Python), deploy to a PlexSpaces node, then HTTP operations.
+This example mirrors the Python app: same API and operations. **Verification** runs in Node (no server) via `verify.mjs`. **E2E** runs TypeScript-only: build WASM with `jco componentize` (no Python), deploy to a running PlexSpaces node, then HTTP `/ask` operations (same pattern as [abstractions](../abstractions/README.md) and [weather_actor](../weather_actor/README.md)).
 
 ## Overview
 
@@ -10,23 +10,29 @@ This example mirrors the Python app: same API and operations. **Verification** r
 - **app-config.toml** – Same supervisor layout as Python (3 accounts).
 - **verify.mjs** – In-process Node script that runs the actor logic and asserts results (no WASM, no server).
 - **scripts/build.sh** – tsc → account_actor.js; esbuild bundle → account_actor_bundle.mjs; jco componentize bundle → account_actor.wasm (--disable all).
-- **test.sh** – Full E2E: start node → build TypeScript WASM → deploy → HTTP operations (no Python).
+- **test.sh** – Build WASM → deploy → HTTP `/ask` banking flow. Expects a node already running (`./scripts/server.sh` from repo root).
 
 ## Prerequisites
 
 - **Node.js** (v18+) and **npm** (TypeScript and jco; run `npm install` in this directory).
 - **PlexSpaces repo** for E2E: `scripts/server.sh` starts a node (HTTP 8092, gRPC 8091). Run `make build` at repo root first.
 
-## Quick Start (full E2E)
+## Quick Start (E2E)
 
 From the **repo root** (so `scripts/server.sh` and `make build` are available):
 
 ```bash
+# Terminal 1: node (HTTP 8092 by default)
+./scripts/server.sh
+
+# Terminal 2: example
 cd examples/typescript/apps/bank_account
 ./test.sh
 ```
 
-**test.sh** runs: start PlexSpaces node → build TypeScript→WASM (jco) → deploy → HTTP banking operations → cleanup. No Python required.
+Optional port: `./test.sh 8094` if your HTTP gateway uses a different port.
+
+**test.sh** runs: build TypeScript→WASM (jco) → deploy → HTTP `/ask` banking operations → undeploy on exit. No Python required.
 
 ## Operations (same as Python)
 
@@ -38,15 +44,14 @@ cd examples/typescript/apps/bank_account
 | History    | `{"op":"history","count":5}`       | `{"transactions":[...]}` |
 | Replay     | `{"op":"replay"}`                | `{"replayed":N,"rebuilt_balance":...}` |
 
-## Scripts (pattern from nbody_wasm)
+## Scripts
 
 | Script | Description |
 |--------|-------------|
-| **test.sh** | Full E2E: start node (scripts/server.sh), build WASM, deploy, HTTP tests |
-| scripts/start_server.sh | Start empty node via repo `scripts/server.sh` (gRPC 8091, HTTP 8092) |
+| **test.sh** | Build WASM, deploy, HTTP `/ask` tests (node must already be running) |
+| scripts/start_server.sh | Convenience: `cd` to repo root and run `scripts/server.sh` |
 | scripts/build.sh | TypeScript → JS (tsc) then jco componentize → account_actor.wasm (no Python) |
-| scripts/deploy.sh | Deploy WASM to running node (curl POST) |
-| scripts/test_e2e.sh | Full E2E flow (start, build, deploy, HTTP ops, cleanup) |
+| scripts/deploy.sh | Deploy WASM to running node (curl multipart) |
 | verify.mjs | In-process verification only (no node) |
 
 ## Files
@@ -57,7 +62,7 @@ cd examples/typescript/apps/bank_account
 | account_actor_bundle.mjs | ESM bundle (actor + SDK) for jco componentize |
 | build-bundle.mjs | Script to produce account_actor_bundle.mjs (esbuild) |
 | app-config.toml | Supervisor config for 3 accounts |
-| test.sh         | Runs scripts/test_e2e.sh (full E2E) |
+| test.sh         | Build, deploy, HTTP example flow |
 | verify.mjs      | Node script that asserts actor behavior (no server) |
 
 ## See Also

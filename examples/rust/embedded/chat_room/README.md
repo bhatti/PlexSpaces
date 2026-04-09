@@ -100,7 +100,10 @@ struct ChatMessage {
     text: String,
 }
 
-let msg = ChatMessage::new("alice", "Hello everyone!");
+let msg = new_message(ChatMessage {
+    from: "alice".to_string(),
+    text: "Hello everyone!".to_string(),
+});
 let payload = serde_json::to_vec(&msg)?;
 let recipients = registry.publish_to_group(&ctx, "general", None, payload).await?;
 ```

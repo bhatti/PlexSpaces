@@ -69,39 +69,17 @@ class WeatherActor extends PlexSpacesActor<WeatherState> {
     return { actor_id: "", cache_hits: 0, cache_misses: 0 };
   }
 
-  override init(configJSON: string): string {
-    try {
-      const cfg = JSON.parse(configJSON) as { actor_id?: string };
-      if (cfg.actor_id) this.state.actor_id = cfg.actor_id;
-    } catch {
-      // ignore parse errors
+  protected override onInit(config: Record<string, unknown>): void {
+    if (typeof config.actor_id === "string" && config.actor_id) {
+      this.state.actor_id = config.actor_id;
     }
     host.log("info", `WeatherActor initialized: ${this.state.actor_id}`);
-    return "";
   }
 
-  override handle(_from: string, msgType: string, payloadJSON: string): string {
-    switch (msgType) {
-      case "get_weather":
-        return this.handleGetWeather(payloadJSON);
-      case "cache_stats":
-        return JSON.stringify({ hits: this.state.cache_hits, misses: this.state.cache_misses });
-      case "clear_cache":
-        this.state.cache_hits = 0;
-        this.state.cache_misses = 0;
-        return JSON.stringify({ cleared: true });
-      default:
-        return JSON.stringify({ error: `unknown message type: ${msgType}` });
-    }
-  }
-
-  private handleGetWeather(payloadJSON: string): string {
+  protected onGet_weather(payload: Record<string, unknown>): Record<string, unknown> {
     let city = "London";
-    try {
-      const req = JSON.parse(payloadJSON) as { city?: string };
-      if (req.city) city = req.city;
-    } catch {
-      // use default
+    if (typeof payload.city === "string" && payload.city) {
+      city = payload.city;
     }
 
     const cacheKey = `weather:${city}`;
@@ -115,7 +93,7 @@ class WeatherActor extends PlexSpacesActor<WeatherState> {
         if (host.nowMs() - fetchedAt < CACHE_TTL_MS) {
           this.state.cache_hits++;
           host.log("debug", `Cache HIT for ${city}`);
-          return JSON.stringify({ ...data, city, source: "cache" });
+          return { ...data, city, source: "cache" };
         }
       } catch {
         // stale or invalid cache — fall through
@@ -142,11 +120,21 @@ class WeatherActor extends PlexSpacesActor<WeatherState> {
       if (cacheWrite.startsWith("ERROR:")) {
         host.log("warn", `Cache write failed for ${city}: ${cacheWrite}`);
       }
-      return JSON.stringify({ ...result, city, source: "api" });
+      return { ...result, city, source: "api" };
     } catch (err) {
       host.log("error", `Weather API call failed: ${err}`);
-      return JSON.stringify({ city, error: String(err), source: "api" });
+      return { city, error: String(err), source: "api" };
     }
+  }
+
+  protected onCache_stats(_payload: Record<string, unknown>): Record<string, unknown> {
+    return { hits: this.state.cache_hits, misses: this.state.cache_misses };
+  }
+
+  protected onClear_cache(_payload: Record<string, unknown>): Record<string, unknown> {
+    this.state.cache_hits = 0;
+    this.state.cache_misses = 0;
+    return { cleared: true };
   }
 }
 
@@ -155,9 +143,12 @@ const router = new ActorRouter({
 });
 
 export const actor = {
-  init: (configJson: string) => router.init(configJson),
-  handle: (from: string, msgType: string, payloadJson: string) =>
-    router.handle(from, msgType, payloadJson),
+  init: (configJson: string | Uint8Array | ArrayBuffer | ArrayBufferView) => router.init(configJson),
+  handle: (
+    from: string,
+    msgType: string,
+    payloadJson: string | Uint8Array | ArrayBuffer | ArrayBufferView
+  ) => router.handle(from, msgType, payloadJson),
   getState: () => router.getState(),
-  setState: (stateJson: string) => router.setState(stateJson),
+  setState: (stateJson: string | Uint8Array | ArrayBuffer | ArrayBufferView) => router.setState(stateJson),
 };

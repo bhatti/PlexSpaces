@@ -10,7 +10,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$SCRIPT_DIR/weather_actor.wasm"
 CONFIG_FILE="$SCRIPT_DIR/app-config.toml"
 HTTP_PORT="${1:-8092}"
-APP_ID="weather-rust-test"
+APP_ID="weather-rust"
 ACTOR_TYPE="weather"
 INSTANCE_ID="default"
 
@@ -59,7 +59,7 @@ curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/de
 sleep 1
 DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
   -F "application_id=$APP_ID" \
-  -F "name=weather-rust" \
+  -F "name=$APP_ID" \
   -F "version=1.0.0" \
   -F "wasm_file=@$WASM_FILE;type=application/wasm" \
   -F "config=@$CONFIG_FILE" 2>&1)

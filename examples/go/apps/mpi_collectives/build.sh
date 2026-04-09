@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-WIT_DIR="$REPO_ROOT/wit/plexspaces-simple-actor"
+WIT_DIR="$REPO_ROOT/wit/plexspaces-actor"
 OUTPUT_WASM="$SCRIPT_DIR/mpi_collectives_actor.wasm"
 export GOCACHE="${GOCACHE:-$REPO_ROOT/.cache/go-build}"
 mkdir -p "$GOCACHE"

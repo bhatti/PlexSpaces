@@ -49,7 +49,7 @@ use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::SystemTime;
 use tokio::sync::RwLock;
 use tokio::time::{interval, sleep, Duration};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Max retries for lease operations when backend returns transient database errors.
 const LEASE_RETRY_MAX: u32 = 3;
@@ -58,17 +58,6 @@ const LEASE_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 fn active_scheduler_nodes() -> &'static StdMutex<HashSet<String>> {
     static ACTIVE: OnceLock<StdMutex<HashSet<String>>> = OnceLock::new();
     ACTIVE.get_or_init(|| StdMutex::new(HashSet::new()))
-}
-
-/// Check if error is a transient database error (readonly, locked, etc.)
-fn is_transient_db_error(e: &str) -> bool {
-    let lower = e.to_lowercase();
-    lower.contains("readonly") 
-        || lower.contains("read-only") 
-        || lower.contains("attempt to write")
-        || lower.contains("database is locked")
-        || lower.contains("code: 517")  // SQLite SQLITE_BUSY
-        || lower.contains("code: 8") // SQLite SQLITE_READONLY
 }
 
 /// Error types for background scheduler
@@ -385,27 +374,33 @@ impl BackgroundScheduler {
                 tokio::select! {
                     _ = interval.tick() => {
                         let mut renew_result = scheduler.renew_lease().await;
-                        let mut renew_attempts = 1u32;
                         for attempt in 1..=LEASE_RETRY_MAX {
                             match &renew_result {
                                 Ok(()) => break,
                                 Err(e) => {
                                     let err_str = e.to_string();
-                                    if is_transient_db_error(&err_str) && attempt < LEASE_RETRY_MAX {
-                                        warn!("Failed to renew lease (try {}/{}): {}", attempt, LEASE_RETRY_MAX, err_str);
+                                    if attempt < LEASE_RETRY_MAX {
+                                        debug!(
+                                            attempt,
+                                            max_attempts = LEASE_RETRY_MAX,
+                                            error = %err_str,
+                                            "Failed to renew lease, retrying"
+                                        );
                                         sleep(LEASE_RETRY_BACKOFF).await;
                                         renew_result = scheduler.renew_lease().await;
-                                        renew_attempts = attempt + 1;
                                     } else {
-                                        break;
+                                        error!(
+                                            attempt,
+                                            max_attempts = LEASE_RETRY_MAX,
+                                            error = %err_str,
+                                            "Failed to renew lease after all attempts"
+                                        );
                                     }
                                 }
                             }
                         }
-                        if let Err(e) = renew_result {
-                            error!("Failed to renew lease (try {}/{}): {}", renew_attempts, LEASE_RETRY_MAX, e);
+                        if renew_result.is_err() {
                             let mut acquire_result = scheduler.acquire_lease().await;
-                            let mut acquire_attempts = 1u32;
                             for attempt in 1..=LEASE_RETRY_MAX {
                                 match &acquire_result {
                                     Ok(new_lease) => {
@@ -416,20 +411,27 @@ impl BackgroundScheduler {
                                     }
                                     Err(acquire_err) => {
                                         let err_str = acquire_err.to_string();
-                                        if is_transient_db_error(&err_str) && attempt < LEASE_RETRY_MAX {
-                                            warn!("Failed to re-acquire lease (try {}/{}): {}", attempt, LEASE_RETRY_MAX, err_str);
+                                        if attempt < LEASE_RETRY_MAX {
+                                            debug!(
+                                                attempt,
+                                                max_attempts = LEASE_RETRY_MAX,
+                                                error = %err_str,
+                                                "Failed to re-acquire lease, retrying"
+                                            );
                                             sleep(LEASE_RETRY_BACKOFF).await;
                                             acquire_result = scheduler.acquire_lease().await;
-                                            acquire_attempts = attempt + 1;
                                         } else {
-                                            error!("Failed to re-acquire lease (try {}/{}): {}", attempt, LEASE_RETRY_MAX, acquire_err);
-                                            break;
+                                            error!(
+                                                attempt,
+                                                max_attempts = LEASE_RETRY_MAX,
+                                                error = %err_str,
+                                                "Failed to re-acquire lease after all attempts"
+                                            );
                                         }
                                     }
                                 }
                             }
-                            if let Err(acquire_err) = acquire_result {
-                                error!("Failed to re-acquire lease (try {}/{}): {}", acquire_attempts, LEASE_RETRY_MAX, acquire_err);
+                            if acquire_result.is_err() {
                                 break;
                             }
                         }

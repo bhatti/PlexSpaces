@@ -1830,57 +1830,6 @@ class UnlinkActorResponse(betterproto.Message):
 
 
 @dataclass(eq=False, repr=False)
-class TerminateActorRequest(betterproto.Message):
-    """
-    Request to terminate an actor gracefully
-
-     ## Purpose
-     Permanently terminates an actor, completing pending work and removing from system.
-     Pairs with SpawnActorRequest for complete lifecycle management.
-    """
-
-    namespace: str = betterproto.string_field(1)
-    """Namespace of the actor"""
-
-    actor_id: str = betterproto.string_field(2)
-    """Actor ID to terminate"""
-
-    force: bool = betterproto.bool_field(3)
-    """
-    Optional: Force termination even if actor has pending messages
-     When false (default): Actor completes pending messages before terminating
-     When true: Actor terminates immediately, pending messages may be lost
-    """
-
-    timeout_ms: int = betterproto.uint64_field(4)
-    """
-    Optional: Timeout for graceful shutdown (in milliseconds)
-     Default: 5000ms (5 seconds)
-     After timeout, actor is forcefully terminated
-    """
-
-
-@dataclass(eq=False, repr=False)
-class TerminateActorResponse(betterproto.Message):
-    """Response from terminating an actor"""
-
-    success: bool = betterproto.bool_field(1)
-    """Whether the actor was successfully terminated"""
-
-    actor_id: str = betterproto.string_field(2)
-    """Actor ID that was terminated"""
-
-    messages_processed: int = betterproto.uint64_field(3)
-    """Number of pending messages that were processed before termination"""
-
-    messages_dropped: int = betterproto.uint64_field(4)
-    """Number of pending messages that were dropped (if force=true)"""
-
-    error_message: str = betterproto.string_field(5)
-    """Error message if success is false"""
-
-
-@dataclass(eq=False, repr=False)
 class CheckActorExistsRequest(betterproto.Message):
     """Request to check if actor exists"""
 
@@ -2544,23 +2493,6 @@ class ActorServiceStub(betterproto.ServiceStub):
             metadata=metadata,
         )
 
-    async def terminate_actor(
-        self,
-        terminate_actor_request: "TerminateActorRequest",
-        *,
-        timeout: Optional[float] = None,
-        deadline: Optional["Deadline"] = None,
-        metadata: Optional["MetadataLike"] = None
-    ) -> "TerminateActorResponse":
-        return await self._unary_unary(
-            "/plexspaces.actor.v1.ActorService/TerminateActor",
-            terminate_actor_request,
-            TerminateActorResponse,
-            timeout=timeout,
-            deadline=deadline,
-            metadata=metadata,
-        )
-
     async def create_shard_group(
         self,
         create_shard_group_request: "CreateShardGroupRequest",
@@ -2898,11 +2830,6 @@ class ActorServiceBase(ServiceBase):
     ) -> "AskReplyResponse":
         raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
 
-    async def terminate_actor(
-        self, terminate_actor_request: "TerminateActorRequest"
-    ) -> "TerminateActorResponse":
-        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
-
     async def create_shard_group(
         self, create_shard_group_request: "CreateShardGroupRequest"
     ) -> "CreateShardGroupResponse":
@@ -3078,14 +3005,6 @@ class ActorServiceBase(ServiceBase):
     ) -> None:
         request = await stream.recv_message()
         response = await self.ask_reply(request)
-        await stream.send_message(response)
-
-    async def __rpc_terminate_actor(
-        self,
-        stream: "grpclib.server.Stream[TerminateActorRequest, TerminateActorResponse]",
-    ) -> None:
-        request = await stream.recv_message()
-        response = await self.terminate_actor(request)
         await stream.send_message(response)
 
     async def __rpc_create_shard_group(
@@ -3282,12 +3201,6 @@ class ActorServiceBase(ServiceBase):
                 grpclib.const.Cardinality.UNARY_UNARY,
                 AskReplyRequest,
                 AskReplyResponse,
-            ),
-            "/plexspaces.actor.v1.ActorService/TerminateActor": grpclib.const.Handler(
-                self.__rpc_terminate_actor,
-                grpclib.const.Cardinality.UNARY_UNARY,
-                TerminateActorRequest,
-                TerminateActorResponse,
             ),
             "/plexspaces.actor.v1.ActorService/CreateShardGroup": grpclib.const.Handler(
                 self.__rpc_create_shard_group,

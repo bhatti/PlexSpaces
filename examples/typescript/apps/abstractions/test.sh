@@ -36,12 +36,20 @@ extract_payload_json() {
 import json, os
 raw = os.environ["RAW_RESPONSE"]
 data = json.loads(raw)
+if not isinstance(data, dict):
+    print(json.dumps({}))
+    raise SystemExit(0)
 payload = data.get("payload", data)
+if payload is None:
+    print(json.dumps({}))
+    raise SystemExit(0)
 if isinstance(payload, str):
     try:
         payload = json.loads(payload)
     except Exception:
         payload = {"value": payload}
+if payload is None:
+    payload = {}
 print(json.dumps(payload))
 PY
 }
@@ -155,9 +163,24 @@ assert_actor_ok "status" "$STATUS"
 ACTOR_PAYLOAD="$(extract_payload_json "$STATUS")"
 INTERNAL_ACTOR_ID="$(PARSED="$ACTOR_PAYLOAD" python3 - <<'PY'
 import json, os
-print(json.loads(os.environ["PARSED"]).get("self_id", ""))
+parsed = json.loads(os.environ["PARSED"])
+obj = parsed if isinstance(parsed, dict) else {}
+print(obj.get("self_id", ""))
 PY
 )"
+COUNT_VALUE="$(PARSED="$ACTOR_PAYLOAD" python3 - <<'PY'
+import json, os
+parsed = json.loads(os.environ["PARSED"])
+obj = parsed if isinstance(parsed, dict) else {}
+v = obj.get("count", "")
+print(v if v is not None else "")
+PY
+)"
+if [ "$COUNT_VALUE" != "2" ] || [ -z "$INTERNAL_ACTOR_ID" ]; then
+  echo -e "${RED}Expected count=2 and a resolved self_id (canonical actor id); check virtual activation${NC}"
+  echo "  payload: $ACTOR_PAYLOAD"
+  exit 1
+fi
 
 echo "Step 4: Timers and reminders"
 assert_actor_ok "schedule_timer" "$(send_actor "$ABSTRACTIONS_ACTOR" '{"op":"schedule_timer","delay_ms":100}' 15)"
@@ -192,7 +215,9 @@ assert_actor_ok "ephemeral increment" "$(send_actor "$EPHEMERAL_ACTOR" '{"op":"i
 EPHEMERAL_UPDATED="$(send_actor "$EPHEMERAL_ACTOR" '{"op":"status"}' 15)"
 EPHEMERAL_INTERNAL_ID="$(PARSED="$(extract_payload_json "$EPHEMERAL_UPDATED")" python3 - <<'PY'
 import json, os
-print(json.loads(os.environ["PARSED"]).get("self_id", ""))
+parsed = json.loads(os.environ["PARSED"])
+obj = parsed if isinstance(parsed, dict) else {}
+print(obj.get("self_id", ""))
 PY
 )"
 STOP_EPHEMERAL_PAYLOAD="$(printf '{"op":"stop_actor","actor_id":"%s"}' "$EPHEMERAL_INTERNAL_ID")"

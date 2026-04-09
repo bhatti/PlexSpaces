@@ -42,6 +42,35 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
+/// Single DEBUG line after facets attach; includes mailbox stats when durability is present.
+async fn debug_log_attached_facets(actor: &Actor, actor_id: &ActorId) {
+    if !tracing::enabled!(tracing::Level::DEBUG) {
+        return;
+    }
+    let attached = actor.facets().read().await.list_facets();
+    if attached.is_empty() {
+        return;
+    }
+    let facet_str = attached.join(", ");
+    if attached.iter().any(|t| t == "durability") {
+        let st = actor.mailbox().get_stats().await;
+        tracing::debug!(
+            actor_id = %actor_id,
+            facets = %facet_str,
+            mailbox_backend = %st.backend_type,
+            mailbox_is_durable = st.is_durable,
+            mailbox_size = st.current_size,
+            "Attached facets"
+        );
+    } else {
+        tracing::debug!(
+            actor_id = %actor_id,
+            facets = %facet_str,
+            "Attached facets"
+        );
+    }
+}
+
 /// ActorFactory implementation
 ///
 /// ## Design
@@ -941,15 +970,8 @@ impl ActorFactory for ActorFactoryImpl {
                 .await
                 .map_err(|e| format!("Failed to attach facet: {}", e))?;
         }
-        if num_facets > 0 && tracing::enabled!(tracing::Level::DEBUG) {
-            let attached = actor.facets().read().await.list_facets();
-            if !attached.is_empty() {
-                tracing::debug!(
-                    actor_id = %normalized_actor_id,
-                    facets = %attached.join(", "),
-                    "Attached facets"
-                );
-            }
+        if num_facets > 0 {
+            debug_log_attached_facets(&actor, &normalized_actor_id).await;
         }
 
         // Spawn the built actor with type information
@@ -1764,15 +1786,8 @@ impl ActorFactoryImpl {
                 .await
                 .map_err(|e| format!("Failed to attach facet: {}", e))?;
         }
-        if num_facets > 0 && tracing::enabled!(tracing::Level::DEBUG) {
-            let attached = actor.facets().read().await.list_facets();
-            if !attached.is_empty() {
-                tracing::debug!(
-                    actor_id = %actor_id,
-                    facets = %attached.join(", "),
-                    "Attached facets"
-                );
-            }
+        if num_facets > 0 {
+            debug_log_attached_facets(&actor, &actor_id).await;
         }
 
         // Use spawn_built_actor_impl - returns ActorRef directly

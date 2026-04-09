@@ -4,21 +4,20 @@
 // WIT actor export functions for TinyGo WASM compilation.
 //
 // These functions implement the Component Model canonical ABI for the
-// plexspaces:simple-actor/actor interface. They use raw uint32 types
+// plexspaces:actor/actor interface. They use raw uint32 types
 // for string parameters (ptr, len pairs) and return values to match
 // the canonical ABI signatures expected by wasm-tools component new.
 //
 // Canonical ABI mapping:
-//   - string param → (ptr: i32, len: i32)
-//   - string return → i32 (pointer to (ptr, len) pair in return area)
-//   - cabi_realloc → memory allocation for host-to-guest string passing
+//   - string / list<u8> params → (ptr: i32, len: i32)
+//   - result<...> return → i32 pointer to in-memory variant (discriminant + ptr/len)
+//   - cabi_realloc → memory allocation for host-to-guest passing
 //   - cabi_post_* → cleanup after host reads return values
 //
-// The host calls these functions to drive the actor lifecycle:
-//   - init(config-json) -> error string (empty = success)
-//   - handle(from, msg-type, payload-json) -> result JSON string
-//   - get-state() -> state JSON string
-//   - set-state(state-json) -> error string (empty = success)
+// The host calls these functions to drive the actor lifecycle. WIT types are
+// result<payload, actor-error> (and result<_, actor-error> for init/set-state):
+// opaque payload bytes on success, host error string on failure. SDK actors may
+// still use JSON inside those bytes; the boundary is raw list<u8>, not a JSON string.
 //
 // This file is excluded from native Go builds (only compiled for wasm).
 
@@ -27,14 +26,22 @@
 package plexspaces
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"strings"
 	"unsafe"
 )
 
-// cabiReturnArea is a fixed buffer where canonical ABI return values are written.
-// The host reads (ptr: u32, len: u32) from this area after function returns.
-var cabiReturnArea [8]byte
+// cabiResultArea stores result<payload, actor-error> in the Component Model
+// canonical in-memory layout (variant with two cases: ok, error):
+//   offset 0: u8 discriminant (0 = ok, 1 = error)
+//   offsets 1-3: padding to 4-byte alignment
+//   offsets 4-7: ptr (list<u8> or string body)
+//   offsets 8-11: byte length
+//
+// Exports return the address of this area (single i32) when the flattened result
+// does not fit in one register.
+var cabiResultArea [12]byte
 
 // cabi_realloc is required by the Component Model canonical ABI.
 // The host calls this to allocate memory in the WASM module for string parameters.
@@ -66,22 +73,59 @@ func ptrToString(ptr, length uint32) string {
 	return unsafe.String((*byte)(unsafe.Pointer(uintptr(ptr))), int(length))
 }
 
-// stringToRetArea writes a string result to the canonical ABI return area.
-// Returns the address of the return area for the host to read (ptr, len).
-func stringToRetArea(s string) uint32 {
-	sLen := uint32(len(s))
-	var sPtr uint32
-	if sLen > 0 {
-		// Allocate a copy so the string data stays alive after return
-		buf := make([]byte, sLen)
-		copy(buf, s)
-		sPtr = uint32(uintptr(unsafe.Pointer(unsafe.SliceData(buf))))
+func clearCabiResultArea() {
+	for i := range cabiResultArea {
+		cabiResultArea[i] = 0
 	}
-	// Write (ptr, len) to return area
-	retPtr := unsafe.Pointer(&cabiReturnArea[0])
-	*(*uint32)(retPtr) = sPtr
-	*(*uint32)(unsafe.Add(retPtr, 4)) = sLen
-	return uint32(uintptr(retPtr))
+}
+
+func cabiResultAreaAddress() uint32 {
+	return uint32(uintptr(unsafe.Pointer(&cabiResultArea[0])))
+}
+
+// copyBytesToGuestAlloc copies data into a cabi_realloc-allocated buffer; returns ptr and length.
+func copyBytesToGuestAlloc(data []byte) (ptr uint32, length uint32) {
+	length = uint32(len(data))
+	if length == 0 {
+		return 0, 0
+	}
+	ptr = cabiRealloc(0, 0, 1, length)
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), len(data))
+	copy(dst, data)
+	return ptr, length
+}
+
+// resultOkPayload encodes result::ok(list<u8>) for handle/get-state responses.
+func resultOkPayload(data []byte) uint32 {
+	clearCabiResultArea()
+	cabiResultArea[0] = 0 // ok
+	ptr, length := copyBytesToGuestAlloc(data)
+	binary.LittleEndian.PutUint32(cabiResultArea[4:], ptr)
+	binary.LittleEndian.PutUint32(cabiResultArea[8:], length)
+	return cabiResultAreaAddress()
+}
+
+// resultOkUnit encodes result::ok for init/set-state success (empty ok payload).
+func resultOkUnit() uint32 {
+	clearCabiResultArea()
+	cabiResultArea[0] = 0
+	binary.LittleEndian.PutUint32(cabiResultArea[4:], 0)
+	binary.LittleEndian.PutUint32(cabiResultArea[8:], 0)
+	return cabiResultAreaAddress()
+}
+
+// resultErr encodes result::error(string) for init/set-state failures.
+func resultErr(msg string) uint32 {
+	clearCabiResultArea()
+	cabiResultArea[0] = 1 // error
+	ptr, length := copyBytesToGuestAlloc([]byte(msg))
+	binary.LittleEndian.PutUint32(cabiResultArea[4:], ptr)
+	binary.LittleEndian.PutUint32(cabiResultArea[8:], length)
+	return cabiResultAreaAddress()
+}
+
+func resultOkJSON(s string) uint32 {
+	return resultOkPayload([]byte(s))
 }
 
 // ========================================================================
@@ -91,27 +135,30 @@ func stringToRetArea(s string) uint32 {
 // init(config-json: string) -> string
 // Canonical ABI: (i32, i32) -> (i32)
 //
-//export plexspaces:simple-actor/actor@0.1.0#init
+//export plexspaces:actor/actor@0.1.0#init
 func wasmInit(configPtr, configLen uint32) uint32 {
 	configJSON := ptrToString(configPtr, configLen)
 	actor := GetRegisteredActor()
 	if actor == nil {
-		return stringToRetArea("ERROR: no actor registered")
+		return resultErr("ERROR: no actor registered")
 	}
-	return stringToRetArea(actor.Init(configJSON))
+	if errMsg := actor.Init(configJSON); errMsg != "" {
+		return resultErr(errMsg)
+	}
+	return resultOkUnit()
 }
 
 // handle(from: string, msg-type: string, payload-json: string) -> string
 // Canonical ABI: (i32, i32, i32, i32, i32, i32) -> (i32)
 //
-//export plexspaces:simple-actor/actor@0.1.0#handle
+//export plexspaces:actor/actor@0.1.0#handle
 func wasmHandle(fromPtr, fromLen, msgTypePtr, msgTypeLen, payloadPtr, payloadLen uint32) uint32 {
 	fromActor := ptrToString(fromPtr, fromLen)
 	msgType := ptrToString(msgTypePtr, msgTypeLen)
 	payloadJSON := ptrToString(payloadPtr, payloadLen)
 	actor := GetRegisteredActor()
 	if actor == nil {
-		return stringToRetArea(`{"error":"no actor registered"}`)
+		return resultOkJSON(`{"error":"no actor registered"}`)
 	}
 	// Resolve operation from payload when envelope is "call" or "cast". Payload key order
 	// (aligned with Rust/Python/TS): message_type (canonical) -> op -> msg_type.
@@ -135,43 +182,46 @@ func wasmHandle(fromPtr, fromLen, msgTypePtr, msgTypeLen, payloadPtr, payloadLen
 	if wa, ok := actor.(WorkflowActor); ok {
 		switch {
 		case msgType == "workflow_run":
-			return stringToRetArea(wa.Run(payloadJSON))
+			return resultOkJSON(wa.Run(payloadJSON))
 		case strings.HasPrefix(msgType, "workflow_signal:"):
 			name := strings.TrimSpace(strings.TrimPrefix(msgType, "workflow_signal:"))
 			wa.Signal(name, payloadJSON)
-			return stringToRetArea("{}")
+			return resultOkJSON("{}")
 		case strings.HasPrefix(msgType, "workflow_query:"):
 			name := strings.TrimSpace(strings.TrimPrefix(msgType, "workflow_query:"))
-			return stringToRetArea(wa.Query(name, payloadJSON))
+			return resultOkJSON(wa.Query(name, payloadJSON))
 		}
 	}
 
-	return stringToRetArea(actor.Handle(fromActor, msgType, payloadJSON))
+	return resultOkJSON(actor.Handle(fromActor, msgType, payloadJSON))
 }
 
 // get-state() -> string
 // Canonical ABI: () -> (i32)
 //
-//export plexspaces:simple-actor/actor@0.1.0#get-state
+//export plexspaces:actor/actor@0.1.0#get-state
 func wasmGetState() uint32 {
 	actor := GetRegisteredActor()
 	if actor == nil {
-		return stringToRetArea("{}")
+		return resultOkJSON("{}")
 	}
-	return stringToRetArea(actor.GetState())
+	return resultOkJSON(actor.GetState())
 }
 
 // set-state(state-json: string) -> string
 // Canonical ABI: (i32, i32) -> (i32)
 //
-//export plexspaces:simple-actor/actor@0.1.0#set-state
+//export plexspaces:actor/actor@0.1.0#set-state
 func wasmSetState(statePtr, stateLen uint32) uint32 {
 	stateJSON := ptrToString(statePtr, stateLen)
 	actor := GetRegisteredActor()
 	if actor == nil {
-		return stringToRetArea("ERROR: no actor registered")
+		return resultErr("ERROR: no actor registered")
 	}
-	return stringToRetArea(actor.SetState(stateJSON))
+	if errMsg := actor.SetState(stateJSON); errMsg != "" {
+		return resultErr(errMsg)
+	}
+	return resultOkUnit()
 }
 
 // ========================================================================
@@ -179,14 +229,14 @@ func wasmSetState(statePtr, stateLen uint32) uint32 {
 // Called by the host after reading the return value.
 // ========================================================================
 
-//export cabi_post_plexspaces:simple-actor/actor@0.1.0#init
+//export cabi_post_plexspaces:actor/actor@0.1.0#init
 func cabiPostInit(_ uint32) {}
 
-//export cabi_post_plexspaces:simple-actor/actor@0.1.0#handle
+//export cabi_post_plexspaces:actor/actor@0.1.0#handle
 func cabiPostHandle(_ uint32) {}
 
-//export cabi_post_plexspaces:simple-actor/actor@0.1.0#get-state
+//export cabi_post_plexspaces:actor/actor@0.1.0#get-state
 func cabiPostGetState(_ uint32) {}
 
-//export cabi_post_plexspaces:simple-actor/actor@0.1.0#set-state
+//export cabi_post_plexspaces:actor/actor@0.1.0#set-state
 func cabiPostSetState(_ uint32) {}

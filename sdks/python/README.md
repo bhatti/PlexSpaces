@@ -128,7 +128,7 @@ class SensorStream:
 
 ### WIT/WASM compatibility (production-grade)
 
-The SDK targets the **plexspaces-simple-actor** WIT world: all data crosses the WASM boundary as **JSON strings** (no raw float/list/dict in WIT). To avoid traps in componentize-py:
+The SDK targets the **plexspaces-actor** WIT world: all data crosses the WASM boundary as **JSON strings** (no raw float/list/dict in WIT). To avoid traps in componentize-py:
 
 1. **State and handler returns**: Use only JSON-serializable types: `str`, `int`, `bool`, `list`, `dict`. Avoid raw `float` in state or return values; use `str` for numbers if needed (the SDK sanitizes float→str at the boundary).
 2. **No in-place mutation of state lists**: Prefer replacing the list instead of `list.append()` then `list.pop(0)` in a loop (e.g. `self.items = (list(self.items) + [new])[-max:]` or build a new list and assign).
@@ -283,7 +283,7 @@ PlexSpaces provides comprehensive host functions for WASM actors, following wasm
 | `host.application_metrics_add(application_id, metrics)` | Merge node-local application metrics delta | `host.application_metrics_add("heat-app", {"counter_metrics": {"worker_messages": 1}})` |
 | `host.application_get_status(application_id, node_id)` | Get per-node application status and metrics | `status = host.application_get_status("heat-app", "test-node-8093")` |
 
-These methods use the same simple-actor WIT host surface as Rust WASM apps. The SDK wrapper is
+These methods use the same actor-world WIT host surface as Rust WASM apps. The SDK wrapper is
 thin: it serializes request/response JSON using the framework field names and delegates to the
 underlying framework `ActorService` and application manager.
 

@@ -116,35 +116,68 @@ fn actor_id_from_initial_state(
         })
 }
 
+/// Merges framework fields into a JSON object for WASM `Init(config_json)`.
+///
+/// ShardGroup and similar paths often pass `initial_state` as `{}` (non-empty bytes). Returning
+/// that verbatim omitted `actor_id`, which breaks multi-role WASM guests (e.g. Go `ActorRouter`)
+/// that route by normalized `actor_id`. When `actor_id` is already present and non-empty, the
+/// payload is left unchanged so materialized virtual-actor configs stay stable.
 fn init_config_from_initial_state_or_child_spec(
     initial_state: &[u8],
     child_spec: &plexspaces_proto::application::v1::ChildSpec,
     actor_id: &str,
 ) -> Vec<u8> {
-    if !initial_state.is_empty() {
-        return initial_state.to_vec();
+    fn apply_child_spec_to_object(
+        obj: &mut serde_json::Map<String, serde_json::Value>,
+        child_spec: &plexspaces_proto::application::v1::ChildSpec,
+        actor_id: &str,
+    ) {
+        obj.insert(
+            "actor_id".to_string(),
+            serde_json::Value::String(actor_id.to_string()),
+        );
+        if let Some(ref bk) = child_spec.behavior_kind {
+            obj.entry("behavior_kind".to_string())
+                .or_insert_with(|| serde_json::Value::String(bk.clone()));
+        }
+        if !child_spec.args.is_empty() {
+            obj.entry("args".to_string()).or_insert_with(|| {
+                let args_obj: serde_json::Map<String, serde_json::Value> = child_spec
+                    .args
+                    .iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                    .collect();
+                serde_json::Value::Object(args_obj)
+            });
+        }
     }
 
-    let mut init_config = serde_json::Map::new();
-    init_config.insert(
-        "actor_id".to_string(),
-        serde_json::Value::String(actor_id.to_string()),
-    );
-    if let Some(ref bk) = child_spec.behavior_kind {
-        init_config.insert(
-            "behavior_kind".to_string(),
-            serde_json::Value::String(bk.clone()),
-        );
+    if initial_state.is_empty() {
+        let mut init_config = serde_json::Map::new();
+        apply_child_spec_to_object(&mut init_config, child_spec, actor_id);
+        return serde_json::to_vec(&serde_json::Value::Object(init_config)).unwrap_or_default();
     }
-    if !child_spec.args.is_empty() {
-        let args_obj: serde_json::Map<String, serde_json::Value> = child_spec
-            .args
-            .iter()
-            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-            .collect();
-        init_config.insert("args".to_string(), serde_json::Value::Object(args_obj));
+
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(initial_state) else {
+        return initial_state.to_vec();
+    };
+    let serde_json::Value::Object(mut obj) = value else {
+        return initial_state.to_vec();
+    };
+
+    let has_actor_id = obj
+        .get("actor_id")
+        .and_then(|v| v.as_str())
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+
+    if !has_actor_id {
+        apply_child_spec_to_object(&mut obj, child_spec, actor_id);
+        return serde_json::to_vec(&serde_json::Value::Object(obj))
+            .unwrap_or_else(|_| initial_state.to_vec());
     }
-    serde_json::to_vec(&serde_json::Value::Object(init_config)).unwrap_or_default()
+
+    initial_state.to_vec()
 }
 
 fn wasm_config_for_child_spec(
@@ -321,14 +354,8 @@ impl Actor for WasmActorBehavior {
         _ctx: &plexspaces_core::ActorContext,
         state_data: &[u8],
     ) -> Result<bool, plexspaces_core::ActorError> {
-        let state_json = String::from_utf8(state_data.to_vec()).map_err(|e| {
-            plexspaces_core::ActorError::BehaviorError(format!(
-                "Checkpoint state is not valid UTF-8 JSON: {}",
-                e
-            ))
-        })?;
         self.instance
-            .set_state_component(&state_json)
+            .set_state_component(state_data)
             .await
             .map_err(|e| plexspaces_core::ActorError::BehaviorError(e.to_string()))?;
         Ok(true)
@@ -654,6 +681,8 @@ impl WasmApplication {
         }
         collect_child_specs(&supervisor_spec, &mut child_specs);
 
+        let behavior_names: Vec<&str> = child_specs.iter().map(|c| c.id.as_str()).collect();
+
         // Register each child spec as a behavior
         let module_hash = self.module_hash.clone();
         let runtime = self.runtime.clone();
@@ -713,12 +742,6 @@ impl WasmApplication {
                     })
                 })
                 .await;
-
-            tracing::info!(
-                application = %self.name,
-                behavior_name = %behavior_name,
-                "Registered WASM behavior for ShardGroup support"
-            );
         }
 
         // Register the registry with ServiceLocator if not already registered
@@ -729,8 +752,8 @@ impl WasmApplication {
         tracing::info!(
             application = %self.name,
             behavior_count = child_specs.len(),
-            "Registered {} behaviors from supervisor tree",
-            child_specs.len()
+            behavior_names = ?behavior_names,
+            "Registered WASM behaviors from supervisor tree for ShardGroup support"
         );
 
         Ok(())
@@ -1335,22 +1358,14 @@ impl WasmApplication {
         // Attach facets from ChildSpec (e.g., LockFacet, RegistryFacet, ProcessGroupFacet, VirtualActorFacet)
         // Facets are attached BEFORE actor.start() so lifecycle hooks work correctly
         let mut has_virtual_actor_facet = false;
+        let mut virtual_actor_registered = false;
+        let mut attached_facet_types: Vec<String> = Vec::new();
         let mut virtual_facet_config = serde_json::Value::Null;
         if !child_spec.facets.is_empty() {
             if let Some(facet_registry_wrapper) = service_locator.get_facet_registry().await {
                 let facet_registry = facet_registry_wrapper.inner_clone();
                 use plexspaces_actor::create_facets_from_proto;
                 let facets = create_facets_from_proto(&child_spec.facets, &facet_registry).await;
-
-                tracing::info!(
-                    actor_id = %actor_id,
-                    child_id = %child_spec.id,
-                    facet_count = child_spec.facets.len(),
-                    created_count = facets.len(),
-                    "📦 WASM: Created {} facets from ChildSpec for actor {}",
-                    facets.len(),
-                    child_spec.id
-                );
 
                 for facet in facets {
                     if let Err(e) = actor.attach_facet(facet).await {
@@ -1365,15 +1380,8 @@ impl WasmApplication {
                 let facets_container = actor.facets();
                 let facets_guard = facets_container.read().await;
                 let attached = facets_guard.list_facets();
-                let attached_list = attached.join(", ");
+                attached_facet_types = attached.clone();
                 drop(facets_guard);
-                if !attached.is_empty() {
-                    tracing::info!(
-                        actor_id = %actor_id,
-                        facets = %attached_list,
-                        "FacetContainer: attached facets"
-                    );
-                }
 
                 // Check if VirtualActorFacet was attached (after all facets are attached)
                 use plexspaces_facet::has_facet_attached;
@@ -1462,13 +1470,32 @@ impl WasmApplication {
                 init_config_template, // Init config template for WASM actors
             )
             .await;
-
-            tracing::info!(
-                actor_id = %actor_id,
-                actor_type = %actor_type,
-                "✅ Registered virtual actor type (enables auto-activation for instances)"
-            );
+            virtual_actor_registered = true;
         }
+
+        let attached_facet_list = if attached_facet_types.is_empty() {
+            "none".to_string()
+        } else {
+            attached_facet_types.join(", ")
+        };
+        let args_keys = if child_spec.args.is_empty() {
+            "none".to_string()
+        } else {
+            let mut keys: Vec<&str> = child_spec.args.keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            keys.join(", ")
+        };
+        tracing::info!(
+            actor_id = %actor_id,
+            child_id = %child_spec.id,
+            behavior_kind = %child_spec.behavior_kind.as_deref().unwrap_or("unknown"),
+            configured_facets = child_spec.facets.len(),
+            attached_facets = %attached_facet_list,
+            has_virtual_actor_facet = has_virtual_actor_facet,
+            virtual_actor_registered = virtual_actor_registered,
+            args_keys = %args_keys,
+            "WASM actor child initialized"
+        );
 
         // NOTE: DurabilityFacet is NOT attached to WASM actors because:
         // 1. WASM actors use host functions for journaling (journal_write, journal_replay)
@@ -1907,7 +1934,7 @@ impl Application for WasmApplication {
         let stop_result = timeout(shutdown_timeout, async {
             // Stop actors in reverse order (children first, then parents)
             let mut errors = Vec::new();
-            let mut stopped_count = 0;
+            let mut stopped_count = 0u32;
 
             for (idx, actor_id) in actor_ids.iter().rev().enumerate() {
                 if let Err(e) = self
@@ -1927,20 +1954,12 @@ impl Application for WasmApplication {
                 }
             }
 
-            tracing::info!(
-                application = %self.name,
-                stopped_count = stopped_count,
-                total_count = actor_ids.len(),
-                error_count = errors.len(),
-                "Actor shutdown completed"
-            );
-
-            errors
+            (errors, stopped_count)
         })
         .await;
 
-        let errors = match stop_result {
-            Ok(errors) => errors,
+        let (errors, stopped_count) = match stop_result {
+            Ok(pair) => pair,
             Err(_) => {
                 let timeout_msg = format!(
                     "Shutdown timeout ({:?}) exceeded while stopping {} actors. Some actors may not have stopped gracefully.",
@@ -1953,7 +1972,7 @@ impl Application for WasmApplication {
                     actor_count = actor_ids.len(),
                     "Shutdown timeout exceeded"
                 );
-                vec![timeout_msg]
+                (vec![timeout_msg], 0)
             }
         };
 
@@ -1988,6 +2007,9 @@ impl Application for WasmApplication {
 
         tracing::info!(
             application = %self.name,
+            stopped_count = stopped_count,
+            total_count = actor_ids.len(),
+            error_count = errors.len(),
             actor_count = final_actor_count,
             "WASM application stopped"
         );
@@ -2806,6 +2828,31 @@ mod tests {
     }
 
     #[test]
+    fn test_init_config_from_empty_json_object_injects_actor_id_for_wasm_router() {
+        let child_spec = plexspaces_proto::application::v1::ChildSpec {
+            id: "worker".to_string(),
+            behavior_kind: Some("GenServer".to_string()),
+            ..Default::default()
+        };
+        let canonical =
+            "01ABC//worker::data-lake-rag-go@test-node-8093".to_string();
+        let init_config = super::init_config_from_initial_state_or_child_spec(
+            b"{}",
+            &child_spec,
+            &canonical,
+        );
+        let value: serde_json::Value = serde_json::from_slice(&init_config).unwrap();
+        assert_eq!(
+            value.get("actor_id").and_then(|v| v.as_str()),
+            Some(canonical.as_str())
+        );
+        assert_eq!(
+            value.get("behavior_kind").and_then(|v| v.as_str()),
+            Some("GenServer")
+        );
+    }
+
+    #[test]
     fn test_init_config_from_child_spec_builds_default_actor_config() {
         let mut child_spec = plexspaces_proto::application::v1::ChildSpec {
             id: "channel".to_string(),
@@ -2850,7 +2897,7 @@ mod tests {
                     "checkpoint_interval".to_string(),
                     "5".to_string(),
                 )]),
-                metadata: std::collections::HashMap::new(),
+                metadata: None,
                 state: std::collections::HashMap::new(),
             }],
             ..Default::default()
@@ -2871,7 +2918,7 @@ mod tests {
                     "activation_strategy".to_string(),
                     "lazy".to_string(),
                 )]),
-                metadata: std::collections::HashMap::new(),
+                metadata: None,
                 state: std::collections::HashMap::new(),
             }],
             ..Default::default()

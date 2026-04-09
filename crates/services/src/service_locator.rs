@@ -2216,11 +2216,15 @@ async fn initialize_services_impl(
     tracing::info!(registered_types = ?facet_registry.list_types(), "📦 FacetRegistry initialized with {} facet types", facet_registry.list_types().len());
 
     // Create and register NodeRegistry (required for node connectivity and SWIM protocol)
-    // NodeRegistry needs ObjectRegistry (concrete type), not trait object
+    // NodeRegistry needs ObjectRegistry (concrete type), not trait object.
+    // Pass service_locator so SWIM gossip can make gRPC calls without a post-construction setter.
     use crate::node_registry::NodeRegistry;
+    let service_locator_for_registry: Arc<dyn plexspaces_core::ServiceLocator> =
+        service_locator_impl.clone();
     let node_registry = Arc::new(NodeRegistry::from_config(
         object_registry.clone(), // Use concrete ObjectRegistryImpl, not trait object
         &final_node_config,
+        Some(service_locator_for_registry),
     ));
     let node_registry_trait: Arc<dyn plexspaces_core::NodeRegistryTrait> = node_registry.clone();
     service_locator

@@ -867,6 +867,13 @@ impl Mailbox {
                     if tracing::enabled!(tracing::Level::TRACE) {
                         tracing::trace!("Mailbox::dequeue: local_receiver not available (attempt {}), falling back to channel backend", attempts);
                     }
+                    // TODO(debug-mailbox): remove or downgrade after tracing why WASM ask messages stall (local_receiver vs channel path).
+                    tracing::info!(
+                        mailbox_id = %mailbox_id,
+                        is_in_memory,
+                        attempt = attempts,
+                        "mailbox dequeue_with_timeout: no local_receiver, using channel backend"
+                    );
                     break; // Fall through to channel backend
                 }
 
@@ -893,6 +900,16 @@ impl Mailbox {
                             "📬 Mailbox::dequeue: ✅ Received message from local_receiver (try_recv)"
                         );
                     }
+                    // TODO(debug-mailbox): remove or downgrade to DEBUG after dequeue investigation.
+                    tracing::info!(
+                        mailbox_id = %mailbox_id,
+                        message_id = %msg.id,
+                        message_type = %message_type_str(&msg),
+                        correlation_id = %msg.correlation_id,
+                        receiver_id = %msg.receiver_id,
+                        source = "local_receiver",
+                        "mailbox dequeue_with_timeout delivered message"
+                    );
 
                     return Some(msg);
                 }
@@ -959,6 +976,16 @@ impl Mailbox {
                                             "📬 Mailbox::dequeue: ✅ Received message from channel (receive)"
                                         );
                                     }
+                                    // TODO(debug-mailbox): remove or downgrade to DEBUG after dequeue investigation.
+                                    tracing::info!(
+                                        mailbox_id = %mailbox_id,
+                                        message_id = %channel_msg.id,
+                                        message_type = %message_type_str(channel_msg),
+                                        correlation_id = %channel_msg.correlation_id,
+                                        receiver_id = %channel_msg.receiver_id,
+                                        source = "channel_receive",
+                                        "mailbox dequeue_with_timeout delivered message"
+                                    );
                                     return Some(channel_msg.clone());
                                 }
                             }
@@ -1011,6 +1038,16 @@ impl Mailbox {
                                             "📬 Mailbox::dequeue: ✅ Received message from channel (try_receive)"
                                         );
                                     }
+                                    // TODO(debug-mailbox): remove or downgrade to DEBUG after dequeue investigation.
+                                    tracing::info!(
+                                        mailbox_id = %mailbox_id,
+                                        message_id = %channel_msg.id,
+                                        message_type = %message_type_str(channel_msg),
+                                        correlation_id = %channel_msg.correlation_id,
+                                        receiver_id = %channel_msg.receiver_id,
+                                        source = "channel_try_receive",
+                                        "mailbox dequeue_with_timeout delivered message"
+                                    );
                                     return Some(channel_msg.clone());
                                 }
                             }

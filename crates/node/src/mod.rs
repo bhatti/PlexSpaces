@@ -248,7 +248,7 @@ impl Node {
                         grpc_connection_pool_size: self.config.grpc_connection_pool_size,
                         metadata: self.config.metadata.clone(),
                         node_registry: None,
-                        grpc_address: String::new(),
+                        grpc_address: self.config.grpc_address.clone(),
                     }
                 }
             } else {
@@ -264,7 +264,7 @@ impl Node {
                     grpc_connection_pool_size: self.config.grpc_connection_pool_size,
                     metadata: self.config.metadata.clone(),
                     node_registry: None,
-                    grpc_address: String::new(),
+                    grpc_address: self.config.grpc_address.clone(),
                 }
             }
         };
@@ -1343,7 +1343,6 @@ impl Node {
         // Register the node in NodeRegistry before starting heartbeats so it is
         // immediately visible to placement and discovery.
         let node_id_str = self.id.as_str().to_string();
-        let listen_addr = self.config.listen_addr.clone();
         let cluster_name = self
             .service_locator
             .get_node_config()
@@ -1366,7 +1365,15 @@ impl Node {
                 .request_context_for_system_operations()
                 .await
         };
-        let grpc_address = format!("http://{}", listen_addr);
+        // Use grpc_address (per-node port) if available; fall back to listen_addr.
+        // Normalize 0.0.0.0/127.0.0.1 → localhost and add http:// scheme for gRPC clients.
+        let effective_addr = self
+            .service_locator
+            .get_node_config()
+            .await
+            .and_then(|c| if !c.grpc_address.is_empty() { Some(c.grpc_address) } else { None })
+            .unwrap_or_else(|| self.config.listen_addr.clone());
+        let grpc_address = plexspaces_common::dialable_node_address(&effective_addr);
 
         if let Some(node_registry) = self.service_locator.get_node_registry().await {
             let mut capabilities = self.config.metadata.clone();
@@ -2940,7 +2947,82 @@ impl Node {
                         })))
                     };
 
+                /// HTTP mirror of `NodeService.ListConnectedNodes` for scripts and debugging.
+                async fn list_connected_nodes_http(
+                    axum::extract::State((
+                        _svc,
+                        _auth_disabled,
+                        _jwt_secret,
+                        service_locator,
+                        _ds,
+                    )): axum::extract::State<HttpGatewayState>,
+                    Query(params): Query<HashMap<String, String>>,
+                ) -> Result<Json<Value>, (StatusCode, String)> {
+                    use plexspaces_core::NodeRegistryTrait;
+
+                    let cluster = params
+                        .get("cluster")
+                        .map(|value| value.as_str())
+                        .filter(|value| !value.is_empty());
+                    let page_size = match params.get("page_size").and_then(|value| value.parse::<i32>().ok()) {
+                        Some(size) if size > 0 => (size as u32).min(1000),
+                        _ => 100,
+                    };
+                    let page_token = params
+                        .get("page_token")
+                        .map(String::as_str)
+                        .unwrap_or("")
+                        .to_string();
+
+                    let node_registry = service_locator
+                        .get_node_registry()
+                        .await
+                        .ok_or_else(|| {
+                            (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                "NodeRegistry not available".to_string(),
+                            )
+                        })?;
+
+                    let ctx = service_locator
+                        .request_context_for_system_operations()
+                        .await;
+
+                    let (nodes, next_page_token) = node_registry
+                        .list_nodes(&ctx, cluster, page_size, &page_token)
+                        .await
+                        .map_err(|error| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("Failed to list nodes: {}", error),
+                            )
+                        })?;
+
+                    let nodes_json: Vec<Value> = nodes
+                        .iter()
+                        .map(|node| {
+                            serde_json::json!({
+                                "node_id": node.node_id,
+                                "node_address": node.node_address,
+                                "capabilities": node.capabilities,
+                                "status": node.status,
+                                "actor_count": node.actor_count,
+                                "message_count": node.message_count,
+                                "error_count": node.error_count,
+                            })
+                        })
+                        .collect();
+
+                    let total_count = i32::try_from(nodes_json.len()).unwrap_or(i32::MAX);
+                    Ok(Json(serde_json::json!({
+                        "nodes": nodes_json,
+                        "next_page_token": next_page_token,
+                        "total_count": total_count,
+                    })))
+                }
+
                 let deploy_router = Router::new()
+                    .route("/api/v1/nodes", get(list_connected_nodes_http))
                     .route("/api/v1/applications/deploy", post(wasm_deploy_handler))
                     .route(
                         "/api/v1/applications/:application_id",
@@ -4703,7 +4785,6 @@ mod tests {
         let cluster_config = ClusterConfig {
             name: "test-cluster".to_string(),
             seed_nodes: vec![],
-            required_service_links: vec![],
             min_nodes: 1,
             auto_discovery: false,
         };
@@ -4724,7 +4805,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_actor_creates_and_returns_ref() {
-        use plexspaces_actor::Actor;
         use plexspaces_behavior::MockBehavior;
         use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
         use std::sync::Arc;
@@ -4734,24 +4814,21 @@ mod tests {
         // Initialize services (registers all services including ActorFactory)
         node.initialize_services().await.unwrap();
 
-        // Create actor
-        let behavior = Box::new(MockBehavior::new());
-        // Create mailbox - Actor::new takes ownership, but we need Arc for ActorRef
-        // So we create a new mailbox for ActorRef after spawning
-        let mailbox = Mailbox::new(
-            mailbox_config_default(),
-            format!("test-mailbox-{}", ulid::Ulid::new()),
-        )
-        .await
-        .unwrap();
-        let actor = Actor::new(
-            "test-actor@test-node".to_string(),
-            behavior,
-            mailbox,
-            "test-tenant".to_string(),
-            "test-namespace".to_string(),
-            None,
-        );
+        // Register a BehaviorRegistry so spawn_actor can create "test" actors
+        {
+            use plexspaces_core::behavior_factory::BehaviorRegistry;
+            let registry = BehaviorRegistry::new();
+            registry
+                .register_simple("test", || {
+                    Box::pin(async move {
+                        Ok(Box::new(MockBehavior::new()) as Box<dyn plexspaces_core::Actor>)
+                    })
+                })
+                .await;
+            node.service_locator()
+                .register_behavior_registry(Arc::new(registry))
+                .await;
+        }
 
         // Get ActorFactory from ServiceLocator using extension trait
         let service_locator = node.service_locator();
@@ -4841,25 +4918,25 @@ mod tests {
         // Initialize services
         node.initialize_services().await.unwrap();
 
+        // Register a BehaviorRegistry so spawn_actor can create "test" actors
+        {
+            use plexspaces_core::behavior_factory::BehaviorRegistry;
+            let registry = BehaviorRegistry::new();
+            registry
+                .register_simple("test", || {
+                    Box::pin(async move {
+                        Ok(Box::new(plexspaces_behavior::MockBehavior::new())
+                            as Box<dyn plexspaces_core::Actor>)
+                    })
+                })
+                .await;
+            node.service_locator()
+                .register_behavior_registry(Arc::new(registry))
+                .await;
+        }
+
         // Create monitor channel
         let (tx, _rx) = mpsc::channel(1);
-
-        // Create actor with normal behavior (panics are converted to errors)
-        let behavior = Box::new(plexspaces_behavior::MockBehavior::new());
-        let mailbox = Mailbox::new(
-            mailbox_config_default(),
-            format!("test-mailbox-{}", ulid::Ulid::new()),
-        )
-        .await
-        .unwrap();
-        let actor = Actor::new(
-            "test-actor@test-node".to_string(),
-            behavior,
-            mailbox,
-            "test-tenant".to_string(),
-            "test-namespace".to_string(),
-            None,
-        );
 
         // Get ActorFactory from ServiceLocator using extension trait
         let service_locator = node.service_locator();
@@ -4870,13 +4947,12 @@ mod tests {
             .expect("ActorFactory should be registered after initialize_services()");
 
         // Test code - spawning test actors
-        // Since spawn_built_actor is not on the ActorFactory trait, we use spawn_actor instead
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
         let internal_ctx = node
             .service_locator()
             .request_context_for_system_operations()
             .await;
-        let actor_id = actor.id().clone();
+        let actor_id = "test-actor@test-node".to_string();
         let _message_sender = actor_factory
             .spawn_actor(
                 &internal_ctx,
@@ -5043,22 +5119,29 @@ mod tests {
     async fn test_find_actor_remote_via_node_id() {
         let node = NodeBuilder::new("node1").build().await;
 
-        // Register remote node in ObjectRegistry (ActorRegistry looks up nodes here)
-        // Note: We no longer use register_remote_node - discovery goes through ObjectRegistry/NodeRegistry
-        use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+        // Register remote node via NodeRegistry so it ends up in the in-memory cache,
+        // which lookup_node checks even when use_shared_db=false.
         let ctx = node
             .service_locator()
             .request_context_for_system_operations()
             .await;
-        let registration = ObjectRegistration {
-            object_type: ObjectType::ObjectTypeNode as i32,
-            object_id: "node2".to_string(),
-            grpc_address: "http://localhost:9999".to_string(),
-            object_category: "Node".to_string(),
-            ..Default::default()
-        };
-        let object_registry = node.service_locator.get_object_registry().await.unwrap();
-        object_registry.register(&ctx, registration).await.unwrap();
+        let node_registry = node
+            .service_locator
+            .get_node_registry()
+            .await
+            .expect("NodeRegistry should be registered");
+        node_registry
+            .register_node(
+                &ctx,
+                plexspaces_proto::node::v1::NodeRegistration {
+                    node_id: "node2".to_string(),
+                    node_address: "http://localhost:9999".to_string(),
+                    status: plexspaces_proto::node::v1::NodeStatus::NodeStatusReady as i32,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
 
         let result = node.lookup_node_address(&crate::NodeId::new("node2")).await;
         assert!(result.is_ok());
@@ -5120,21 +5203,29 @@ mod tests {
             )
             .await;
 
-        // Register node2 in ObjectRegistry on node1 so remote node resolution can succeed.
-        use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
+        // Register node2 in NodeRegistry on node1 so remote node resolution can succeed
+        // (lookup_node checks the in-memory cache, populated by register_node).
         let ctx = node1
             .service_locator()
             .request_context_for_system_operations()
             .await;
-        let registration = ObjectRegistration {
-            object_type: ObjectType::ObjectTypeNode as i32,
-            object_id: "node2".to_string(),
-            grpc_address: "http://localhost:9999".to_string(),
-            object_category: "Node".to_string(),
-            ..Default::default()
-        };
-        let object_registry = node1.service_locator.get_object_registry().await.unwrap();
-        object_registry.register(&ctx, registration).await.unwrap();
+        let node_registry1 = node1
+            .service_locator
+            .get_node_registry()
+            .await
+            .expect("NodeRegistry should be registered");
+        node_registry1
+            .register_node(
+                &ctx,
+                plexspaces_proto::node::v1::NodeRegistration {
+                    node_id: "node2".to_string(),
+                    node_address: "http://localhost:9999".to_string(),
+                    status: plexspaces_proto::node::v1::NodeStatus::NodeStatusReady as i32,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
 
         let result = node1
             .lookup_node_address(&crate::NodeId::new("node2"))

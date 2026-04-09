@@ -44,7 +44,9 @@ use plexspaces_proto::{
     v1::common::Empty,
 };
 use plexspaces_tuplespace::{
-    Lease, OrderedFloat, Pattern, PatternField, Tuple, TupleField, TupleSpaceError,
+    proto_field_to_tuple_field, proto_template_to_pattern, proto_tuple_to_tuple,
+    tuple_field_to_proto_field, tuple_to_proto_tuple, Pattern, Tuple, TupleField,
+    TupleSpaceError,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -87,188 +89,30 @@ impl TupleSpaceServiceImpl {
     fn convert_proto_field_to_internal(
         proto_field: &ProtoTupleField,
     ) -> Result<TupleField, Status> {
-        match &proto_field.value {
-            Some(ProtoValue::Integer(v)) => Ok(TupleField::Integer(*v)),
-            Some(ProtoValue::Float(v)) => Ok(TupleField::Float(OrderedFloat::new(*v))),
-            Some(ProtoValue::String(v)) => Ok(TupleField::String(v.clone())),
-            Some(ProtoValue::Boolean(v)) => Ok(TupleField::Boolean(*v)),
-            Some(ProtoValue::Binary(v)) => Ok(TupleField::Binary(v.clone())),
-            Some(ProtoValue::Null(_)) => Ok(TupleField::Null),
-            Some(ProtoValue::Wildcard(_)) => {
-                // Wildcard is not a value, it's a pattern - error if used in write
-                Err(Status::invalid_argument(
-                    "Wildcard cannot be used as a tuple value (only in patterns)",
-                ))
-            }
-            None => Err(Status::invalid_argument("TupleField must have a value")),
-        }
+        proto_field_to_tuple_field(proto_field)
+            .map_err(|err| Status::invalid_argument(err.to_string()))
     }
 
     /// Convert proto Tuple to internal Tuple
     fn convert_proto_tuple_to_internal(proto_tuple: &ProtoTuple) -> Result<Tuple, Status> {
-        if proto_tuple.fields.is_empty() {
-            return Err(Status::invalid_argument(
-                "Tuple must have at least one field",
-            ));
-        }
-
-        let mut fields = Vec::new();
-        for proto_field in &proto_tuple.fields {
-            fields.push(Self::convert_proto_field_to_internal(proto_field)?);
-        }
-
-        let mut tuple = Tuple::new(fields);
-
-        // Add metadata if present
-        // Proto metadata is map<string, Value> (prost_types::Value), but we store map<string, string>
-        // Extract string value from Value message
-        for (key, value) in &proto_tuple.metadata {
-            // Extract string from prost_types::Value
-            let value_str = if let Some(kind) = &value.kind {
-                match kind {
-                    prost_types::value::Kind::StringValue(s) => s.clone(),
-                    prost_types::value::Kind::NumberValue(n) => n.to_string(),
-                    prost_types::value::Kind::BoolValue(b) => b.to_string(),
-                    prost_types::value::Kind::NullValue(_) => String::new(),
-                    prost_types::value::Kind::ListValue(_) => format!("{:?}", value),
-                    prost_types::value::Kind::StructValue(_) => format!("{:?}", value),
-                }
-            } else {
-                String::new()
-            };
-            tuple = tuple.with_metadata(key.clone(), value_str);
-        }
-
-        // Add lease if present
-        if let Some(proto_lease) = &proto_tuple.lease {
-            if let Some(ttl) = &proto_lease.ttl {
-                use chrono::Duration as ChronoDuration;
-                let duration = ChronoDuration::seconds(ttl.seconds as i64)
-                    + ChronoDuration::nanoseconds(ttl.nanos as i64);
-                let mut lease = Lease::new(duration);
-                if !proto_lease.owner.is_empty() {
-                    lease = lease.with_owner(proto_lease.owner.clone());
-                }
-                if proto_lease.renewable {
-                    lease = lease.renewable();
-                }
-                tuple = tuple.with_lease(lease);
-            }
-        }
-
-        Ok(tuple)
+        proto_tuple_to_tuple(proto_tuple)
+            .map_err(|err| Status::invalid_argument(err.to_string()))
     }
 
     /// Convert proto template (used in read/take) to internal Pattern
     fn convert_proto_template_to_pattern(proto_tuple: &ProtoTuple) -> Result<Pattern, Status> {
-        if proto_tuple.fields.is_empty() {
-            return Err(Status::invalid_argument(
-                "Template must have at least one field",
-            ));
-        }
-
-        let mut pattern_fields = Vec::new();
-        for proto_field in &proto_tuple.fields {
-            match &proto_field.value {
-                Some(ProtoValue::Wildcard(_)) => {
-                    pattern_fields.push(PatternField::Wildcard);
-                }
-                Some(ProtoValue::Integer(v)) => {
-                    pattern_fields.push(PatternField::Exact(TupleField::Integer(*v)));
-                }
-                Some(ProtoValue::Float(v)) => {
-                    pattern_fields.push(PatternField::Exact(TupleField::Float(OrderedFloat::new(
-                        *v,
-                    ))));
-                }
-                Some(ProtoValue::String(v)) => {
-                    pattern_fields.push(PatternField::Exact(TupleField::String(v.clone())));
-                }
-                Some(ProtoValue::Boolean(v)) => {
-                    pattern_fields.push(PatternField::Exact(TupleField::Boolean(*v)));
-                }
-                Some(ProtoValue::Binary(v)) => {
-                    pattern_fields.push(PatternField::Exact(TupleField::Binary(v.clone())));
-                }
-                Some(ProtoValue::Null(_)) => {
-                    pattern_fields.push(PatternField::Exact(TupleField::Null));
-                }
-                None => {
-                    return Err(Status::invalid_argument(
-                        "Pattern field must have a value or wildcard",
-                    ));
-                }
-            }
-        }
-
-        Ok(Pattern::new(pattern_fields))
+        proto_template_to_pattern(proto_tuple)
+            .map_err(|err| Status::invalid_argument(err.to_string()))
     }
 
     /// Convert internal TupleField to proto TupleField
     fn convert_internal_field_to_proto(field: &TupleField) -> ProtoTupleField {
-        let value = match field {
-            TupleField::Integer(v) => Some(ProtoValue::Integer(*v)),
-            TupleField::Float(v) => Some(ProtoValue::Float(v.get())),
-            TupleField::String(v) => Some(ProtoValue::String(v.clone())),
-            TupleField::Boolean(v) => Some(ProtoValue::Boolean(*v)),
-            TupleField::Binary(v) => Some(ProtoValue::Binary(v.clone())),
-            TupleField::Null => Some(ProtoValue::Null(true)),
-        };
-        ProtoTupleField { value }
+        tuple_field_to_proto_field(field)
     }
 
     /// Convert internal Tuple to proto Tuple
     fn convert_internal_tuple_to_proto(tuple: &Tuple) -> ProtoTuple {
-        use plexspaces_proto::tuplespace::v1::Lease as ProtoLease;
-        use prost_types::{Duration as ProtoDuration, Timestamp};
-
-        // Convert lease if present
-        let lease = tuple.lease().map(|lease| {
-            let expires_at = lease.expires_at();
-            let now = Utc::now();
-            let ttl_duration = if expires_at > now {
-                expires_at - now
-            } else {
-                chrono::Duration::zero()
-            };
-
-            ProtoLease {
-                ttl: Some(ProtoDuration {
-                    seconds: ttl_duration.num_seconds(),
-                    nanos: ttl_duration.num_nanoseconds().unwrap_or(0) as i32 % 1_000_000_000,
-                }),
-                owner: lease.owner().map(|s| s.clone()).unwrap_or_default(),
-                renewable: lease.is_renewable(),
-                expires_at: Some(Timestamp {
-                    seconds: expires_at.timestamp(),
-                    nanos: expires_at.timestamp_subsec_nanos() as i32,
-                }),
-            }
-        });
-
-        // Convert metadata (proto expects map<string, Value>, but we have map<string, string>)
-        // Note: Tuple doesn't expose metadata() method, so we'll leave it empty for now
-        // TODO: Add metadata() accessor to Tuple if needed
-        // For now, metadata is not exposed, so we'll use empty map
-
-        let proto_metadata = std::collections::HashMap::new();
-        // Metadata conversion will be implemented when Tuple exposes metadata accessor
-
-        ProtoTuple {
-            id: ulid::Ulid::new().to_string(), // Assign ULID
-            fields: tuple
-                .fields()
-                .iter()
-                .map(Self::convert_internal_field_to_proto)
-                .collect(),
-            timestamp: Some(prost_types::Timestamp {
-                seconds: Utc::now().timestamp(),
-                nanos: 0,
-            }),
-            lease,
-            metadata: proto_metadata,
-            location: None,
-        }
+        tuple_to_proto_tuple(tuple)
     }
 
     /// Convert TupleSpaceError to gRPC Status
@@ -742,6 +586,7 @@ impl TupleSpaceService for TupleSpaceServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_tuplespace::OrderedFloat;
     use tonic::Code;
 
     // Helper to create proto field

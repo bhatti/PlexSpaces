@@ -10,7 +10,7 @@ use plexspaces_core::{Actor, BehaviorType};
 use plexspaces_sdk::{
     actor, event_actor, fsm_actor, gen_server_actor, handler, init_handler, json,
     plexspaces_handlers, query_handler, run_handler, signal_handler,
-    simple_actor::SimpleActorHandlers, workflow_actor, ActorContext, BehaviorError, Message, Value,
+    simple_actor::ActorWorldHandlers, workflow_actor, ActorContext, BehaviorError, Message, Value,
 };
 
 // ============================================================================
@@ -674,19 +674,22 @@ struct TestSimpleWasmActor {
 #[plexspaces_handlers(wasm)]
 impl TestSimpleWasmActor {
     #[init_handler]
-    fn initialize(&mut self, config_json: &str) -> Result<(), String> {
-        self.started = config_json.contains("start");
+    fn initialize(&mut self, config_json: &[u8]) -> Result<(), String> {
+        let s = std::str::from_utf8(config_json).map_err(|e| e.to_string())?;
+        self.started = s.contains("start");
         Ok(())
     }
 
     #[handler("ping")]
-    fn ping(&mut self, from_actor: &str, payload_json: &str) -> Result<String, String> {
+    fn ping(&mut self, from_actor: &str, payload_json: &[u8]) -> Result<Vec<u8>, String> {
+        let payload_str = std::str::from_utf8(payload_json).map_err(|e| e.to_string())?;
         Ok(json!({
             "from_actor": from_actor,
-            "payload": payload_json,
+            "payload": payload_str,
             "started": self.started,
         })
-        .to_string())
+        .to_string()
+        .into_bytes())
     }
 }
 
@@ -694,12 +697,12 @@ impl TestSimpleWasmActor {
 fn test_wasm_gen_server_handlers_dispatch() {
     let mut actor = TestSimpleWasmActor { started: false };
     actor
-        .init(r#"{"start":true}"#)
+        .init(br#"{"start":true}"#)
         .expect("simple actor init should succeed");
     let response = actor
-        .handle_operation("leader@test-node", "ping", r#"{"value":1}"#)
+        .handle_operation("leader@test-node", "ping", br#"{"value":1}"#)
         .expect("simple actor dispatch should succeed");
-    let parsed: Value = serde_json::from_str(&response).expect("valid JSON response");
+    let parsed: Value = serde_json::from_slice(&response).expect("valid JSON response");
     assert_eq!(parsed["from_actor"], "leader@test-node");
     assert_eq!(parsed["payload"], r#"{"value":1}"#);
     assert_eq!(parsed["started"], true);

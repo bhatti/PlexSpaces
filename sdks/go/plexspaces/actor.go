@@ -5,7 +5,7 @@
 //
 // Provides the Actor interface and base implementation for building
 // PlexSpaces actors in Go. Actors implement Init, Handle, GetState,
-// and SetState to be compatible with the simple-actor WIT interface.
+// and SetState to be compatible with the actor-world WIT interface.
 //
 // Example:
 //
@@ -38,7 +38,7 @@ import (
 )
 
 // Actor is the interface that all PlexSpaces actors must implement.
-// It maps directly to the simple-actor WIT interface.
+// It maps directly to the actor-world WIT interface.
 type Actor interface {
 	// Init initializes the actor with a JSON config string.
 	// Returns empty string on success, or error message.

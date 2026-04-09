@@ -16,7 +16,8 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 APP_ID="chat-room-test"
-ACTOR_NAME="ChatRoom"
+# Namespace from deploy `name` must match first URL segment; default child id matches second.
+ACTOR_TYPE="$APP_ID"
 
 cleanup() {
     echo ""
@@ -62,7 +63,7 @@ sleep 1
 
 RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
     -F "application_id=$APP_ID" \
-    -F "name=$ACTOR_NAME" \
+    -F "name=$APP_ID" \
     -F "version=1.0.0" \
     -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
 
@@ -80,7 +81,7 @@ send_post() {
     local desc="$1"
     local payload="$2"
     
-    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME" \
+    RESPONSE=$(curl -s --max-time 10 -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || RESPONSE=""
     
@@ -100,7 +101,7 @@ echo ""
 
 echo "Step 4: Get room members"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-RESPONSE=$(curl -s --max-time 10 -X GET "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME?msg_type=members" 2>/dev/null) || RESPONSE=""
+RESPONSE=$(curl -s --max-time 10 -X GET "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE?msg_type=members" 2>/dev/null) || RESPONSE=""
 if echo "$RESPONSE" | grep -q '"success":true'; then
     echo -e "  ${GREEN}✓${NC} Room has members (Alice, Bob, Charlie)"
 else
@@ -134,7 +135,7 @@ echo ""
 
 echo "Step 9: Get chat history"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-RESPONSE=$(curl -s --max-time 10 -X GET "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_NAME?msg_type=history&limit=10" 2>/dev/null) || RESPONSE=""
+RESPONSE=$(curl -s --max-time 10 -X GET "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE?msg_type=history&limit=10" 2>/dev/null) || RESPONSE=""
 if echo "$RESPONSE" | grep -q '"success":true'; then
     echo -e "  ${GREEN}✓${NC} Chat history retrieved"
 else

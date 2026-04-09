@@ -45,15 +45,15 @@ def componentize_command() -> list[str]:
 
 
 def find_wit_dir() -> str:
-    """Find the WIT directory for simple-actor interface."""
+    """Find the WIT directory for the actor-world interface."""
     # Check common locations
     candidates = [
         # Relative to this file (in SDK)
-        Path(__file__).parent.parent.parent.parent / "wit" / "plexspaces-simple-actor",
+        Path(__file__).parent.parent.parent.parent / "wit" / "plexspaces-actor",
         # Relative to workspace root
-        Path.cwd() / "wit" / "plexspaces-simple-actor",
+        Path.cwd() / "wit" / "plexspaces-actor",
         # Environment variable
-        Path(os.environ.get("PLEXSPACES_WIT_DIR", "")) / "plexspaces-simple-actor",
+        Path(os.environ.get("PLEXSPACES_WIT_DIR", "")) / "plexspaces-actor",
     ]
     
     for candidate in candidates:

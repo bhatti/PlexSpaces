@@ -56,15 +56,34 @@ use tokio::time::{sleep, Duration};
 use tonic::metadata::MetadataValue;
 use tonic::Request;
 
-// Simple WASM module: (module (func (export "test") (result i32) i32.const 42))
-const SIMPLE_WASM: &[u8] = &[
-    0x00, 0x61, 0x73, 0x6d, // Magic: \0asm
-    0x01, 0x00, 0x00, 0x00, // Version: 1
-    0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // Type section
-    0x03, 0x02, 0x01, 0x00, // Function section
-    0x07, 0x08, 0x01, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x00, // Export section
-    0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b, // Code section
-];
+/// WAT source for a minimal WASM actor module that exports memory, init, and handle_message.
+/// init(ptr, len) -> 0 (success), handle_message(6 params) -> 0 (success).
+const SIMPLE_WASM_WAT: &str = r#"
+    (module
+        (memory (export "memory") 1)
+        (func (export "init") (param i32 i32) (result i32)
+            i32.const 0
+        )
+        (func (export "handle_message") (param i32 i32 i32 i32 i32 i32) (result i32)
+            i32.const 0
+        )
+        (func (export "snapshot_state") (result i32 i32)
+            i32.const 0
+            i32.const 0
+        )
+    )
+"#;
+
+/// Lazy-compiled WASM bytes from WAT source.
+fn simple_wasm_bytes() -> Vec<u8> {
+    wat::parse_str(SIMPLE_WASM_WAT).expect("Failed to parse SIMPLE_WASM_WAT")
+}
+
+/// Convenience alias for places that used the old SIMPLE_WASM constant.
+static SIMPLE_WASM_ONCE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+fn get_simple_wasm() -> &'static [u8] {
+    SIMPLE_WASM_ONCE.get_or_init(simple_wasm_bytes)
+}
 
 async fn create_test_node() -> Arc<Node> {
     use plexspaces_node::NodeBuilder;
@@ -265,7 +284,7 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
         name: "test-app".to_string(),
         version: "1.0.0".to_string(),
         version_number: 1,
-        module_bytes: SIMPLE_WASM.to_vec(),
+        module_bytes: get_simple_wasm().to_vec(),
         module_hash: String::new(),
         wit_interface: String::new(),
         source_languages: vec![],
@@ -278,7 +297,7 @@ fn create_wasm_module_with_supervisor_spec() -> (WasmModule, ApplicationSpec) {
             updated_by: String::new(),
         }),
         created_at: None,
-        size_bytes: SIMPLE_WASM.len() as u64,
+        size_bytes: get_simple_wasm().len() as u64,
     };
 
     (wasm_module, app_spec)
@@ -297,13 +316,13 @@ async fn test_deploy_wasm_application_success() {
         name: "test-app".to_string(),
         version: "1.0.0".to_string(),
         version_number: 1,
-        module_bytes: SIMPLE_WASM.to_vec(),
+        module_bytes: get_simple_wasm().to_vec(),
         module_hash: String::new(), // Will be computed by deployment service
         wit_interface: String::new(),
         source_languages: vec![],
         metadata: None,
         created_at: None,
-        size_bytes: SIMPLE_WASM.len() as u64,
+        size_bytes: get_simple_wasm().len() as u64,
     };
 
     // Deploy application
@@ -395,13 +414,13 @@ async fn test_deploy_wasm_application_missing_fields() {
             name: "test-app".to_string(),
             version: "1.0.0".to_string(),
             version_number: 1,
-            module_bytes: SIMPLE_WASM.to_vec(),
+            module_bytes: get_simple_wasm().to_vec(),
             module_hash: String::new(),
             wit_interface: String::new(),
             source_languages: vec![],
             metadata: None,
             created_at: None,
-            size_bytes: SIMPLE_WASM.len() as u64,
+            size_bytes: get_simple_wasm().len() as u64,
         }),
         config: None,
         initial_state: vec![],
@@ -433,13 +452,13 @@ async fn test_get_wasm_application_status() {
         name: "test-app".to_string(),
         version: "1.0.0".to_string(),
         version_number: 1,
-        module_bytes: SIMPLE_WASM.to_vec(),
+        module_bytes: get_simple_wasm().to_vec(),
         module_hash: String::new(),
         wit_interface: String::new(),
         source_languages: vec![],
         metadata: None,
         created_at: None,
-        size_bytes: SIMPLE_WASM.len() as u64,
+        size_bytes: get_simple_wasm().len() as u64,
     };
 
     let deploy_request = DeployApplicationRequest {
@@ -494,13 +513,13 @@ async fn test_list_wasm_applications() {
             name: format!("test-app-{}", i),
             version: "1.0.0".to_string(),
             version_number: 1,
-            module_bytes: SIMPLE_WASM.to_vec(),
+            module_bytes: get_simple_wasm().to_vec(),
             module_hash: String::new(),
             wit_interface: String::new(),
             source_languages: vec![],
             metadata: None,
             created_at: None,
-            size_bytes: SIMPLE_WASM.len() as u64,
+            size_bytes: get_simple_wasm().len() as u64,
         };
 
         let deploy_request = DeployApplicationRequest {

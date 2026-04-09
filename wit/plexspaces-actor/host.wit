@@ -1,0 +1,112 @@
+// PlexSpaces polyglot guest/host ABI.
+//
+// This world is the deployable component ABI for Rust/Python/Go/TypeScript
+// actors. Host operations exchange protobuf wire bytes at the ABI boundary
+// while SDK decorators map those payloads to generated framework message types.
+
+/// Guest actor interface implemented by deployable WASM applications.
+interface actor {
+    use types.{payload, actor-error};
+
+    /// Initialize with protobuf-encoded config bytes.
+    init: func(config: payload) -> result<_, actor-error>;
+
+    /// Handle a message and return protobuf-encoded response bytes.
+    handle: func(from-actor: string, msg-type: string, payload: payload) -> result<payload, actor-error>;
+
+    /// Snapshot actor state as protobuf-encoded bytes.
+    get-state: func() -> result<payload, actor-error>;
+
+    /// Restore actor state from protobuf-encoded bytes.
+    set-state: func(state: payload) -> result<_, actor-error>;
+}
+
+/// Host interface for deployable WASM actors.
+interface host {
+    use types.{payload, actor-error};
+
+    send: func(to: string, msg-type: string, payload: payload) -> result<_, actor-error>;
+    ask: func(to: string, msg-type: string, payload: payload, timeout-ms: u64) -> result<payload, actor-error>;
+    self-id: func() -> string;
+    spawn: func(module-ref: string, actor-id: string, init-config: payload) -> result<string, actor-error>;
+    stop: func(actor-id: string) -> result<_, actor-error>;
+
+    link: func(actor-id: string) -> result<_, actor-error>;
+    unlink: func(actor-id: string) -> result<_, actor-error>;
+    monitor: func(actor-id: string) -> result<string, actor-error>;
+    demonitor: func(monitor-ref: string) -> result<_, actor-error>;
+
+    send-after: func(delay-ms: u64, msg-type: string, payload: payload) -> result<string, actor-error>;
+
+    pg-join: func(group-name: string) -> result<_, actor-error>;
+    pg-leave: func(group-name: string) -> result<_, actor-error>;
+    pg-members: func(group-name: string) -> result<list<string>, actor-error>;
+    pg-broadcast: func(group-name: string, msg-type: string, payload: payload) -> result<_, actor-error>;
+
+    log: func(level: string, message: string);
+    now-ms: func() -> u64;
+
+    kv-get: func(key: string) -> result<payload, actor-error>;
+    kv-put: func(key: string, value: payload) -> result<_, actor-error>;
+    kv-delete: func(key: string) -> result<_, actor-error>;
+    kv-list: func(prefix: string) -> result<list<string>, actor-error>;
+
+    pool-checkout: func(pool-name: string, timeout-ms: u64) -> result<payload, actor-error>;
+    pool-checkin: func(pool-name: string, actor-id: string, checkout-id: string, healthy: bool) -> result<_, actor-error>;
+    pool-get-metrics: func(pool-name: string) -> result<payload, actor-error>;
+
+    create-shard-group: func(request: payload) -> result<payload, actor-error>;
+    bulk-update-shard-group: func(request: payload) -> result<payload, actor-error>;
+    map-shard-group: func(request: payload) -> result<payload, actor-error>;
+    broadcast-shard-group: func(request: payload) -> result<payload, actor-error>;
+    reduce-shard-group: func(request: payload) -> result<payload, actor-error>;
+    all-reduce-shard-group: func(request: payload) -> result<payload, actor-error>;
+    barrier-shard-group: func(request: payload) -> result<payload, actor-error>;
+    scatter-gather: func(request: payload) -> result<payload, actor-error>;
+    spawn-actors: func(request: payload) -> result<payload, actor-error>;
+    application-metrics-add: func(application-id: string, metrics: payload) -> result<payload, actor-error>;
+    application-get-status: func(application-id: string, node-id: string) -> result<payload, actor-error>;
+
+    ts-write: func(tuple-data: payload) -> result<_, actor-error>;
+    ts-read: func(pattern-data: payload) -> result<payload, actor-error>;
+    ts-take: func(pattern-data: payload) -> result<payload, actor-error>;
+    ts-read-all: func(pattern-data: payload) -> result<payload, actor-error>;
+
+    lock-acquire: func(
+        tenant-id: string,
+        namespace: string,
+        holder-id: string,
+        lock-name: string,
+        lease-duration-secs: u32,
+        timeout-ms: u64
+    ) -> result<payload, actor-error>;
+
+    lock-release: func(
+        lock-id: string,
+        tenant-id: string,
+        namespace: string,
+        holder-id: string,
+        lock-version: string
+    ) -> result<_, actor-error>;
+
+    lock-renew: func(
+        lock-id: string,
+        tenant-id: string,
+        namespace: string,
+        holder-id: string,
+        lock-version: string,
+        lease-duration-secs: u32
+    ) -> result<payload, actor-error>;
+
+    blob-upload: func(blob-id: string, data: payload, content-type: string) -> result<string, actor-error>;
+    blob-download: func(blob-id: string) -> result<payload, actor-error>;
+    blob-delete: func(blob-id: string) -> result<_, actor-error>;
+    blob-list: func(prefix: string) -> result<list<string>, actor-error>;
+
+    http-fetch: func(
+        link-name: string,
+        method: string,
+        path-and-query: string,
+        request: payload
+    ) -> result<payload, actor-error>;
+}

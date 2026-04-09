@@ -37,10 +37,10 @@ export declare class DocumentProcessingActor extends WorkflowActor<DocumentProce
     private finishCancelled;
 }
 export declare const actor: {
-    init: (configJson: string) => string;
-    handle: (from: string, msgType: string, payloadJson: string) => string;
-    getState: () => string;
-    setState: (stateJson: string) => string;
+    init: (configJson: string) => void;
+    handle: (from: string, msgType: string, payloadJson: string) => Uint8Array<ArrayBufferLike>;
+    getState: () => Uint8Array<ArrayBufferLike>;
+    setState: (stateJson: string) => void;
 };
 export {};
 //# sourceMappingURL=document_processing_actor.d.ts.map

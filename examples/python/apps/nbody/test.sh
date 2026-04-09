@@ -86,7 +86,7 @@ for i in $(seq 0 $((BODY_COUNT - 1))); do
     # Deploy via HTTP multipart
     RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
         -F "application_id=$APP_ID" \
-        -F "name=$APP_NAME" \
+        -F "name=$APP_ID" \
         -F "version=1.0.0" \
         -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || RESPONSE=""
     
@@ -128,7 +128,7 @@ if [ $DEPLOYED -gt 0 ]; then
         BODY_NAME="${BODY_NAMES[$i]}"
         MASS="${BODY_MASSES[$i]}"
         
-        send_post "$APP_ID" "$BODY_NAME" "Set $BODY_NAME mass" "{\"msg_type\":\"set_mass\",\"payload\":{\"mass\":$MASS}}"
+        send_post "$APP_ID" "$APP_ID" "Set $BODY_NAME mass" "{\"msg_type\":\"set_mass\",\"payload\":{\"mass\":$MASS}}"
     done
     echo ""
     
@@ -136,8 +136,8 @@ if [ $DEPLOYED -gt 0 ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
     # Calculate force between Sun and Mercury
-    send_post "nbody-body-0" "Sun" "Calculate force Sun->Mercury" '{"msg_type":"calculate_force","payload":{"mass":3.285e23,"position":[5.79e10,0,0]}}'
-    send_post "nbody-body-1" "Mercury" "Calculate force Mercury->Sun" '{"msg_type":"calculate_force","payload":{"mass":1.989e30,"position":[0,0,0]}}'
+    send_post "nbody-body-0" "nbody-body-0" "Calculate force Sun->Mercury" '{"msg_type":"calculate_force","payload":{"mass":3.285e23,"position":[5.79e10,0,0]}}'
+    send_post "nbody-body-1" "nbody-body-1" "Calculate force Mercury->Sun" '{"msg_type":"calculate_force","payload":{"mass":1.989e30,"position":[0,0,0]}}'
     echo ""
     
     echo "Step 5: Update positions"
@@ -146,7 +146,7 @@ if [ $DEPLOYED -gt 0 ]; then
     for i in $(seq 0 $((DEPLOYED - 1))); do
         APP_ID="nbody-body-$i"
         BODY_NAME="${BODY_NAMES[$i]}"
-        send_post "$APP_ID" "$BODY_NAME" "Update $BODY_NAME position" '{"msg_type":"update","payload":{"dt":3600}}'
+        send_post "$APP_ID" "$APP_ID" "Update $BODY_NAME position" '{"msg_type":"update","payload":{"dt":3600}}'
     done
     echo ""
     
@@ -157,7 +157,7 @@ if [ $DEPLOYED -gt 0 ]; then
         APP_ID="nbody-body-$i"
         BODY_NAME="${BODY_NAMES[$i]}"
         
-        RESPONSE=$(curl -s --max-time 10 -X GET "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$BODY_NAME?msg_type=get_state" 2>/dev/null) || RESPONSE=""
+        RESPONSE=$(curl -s --max-time 10 -X GET "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$APP_ID?msg_type=get_state" 2>/dev/null) || RESPONSE=""
         
         if echo "$RESPONSE" | grep -q '"success":true'; then
             echo -e "  ${GREEN}✓${NC} $BODY_NAME state retrieved"

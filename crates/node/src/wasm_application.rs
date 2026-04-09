@@ -101,15 +101,27 @@ fn is_wasm_instance_poisoned(error_str: &str) -> bool {
         || lower.contains("cannotentercomponent")
 }
 
-/// Tries to get application-level msg_type (handler name) from JSON payload, e.g. {"msg_type":"ingest","payload":{...}}.
-/// Returns None if payload is not valid JSON or has no msg_type, or msg_type is transport-only ("call"/"cast").
+/// Tries to get application-level message type (handler name) from JSON payload.
+///
+/// **Canonical key**: `message_type`. Aliases: `op` (TypeScript/Python/Go SDK shorthand), `msg_type`.
+/// Order: `message_type` → `op` → `msg_type` (matches `plexspaces-application` WASM routing).
+/// Returns `None` if JSON is invalid, no handler field is set, or the value is transport-only (`call`/`cast`).
 fn try_msg_type_from_payload(payload: &[u8]) -> Option<String> {
     let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
-    let s = value.get("msg_type")?.as_str()?.trim();
-    if s.is_empty() || s.eq_ignore_ascii_case("call") || s.eq_ignore_ascii_case("cast") {
-        return None;
+    let take_str = |key: &str| -> Option<String> {
+        value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+    };
+    for key in ["message_type", "op", "msg_type"] {
+        if let Some(s) = take_str(key) {
+            if !s.is_empty() && !s.eq_ignore_ascii_case("call") && !s.eq_ignore_ascii_case("cast") {
+                return Some(s);
+            }
+        }
     }
-    Some(s.to_string())
+    None
 }
 
 #[async_trait]
@@ -123,10 +135,15 @@ impl Actor for WasmActorBehavior {
         // Reply is sent only when message.sender_id is non-empty (see below); we never default sender_id for reply.
         let from = message.sender_id.as_str();
         let from = if from.is_empty() { "" } else { from };
-        // Pass handler name to WASM so SDK can dispatch: prefer application msg_type from payload (e.g. "ingest"), else envelope message_type ("cast"/"call")
-        let from_payload = try_msg_type_from_payload(&message.payload);
-        let message_type: String = from_payload
-            .clone()
+        // Pass handler name to WASM: payload keys (message_type / op / msg_type), then HTTP header, then envelope ("call"/"cast").
+        let message_type: String = try_msg_type_from_payload(&message.payload)
+            .or_else(|| {
+                message
+                    .headers
+                    .get("x-message-type")
+                    .or_else(|| message.headers.get("X-Message-Type"))
+                    .cloned()
+            })
             .unwrap_or_else(|| message.message_type.clone());
         let message_type = if message_type.is_empty() {
             "cast".to_string()
@@ -601,7 +618,7 @@ impl WasmApplication {
         let tuplespace_provider: Option<Arc<dyn TupleSpaceProvider>> =
             service_locator.get_tuplespace_provider().await;
 
-        // KeyValue store for WASM actors (simple-actor kv_get/kv_put).
+        // KeyValue store for WASM actors (actor-world kv_get/kv_put).
         // Use the shared KeyValueStore from ServiceLocator (initialized during node startup).
         let keyvalue_store: Option<Arc<dyn plexspaces_core::KeyValueStore>> =
             service_locator.get_keyvalue_store().await;
@@ -1816,5 +1833,32 @@ mod tests {
         // Stop should timeout and still succeed (or return timeout error)
         let _result = app.stop().await;
         // assert!(result.is_err() || result.is_ok()); // Either timeout error or force stop
+    }
+
+    #[test]
+    fn test_try_msg_type_from_payload_op_alias() {
+        assert_eq!(
+            super::try_msg_type_from_payload(br#"{"op":"status"}"#),
+            Some("status".to_string())
+        );
+        assert_eq!(
+            super::try_msg_type_from_payload(br#"{"op":"workflow_run","order_id":"o1"}"#),
+            Some("workflow_run".to_string())
+        );
+        assert_eq!(super::try_msg_type_from_payload(br#"{"op":"call"}"#), None);
+        assert_eq!(super::try_msg_type_from_payload(br#"{"op":"cast"}"#), None);
+    }
+
+    #[test]
+    fn test_try_msg_type_from_payload_message_type_canonical() {
+        assert_eq!(
+            super::try_msg_type_from_payload(br#"{"message_type":"workflow_query:status"}"#),
+            Some("workflow_query:status".to_string())
+        );
+        let payload = br#"{"op":"other","message_type":"workflow_run"}"#;
+        assert_eq!(
+            super::try_msg_type_from_payload(payload),
+            Some("workflow_run".to_string())
+        );
     }
 }

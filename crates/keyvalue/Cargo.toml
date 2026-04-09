@@ -67,3 +67,4 @@ doctest = false
 [[bench]]
 name = "keyvalue_benchmarks"
 harness = false
+required-features = ["sql-backend"]

@@ -2,7 +2,7 @@
 
 **Single actor type**: coordinator (`workflow_run`) and **worker pool** workers (`work_available`). Uses **elastic pool API** (checkout/checkin) when the pool is configured, with **tuple space** as the work queue. Falls back to **process group** broadcast when the pool is not available.
 
-This Rust example is a WASM component built with **`wit_bindgen::generate!`** (world `actor-world`), **`#[gen_server_actor(wasm)]`**, and **`plexspaces::simple_actor::host`** (`pool_checkout` / `pool_checkin`, `ts_*`, `pg_*`, `send`, `application_metrics_add`) — the same SDK + WIT pattern as [`migrating_temporal`](../migrating_temporal/README.md) and [`migrating_eflows4hpc`](../migrating_eflows4hpc/README.md).
+This Rust example is a WASM component built with **`wit_bindgen::generate!`** (world `actor-world`), **`#[gen_server_actor(wasm)]`**, and **`plexspaces::actor::host`** (`pool_checkout` / `pool_checkin`, `ts_*`, `pg_*`, `send`, `application_metrics_add`) — the same SDK + WIT pattern as [`migrating_temporal`](../migrating_temporal/README.md) and [`migrating_eflows4hpc`](../migrating_eflows4hpc/README.md).
 
 ## Abstractions
 

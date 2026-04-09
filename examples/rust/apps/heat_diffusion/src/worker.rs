@@ -8,22 +8,23 @@ pub(super) struct WorkerActor;
 #[plexspaces_handlers(wasm)]
 impl WorkerActor {
     #[handler("init")]
-    fn init_region(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-        Ok(handle_worker_init(payload_json))
+    fn init_region(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(handle_worker_init(payload))
     }
 
     #[handler("compute")]
-    fn compute_region(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-        Ok(handle_worker_compute(payload_json))
+    fn compute_region(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(handle_worker_compute(payload))
     }
 }
 
-pub(super) fn handle_worker_init(payload_json: &str) -> String {
-    let payload: serde_json::Value = match serde_json::from_str(payload_json) {
+pub(super) fn handle_worker_init(payload: &[u8]) -> Vec<u8> {
+    let payload: serde_json::Value = match serde_json::from_slice(payload) {
         Ok(payload) => payload,
         Err(err) => {
-            return serde_json::json!({ "error": format!("invalid init payload: {}", err) })
-                .to_string()
+            return super::json_bytes(
+                serde_json::json!({ "error": format!("invalid init payload: {}", err) }),
+            )
         }
     };
     let region_id = payload
@@ -48,23 +49,24 @@ pub(super) fn handle_worker_init(payload_json: &str) -> String {
         }),
         "worker init metrics update",
     ) {
-        return serde_json::json!({ "error": err }).to_string();
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
-    serde_json::json!({ "status": "ok", "region_id": region_id }).to_string()
+    super::json_bytes(serde_json::json!({ "status": "ok", "region_id": region_id }))
 }
 
-pub(super) fn handle_worker_compute(payload_json: &str) -> String {
-    let request: ComputeRequest = match serde_json::from_str(payload_json) {
+pub(super) fn handle_worker_compute(payload: &[u8]) -> Vec<u8> {
+    let request: ComputeRequest = match serde_json::from_slice(payload) {
         Ok(request) => request,
         Err(err) => {
-            return serde_json::json!({ "error": format!("invalid compute payload: {}", err) })
-                .to_string()
+            return super::json_bytes(
+                serde_json::json!({ "error": format!("invalid compute payload: {}", err) }),
+            )
         }
     };
     let mut region = match with_state(|state| state.worker.clone()) {
         Some(region) => region,
         None => {
-            return serde_json::json!({ "error": "worker not initialized" }).to_string();
+            return super::json_bytes(serde_json::json!({ "error": "worker not initialized" }));
         }
     };
 
@@ -73,13 +75,11 @@ pub(super) fn handle_worker_compute(payload_json: &str) -> String {
         build_boundary_tuple("north", request.iteration, region.region_id, &region.data);
     let south_tuple =
         build_boundary_tuple("south", request.iteration, region.region_id, &region.data);
-    let north_write = host::ts_write(&north_tuple);
-    if north_write.starts_with("ERROR:") {
-        return serde_json::json!({ "error": north_write }).to_string();
+    if let Err(err) = host::ts_write(&north_tuple) {
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
-    let south_write = host::ts_write(&south_tuple);
-    if south_write.starts_with("ERROR:") {
-        return serde_json::json!({ "error": south_write }).to_string();
+    if let Err(err) = host::ts_write(&south_tuple) {
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
 
     let north = if region.region_id > 0 {
@@ -88,7 +88,10 @@ pub(super) fn handle_worker_compute(payload_json: &str) -> String {
             request.iteration,
             region.region_id - 1,
         ));
-        parse_tuple_line(&response).unwrap_or_else(|| region.fixed_boundary.clone())
+        match response {
+            Ok(response) => parse_tuple_line(&response).unwrap_or_else(|| region.fixed_boundary.clone()),
+            Err(_) => region.fixed_boundary.clone(),
+        }
     } else {
         region.fixed_boundary.clone()
     };
@@ -98,7 +101,10 @@ pub(super) fn handle_worker_compute(payload_json: &str) -> String {
             request.iteration,
             region.region_id + 1,
         ));
-        parse_tuple_line(&response).unwrap_or_else(|| region.fixed_boundary.clone())
+        match response {
+            Ok(response) => parse_tuple_line(&response).unwrap_or_else(|| region.fixed_boundary.clone()),
+            Err(_) => region.fixed_boundary.clone(),
+        }
     } else {
         region.fixed_boundary.clone()
     };
@@ -153,9 +159,9 @@ pub(super) fn handle_worker_compute(payload_json: &str) -> String {
         }),
         "worker compute metrics update",
     ) {
-        return serde_json::json!({ "error": err }).to_string();
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
-    serde_json::json!({
+    super::json_bytes(serde_json::json!({
         "status": "ok",
         "actor_id": host::self_id(),
         "role": "worker",
@@ -168,6 +174,5 @@ pub(super) fn handle_worker_compute(payload_json: &str) -> String {
         "messages_processed": 1,
         "tuple_operations": tuple_operations,
         "errors": 0,
-    })
-    .to_string()
+    }))
 }

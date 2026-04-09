@@ -38,10 +38,10 @@ export declare class OrderFulfillmentActor extends WorkflowActor<OrderFulfillmen
     private compensate;
 }
 export declare const actor: {
-    init: (configJson: string) => string;
-    handle: (from: string, msgType: string, payloadJson: string) => string;
-    getState: () => string;
-    setState: (stateJson: string) => string;
+    init: (configJson: string) => void;
+    handle: (from: string, msgType: string, payloadJson: string) => Uint8Array<ArrayBufferLike>;
+    getState: () => Uint8Array<ArrayBufferLike>;
+    setState: (stateJson: string) => void;
 };
 export {};
 //# sourceMappingURL=order_fulfillment_actor.d.ts.map

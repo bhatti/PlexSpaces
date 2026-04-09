@@ -40,7 +40,7 @@ curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/de
 sleep 1
 DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
   -F "application_id=$APP_ID" \
-  -F "name=migrating-kueue-scheduler-py" \
+  -F "name=$APP_ID" \
   -F "version=1.0.0" \
   -F "wasm_file=@$WASM_FILE;type=application/wasm" \
   -F "config=@$CONFIG_FILE" 2>&1)
@@ -60,11 +60,15 @@ send_op() {
 
 echo "Step 2: Submit jobs (priority order)"
 send_op "sched-1" '{"op":"submit","job_id":"j1","priority":5,"gpu_request":2}' 10
+echo ""
 send_op "sched-1" '{"op":"submit","job_id":"j2","priority":10,"gpu_request":1}' 10
+echo ""
 send_op "sched-1" '{"op":"submit","job_id":"j3","priority":3,"gpu_request":4}' 10
+echo ""
 if send_op "sched-1" '{"op":"submit","job_id":"j4","priority":8,"gpu_request":2}' 10 | grep -q '"ok":true'; then
   echo -e "  ${GREEN}Submitted j1,j2,j3,j4${NC}"
 fi
+echo ""
 
 echo "Step 3: Allocate (with lock) – should return highest priority job"
 ALLOC=$(send_op "sched-1" '{"op":"allocate"}' 15)
@@ -79,7 +83,13 @@ send_op "sched-1" '{"op":"list_queue"}' 10 | head -c 140
 echo "..."
 
 echo "Step 5: Complete j2, allocate again"
-send_op "sched-1" '{"op":"complete","job_id":"j2"}' 10
+CMP=$(send_op "sched-1" '{"op":"complete","job_id":"j2"}' 10)
+echo "  complete j2: $(echo "$CMP" | head -c 200)"
+if echo "$CMP" | grep -q '"ok":true'; then
+  echo -e "  ${GREEN}complete j2 ok${NC}"
+else
+  echo -e "  ${RED}complete j2 failed (expected ok after allocate j2)${NC}"
+fi
 ALLOC2=$(send_op "sched-1" '{"op":"allocate"}' 10)
 if echo "$ALLOC2" | grep -q '"job_id"'; then
   echo -e "  ${GREEN}Completed j2, allocated next${NC}"

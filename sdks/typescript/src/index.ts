@@ -6,6 +6,7 @@
 // Build actors with minimal boilerplate via inheritance (mirrors Python SDK's decorators).
 
 export { PlexSpacesActor, WorkflowActor } from "./actor.js";
+export { decodeWitPayloadUtf8, encodeWitPayloadUtf8 } from "./wit-payload.js";
 export {
   actor,
   gen_server_actor,

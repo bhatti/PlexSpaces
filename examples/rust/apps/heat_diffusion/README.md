@@ -47,7 +47,7 @@ flowchart TD
 
 ## APIs used
 
-- `plexspaces:simple-actor` WIT host
+- `plexspaces:actor` WIT host
 - Rust SDK WASM annotations: `#[gen_server_actor(wasm)]`, `#[plexspaces_handlers(wasm)]`, `#[handler(...)]`
 - ShardGroup create / bulk-update / scatter-gather
 - TupleSpace `ts-write` / `ts-read`
@@ -83,7 +83,7 @@ The test script:
 ## Metrics model
 
 Each node keeps local application metrics for the deployed app instance. The worker and leader update
-node-local `ApplicationMetrics` through the simple-actor WIT host, and the leader aggregates those
+node-local `ApplicationMetrics` through the actor-world WIT host, and the leader aggregates those
 per-node snapshots via `application-get-status` after the scatter/gather run completes.
 
 That means the final benchmark output reflects:

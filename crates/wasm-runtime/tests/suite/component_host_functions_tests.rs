@@ -172,7 +172,7 @@ mod tests {
                 _from: &str,
                 _to: &str,
                 _message_type: &str,
-                _message: &str,
+                _message: &[u8],
             ) -> Result<(), String> {
                 Ok(())
             }
@@ -296,7 +296,7 @@ mod tests {
                 _from: &str,
                 _to: &str,
                 _message_type: &str,
-                _message: &str,
+                _message: &[u8],
             ) -> Result<(), String> {
                 Ok(())
             }
@@ -568,7 +568,7 @@ mod tests {
                 _from: &str,
                 _to: &str,
                 _message_type: &str,
-                _message: &str,
+                _message: &[u8],
             ) -> Result<(), String> {
                 Ok(())
             }
@@ -707,7 +707,7 @@ mod tests {
                 _from: &str,
                 _to: &str,
                 _message_type: &str,
-                _message: &str,
+                _message: &[u8],
             ) -> Result<(), String> {
                 Ok(())
             }

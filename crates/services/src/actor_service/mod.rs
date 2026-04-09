@@ -119,6 +119,7 @@
 
 use async_trait::async_trait;
 use futures::future::join_all;
+use serde::Deserialize;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio_stream::Stream;
@@ -406,8 +407,13 @@ impl ActorServiceImpl {
         } else if payload.is_empty() {
             Ok(Vec::new())
         } else {
-            serde_json::from_slice::<serde_json::Value>(payload)
-                .map_err(|e| Status::invalid_argument(format!("Invalid JSON payload: {}", e)))?;
+            // Deserialize only the first JSON value; do not require end-of-input (matches Python
+            // `payload_from_request_json`, which uses raw_decode on "Extra data"). Some gateways
+            // or clients append a second JSON document or stray bytes after a valid object.
+            let mut de = serde_json::Deserializer::from_slice(payload);
+            let _: serde_json::Value = Deserialize::deserialize(&mut de).map_err(|e| {
+                Status::invalid_argument(format!("Invalid JSON payload: {}", e))
+            })?;
             Ok(payload.to_vec())
         }
     }
@@ -454,7 +460,7 @@ impl ActorServiceImpl {
         &self,
         ctx: RequestContext,
         requested_actor_type: &str,
-        message: Message,
+        mut message: Message,
         wait_for_response: bool,
         timeout: Option<Duration>,
     ) -> Result<(String, String, Option<Message>), Status> {
@@ -462,6 +468,7 @@ impl ActorServiceImpl {
             .canonical_actor_id_from_client_target(&ctx, requested_actor_type)
             .await
             .unwrap_or_else(|| requested_actor_type.to_string());
+        Self::set_message_receiver_id(&mut message, &requested_target);
 
         match self
             .route_message(
@@ -505,6 +512,7 @@ impl ActorServiceImpl {
                 }
 
                 let resolved_actor_id = resolved_actor_id.ok_or(status)?;
+                Self::set_message_receiver_id(&mut message, &resolved_actor_id);
                 let (message_id, reply) = self
                     .route_message(ctx, &resolved_actor_id, message, wait_for_response, timeout)
                     .await?;
@@ -512,6 +520,12 @@ impl ActorServiceImpl {
             }
             Err(status) => Err(status),
         }
+    }
+
+    /// Canonicalize receiver_id at the service boundary so actors always observe the
+    /// resolved framework-owned actor id rather than a client alias such as `type:id`.
+    fn set_message_receiver_id(message: &mut Message, resolved_actor_id: &str) {
+        message.receiver_id = resolved_actor_id.to_string();
     }
 
     /// Check if service should accept requests (not shutting down)
@@ -2229,6 +2243,15 @@ impl ActorServiceImpl {
                     .list_nodes(ctx, cluster, 1000, "")
                     .await
                     .map_err(|e| format!("list_nodes failed: {}", e))?;
+                if registrations.is_empty() {
+                    tracing::warn!(
+                        local_node_id = %local_node_id,
+                        list_cluster_filter = ?cluster,
+                        node_config_cluster_name = %local_cluster,
+                        placement_cluster_field = %placement.cluster,
+                        "from_registry placement: list_nodes returned zero members (SWIM/cache empty or cluster label filter excluded all nodes)"
+                    );
+                }
                 registrations
                     .into_iter()
                     .map(|registration| registration.node_id)
@@ -4212,6 +4235,14 @@ mod tests {
             false
         }
 
+        async fn kickoff_seed_reconcile_ping(
+            &self,
+            _node_id: String,
+            _node_address: String,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            Ok(())
+        }
+
         async fn cache_stats(&self) -> (usize, usize, StdDuration) {
             (self.nodes.len(), 0, StdDuration::from_secs(0))
         }
@@ -4362,11 +4393,17 @@ mod tests {
         use plexspaces_core::ServiceLocator as ServiceLocatorTrait;
         // Create ServiceLocatorImpl directly
         let service_locator_impl = Arc::new(ServiceLocatorImpl::new());
-        // Register actor_registry using strongly-typed method
+        // Disable auth so tests can call gRPC methods without JWT
         service_locator_impl
-            .register_actor_registry(actor_registry.clone())
+            .register_security_config(plexspaces_proto::node::v1::SecurityConfig {
+                disable_auth: true,
+                ..Default::default()
+            })
             .await;
-        // Initialize with default services
+        // Initialize services first — this registers GrpcConnectionManager and other
+        // services.  The idempotency guard in initialize_services triggers on
+        // actor_registry being present, so we must NOT register actor_registry before
+        // this call.
         service_locator_impl
             .initialize_services(Some(plexspaces_proto::node::v1::ReleaseSpec {
                 node: Some(plexspaces_proto::node::v1::NodeConfig {
@@ -4380,6 +4417,19 @@ mod tests {
                 }),
                 ..Default::default()
             }))
+            .await;
+        // Override actor_registry with the test-specific one (which has test actors).
+        // VirtualActorManager must always be present in the actor-registry; set it here.
+        {
+            use plexspaces_core::VirtualActorManager;
+            let virtual_actor_manager =
+                Arc::new(VirtualActorManager::new(actor_registry.clone()));
+            actor_registry
+                .set_virtual_actor_manager(virtual_actor_manager)
+                .await;
+        }
+        service_locator_impl
+            .register_actor_registry(actor_registry.clone())
             .await;
         ActorServiceImpl::new(service_locator_impl, node_id)
     }
@@ -4713,11 +4763,24 @@ mod tests {
         assert_eq!(resolved, Some(actor_id));
     }
 
+    #[test]
+    fn test_set_message_receiver_id_uses_canonical_actor_id() {
+        let mut message = create_test_message(b"test".to_vec());
+        message.receiver_id = "controller:cart-1".to_string();
+
+        ActorServiceImpl::set_message_receiver_id(
+            &mut message,
+            "cart-1//controller::app-ns@node1",
+        );
+
+        assert_eq!(message.receiver_id, "cart-1//controller::app-ns@node1");
+    }
+
     // ========================================================================
     // COVERAGE TESTS - route_message()
     // ========================================================================
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_route_message_invalid_actor_id() {
         // ARRANGE: Create service
         let actor_registry = create_test_registry("node1").await;
@@ -4790,7 +4853,7 @@ mod tests {
     // COVERAGE TESTS - send_message() gRPC Handler
     // ========================================================================
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_send_message_missing_actor_type() {
         // ARRANGE: Create service
         let actor_registry = create_test_registry("node1").await;
@@ -4821,7 +4884,7 @@ mod tests {
         assert!(err.message().contains("actor_type"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_send_message_missing_receiver() {
         // ARRANGE: Create service
         let actor_registry = create_test_registry("node1").await;
@@ -4841,7 +4904,7 @@ mod tests {
         assert!(err.message().contains("actor_type"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_send_message_success() {
         // ARRANGE: Create actor and register it
         let actor_registry = create_test_registry("node1").await;
@@ -4863,8 +4926,9 @@ mod tests {
         )
         .await;
 
-        // Create proto message
-        let mut message = create_test_message(b"hello".to_vec());
+        // Create proto message with a valid JSON payload (send_message validates JSON)
+        let json_payload = b"{\"msg\":\"hello\"}".to_vec();
+        let mut message = create_test_message(json_payload.clone());
         message.receiver_id = "test@node1".to_string();
         let proto_message = message.clone();
         let expected_message_id = proto_message.id.clone();
@@ -4886,10 +4950,10 @@ mod tests {
             delivered.is_some(),
             "Message should be delivered immediately"
         );
-        assert_eq!(delivered.unwrap().payload, b"hello");
+        assert_eq!(delivered.unwrap().payload, json_payload);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_send_message_with_timeout() {
         // ARRANGE
         let actor_registry = create_test_registry("node1").await;
@@ -4911,8 +4975,8 @@ mod tests {
         )
         .await;
 
-        // Create message with timeout
-        let mut message = create_test_message(b"test".to_vec());
+        // Create message with timeout and valid JSON payload (send_message validates JSON)
+        let mut message = create_test_message(b"{}".to_vec());
         message.receiver_id = "test@node1".to_string();
         let proto_message = message.clone();
 
@@ -4929,7 +4993,7 @@ mod tests {
     // Connection Manager
     // ========================================================================
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_connection_manager_available() {
         let actor_registry = create_test_registry("node1").await;
         let service = create_test_actor_service(actor_registry.clone(), "node1".to_string()).await;
@@ -4946,7 +5010,7 @@ mod tests {
     // COVERAGE TESTS - send_message() timeout conversion
     // ========================================================================
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_send_message_converts_timeout_correctly() {
         // ARRANGE
         let actor_registry = create_test_registry("node1").await;
@@ -4968,8 +5032,8 @@ mod tests {
         )
         .await;
 
-        // Create message with fractional seconds timeout
-        let mut message = create_test_message(b"test".to_vec());
+        // Create message with fractional seconds timeout and valid JSON payload
+        let mut message = create_test_message(b"{}".to_vec());
         message.receiver_id = "test@node1".to_string();
         let proto_message = message.clone();
 

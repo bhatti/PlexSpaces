@@ -603,7 +603,7 @@ async fn test_spawn_built_actor_virtual_lazy() {
     // Create virtual actor with lazy activation
     let behavior = Box::new(TestBehavior::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id)
+        .with_id(actor_id.clone())
         .build()
         .await
         .unwrap();
@@ -650,8 +650,8 @@ async fn test_spawn_built_actor_virtual_prewarm() {
 
     // Create virtual actor with prewarm activation
     let behavior = Box::new(TestBehavior::new());
-    let mut actor = ActorBuilder::new(behavior)
-        .with_id(actor_id)
+    let actor = ActorBuilder::new(behavior)
+        .with_id(actor_id.clone())
         .build()
         .await
         .unwrap();

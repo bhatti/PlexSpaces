@@ -232,6 +232,7 @@ pub mod v1 {
 }
 
 // Re-export v1 actor service for convenience
+#[cfg(feature = "grpc")]
 pub use v1::actor::{
     actor_lifecycle_event,
     actor_service_client::ActorServiceClient,
@@ -251,8 +252,15 @@ pub use v1::actor::{
     MonitorActorRequest,
     MonitorActorResponse,
 };
+#[cfg(not(feature = "grpc"))]
+pub use v1::actor::{
+    actor_lifecycle_event, ActorActivated, ActorCreated, ActorDeactivated, ActorDeactivating,
+    ActorDownNotification, ActorFailed, ActorLifecycleEvent, ActorMigrating, ActorStarting,
+    ActorTerminated, MonitorActorRequest, MonitorActorResponse,
+};
 
 // Re-export v1 tuplespace service for convenience
+#[cfg(feature = "grpc")]
 pub use v1::tuplespace::{
     tuple_space_service_client::TupleSpaceServiceClient,
     tuple_space_service_server::TupleSpaceService,
@@ -260,11 +268,14 @@ pub use v1::tuplespace::{
 };
 
 // Re-export v1 process groups types and service for convenience
+#[cfg(feature = "grpc")]
 pub use v1::processgroups::{
     process_group_service_client::ProcessGroupServiceClient,
     process_group_service_server::ProcessGroupService as ProcessGroupServiceTrait,
     process_group_service_server::ProcessGroupServiceServer, GroupMembership, ProcessGroup,
 };
+#[cfg(not(feature = "grpc"))]
+pub use v1::processgroups::{GroupMembership, ProcessGroup};
 
 #[cfg(test)]
 mod tests {

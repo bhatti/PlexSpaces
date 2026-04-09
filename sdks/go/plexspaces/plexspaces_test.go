@@ -362,6 +362,24 @@ func TestHostApplicationGetStatus(t *testing.T) {
 	}
 }
 
+func TestHostApplicationMetricsAdd(t *testing.T) {
+	ResetStubs()
+	h := NewHost()
+	out, err := h.ApplicationMetricsAdd("app-a", map[string]any{
+		"message_count": float64(7),
+		"counter_metrics": map[string]any{
+			"tuple_operations": float64(42),
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplicationMetricsAdd returned error: %v", err)
+	}
+	mc, ok := out["message_count"].(float64)
+	if !ok || mc != 7 {
+		t.Fatalf("expected message_count 7, got %v", out["message_count"])
+	}
+}
+
 func TestCheckError(t *testing.T) {
 	err := checkError("")
 	if err != nil {

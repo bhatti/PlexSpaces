@@ -359,8 +359,8 @@ impl ActorRegistry {
 
         if let Some(state_value) = self.get_actor_state(actor_id).await {
             let is_active = state_value == ProtoActorState::ActorStateActive;
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
                     "[ACTOR_REGISTRY] is_actor_state_active: actor_id={}, state_value={:?}, is_active={}",
                     actor_id,
                     state_value,
@@ -369,8 +369,11 @@ impl ActorRegistry {
             }
             is_active
         } else {
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!("[ACTOR_REGISTRY] is_actor_state_active: actor_id={}, state_value=None, is_active=false", actor_id);
+            if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
+                    "[ACTOR_REGISTRY] is_actor_state_active: actor_id={}, state_value=None, is_active=false",
+                    actor_id
+                );
             }
             false
         }
@@ -891,7 +894,13 @@ impl ActorRegistry {
             return Ok(sender);
         }
 
-        let manager = self.require_virtual_actor_manager().await?;
+        let manager = match self.require_virtual_actor_manager().await {
+            Ok(m) => m,
+            Err(ActorRegistryError::DependencyUnavailable(_)) => {
+                return Err(ActorRegistryError::ActorNotFound(actor_id.clone()));
+            }
+            Err(e) => return Err(e),
+        };
         if !manager.is_virtual(actor_id).await {
             return Err(ActorRegistryError::ActorNotFound(actor_id.clone()));
         }
@@ -919,7 +928,15 @@ impl ActorRegistry {
                 .map_err(|e| ActorRegistryError::SendFailed(e.to_string()));
         }
 
-        let manager = self.require_virtual_actor_manager().await?;
+        // VirtualActorManager is optional; treat its absence as "no virtual actors" rather
+        // than a dependency error, so the caller gets ActorNotFound instead of Internal.
+        let manager = match self.require_virtual_actor_manager().await {
+            Ok(m) => m,
+            Err(ActorRegistryError::DependencyUnavailable(_)) => {
+                return Err(ActorRegistryError::ActorNotFound(actor_id.clone()));
+            }
+            Err(e) => return Err(e),
+        };
         if !manager.is_virtual(actor_id).await {
             return Err(ActorRegistryError::ActorNotFound(actor_id.clone()));
         }
@@ -1297,8 +1314,8 @@ impl ActorRegistry {
     /// This prevents memory leaks. Should be called periodically (e.g., every 30 seconds).
     ///
     /// ## Returns
-    /// Number of expired temporary senders removed
-    pub async fn cleanup_expired_temporary_senders(&self) -> usize {
+    /// `(expired_count, remaining_temporary_senders_after)`.
+    pub async fn cleanup_expired_temporary_senders(&self) -> (usize, usize) {
         let now = Instant::now();
         let expired_ids: Vec<String> = {
             let temp_senders = self.temporary_senders.read().await;
@@ -1322,22 +1339,12 @@ impl ActorRegistry {
             }
         }
 
-        // Remove from temporary_senders map
-        if expired_count > 0 {
+        let remaining = if expired_count > 0 {
             let mut temp_senders = self.temporary_senders.write().await;
             for temp_sender_id in &expired_ids {
                 temp_senders.remove(temp_sender_id);
             }
             let after_count = temp_senders.len();
-
-            if tracing::enabled!(tracing::Level::DEBUG) {
-                tracing::debug!(
-                "ActorRegistry: Cleaned up {} expired temporary senders (before: {}, after: {})",
-                expired_count,
-                expired_count + after_count,
-                after_count
-            );
-            }
 
             // OBSERVABILITY: Track expired temporary sender cleanup
             #[cfg(feature = "metrics")]
@@ -1351,9 +1358,13 @@ impl ActorRegistry {
                 )
                 .set(after_count as f64);
             }
-        }
 
-        expired_count
+            after_count
+        } else {
+            self.temporary_senders.read().await.len()
+        };
+
+        (expired_count, remaining)
     }
 
     /// Get count of temporary senders (for metrics/monitoring)
@@ -1523,8 +1534,8 @@ impl ActorRegistry {
         )
         .increment(1);
 
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
+        if tracing::enabled!(tracing::Level::TRACE) {
+            tracing::trace!(
                 parent = %parent_id,
                 child = %child_id,
                 "Unregistered parent-child relationship"
@@ -1660,16 +1671,17 @@ impl ActorRegistry {
             loop {
                 interval.tick().await;
 
-                // Cleanup expired temporary senders
-                let expired_count = registry.cleanup_expired_temporary_senders().await;
-                if expired_count > 0 {
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            "ActorRegistry: Cleaned up {} expired temporary senders (node_id={})",
-                            expired_count,
-                            local_node_id
-                        );
-                    }
+                let (expired_count, after_count) =
+                    registry.cleanup_expired_temporary_senders().await;
+                if expired_count > 0 && tracing::enabled!(tracing::Level::DEBUG) {
+                    let before_count = expired_count + after_count;
+                    tracing::debug!(
+                        expired_count = expired_count,
+                        before_count = before_count,
+                        after_count = after_count,
+                        node_id = %local_node_id,
+                        "ActorRegistry: Cleaned up expired temporary senders"
+                    );
                 }
             }
         });

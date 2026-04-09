@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-WIT_DIR="$REPO_ROOT/wit/plexspaces-simple-actor"
+WIT_DIR="$REPO_ROOT/wit/plexspaces-actor"
 OUTPUT_WASM="$SCRIPT_DIR/abstractions_actor.wasm"
 EMBEDDED_WASM="$SCRIPT_DIR/abstractions_actor_embedded.wasm"
 BUILD_PROFILE="${CARGO_PROFILE:-debug}"
@@ -37,7 +37,7 @@ if [ ! -d "$WIT_DIR" ] || [ ! -f "$WIT_DIR/world.wit" ]; then
 fi
 
 echo "Building abstractions example (Rust WASM, SDK + WIT)..."
-cargo build $PROFILE_FLAG --target wasm32-wasip1 ${CARGO_BUILD_FLAGS:-}
+cargo build $PROFILE_FLAG --lib --target wasm32-wasip1 ${CARGO_BUILD_FLAGS:-}
 
 if [ ! -f "$CORE_WASM" ]; then
   echo "ERROR: core WASM not found at $CORE_WASM"

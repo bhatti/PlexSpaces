@@ -14,5 +14,6 @@ shutdown_timeout_seconds = 10
 behavior_kind = "GenServer"
 facets = [
   { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "keyvalue", priority = 80, config = {} },
   { type = "locks", priority = 50, config = {} }
 ]

@@ -498,6 +498,14 @@ impl ApplicationService for ApplicationServiceImpl {
                 );
             }
 
+            let node_id_for_log = self
+                .service_locator
+                .get_node_config()
+                .await
+                .map(|c| c.id.clone())
+                .unwrap_or_default();
+
+            let mut registered_with_object_registry = false;
             // Register application with object-registry using proper tenant/namespace
             if let Some(object_registry) = self.service_locator.get_object_registry().await {
                 use plexspaces_core::RequestContext;
@@ -528,16 +536,40 @@ impl ApplicationService for ApplicationServiceImpl {
                 {
                     tracing::warn!(application = %app_name, error = %e, "Failed to register application with object-registry");
                 } else {
-                    tracing::info!(application = %app_name, node_id = %node_id, tenant_id = %tenant_id_for_registry, namespace = %namespace_for_registry, "Registered application with object-registry");
+                    registered_with_object_registry = true;
                 }
             }
 
-            // Start application using ApplicationManager directly
             tracing::info!(
                 application_id = %req.application_id,
                 application_name = %app_name,
-                "Starting WASM application"
+                node_id = %node_id_for_log,
+                tenant_id = %tenant_id_for_registry,
+                namespace = %namespace_for_registry,
+                registered_with_object_registry = registered_with_object_registry,
+                "Starting WASM application (object-registry updated when configured)"
             );
+            // Connect to ApplicationSpec.seed_nodes BEFORE start() so seeds are always
+            // registered even if start() blocks for a long time (e.g. WASM compilation).
+            if !merged_config_for_save.seed_nodes.is_empty() {
+                if let Some(conn) = self.node_connectivity.clone() {
+                    let addrs = merged_config_for_save.seed_nodes.clone();
+                    match conn.connect_to_node_addresses(addrs).await {
+                        Ok(r) => tracing::info!(
+                            application_id = %req.application_id,
+                            connected = r.connected.len(),
+                            failed = r.failed.len(),
+                            "Connected to application seed_nodes"
+                        ),
+                        Err(e) => tracing::warn!(
+                            application_id = %req.application_id,
+                            error = %e,
+                            "Failed to connect to application seed_nodes"
+                        ),
+                    }
+                }
+            }
+
             // No rollback on failure: we return the first error so the client always sees the
             // original deploy/start failure, not any subsequent cleanup error.
             application_manager.start(&app_name).await.map_err(|e| {
@@ -564,26 +596,6 @@ impl ApplicationService for ApplicationServiceImpl {
                 tenant_id = %tenant_id_for_log,
                 "WASM application deployed and started successfully"
             );
-
-            // Connect to ApplicationSpec.seed_nodes if configured (idempotent; already-connected are skipped)
-            if !merged_config_for_save.seed_nodes.is_empty() {
-                if let Some(conn) = self.node_connectivity.clone() {
-                    let addrs = merged_config_for_save.seed_nodes.clone();
-                    match conn.connect_to_node_addresses(addrs).await {
-                        Ok(r) => tracing::info!(
-                            application_id = %req.application_id,
-                            connected = r.connected.len(),
-                            failed = r.failed.len(),
-                            "Connected to application seed_nodes"
-                        ),
-                        Err(e) => tracing::warn!(
-                            application_id = %req.application_id,
-                            error = %e,
-                            "Failed to connect to application seed_nodes"
-                        ),
-                    }
-                }
-            }
 
             return Ok(Response::new(DeployApplicationResponse {
                 success: true,
@@ -985,6 +997,21 @@ mod tests {
     use std::sync::Mutex;
     use tonic::metadata::MetadataValue;
 
+    struct TestNode {
+        service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
+    }
+    impl plexspaces_application::ApplicationNode for TestNode {
+        fn id(&self) -> &str {
+            "test-node"
+        }
+        fn listen_addr(&self) -> &str {
+            "127.0.0.1:0"
+        }
+        fn service_locator(&self) -> Option<Arc<dyn plexspaces_core::ServiceLocator>> {
+            Some(self.service_locator.clone())
+        }
+    }
+
     #[derive(Default)]
     struct RecordingNodeConnectivity {
         calls: Mutex<Vec<Vec<String>>>,
@@ -1015,7 +1042,10 @@ mod tests {
     async fn deploy_application_connects_seed_nodes_for_native_specs() {
         let service_locator = Arc::new(ServiceLocatorImpl::new());
         service_locator
-            .register_application_manager(Arc::new(ApplicationManagerImpl::new()))
+            .register_security_config(plexspaces_proto::node::v1::SecurityConfig {
+                disable_auth: true,
+                ..Default::default()
+            })
             .await;
         service_locator
             .register_node_config(NodeConfig {
@@ -1025,13 +1055,29 @@ mod tests {
             })
             .await;
 
+        let app_manager = Arc::new(ApplicationManagerImpl::new());
+        app_manager
+            .set_node_context(Arc::new(TestNode {
+                service_locator: service_locator.clone(),
+            }))
+            .await;
+        service_locator
+            .register_application_manager(app_manager)
+            .await;
+
         let connectivity = Arc::new(RecordingNodeConnectivity::default());
         let service = ApplicationServiceImpl::new(
             service_locator,
             Some(connectivity.clone() as Arc<dyn NodeConnectivity>),
         );
 
-        let mut spec = create_default_application_spec("seeded-app", "1.0.0", None);
+        // Use a minimal spec with no supervisor so start() doesn't try to spawn actors.
+        let mut spec = ApplicationSpec {
+            name: "seeded-app".to_string(),
+            version: "1.0.0".to_string(),
+            namespace: "seeded-app".to_string(),
+            ..Default::default()
+        };
         spec.seed_nodes = vec!["127.0.0.1:8091".to_string(), "127.0.0.1:8093".to_string()];
 
         let mut request = Request::new(DeployApplicationRequest {

@@ -12,8 +12,8 @@
 
 ### Tuple space (`host.ts`)
 
-- **Scatter**: Coordinator writes task tuples: `host.ts.write([prefix, sweep_id, "task", param_id, {...}])`.
-- **Workers**: `host.ts.take(pattern)` → run simulation → `host.ts.write([..., "result", param_id, result])`.
+- **Scatter**: Coordinator writes task tuples: last field is a **JSON string** (TupleField proto allows int/double/string/bool/bytes only), e.g. `json.dumps({"param": v})` in `host.ts.write([prefix, sweep_id, "task", param_id, body])`.
+- **Workers**: `host.ts.take(pattern)` → run simulation → `host.ts.write([..., "result", param_id, json.dumps({...})])`.
 - **Gather**: Coordinator `host.ts.read_all([..., "result", None, None])`.
 
 ## Convention

@@ -596,7 +596,7 @@ PlexSpaces uses a centralized configuration manager (`config_manager::initialize
 | `PLEXSPACES_TUPLESPACE_BACKEND` | TupleSpace backend | `inmemory` (or `ddb` if `AWS_REGION` set) |
 | `PLEXSPACES_CHANNEL_PROVIDER` | Channel provider | `IN_MEMORY` |
 | `PLEXSPACES_MAILBOX_PROVIDER` | Mailbox provider | `IN_MEMORY` |
-| `PLEXSPACES_CLUSTER_NAME` | Cluster name for UDP channels | - |
+| `PLEXSPACES_CLUSTER_NAME` | Overrides `spec.node.cluster_name` after load. Used for node registry membership labels, `ListConnectedNodes` / `from_registry` shard placement when the placement cluster field is empty, SWIM reconciliation with peers that omit cluster on ping, and UDP/multicast channel grouping. Set the **same** value on every node in a multinode deployment. If unset or empty and the release file leaves `node.cluster_name` empty, `config_manager::initialize` sets `node.cluster_name` to `default`. | - |
 | `PLEXSPACES_JWT_SECRET` | JWT secret for HS256 (required if JWT enabled) | - |
 | `PLEXSPACES_MTLS_CA_CERT` | Path to mTLS CA certificate | - |
 | `PLEXSPACES_MTLS_SERVER_CERT` | Path to mTLS server certificate | - |
@@ -1496,6 +1496,7 @@ docker rm plexspaces-node
 |----------|-------------|---------|
 | `PLEXSPACES_NODE_ID` | Node identifier | `node1` |
 | `PLEXSPACES_LISTEN_ADDR` | gRPC listen address | `0.0.0.0:8000` |
+| `PLEXSPACES_CLUSTER_NAME` | Logical cluster (registry, placement, messaging); same on all nodes in a cluster. When unset and release `node.cluster_name` is empty, `initialize` uses `default`. | - |
 | `PLEXSPACES_RELEASE_CONFIG` | Path to release config | `/app/config/release.yaml` |
 | `PLEXSPACES_BASE_DIR` | Base directory for data | `/app/data` |
 | `PLEXSPACES_DISABLE_AUTH` | Disable auth (testing only) | Not set (auth enabled) |

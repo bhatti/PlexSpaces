@@ -327,12 +327,6 @@ impl ApplicationManagerImpl {
         )
         .increment(1);
 
-        tracing::info!(
-            application = %name,
-            version = %instance.app.version(),
-            "Starting application"
-        );
-
         // Transition to Starting
         instance.state = ApplicationState::ApplicationStateStarting;
 
@@ -340,15 +334,14 @@ impl ApplicationManagerImpl {
         let tenant_id = instance.tenant_id.clone();
         let namespace = instance.namespace.clone();
 
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            tracing::debug!(
-                application = %name,
-                state = ?instance.state,
-                tenant_id = %if tenant_id.is_empty() { "<empty>" } else { &tenant_id },
-                namespace = %if namespace.is_empty() { "<empty>" } else { &namespace },
-                "Application starting (tenant_id/namespace from registration); calling start()"
-            );
-        }
+        tracing::info!(
+            application = %name,
+            version = %instance.app.version(),
+            state = ?instance.state,
+            tenant_id = %if tenant_id.is_empty() { "<empty>" } else { &tenant_id },
+            namespace = %if namespace.is_empty() { "<empty>" } else { &namespace },
+            "Starting application"
+        );
 
         // Get node context (must be set before calling start)
         let node_context = {
@@ -1582,6 +1575,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app).await.unwrap();
@@ -1639,6 +1633,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app).await.unwrap();
@@ -1763,6 +1758,7 @@ mod tests {
             should_fail_start: false,
             should_fail_stop: false,
             stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         manager.register(app).await.unwrap();

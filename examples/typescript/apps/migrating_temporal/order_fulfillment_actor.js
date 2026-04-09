@@ -112,9 +112,11 @@ export class OrderFulfillmentActor extends WorkflowActor {
                 this.state.status = "shipped";
                 this.state.updated_at_ms = host.nowMs();
             }
-            this.state.total_compute_ms += computeMs;
-            const coordMs = host.nowMs() - t0 - computeMs;
-            this.state.total_coord_ms += coordMs;
+            const totalElapsedMs = host.nowMs() - t0;
+            const computeReported = Math.min(computeMs, totalElapsedMs);
+            const coordReported = Math.max(0, totalElapsedMs - computeReported);
+            this.state.total_compute_ms += computeReported;
+            this.state.total_coord_ms += coordReported;
             return {
                 status: this.state.status,
                 order_id: this.state.order_id,

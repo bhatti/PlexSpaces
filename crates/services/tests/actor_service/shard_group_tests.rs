@@ -277,6 +277,14 @@ impl NodeRegistryTrait for MockNodeRegistry {
         false
     }
 
+    async fn kickoff_seed_reconcile_ping(
+        &self,
+        _node_id: String,
+        _node_address: String,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        Ok(())
+    }
+
     async fn cache_stats(&self) -> (usize, usize, std::time::Duration) {
         (self.nodes.len(), 0, std::time::Duration::from_secs(0))
     }

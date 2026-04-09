@@ -29,20 +29,74 @@ Usage:
 import json
 from typing import Any, Dict, List, Optional, Union
 from .decorators import _desanitize_from_wasm
+from .proto_wire import (
+    encode_write_request,
+    encode_read_request,
+    decode_read_response_first,
+    decode_read_response_all,
+    encode_create_shard_group_request,
+    encode_scatter_gather_request,
+    encode_broadcast_shard_group_request,
+    encode_reduce_shard_group_request,
+    encode_all_reduce_shard_group_request,
+    encode_map_shard_group_request,
+    encode_barrier_shard_group_request,
+    encode_application_metrics,
+    decode_create_shard_group_response,
+    decode_scatter_gather_response,
+    decode_broadcast_shard_group_response,
+    decode_reduce_shard_group_response,
+    decode_all_reduce_shard_group_response,
+    decode_map_shard_group_response,
+    decode_barrier_shard_group_response,
+    decode_application_metrics_response,
+    decode_application_get_status_response,
+    decode_http_fetch_response,
+    encode_http_fetch_request,
+)
 
 # Global reference to actual host module (set by runtime)
 _host_impl = None
 _host_init_attempted = False
+
+# Whether the host is a real WIT host (payload = list<u8> = bytes) or mock (string)
+_host_is_wit = False
 
 # Eager import at module load time - componentize-py does NOT support
 # dynamic imports during handler execution (causes WASM trap)
 try:
     from wit_world.imports import host as _wit_host_eager
     _host_impl = _wit_host_eager
+    _host_is_wit = True
     _host_init_attempted = True
 except ImportError:
     # Not in WASM environment, will use mock
     _host_init_attempted = True
+
+
+def _to_payload_bytes(data: str) -> bytes:
+    """Encode a JSON/string payload to bytes for WIT payload (list<u8>) parameters.
+
+    WIT ``payload = list<u8>`` maps to Python ``bytes`` in componentize-py.
+    The mock host accepts plain strings, so this only encodes when using
+    the real WIT host.
+    """
+    if _host_is_wit:
+        if isinstance(data, (bytes, bytearray)):
+            return data
+        return data.encode("utf-8") if data else b""
+    return data
+
+
+def _from_payload_bytes(data) -> str:
+    """Decode bytes returned from a WIT host function back to a string.
+
+    WIT ``result<payload, actor-error>`` returns ``bytes`` on Ok and ``str``
+    on Err in componentize-py.  The mock host returns plain strings.
+    """
+    if isinstance(data, (bytes, bytearray)):
+        return data.decode("utf-8")
+    return str(data) if data else ""
 
 
 def _get_host():
@@ -544,24 +598,25 @@ class ProcessGroups:
         """Join a process group (uses self actor ID)."""
         h = _get_host()
         result = h.pg_join(group)
-        if result.startswith("ERROR:"):
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
     def leave(self, group: str) -> None:
         """Leave a process group."""
         h = _get_host()
         result = h.pg_leave(group)
-        if result.startswith("ERROR:"):
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
     def members(self, group: str) -> List[str]:
         """Get all members of a group. Returns list of actor IDs."""
         h = _get_host()
-        result = h.pg_members(group)
-        if result.startswith("ERROR:"):
+        raw = h.pg_members(group)
+        result = _from_payload_bytes(raw) if isinstance(raw, (bytes, bytearray)) else (raw or "[]")
+        if isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
         try:
-            return json.loads(result)
+            return json.loads(result) if isinstance(result, str) else result
         except (json.JSONDecodeError, ValueError):
             return []
 
@@ -569,8 +624,8 @@ class ProcessGroups:
         """Broadcast a message to all members of a group."""
         h = _get_host()
         payload_json = json.dumps(payload) if payload is not None else "{}"
-        result = h.pg_broadcast(group, msg_type, payload_json)
-        if result.startswith("ERROR:"):
+        result = h.pg_broadcast(group, msg_type, _to_payload_bytes(payload_json))
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
 
@@ -604,7 +659,7 @@ class Host:
                 payload_json = payload
             else:
                 payload_json = json.dumps(payload)
-        return h.send(to, msg_type, payload_json)
+        return h.send(to, msg_type, _to_payload_bytes(payload_json))
     
     def log(self, level: str, message: str) -> None:
         """
@@ -655,7 +710,7 @@ class Host:
         """
         h = _get_host()
         if hasattr(h, "kv_get"):
-            return h.kv_get(key)
+            return _from_payload_bytes(h.kv_get(key))
         return getattr(h, "kv-get", lambda k: "")(key)
 
     def kv_put(self, key: str, value: str) -> str:
@@ -671,15 +726,21 @@ class Host:
         """
         h = _get_host()
         if hasattr(h, "kv_put"):
-            return h.kv_put(key, value)
+            return h.kv_put(key, _to_payload_bytes(value))
         return getattr(h, "kv-put", lambda k, v: "")(key, value)
 
     def ts_write(self, tuple_json: str) -> str:
         """
-        TupleSpace write (existing API). tuple_json: JSON array of strings, e.g. ["AUDIT","action",...].
+        TupleSpace write. tuple_json: JSON array of values, e.g. ["AUDIT","action",...].
         Returns empty on success, ERROR:... on failure.
         """
         h = _get_host()
+        if _host_is_wit:
+            # WIT host expects proto-encoded WriteRequest bytes
+            values = json.loads(tuple_json) if isinstance(tuple_json, str) else tuple_json
+            wire = encode_write_request(values)
+            h.ts_write(wire)
+            return ""
         if hasattr(h, "ts_write"):
             return h.ts_write(tuple_json)
         return getattr(h, "ts-write", lambda _: "")(tuple_json)
@@ -690,6 +751,12 @@ class Host:
         Returns matched tuple as JSON array, or empty if not found.
         """
         h = _get_host()
+        if _host_is_wit:
+            values = json.loads(pattern_json) if isinstance(pattern_json, str) else pattern_json
+            wire = encode_read_request(values, take=False)
+            raw = h.ts_read(wire)
+            result = decode_read_response_first(bytes(raw) if raw else b"")
+            return json.dumps(result) if result is not None else ""
         if hasattr(h, "ts_read"):
             return h.ts_read(pattern_json)
         return getattr(h, "ts-read", lambda _: "")(pattern_json)
@@ -700,6 +767,12 @@ class Host:
         Returns matched tuple as JSON array and removes it, or empty if not found.
         """
         h = _get_host()
+        if _host_is_wit:
+            values = json.loads(pattern_json) if isinstance(pattern_json, str) else pattern_json
+            wire = encode_read_request(values, take=True)
+            raw = h.ts_take(wire)
+            result = decode_read_response_first(bytes(raw) if raw else b"")
+            return json.dumps(result) if result is not None else ""
         if hasattr(h, "ts_take"):
             return h.ts_take(pattern_json)
         return getattr(h, "ts-take", lambda _: "")(pattern_json)
@@ -710,8 +783,14 @@ class Host:
         Returns JSON array of matched tuples, e.g. [["task","w1",1],["task","w2",2]].
         """
         h = _get_host()
+        if _host_is_wit:
+            values = json.loads(pattern_json) if isinstance(pattern_json, str) else pattern_json
+            wire = encode_read_request(values, take=False, max_results=10000)
+            raw = h.ts_read_all(wire)
+            result = decode_read_response_all(bytes(raw) if raw else b"")
+            return json.dumps(result)
         if hasattr(h, "ts_read_all"):
-            return h.ts_read_all(pattern_json)
+            return _from_payload_bytes(h.ts_read_all(_to_payload_bytes(pattern_json)))
         return getattr(h, "ts-read-all", lambda _: "[]")(pattern_json)
 
     def kv_delete(self, key: str) -> str:
@@ -741,7 +820,16 @@ class Host:
         """
         h = _get_host()
         if hasattr(h, "kv_list"):
-            return h.kv_list(prefix)
+            raw = h.kv_list(prefix)
+            if raw is None:
+                return "[]"
+            if isinstance(raw, list):
+                return json.dumps(raw)
+            if isinstance(raw, (bytes, bytearray)):
+                return _from_payload_bytes(raw)
+            if isinstance(raw, str):
+                return raw
+            return str(raw)
         return getattr(h, "kv-list", lambda _: "[]")(prefix)
 
     def lock_acquire(
@@ -761,9 +849,9 @@ class Host:
         """
         h = _get_host()
         if hasattr(h, "lock_acquire"):
-            return h.lock_acquire(
+            return _from_payload_bytes(h.lock_acquire(
                 tenant_id, namespace, holder_id, lock_name, lease_duration_secs, timeout_ms
-            )
+            ))
         return getattr(h, "lock-acquire", lambda *_: "ERROR: not implemented")(
             tenant_id, namespace, holder_id, lock_name, lease_duration_secs, timeout_ms
         )
@@ -804,9 +892,9 @@ class Host:
         """
         h = _get_host()
         if hasattr(h, "lock_renew"):
-            return h.lock_renew(
+            return _from_payload_bytes(h.lock_renew(
                 lock_id, tenant_id, namespace, holder_id, lock_version, lease_duration_secs
-            )
+            ))
         return getattr(h, "lock-renew", lambda *_: "ERROR: not implemented")(
             lock_id, tenant_id, namespace, holder_id, lock_version, lease_duration_secs
         )
@@ -825,7 +913,7 @@ class Host:
         """
         h = _get_host()
         if hasattr(h, "blob_upload"):
-            return h.blob_upload(blob_id, data, content_type)
+            return h.blob_upload(blob_id, _to_payload_bytes(data), content_type)
         return getattr(h, "blob-upload", lambda *_: "")(blob_id, data, content_type)
 
     def blob_download(self, blob_id: str) -> str:
@@ -840,7 +928,7 @@ class Host:
         """
         h = _get_host()
         if hasattr(h, "blob_download"):
-            return h.blob_download(blob_id)
+            return _from_payload_bytes(h.blob_download(blob_id))
         return getattr(h, "blob-download", lambda _: "")(blob_id)
 
     def blob_delete(self, blob_id: str) -> str:
@@ -894,7 +982,8 @@ class Host:
         payload_json = ""
         if payload is not None:
             payload_json = json.dumps(payload) if not isinstance(payload, str) else payload
-        result = h.ask(to, msg_type, payload_json, timeout_ms)
+        raw = h.ask(to, msg_type, _to_payload_bytes(payload_json), timeout_ms)
+        result = _from_payload_bytes(raw)
         if result.startswith("ERROR:"):
             raise RuntimeError(result)
         try:
@@ -933,8 +1022,8 @@ class Host:
         """
         h = _get_host()
         config_json = json.dumps(init_config) if init_config is not None else "{}"
-        result = h.spawn(module_ref, actor_id, config_json)
-        if result.startswith("ERROR:"):
+        result = h.spawn(module_ref, actor_id, _to_payload_bytes(config_json))
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
         return result
 
@@ -950,7 +1039,7 @@ class Host:
         """
         h = _get_host()
         result = h.stop(actor_id)
-        if result.startswith("ERROR:"):
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
     # ========================================================================
@@ -961,14 +1050,14 @@ class Host:
         """Bidirectional link: if either actor crashes, the other is notified."""
         h = _get_host()
         result = h.link(actor_id)
-        if result.startswith("ERROR:"):
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
     def unlink(self, actor_id: str) -> None:
         """Remove a bidirectional link."""
         h = _get_host()
         result = h.unlink(actor_id)
-        if result.startswith("ERROR:"):
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
     def monitor(self, actor_id: str) -> str:
@@ -977,15 +1066,15 @@ class Host:
         """
         h = _get_host()
         result = h.monitor(actor_id)
-        if result.startswith("ERROR:"):
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
-        return result
+        return result or ""
 
     def demonitor(self, monitor_ref: str) -> None:
         """Cancel a monitor."""
         h = _get_host()
         result = h.demonitor(monitor_ref)
-        if result.startswith("ERROR:"):
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
     # ========================================================================
@@ -1012,8 +1101,9 @@ class Host:
         fn = getattr(h, "pool_checkout", None) or getattr(h, "pool-checkout", None)
         if fn is None:
             return None
-        result = fn(pool_name, timeout_ms)
-        if not result or result.startswith("ERROR:"):
+        raw = fn(pool_name, timeout_ms)
+        result = _from_payload_bytes(raw)
+        if not result or (isinstance(result, str) and result.startswith("ERROR:")):
             return None
         try:
             return json.loads(result)
@@ -1044,7 +1134,7 @@ class Host:
         if fn is None:
             raise RuntimeError("pool checkin not available")
         result = fn(pool_name, actor_id, checkout_id, healthy)
-        if result.startswith("ERROR:"):
+        if result and isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
 
     def pool_get_metrics(self, pool_name: str) -> Optional[Dict[str, Any]]:
@@ -1062,109 +1152,116 @@ class Host:
         fn = getattr(h, "pool_get_metrics", None) or getattr(h, "pool-get-metrics", None)
         if fn is None:
             return None
-        result = fn(pool_name)
-        if not result or result.startswith("ERROR:"):
+        raw = fn(pool_name)
+        result = _from_payload_bytes(raw)
+        if not result or (isinstance(result, str) and result.startswith("ERROR:")):
             return None
         try:
             return json.loads(result)
         except (json.JSONDecodeError, ValueError):
             return None
 
-    def create_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Create a shard group using proto field names in the request payload."""
+    def _call_shard_fn(
+        self,
+        name: str,
+        encode_fn,
+        decode_fn,
+        request: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Call a shard-group host function with proto encoding/decoding."""
         h = _get_host()
-        fn = getattr(h, "create_shard_group", None) or getattr(h, "create-shard-group", None)
+        fn = getattr(h, name, None) or getattr(h, name.replace("_", "-"), None)
         if fn is None:
-            raise RuntimeError("create_shard_group not available")
-        result = fn(json.dumps(request))
-        if result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        return json.loads(result)
+            raise RuntimeError(f"{name} not available")
+        if _host_is_wit:
+            wire = encode_fn(request)
+            raw = fn(wire)
+            result_bytes = bytes(raw) if raw else b""
+            return decode_fn(result_bytes)
+        else:
+            # Mock host takes/returns JSON strings
+            raw = fn(json.dumps(request))
+            result = _from_payload_bytes(raw)
+            if isinstance(result, str) and result.startswith("ERROR:"):
+                raise RuntimeError(result)
+            return json.loads(result)
+
+    def create_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a shard group."""
+        return self._call_shard_fn(
+            "create_shard_group",
+            encode_create_shard_group_request,
+            decode_create_shard_group_response,
+            request,
+        )
 
     def bulk_update_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Bulk update a shard group using proto field names in the request payload."""
+        """Bulk update a shard group."""
         h = _get_host()
-        fn = getattr(h, "bulk_update_shard_group", None) or getattr(
-            h, "bulk-update-shard-group", None
-        )
+        fn = getattr(h, "bulk_update_shard_group", None) or getattr(h, "bulk-update-shard-group", None)
         if fn is None:
             raise RuntimeError("bulk_update_shard_group not available")
-        result = fn(json.dumps(request))
-        if result.startswith("ERROR:"):
+        if _host_is_wit:
+            raise RuntimeError("bulk_update_shard_group: proto wire not implemented for Python WASM")
+        raw = fn(json.dumps(request))
+        result = _from_payload_bytes(raw)
+        if isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
         return json.loads(result)
 
     def map_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Map across shards using proto field names in the request payload."""
-        h = _get_host()
-        fn = getattr(h, "map_shard_group", None) or getattr(h, "map-shard-group", None)
-        if fn is None:
-            raise RuntimeError("map_shard_group not available")
-        result = fn(json.dumps(request))
-        if result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        return json.loads(result)
+        """Map across shards."""
+        return self._call_shard_fn(
+            "map_shard_group",
+            encode_map_shard_group_request,
+            decode_map_shard_group_response,
+            request,
+        )
 
     def scatter_gather(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Scatter/gather using proto field names in the request payload."""
-        h = _get_host()
-        fn = getattr(h, "scatter_gather", None) or getattr(h, "scatter-gather", None)
-        if fn is None:
-            raise RuntimeError("scatter_gather not available")
-        result = fn(json.dumps(request))
-        if result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        return json.loads(result)
+        """Scatter/gather across a shard group."""
+        return self._call_shard_fn(
+            "scatter_gather",
+            encode_scatter_gather_request,
+            decode_scatter_gather_response,
+            request,
+        )
 
     def broadcast_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Broadcast a message to every shard in a group."""
-        h = _get_host()
-        fn = getattr(h, "broadcast_shard_group", None) or getattr(
-            h, "broadcast-shard-group", None
+        return self._call_shard_fn(
+            "broadcast_shard_group",
+            encode_broadcast_shard_group_request,
+            decode_broadcast_shard_group_response,
+            request,
         )
-        if fn is None:
-            raise RuntimeError("broadcast_shard_group not available")
-        result = fn(json.dumps(request))
-        if result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        return json.loads(result)
 
     def reduce_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Reduce values returned by a shard-group map operation."""
-        h = _get_host()
-        fn = getattr(h, "reduce_shard_group", None) or getattr(h, "reduce-shard-group", None)
-        if fn is None:
-            raise RuntimeError("reduce_shard_group not available")
-        result = fn(json.dumps(request))
-        if result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        return json.loads(result)
+        return self._call_shard_fn(
+            "reduce_shard_group",
+            encode_reduce_shard_group_request,
+            decode_reduce_shard_group_response,
+            request,
+        )
 
     def all_reduce_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Reduce values across a shard group and broadcast the reduced result."""
-        h = _get_host()
-        fn = getattr(h, "all_reduce_shard_group", None) or getattr(
-            h, "all-reduce-shard-group", None
+        return self._call_shard_fn(
+            "all_reduce_shard_group",
+            encode_all_reduce_shard_group_request,
+            decode_all_reduce_shard_group_response,
+            request,
         )
-        if fn is None:
-            raise RuntimeError("all_reduce_shard_group not available")
-        result = fn(json.dumps(request))
-        if result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        return json.loads(result)
 
     def barrier_shard_group(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Synchronize a shard group at a barrier round."""
-        h = _get_host()
-        fn = getattr(h, "barrier_shard_group", None) or getattr(
-            h, "barrier-shard-group", None
+        return self._call_shard_fn(
+            "barrier_shard_group",
+            encode_barrier_shard_group_request,
+            decode_barrier_shard_group_response,
+            request,
         )
-        if fn is None:
-            raise RuntimeError("barrier_shard_group not available")
-        result = fn(json.dumps(request))
-        if result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        return json.loads(result)
 
     def spawn_actors(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Spawn multiple actors using the framework actor service."""
@@ -1172,8 +1269,11 @@ class Host:
         fn = getattr(h, "spawn_actors", None) or getattr(h, "spawn-actors", None)
         if fn is None:
             raise RuntimeError("spawn_actors not available")
-        result = fn(json.dumps(request))
-        if result.startswith("ERROR:"):
+        if _host_is_wit:
+            raise RuntimeError("spawn_actors: proto wire not implemented for Python WASM")
+        raw = fn(json.dumps(request))
+        result = _from_payload_bytes(raw)
+        if isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
         return json.loads(result)
 
@@ -1187,10 +1287,17 @@ class Host:
         )
         if fn is None:
             raise RuntimeError("application_metrics_add not available")
-        result = fn(application_id, json.dumps(metrics))
-        if result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        return json.loads(result)
+        if _host_is_wit:
+            wire = encode_application_metrics(metrics)
+            raw = fn(application_id, wire)
+            result_bytes = bytes(raw) if raw else b""
+            return decode_application_metrics_response(result_bytes)
+        else:
+            raw = fn(application_id, _to_payload_bytes(json.dumps(metrics)))
+            result = _from_payload_bytes(raw)
+            if isinstance(result, str) and result.startswith("ERROR:"):
+                raise RuntimeError(result)
+            return json.loads(result)
 
     def application_get_status(self, application_id: str, node_id: str) -> Dict[str, Any]:
         """Get application status for a participating node."""
@@ -1200,10 +1307,15 @@ class Host:
         )
         if fn is None:
             raise RuntimeError("application_get_status not available")
-        result = fn(application_id, node_id)
-        if result.startswith("ERROR:"):
-            raise RuntimeError(result)
-        return json.loads(result)
+        raw = fn(application_id, node_id)
+        if _host_is_wit:
+            result_bytes = bytes(raw) if raw else b""
+            return decode_application_get_status_response(result_bytes)
+        else:
+            result = _from_payload_bytes(raw)
+            if isinstance(result, str) and result.startswith("ERROR:"):
+                raise RuntimeError(result)
+            return json.loads(result)
 
     def send_after(self, delay_ms: int, msg_type: str, payload: Any = None) -> str:
         """
@@ -1225,7 +1337,7 @@ class Host:
         """
         h = _get_host()
         payload_json = json.dumps(payload) if payload is not None else "{}"
-        return h.send_after(delay_ms, msg_type, payload_json)
+        return h.send_after(delay_ms, msg_type, _to_payload_bytes(payload_json))
 
     # ========================================================================
     # Outbound HTTP (service links)
@@ -1253,22 +1365,43 @@ class Host:
             body: Optional request body (string or bytes; bytes are base64-encoded)
 
         Returns:
-            Dict with "status" (int), "headers" (dict), "body" (str, base64-encoded).
+            Dict with "status" (int), "headers" (dict), "body" (str: UTF-8 text when
+            possible, otherwise base64 for WASM; mock returns JSON string as today).
 
         Raises:
             RuntimeError: If the host returns an ERROR: response.
         """
         import base64
         h = _get_host()
-        headers_json = json.dumps(headers or {})
+        hdrs = headers or {}
+        headers_json = json.dumps(hdrs)
         if isinstance(body, bytes):
             body_str = base64.b64encode(body).decode("ascii")
+            body_bytes = body
         else:
             body_str = body or ""
+            body_bytes = body_str.encode("utf-8") if body_str else b""
         fn = getattr(h, "http_fetch", None) or getattr(h, "http-fetch", None)
         if fn is None:
             raise RuntimeError("http_fetch not available (no service links configured)")
-        result = fn(link_name, method, path_and_query, headers_json, body_str)
+        if _host_is_wit:
+            # WIT: request bytes are plexspaces.wasm.v1.HttpFetchRequest (prost); response is HttpFetchResponse.
+            wire_req = encode_http_fetch_request(hdrs, body_bytes)
+            raw = fn(link_name, method, path_and_query, _to_payload_bytes(wire_req))
+            result_bytes = bytes(raw) if raw else b""
+            status, resp_headers, resp_body = decode_http_fetch_response(result_bytes)
+            try:
+                body_out = resp_body.decode("utf-8")
+            except UnicodeDecodeError:
+                body_out = base64.b64encode(resp_body).decode("ascii")
+            return {
+                "status": int(status),
+                "headers": dict(resp_headers),
+                "body": body_out,
+            }
+        else:
+            # Mock: http_fetch(link_name, method, path_and_query, headers_json, body)
+            result = fn(link_name, method, path_and_query, headers_json, body_str)
         if isinstance(result, str) and result.startswith("ERROR:"):
             raise RuntimeError(result)
         if isinstance(result, str):

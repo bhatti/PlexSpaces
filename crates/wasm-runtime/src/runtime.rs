@@ -796,9 +796,7 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
                 let result = ms.downcast::<std::sync::Arc<dyn crate::MessageSender>>()
                     .ok()
                     .map(|inner| (*inner).clone());
-                if result.is_some() {
-                    tracing::info!("MessageSender successfully configured for WASM actor");
-                } else {
+                if result.is_none() {
                     tracing::warn!("Failed to downcast MessageSender from Arc<dyn Any> - host.ask() will not work");
                 }
                 result

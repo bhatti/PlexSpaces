@@ -6,16 +6,19 @@
 // Full native multi-actor FSM / GenServer / GenEvent demo: `examples/rust/embedded/entity_recognition/`.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::{Mutex, OnceLock};
+use prost::Message as ProstMessage;
+use plexspaces_proto::application::v1::ApplicationMetrics;
 
 wit_bindgen::generate!({
-    path: "../../../../wit/plexspaces-simple-actor",
+    path: "../../../../wit/plexspaces-actor",
     world: "actor-world",
 });
 
-use exports::plexspaces::simple_actor::actor::Guest;
-use plexspaces::simple_actor::host;
-use plexspaces_sdk::simple_actor::SimpleActorHandlers;
+use exports::plexspaces::actor::actor::Guest;
+use plexspaces::actor::host;
+use plexspaces_sdk::simple_actor::ActorWorldHandlers;
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +44,9 @@ fn state_cell() -> &'static Mutex<PipelineState> {
 }
 
 fn with_state<T>(f: impl FnOnce(&mut PipelineState) -> T) -> T {
-    let mut g = state_cell().lock().expect("entity_recognition state lock poisoned");
+    let mut g = state_cell()
+        .lock()
+        .expect("entity_recognition state lock poisoned");
     f(&mut *g)
 }
 
@@ -77,17 +82,31 @@ fn merge_application_metrics_for(
     metrics: serde_json::Value,
     context: &str,
 ) -> Result<(), String> {
-    let response = host::application_metrics_add(application_id, &metrics.to_string());
-    if response.starts_with("ERROR:") {
-        Err(format!("{}: {}", context, response))
-    } else {
-        Ok(())
-    }
+    let metrics_bytes = ApplicationMetrics {
+        actor_counts: metrics.get("actor_counts").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
+        supervisor_count: metrics.get("supervisor_count").and_then(|value| value.as_u64()).unwrap_or(0) as u32,
+        uptime_seconds: metrics.get("uptime_seconds").and_then(|value| value.as_u64()).unwrap_or(0),
+        message_count: metrics.get("message_count").and_then(|value| value.as_u64()).unwrap_or(0),
+        error_count: metrics.get("error_count").and_then(|value| value.as_u64()).unwrap_or(0),
+        counter_metrics: metrics.get("counter_metrics").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
+        latency_totals_ms: metrics.get("latency_totals_ms").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
+        latency_max_ms: metrics.get("latency_max_ms").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
+        latency_samples: metrics.get("latency_samples").and_then(|value| value.as_object()).map(|entries| entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()).unwrap_or_default(),
+    }.encode_to_vec();
+    host::application_metrics_add(application_id, &metrics_bytes)
+        .map(|_| ())
+        .map_err(|err| format!("{context}: {err}"))
 }
 
-fn parse_op(msg_type: &str, payload_json: &str) -> Result<String, String> {
-    let payload: serde_json::Value =
-        serde_json::from_str(payload_json).map_err(|e| format!("invalid payload: {}", e))?;
+fn parse_payload(payload: &[u8]) -> Result<Value, String> {
+    if payload.is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    serde_json::from_slice(payload).map_err(|e| format!("invalid payload: {}", e))
+}
+
+fn parse_op(msg_type: &str, payload: &[u8]) -> Result<String, String> {
+    let payload = parse_payload(payload)?;
     if let Some(op) = payload
         .get("op")
         .and_then(|value| value.as_str())
@@ -99,6 +118,14 @@ fn parse_op(msg_type: &str, payload_json: &str) -> Result<String, String> {
     } else {
         Ok(msg_type.to_string())
     }
+}
+
+fn json_bytes(value: Value) -> Vec<u8> {
+    value.to_string().into_bytes()
+}
+
+fn json_error(err: impl Into<String>) -> Vec<u8> {
+    json_bytes(serde_json::json!({ "error": err.into() }))
 }
 
 const COMPUTE_MS_BASE: f64 = 0.5;
@@ -201,7 +228,8 @@ fn handle_process_document(payload: &serde_json::Value) -> String {
     });
 
     let m = metrics_for_doc(compute_u, coord_u, n);
-    if let Err(err) = merge_application_metrics_for(&application_id, m, "process_document metrics") {
+    if let Err(err) = merge_application_metrics_for(&application_id, m, "process_document metrics")
+    {
         return serde_json::json!({ "error": err }).to_string();
     }
 
@@ -348,9 +376,8 @@ struct EntityRecognitionActor;
 #[plexspaces_handlers(wasm)]
 impl EntityRecognitionActor {
     #[init_handler]
-    fn configure(&mut self, config_json: &str) -> Result<(), String> {
-        let v: serde_json::Value =
-            serde_json::from_str(config_json).map_err(|e| format!("invalid init JSON: {}", e))?;
+    fn configure(&mut self, config: &[u8]) -> Result<(), String> {
+        let v = parse_payload(config)?;
         with_state(|state| {
             let actor_id = v.get("actor_id").and_then(|x| x.as_str()).unwrap_or("");
             state.application_id = if actor_id.is_empty() {
@@ -366,98 +393,94 @@ impl EntityRecognitionActor {
     fn process_document_op(
         &mut self,
         _from_actor: &str,
-        payload_json: &str,
-    ) -> Result<String, String> {
-        let payload: serde_json::Value =
-            serde_json::from_str(payload_json).map_err(|e| format!("invalid payload: {}", e))?;
-        Ok(handle_process_document(&payload))
+        payload: &[u8],
+    ) -> Result<Vec<u8>, String> {
+        let payload = parse_payload(payload)?;
+        Ok(json_bytes(
+            serde_json::from_str(&handle_process_document(&payload)).unwrap_or_else(
+                |_| serde_json::json!({ "error": "invalid process_document response" }),
+            ),
+        ))
     }
 
     #[handler("reset")]
-    fn reset_op(
-        &mut self,
-        _from_actor: &str,
-        _payload_json: &str,
-    ) -> Result<String, String> {
-        Ok(handle_reset())
+    fn reset_op(&mut self, _from_actor: &str, _payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(json_bytes(
+            serde_json::from_str(&handle_reset())
+                .unwrap_or_else(|_| serde_json::json!({ "error": "invalid reset response" })),
+        ))
     }
 
     #[handler("get_stats")]
-    fn get_stats_op(
-        &mut self,
-        _from_actor: &str,
-        _payload_json: &str,
-    ) -> Result<String, String> {
-        Ok(handle_get_stats())
+    fn get_stats_op(&mut self, _from_actor: &str, _payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(json_bytes(
+            serde_json::from_str(&handle_get_stats())
+                .unwrap_or_else(|_| serde_json::json!({ "error": "invalid stats response" })),
+        ))
     }
 
     #[handler("get_status")]
-    fn get_status_op(
-        &mut self,
-        _from_actor: &str,
-        _payload_json: &str,
-    ) -> Result<String, String> {
-        Ok(handle_get_status())
+    fn get_status_op(&mut self, _from_actor: &str, _payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(json_bytes(
+            serde_json::from_str(&handle_get_status())
+                .unwrap_or_else(|_| serde_json::json!({ "error": "invalid status response" })),
+        ))
     }
 
     #[handler("status")]
-    fn status_alias(
-        &mut self,
-        _from_actor: &str,
-        _payload_json: &str,
-    ) -> Result<String, String> {
-        Ok(handle_get_status())
+    fn status_alias(&mut self, _from_actor: &str, _payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(json_bytes(
+            serde_json::from_str(&handle_get_status())
+                .unwrap_or_else(|_| serde_json::json!({ "error": "invalid status response" })),
+        ))
     }
 
     #[handler("batch")]
-    fn batch_op(
-        &mut self,
-        _from_actor: &str,
-        payload_json: &str,
-    ) -> Result<String, String> {
-        let payload: serde_json::Value =
-            serde_json::from_str(payload_json).map_err(|e| format!("invalid payload: {}", e))?;
-        Ok(handle_batch(&payload))
+    fn batch_op(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+        let payload = parse_payload(payload)?;
+        Ok(json_bytes(
+            serde_json::from_str(&handle_batch(&payload))
+                .unwrap_or_else(|_| serde_json::json!({ "error": "invalid batch response" })),
+        ))
     }
 }
 
 struct EntityRecognitionBridge;
 
 impl Guest for EntityRecognitionBridge {
-    fn init(config_json: String) -> String {
+    fn init(config: Vec<u8>) -> Result<(), String> {
         let mut actor = EntityRecognitionActor::default();
-        match SimpleActorHandlers::init(&mut actor, &config_json) {
-            Ok(()) => String::new(),
-            Err(err) => err,
-        }
+        ActorWorldHandlers::init(&mut actor, &config)
     }
 
-    fn handle(from_actor: String, msg_type: String, payload_json: String) -> String {
-        let op = match parse_op(&msg_type, &payload_json) {
+    fn handle(from_actor: String, msg_type: String, payload: Vec<u8>) -> Result<Vec<u8>, String> {
+        let op = match parse_op(&msg_type, &payload) {
             Ok(op) => op,
-            Err(err) => return serde_json::json!({ "error": err }).to_string(),
+            Err(err) => return Ok(json_error(err)),
         };
         let mut actor = EntityRecognitionActor::default();
-        actor
-            .handle_operation(&from_actor, &op, &payload_json)
-            .unwrap_or_else(|err| serde_json::json!({ "error": err }).to_string())
+        Ok(actor
+            .handle_operation(&from_actor, &op, &payload)
+            .unwrap_or_else(json_error))
     }
 
-    fn get_state() -> String {
-        with_state(|state| serde_json::to_string(state).unwrap_or_else(|_| "{}".to_string()))
+    fn get_state() -> Result<Vec<u8>, String> {
+        with_state(|state| {
+            serde_json::to_vec(state).map_err(|err| format!("state encode failed: {err}"))
+        })
     }
 
-    fn set_state(state_json: String) -> String {
-        if state_json.is_empty() {
-            return String::new();
+    fn set_state(state: Vec<u8>) -> Result<(), String> {
+        if state.is_empty() {
+            return Ok(());
         }
-        match serde_json::from_str::<PipelineState>(&state_json) {
+        match serde_json::from_slice::<PipelineState>(&state) {
             Ok(s) => {
                 let mut g = state_cell().lock().expect("set_state lock");
                 *g = s;
-                String::new()
+                Ok(())
             }
-            Err(_) => "ERROR: invalid state JSON".to_string(),
+            Err(_) => Err("invalid state JSON".to_string()),
         }
     }
 }
@@ -471,8 +494,11 @@ mod tests {
     #[test]
     fn parse_op_reads_embedded_op() {
         assert_eq!(
-            parse_op("call", r#"{"op":"process_document","doc_id":"d","content":"x"}"#)
-                .expect("op"),
+            parse_op(
+                "call",
+                r#"{"op":"process_document","doc_id":"d","content":"x"}"#
+            )
+            .expect("op"),
             "process_document"
         );
     }

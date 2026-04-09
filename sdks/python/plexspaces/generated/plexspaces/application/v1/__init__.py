@@ -394,6 +394,23 @@ class ApplicationSpec(betterproto.Message):
      Example: ["localhost:8091", "localhost:8093"]
     """
 
+    required_service_links: List["ApplicationServiceLinkRequirement"] = (
+        betterproto.message_field(16)
+    )
+    """
+    External service links this application expects at deploy time (validated against node catalog).
+    """
+
+
+@dataclass(eq=False, repr=False)
+class ApplicationServiceLinkRequirement(betterproto.Message):
+    """
+    Reference to a runtime service link by logical name (see RuntimeConfig.service_links).
+    """
+
+    link_name: str = betterproto.string_field(1)
+    policy_template: Optional[str] = betterproto.string_field(2, optional=True)
+
 
 @dataclass(eq=False, repr=False)
 class SupervisorSpec(betterproto.Message):

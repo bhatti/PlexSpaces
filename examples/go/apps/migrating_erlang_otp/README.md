@@ -44,6 +44,10 @@ cd examples/go/apps/migrating_erlang_otp
 ./test.sh 7993    # Deploy + test rate limiting + benchmarks
 ```
 
+**Deploy `application_id` and `name`**: Use the same value for both. For WASM, the runtime derives the actor registry namespace from `ApplicationSpec.namespace`, then request namespace, then deploy `name` — not from `application_id` when the first two are empty. The HTTP path `/api/v1/actors/{namespace}/...` must use that namespace, so **app-id should map to namespace** by setting `name` equal to `application_id` (as `test.sh` does).
+
+**Actor HTTP paths:** `/api/v1/actors/{namespace}/rate-limiter/ask` must use the same namespace WASM actors register under—the deploy multipart field `name` (see `APP_SPEC_NAME` in `test.sh`), not `application_id`.
+
 ## PlexSpaces SDK Features
 
 | Feature | How Used |

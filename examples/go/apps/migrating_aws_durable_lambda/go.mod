@@ -1,6 +1,6 @@
 module github.com/plexobject/plexspaces/examples/go/apps/migrating_aws_durable_lambda
 
-go 1.22
+go 1.25.0
 
 require github.com/plexobject/plexspaces/sdks/go v0.0.0
 

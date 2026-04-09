@@ -9,8 +9,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$SCRIPT_DIR/calculator_actor.wasm"
-NODE_ADDR="${1:-localhost:8090}"
-HTTP_PORT="${2:-8091}"
+NODE_ADDR="${1:-localhost:8091}"
+HTTP_PORT="${2:-8092}"
 
 # Use shared target directory
 export CARGO_TARGET_DIR="$WORKSPACE_DIR/target"
@@ -22,6 +22,9 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 APP_ID="calculator-test"
+# Deploy `name` sets ApplicationSpec.namespace and default child id; must match
+# /api/v1/actors/{namespace}/{actor_type} path segments.
+ACTOR_TYPE="$APP_ID"
 
 cleanup() {
     echo ""
@@ -79,13 +82,13 @@ if [ -x "$CLI_BIN" ]; then
     RESPONSE=$("$CLI_BIN" deploy \
         --node "$NODE_ADDR" \
         -i "$APP_ID" \
-        -n "calculator" \
+        -n "$APP_ID" \
         -w "$WASM_FILE" 2>&1) || true
 else
     RESPONSE=$(cargo run -q -p plexspaces-cli -- deploy \
         --node "$NODE_ADDR" \
         -i "$APP_ID" \
-        -n "calculator" \
+        -n "$APP_ID" \
         -w "$WASM_FILE" 2>&1) || true
 fi
 
@@ -127,7 +130,7 @@ test_calc() {
     # POST triggers tell (fire-and-forget) but we can verify success from server logs
     # The calculator parses operation from the payload JSON
     # Don't hardcode tenant_id - use path format /api/v1/actors/{namespace}/{actor_type}
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/calculator" \
+    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$ACTOR_TYPE" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || true
     

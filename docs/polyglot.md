@@ -11,7 +11,7 @@ PlexSpaces supports **polyglot development** - you can write actors, application
 - ✅ **Isolation**: Each WASM module runs in isolation with resource limits
 - ✅ **Dynamic Deployment**: Deploy applications at runtime without restarting nodes
 
-> **📦 SDKs Available!** For Python, use the [PlexSpaces Python SDK](sdk.md) (decorator-based: `@actor`, `@event_actor`, `@workflow_actor`, `@handler`, `state()`). For TypeScript, use the [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) (decorators for actor metadata plus base classes/runtime helpers). For Go, use the [PlexSpaces Go SDK](sdk.md#go-sdk) (typed actor definitions such as `GenServerActor`, `EventActor`, `WorkflowActorDefinition`). All target the same `plexspaces-simple-actor` WIT world.
+> **📦 SDKs Available!** For Python, use the [PlexSpaces Python SDK](sdk.md) (decorator-based: `@actor`, `@event_actor`, `@workflow_actor`, `@handler`, `state()`). For TypeScript, use the [PlexSpaces TypeScript SDK](sdk.md#typescript-sdk) (decorators for actor metadata plus base classes/runtime helpers). For Go, use the [PlexSpaces Go SDK](sdk.md#go-sdk) (typed actor definitions such as `GenServerActor`, `EventActor`, `WorkflowActorDefinition`). All target the same `plexspaces-actor` WIT world.
 
 ### Protocol buffers and typed SDK models
 
@@ -22,7 +22,7 @@ At build time, **WIT** defines the WASM boundary (JSON payloads to host function
 | Language | Compiler | WASM Size | Runtime Performance | Best For |
 |----------|----------|-----------|---------------------|----------|
 | **Python** | `componentize-py` | 30-40MB | Moderate | ML, data processing, rapid prototyping |
-| **TypeScript/JavaScript** | `jco componentize` | 500KB-2MB | Good | Web integration, rapid development (simple-actor WIT) |
+| **TypeScript/JavaScript** | `jco componentize` | 500KB-2MB | Good | Web integration, rapid development (actor-world WIT) |
 | **Rust** | `cargo` (wasm32-wasip2) | 100KB-1MB | Excellent | Production, performance-critical |
 | **Go** | `tinygo` | 2-5MB | Good | Good balance, fast iteration |
 
@@ -667,7 +667,7 @@ tsc -p .
 node build-bundle.mjs  # Uses esbuild
 
 # Build WASM component with jco (not Javy)
-jco componentize actor_bundle.mjs --wit wit/plexspaces-simple-actor -o actor.wasm --disable all
+jco componentize actor_bundle.mjs --wit wit/plexspaces-actor -o actor.wasm --disable all
 ```
 
 **SDK Simplification**: 
@@ -876,7 +876,7 @@ ctx = {"tenant-id": "tenant-123", "namespace": "production"}
    - Demonstrates state persistence and coordination
 
 2. **TypeScript Bank Account** (`examples/typescript/apps/bank_account/`)
-   - TypeScript SDK + jco componentize (simple-actor WIT)
+   - TypeScript SDK + jco componentize (actor-world WIT)
    - Full E2E: node, build, deploy, HTTP ops
    - **SDK Simplification**: WIT types auto-generated, iterative serializer, simple API
 

@@ -231,14 +231,14 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
   -F "wasm_file=@target/wasm32-wasip2/release/rust_actor.wasm"
 ```
 
-**TypeScript WASM (simple-actor WIT, recommended):**
+**TypeScript WASM (actor-world WIT, recommended):**
 
 Use the [TypeScript SDK](sdk.md#typescript-sdk): extend `PlexSpacesActor`, bundle with esbuild, then build with jco:
 
 ```bash
 # From examples/typescript/apps/bank_account
 npm run build          # tsc + esbuild bundle
-jco componentize account_actor_bundle.mjs --wit wit/plexspaces-simple-actor -o account_actor.wasm --disable all
+jco componentize account_actor_bundle.mjs --wit wit/plexspaces-actor -o account_actor.wasm --disable all
 
 # Deploy via HTTP
 curl -X POST http://localhost:8001/api/v1/applications/deploy \
@@ -407,12 +407,12 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 
 **Location**: `examples/typescript/apps/bank_account/`
 
-Uses the [TypeScript SDK](sdk.md#typescript-sdk) and the same `plexspaces-simple-actor` WIT as Python. Build with jco (not Javy) so the component imports only `plexspaces:simple-actor/host`.
+Uses the [TypeScript SDK](sdk.md#typescript-sdk) and the same `plexspaces-actor` WIT as Python. Build with jco (not Javy) so the component imports only `plexspaces:actor/host`.
 
 **Key Features**:
 - **SDK Handles WIT Types**: WIT TypeScript types are generated automatically by the SDK - clients don't need to generate or import them
-- **Iterative Serializer**: SDK uses iterative JSON serialization to avoid WASM recursion issues
-- **String Returns**: Actors return JSON strings (serialized by SDK) - host parses them
+- **Proto-first ABI**: Actor-world exchanges protobuf wire bytes and typed WIT results instead of JSON payload strings
+- **Generated Models**: SDKs encode/decode generated protobuf models at the boundary and keep business logic in the framework crates
 
 **Build**:
 ```bash
@@ -676,7 +676,7 @@ cargo build --target wasm32-wasip2 --release
 # Output: target/wasm32-wasip2/release/*.wasm
 ```
 
-**TypeScript (simple-actor WIT):**
+**TypeScript (actor-world WIT):**
 ```bash
 cd examples/typescript/apps/bank_account
 ./scripts/build.sh   # tsc → esbuild bundle → jco componentize --disable all
@@ -755,11 +755,11 @@ cargo run --release --bin plexspaces -- application deploy \
 
 **⚠️ Critical Notes**:
 - **Application Name vs Application ID**: The `name` field is used by `ApplicationManager` for storage and lookup. Use the `name` (not `application_id`) when undeploying.
-- **WASM Components (Python, TypeScript)**: ✅ **Fully Supported** - Components built with `componentize-py` (Python) or `jco componentize` (TypeScript) use the `simple-actor` WIT interface
-  - Uses JSON strings for all complex data (Python: avoids pyo3 lifting; TypeScript: single WIT world)
-  - TypeScript: build with `jco componentize ... --disable all` so the component only imports `plexspaces:simple-actor/host` (no WASI)
+- **WASM Components (Python, TypeScript)**: ✅ **Fully Supported** - Components built with `componentize-py` (Python) or `jco componentize` (TypeScript) use the `actor-world` WIT interface from `wit/plexspaces-actor`
+  - Uses protobuf bytes plus typed WIT results for actor-world payloads and errors
+  - TypeScript: build with `jco componentize ... --disable all` so the component only imports `plexspaces:actor/host` (no WASI)
   - See `examples/python/` and `examples/typescript/apps/bank_account/` for working examples
-  - See `wit/plexspaces-simple-actor/` for the WIT interface
+  - See `wit/plexspaces-actor/` for the WIT interface
 - **Traditional WASM Modules** (Rust, Go): ✅ **Supported** - Use standard actor interface
 - **ApplicationSpec is Required**: All WASM deployments must include an ApplicationSpec (auto-generated or provided). This ensures applications follow the Erlang-style application model.
 
@@ -826,7 +826,7 @@ curl -X POST http://localhost:8001/api/v1/applications/deploy \
 
 See [Installation Guide](installation.md#wasm-applications-auto-deploy-and-persistence) for complete details.
 - Use the test script (`./scripts/test-empty-node-deployment.sh`) which automatically creates a working WASM module
-- For manual testing, use Rust/Go WASM modules or TypeScript/Python components (simple-actor WIT)
+- For manual testing, use Rust/Go WASM modules or TypeScript/Python components (actor-world WIT)
 
 ### 4. Verify Deployment
 
@@ -1050,46 +1050,32 @@ source ~/venv/bin/activate
 pip install componentize-py
 ```
 
-### WIT Interface (Simple Actor)
+### WIT Interface (actor-world)
 
-Python components use the `simple-actor` WIT interface located at `wit/plexspaces-simple-actor/world.wit`. This interface uses JSON strings for all complex data to avoid componentize-py's pyo3 lifting issues:
+Python components use the `actor-world` WIT world located at `wit/plexspaces-actor/world.wit`.
+This interface uses protobuf wire bytes for complex request/response bodies and WIT `result`
+for failures. SDKs generate the protobuf models and hide the raw byte handling from app code:
 
 ```wit
-package plexspaces:simple-actor@0.1.0;
+package plexspaces:actor@0.1.0;
 
 interface actor {
-    init: func(config-json: string) -> string;
-    handle: func(from-actor: string, msg-type: string, payload-json: string) -> string;
-    get-state: func() -> string;
-    set-state: func(state-json: string) -> string;
+    init: func(config: payload) -> result<_, actor-error>;
+    handle: func(from-actor: string, msg-type: string, payload: payload) -> result<payload, actor-error>;
+    get-state: func() -> result<payload, actor-error>;
+    set-state: func(state: payload) -> result<_, actor-error>;
 }
 
 interface host {
-    // Messaging
-    send: func(to: string, msg-type: string, payload-json: string) -> string;
-    ask: func(to: string, msg-type: string, payload-json: string, timeout-ms: u64) -> string;
-    // Actor Identity
+    send: func(to: string, msg-type: string, payload: payload) -> result<_, actor-error>;
+    ask: func(to: string, msg-type: string, payload: payload, timeout-ms: u64) -> result<payload, actor-error>;
     self-id: func() -> string;
-    // Actor Lifecycle
-    spawn: func(module-ref: string, actor-id: string, init-config-json: string) -> string;
-    stop: func(actor-id: string) -> string;
-    // Linking & Monitoring (Erlang/OTP patterns)
-    link: func(actor-id: string) -> string;
-    unlink: func(actor-id: string) -> string;
-    monitor: func(actor-id: string) -> string;
-    demonitor: func(monitor-ref: string) -> string;
-    // Timers (Delayed Messaging)
-    send-after: func(delay-ms: u64, msg-type: string, payload-json: string) -> string;
-    // Logging & Time
+    spawn: func(module-ref: string, actor-id: string, init-config: payload) -> result<string, actor-error>;
+    stop: func(actor-id: string) -> result<_, actor-error>;
+    send-after: func(delay-ms: u64, msg-type: string, payload: payload) -> result<string, actor-error>;
     log: func(level: string, message: string);
     now-ms: func() -> u64;
-    // Key-Value Store
-    kv-get: func(key: string) -> string;
-    kv-put: func(key: string, value: string) -> string;
-    kv-delete: func(key: string) -> string;
-    kv-list: func(prefix: string) -> string;
-    // TupleSpace, Locks, Blob Storage, Process Groups
-    // (see wit/plexspaces-simple-actor/world.wit for full interface)
+    // see wit/plexspaces-actor/host.wit for the complete proto-first host surface
 }
 
 world actor-world {
@@ -1100,49 +1086,50 @@ world actor-world {
 
 ### TupleSpace (ts_write) for WASM
 
-WASM actors using the simple-actor WIT can write tuples via **`host.ts_write(tuple_json)`**. The runtime parses a JSON array (e.g. `["AUDIT","action","actor_id","resource","details","ts"]`) into a Tuple and calls the same TupleSpace backend as native code. Use this for event streams, audit logs, or coordination without keyvalue. The [Audit Log](../examples/python/apps/audit_log/README.md) example currently uses **host.log only** (no ts_write) to avoid WASM integration issues; API support can be added when the runtime is more stable.
+WASM actors using the actor-world WIT call **`host.ts_write`** with protobuf `WriteRequest` bytes and read/take using protobuf `ReadRequest` bytes. The runtime decodes those bytes once and delegates to the same TupleSpace backend as native code. Use this for event streams, audit logs, or coordination without keyvalue.
 
 **When to use ts_write**: Prefer `ts_write` for fire-and-forget event or audit streams when WASM integration is stable; it avoids reentrancy and readonly issues that can occur when WASM calls into the keyvalue backend during message handling.
 
 ### Elastic pool (WASM host)
 
-WASM actors using the simple-actor WIT can use the **elastic pool** API to checkout workers from a named pool, send them work, and check them in when done. When the pool is not configured (or checkout fails), application code can fall back to process group broadcast.
+WASM actors using the actor-world WIT can use the **elastic pool** API to checkout workers from a named pool, send them work, and check them in when done. When the pool is not configured (or checkout fails), application code can fall back to process group broadcast.
 
 | WIT function | Description |
 |--------------|-------------|
-| `pool-checkout(pool-name, timeout-ms)` | Returns JSON handle `{actor_id, pool_name, checkout_id}` on success, or `"ERROR:message"` on failure/timeout. |
-| `pool-checkin(pool-name, actor-id, checkout-id, healthy)` | Returns empty on success, `"ERROR:message"` on failure. |
-| `pool-get-metrics(pool-name)` | Returns JSON metrics (e.g. total_actors, available_actors, busy_actors, current_load) or `"ERROR:message"`. |
+| `pool-checkout(pool-name, timeout-ms)` | Returns protobuf `plexspaces.pool.v1.ActorHandle` on success or typed `actor-error` on failure/timeout. |
+| `pool-checkin(pool-name, actor-id, checkout-id, healthy)` | Returns success/error result. |
+| `pool-get-metrics(pool-name)` | Returns protobuf `plexspaces.pool.v1.PoolMetrics`. |
 
 **SDK usage**: Python `host.pool_checkout` / `host.pool_checkin` / `host.pool_get_metrics`; Go `host.PoolCheckout` / `host.PoolCheckin` / `host.PoolGetMetrics`; TypeScript `host.poolCheckout` / `host.poolCheckin` / `host.poolGetMetrics`. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) (Python, Go, TypeScript, Rust) for a full example combining pool, tuple space (work queue), and process group fallback.
 
 ### ShardGroup scatter-gather (WASM host)
 
-Deployable WASM apps can also use the framework shard-group APIs through the simple-actor host. This keeps leader-worker apps on the same core `ActorService` path used by native Rust.
+Deployable WASM apps can also use the framework shard-group APIs through the actor-world host. This keeps leader-worker apps on the same core `ActorService` path used by native Rust.
 
 | WIT function | Description |
 |--------------|-------------|
-| `create-shard-group(request-json)` | Creates a shard group from JSON fields such as `group_id`, `actor_type`, `shard_count`, and `placement`. Returns JSON with the created group metadata or `"ERROR:message"`. |
-| `bulk-update-shard-group(request-json)` | Sends update messages to shards using JSON fields `group_id`, `updates`, `consistency_level`, `timeout_ms`, and `wait_for_responses`. |
-| `map-shard-group(request-json)` | Maps a query across shards using JSON fields `group_id`, `query`, and `timeout_ms`. Returns per-shard results and aggregate stats as JSON. |
-| `scatter-gather(request-json)` | Broadcasts a query to all shards using JSON fields `group_id`, `query`, `aggregation`, `min_responses`, and `timeout_ms`. Returns aggregate result, per-shard payloads, and stats as JSON. |
+| `create-shard-group(request)` | Uses protobuf `CreateShardGroupRequest` / `CreateShardGroupResponse`. |
+| `bulk-update-shard-group(request)` | Uses protobuf `BulkUpdateShardGroupRequest` / `BulkUpdateShardGroupResponse`. |
+| `map-shard-group(request)` | Uses protobuf `MapShardGroupRequest` / `MapShardGroupResponse`. |
+| `scatter-gather(request)` | Uses protobuf `ScatterGatherRequest` / `ScatterGatherResponse`. |
 
 Use this for WASM leader-worker applications that need framework-owned scatter/gather without dropping down to gRPC or hand-written host bindings. See [Heat Diffusion](../examples/rust/apps/heat_diffusion/README.md) for a Rust WASM example that deploys to multiple nodes and drives workers through the host shard-group surface.
 
 ### Key-Value Storage (WASM)
 
-WASM actors (Python simple-actor) can persist data via the host **keyvalue** API. This avoids in-actor state serialization issues and provides reliable storage across the WASM boundary.
+WASM actors using `actor-world` can persist data via the host **keyvalue** API. This avoids
+in-actor state serialization issues and provides reliable storage across the WASM boundary.
 
-**Choosing storage**: For event streams or audit logs, prefer **`host.ts_write(tuple_json)`** (see [TupleSpace (ts_write) for WASM](#tuplespace-ts_write-for-wasm)). Key-value values must be UTF-8 strings; binary/protobuf data in the same `kv_store` table may come from the object registry—see [KeyValue crate README](../crates/keyvalue/README.md) for inspecting the store.
+**Choosing storage**: For event streams or audit logs, prefer tuplespace writes with protobuf `WriteRequest` payloads. Key-value values are actor-world bytes, so SDKs typically persist protobuf messages or application-owned binary payloads without JSON adapters.
 
 | Host function | Description |
 |---------------|-------------|
-| `kv-get(key)` | Returns value as string, or empty if not found. Errors return `"ERROR:message"`. |
-| `kv-put(key, value)` | Stores string value. Returns empty on success, `"ERROR:message"` on failure. |
+| `kv-get(key)` | Returns raw value bytes on success, or a typed actor error. |
+| `kv-put(key, value)` | Stores raw value bytes. Returns success/error as a WIT result. |
 
 **Scope**: Keys are scoped per actor (namespace derived from actor ID). The node provides an in-memory keyvalue store for WASM actors by default.
 
-**Example (Python)**:
+**Example (Python SDK)**:
 
 ```python
 from plexspaces import actor, handler, host
@@ -1150,21 +1137,21 @@ from plexspaces import actor, handler, host
 @actor
 class SensorStream:
     @handler("ingest")
-    def ingest(self, sensor_id: str = "", value: str = "0") -> str:
+    def ingest(self, sensor_id: str = "", value: str = "0") -> dict:
         raw = host.kv_get("readings")
-        data = json.loads(raw) if raw else []
-        data.append({"sensor_id": sensor_id, "value": value})
-        err = host.kv_put("readings", json.dumps(data))
-        return "" if not err else err
+        data = ReadingList().from_bytes(raw) if raw else ReadingList()
+        data.items.append(Reading(sensor_id=sensor_id, value=value))
+        host.kv_put("readings", data.to_bytes())
+        return {"reading_count": len(data.items)}
 
     @handler("count")
-    def count(self) -> str:
+    def count(self) -> dict:
         raw = host.kv_get("readings")
-        data = json.loads(raw) if raw else []
-        return '{"reading_count":' + str(len(data)) + '}'
+        data = ReadingList().from_bytes(raw) if raw else ReadingList()
+        return {"reading_count": len(data.items)}
 ```
 
-**Best practice**: Have handlers return **strings only** (e.g. JSON built by concatenation or `json.dumps` inside the handler) to avoid componentize-py traps when crossing the WASM boundary. Full keyvalue API (TTL, list-keys, etc.) will be added to the SDKs later.
+**Best practice**: Have handlers return protobuf-backed models or SDK-native values and let the SDK decorator own actor-world serialization. Keep business logic in handlers and keep the WIT boundary thin.
 
 ### Building Python Actors
 
@@ -1181,44 +1168,36 @@ The build script:
 ### Example Python Actor
 
 ```python
-import json
-from wit_world import exports
+from plexspaces import actor, handler, state
+from generated.calculator_pb2 import AddRequest, AddResponse
 
-class Actor(exports.Actor):
-    def init(self, config_json: str) -> str:
-        """Returns "" on success, "ERROR: ..." on failure"""
-        return ""
-    
-    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
-        """Returns JSON response or "ERROR: ..."."""
-        request = json.loads(payload_json)
-        operation = request.get('operation', msg_type)
-        if operation == 'add':
-            result = sum(request.get('operands', []))
-            return json.dumps({'result': result})
-        return json.dumps({'error': 'Unknown operation'})
-    
-    def get_state(self) -> str:
-        return json.dumps({})
-    
-    def set_state(self, state_json: str) -> str:
-        return ""
+@actor
+class Calculator:
+    invocation_count: int = state(default=0)
+
+    @handler("add")
+    def add(self, request: AddRequest) -> AddResponse:
+        self.invocation_count += 1
+        return AddResponse(result=sum(request.operands))
 ```
 
 See `examples/python/README.md` for complete documentation.
 
 ### TypeScript WASM Development
 
-TypeScript actors use the same **simple-actor** WIT world as Python. Use the [TypeScript SDK](sdk.md#typescript-sdk): extend `PlexSpacesActor<TState>`, implement `getDefaultState()` and `on<Op>(payload)` handlers, then build with **jco componentize** (not Javy).
+TypeScript actors use the same **actor-world** WIT world as Python. Use the
+[TypeScript SDK](sdk.md#typescript-sdk): extend `PlexSpacesActor<TState>`, implement
+`getDefaultState()` and `on<Op>(payload)` handlers, then build with **jco componentize**
+(not Javy).
 
 **SDK Simplification**: The SDK automatically generates WIT TypeScript types during build - client code doesn't need to run `jco types` or import generated files. The SDK abstracts all WIT details away, keeping client code simple.
 
 **Build** (from `examples/typescript/apps/bank_account`):
 
 1. Install deps: `npm install` (includes `@plexspaces/sdk`, `esbuild`, `jco`)
-2. Build: `./scripts/build.sh` — runs tsc, esbuild bundle (actor + SDK → single ESM), then `jco componentize account_actor_bundle.mjs --wit wit/plexspaces-simple-actor -o account_actor.wasm --disable all`
+2. Build: `./scripts/build.sh` — runs tsc, esbuild bundle (actor + SDK → single ESM), then `jco componentize account_actor_bundle.mjs --wit wit/plexspaces-actor -o account_actor.wasm --disable all`
 
-**Important**: Use `--disable all` so the component only imports `plexspaces:simple-actor/host`; the PlexSpaces runtime does not provide WASI 0.2.3 that jco would otherwise add.
+**Important**: Use `--disable all` so the component only imports `plexspaces:actor/host`; the PlexSpaces runtime does not provide WASI 0.2.3 that jco would otherwise add.
 
 **SDK Simplification**: 
 - WIT TypeScript types are automatically generated by the SDK during build (`npm run build` in SDK)
@@ -1242,32 +1221,27 @@ WASM actors support **checkpoint-based durability** via the `get-state()` and `s
 ### Implementing State Persistence
 
 ```python
-import json
+from generated.state_pb2 import ActorState
 
 class StatefulActor:
     def __init__(self):
-        self.data = {}  # Internal state
-    
-    def get_state(self) -> str:
+        self.data = ActorState()
+
+    def get_state(self) -> bytes:
         """Called by framework to checkpoint state."""
-        return json.dumps(self.data)
-    
-    def set_state(self, state_json: str) -> str:
+        return self.data.SerializeToString()
+
+    def set_state(self, state_bytes: bytes) -> None:
         """Called by framework to restore state on restart."""
-        if state_json:
-            self.data = json.loads(state_json)
-        return ""  # Empty = success
-    
-    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
-        # Update self.data based on messages
-        pass
+        if state_bytes:
+            self.data.ParseFromString(state_bytes)
 ```
 
 ### Key Points
 
-- **JSON format**: State must be JSON-serializable
-- **Empty string = success**: `set-state()` returns empty string on success
-- **Graceful degradation**: `set-state()` should handle empty/null input
+- **Proto-first state**: State snapshots are raw bytes, typically protobuf messages defined alongside the actor
+- **Typed errors**: `set-state()` and `get-state()` use actor-world `result<_, actor-error>`
+- **Graceful degradation**: `set-state()` should handle empty input
 - **Size matters**: Keep state small for fast checkpointing
 
 ### State Serialization: Float Safety
@@ -1522,7 +1496,7 @@ Tests cover:
 - **[SDK Guide](sdk.md)** - Python and TypeScript SDKs for building WASM actors
 - **[Polyglot WASM Development Guide](polyglot.md)** - Polyglot development (Python, TypeScript, Rust, Go) with WIT abstractions
 - **[Python WASM Examples](../examples/python/README.md)** - Python WASM actors with componentize-py
-- **[TypeScript Bank Account Example](../examples/typescript/apps/bank_account/README.md)** - TypeScript WASM with jco and simple-actor WIT
+- **[TypeScript Bank Account Example](../examples/typescript/apps/bank_account/README.md)** - TypeScript WASM with jco and actor-world WIT
 - [WIT Specification](https://github.com/WebAssembly/component-model/blob/main/design/mvp/WIT.md)
 - [componentize-py](https://github.com/bytecodealliance/componentize-py) - Python to WASM Component compiler
 - [jco](https://bytecodealliance.github.io/jco/) - JavaScript/TypeScript componentize (componentize-js)

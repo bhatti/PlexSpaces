@@ -1759,7 +1759,7 @@ See `scripts/BLOB_TESTING_GUIDE.md` for detailed testing instructions.
 
 ## TupleSpace
 
-PlexSpaces TupleSpace is inspired by Linda memory model. WASM actors using the simple-actor WIT can write tuples via the host function **`ts-write(tuple-json)`**; the runtime parses a JSON array into a `Tuple` and calls the same TupleSpace backend. See [WASM Deployment: TupleSpace (ts_write)](wasm-deployment.md#tuplespace-ts_write-for-wasm). The Audit Log example currently uses host.log only (storage deferred until WASM stable).
+PlexSpaces TupleSpace is inspired by Linda memory model. WASM actors using the actor-world WIT call **`ts-write`** / **`ts-read`** / **`ts-take`** / **`ts-read-all`** with protobuf wire bytes using the shared `plexspaces.tuplespace.v1.WriteRequest` and `ReadRequest` models. The runtime decodes those bytes once at the host boundary and delegates to the same TupleSpace backend used by native code. See [WASM Deployment: TupleSpace (ts_write)](wasm-deployment.md#tuplespace-ts_write-for-wasm).
 
 ### Linda Operations
 
@@ -1817,7 +1817,7 @@ Single unified implementation for actor pools with checkout/checkin semantics an
 - **ServiceLocator**: `get_elastic_pool_service` / `register_elastic_pool_service` (implemented in `plexspaces-services`).
 - **SDK**: `ElasticPoolClient::from_service_locator(service_locator)` in the Rust SDK delegates to the registered service; no duplicate business logic.
 - **Proto**: `proto/plexspaces/v1/pool/pool.proto` defines PoolConfig, PoolMetrics, ActorHandle, and ElasticPoolError. PoolService gRPC can be added later for remote access.
-- **WASM host**: The simple-actor WIT (`wit/plexspaces-simple-actor/world.wit`) exposes `pool-checkout`, `pool-checkin`, and `pool-get-metrics`. Python, Go, and TypeScript SDKs wrap these (e.g. `host.pool_checkout`, `host.PoolCheckout`, `host.poolCheckout`). When the pool is not configured, checkout returns an error and apps can fall back to process group broadcast. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) and [WASM Deployment: Elastic pool](wasm-deployment.md#elastic-pool-wasm-host).
+- **WASM host**: The actor-world WIT (`wit/plexspaces-actor/world.wit`) exposes `pool-checkout`, `pool-checkin`, and `pool-get-metrics`. SDKs wrap these with generated protobuf models such as `plexspaces.pool.v1.ActorHandle` and `PoolMetrics`. When the pool is not configured, checkout returns a typed actor error and apps can fall back to process group broadcast. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) and [WASM Deployment: Elastic pool](wasm-deployment.md#elastic-pool-wasm-host).
 
 ## Leader-Worker and ShardGroup Placement
 
@@ -2921,7 +2921,7 @@ PlexSpaces supports multiple channel backends, each optimized for different use 
 - **Graceful Shutdown**: Closes socket, stops receiving
 - **Features**: 
   - Multicast pub/sub for cluster-wide broadcasting
-  - Requires `cluster_name` configuration
+  - Requires `cluster_name` configuration (release `node.cluster_name` or `PLEXSPACES_CLUSTER_NAME` via `config_manager`)
   - Nodes with same `cluster_name` can communicate
   - TTL configuration for network scope
   - Maximum message size enforcement
@@ -3088,25 +3088,32 @@ pub trait ObjectRegistry: Send + Sync {
 
 ### Architecture
 
-The WASM runtime provides polyglot actor support via two WIT interface worlds:
+The WASM runtime provides polyglot actor support through one canonical WIT package,
+`plexspaces:actor@0.1.0`, with two worlds for the two execution styles:
 
 ```
 SDK Layer (Python/TypeScript/Go/Rust)
   ↓ decorators (@actor, @handler, state())
 WIT Interface (Contract)
-  simple-actor (JSON strings) │ plexspaces-actor (typed)
+  actor-world (deployable polyglot actors) │ plexspaces-actor (native typed actors)
   ↓
 Host Bindings
-  SimpleHostImpl            │ ComponentHost
+  Actor-world host adapter  │ ComponentHost
   ↓
 HostFunctions (Service Gateway)
   ↓ delegates to framework services
 Framework (Node, ActorRef, ActorRegistry, TimerFacet, etc.)
 ```
 
-### WIT Host Interface (simple-actor)
+### WIT Host Interface (actor-world)
 
-The `plexspaces:simple-actor` WIT world is the primary interface for Python, TypeScript, and Go WASM actors. All functions use JSON strings for payload interchange. Error convention: empty string = success, `"ERROR:message"` = failure.
+The `actor-world` world in `wit/plexspaces-actor` is the deployable interface for Python,
+TypeScript, Go, and Rust WASM actors. Its ABI is proto-bytes-first:
+
+- all request/response bodies are `list<u8>` carrying protobuf wire bytes,
+- operation names remain typed WIT methods,
+- failures use `result<_, actor-error>` rather than stringly `"ERROR:..."` conventions,
+- SDKs own protobuf encode/decode while host code delegates to `HostFunctions` and core services.
 
 | Category | Functions |
 |----------|-----------|
@@ -3122,6 +3129,7 @@ The `plexspaces:simple-actor` WIT world is the primary interface for Python, Typ
 | **Blob Storage** | `blob-upload`, `blob-download`, `blob-delete`, `blob-list` |
 | **Process Groups** | `pg-join`, `pg-leave`, `pg-members`, `pg-broadcast` |
 | **Elastic pool** | `pool-checkout`, `pool-checkin`, `pool-get-metrics` |
+| **Shard groups & App metrics** | `create-shard-group`, `bulk-update-shard-group`, `map-shard-group`, `broadcast-shard-group`, `reduce-shard-group`, `all-reduce-shard-group`, `barrier-shard-group`, `scatter-gather`, `spawn-actors`, `application-metrics-add`, `application-get-status`, `http-fetch` |
 
 ### State Preservation
 

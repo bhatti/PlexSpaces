@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-WIT_DIR="$REPO_ROOT/wit/plexspaces-simple-actor"
+WIT_DIR="$REPO_ROOT/wit/plexspaces-actor"
 OUTPUT_WASM="$SCRIPT_DIR/streaming_actor.wasm"
 ESBUILD_STAMP="$SCRIPT_DIR/node_modules/.esbuild-platform"
 
@@ -46,7 +46,7 @@ else
   exit 1
 fi
 
-$JCO componentize streaming_actor_bundle.mjs --wit "$WIT_DIR" -o "$OUTPUT_WASM" --disable all
+$JCO componentize streaming_actor_bundle.mjs --wit "$WIT_DIR" -n actor-world -o "$OUTPUT_WASM" --disable all
 SIZE=$(ls -lh "$OUTPUT_WASM" | awk '{print $5}')
 echo "  ✓ $OUTPUT_WASM ($SIZE)"
 echo ""

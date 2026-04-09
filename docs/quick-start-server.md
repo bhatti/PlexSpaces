@@ -179,6 +179,7 @@ plexspaces generate-mtls \
 
 ## Environment Variables
 
+- `PLEXSPACES_CLUSTER_NAME`: Optional; sets `node.cluster_name` via `config_manager` (same value on every node for multinode registry and shard placement)
 - `PLEXSPACES_JWT_SECRET`: JWT secret for API authentication
 - `PLEXSPACES_MTLS_CA_CERT`: Path to mTLS CA certificate
 - `PLEXSPACES_MTLS_SERVER_CERT`: Path to mTLS server certificate

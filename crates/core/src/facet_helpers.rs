@@ -165,8 +165,8 @@ pub async fn create_facets_from_proto(
         }
     }
 
-    if tracing::enabled!(tracing::Level::DEBUG) && !created_types.is_empty() {
-        tracing::debug!(
+    if tracing::enabled!(tracing::Level::TRACE) && !created_types.is_empty() {
+        tracing::trace!(
             facets = %created_types.join(", "),
             total = proto_facets.len(),
             created = facets.len(),

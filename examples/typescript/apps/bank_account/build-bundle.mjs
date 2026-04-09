@@ -17,6 +17,8 @@ await esbuild.build({
   platform: "neutral",
   target: "es2020",
   packages: "bundle",
+  // WIT world imports are satisfied by the component host at runtime, not by npm.
+  external: ["plexspaces:*"],
 });
 
 console.log("  ✓ account_actor_bundle.mjs");

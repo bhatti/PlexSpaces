@@ -43,6 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Remove Copy from all prost::Message derives
             content = remove_copy_derives(content);
+            content = gate_tonic_includes(content);
 
             if content != original_content {
                 fs::write(&file_path, content)?;
@@ -145,6 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         content = content.replace("(Copy)", "()");
         // Replace prost's Empty with unit type for better ergonomics
         content = content.replace("::prost_types::Empty", "()");
+        content = gate_tonic_includes(content);
 
         if content != original_content {
             fs::write(&file_path, content)?;
@@ -208,8 +210,18 @@ fn remove_copy_derives(content: String) -> String {
     content = content.replace("(Copy)", "()");
     // Replace prost's Empty with unit type for better ergonomics
     content = content.replace("::prost_types::Empty", "()");
+    content = gate_tonic_includes(content);
 
     content
+}
+
+/// Gate tonic client/server includes behind the grpc feature so message-only users
+/// can consume generated protobuf models without pulling transport dependencies.
+fn gate_tonic_includes(content: String) -> String {
+    content.replace(
+        "include!(\"plexspaces.",
+        "#[cfg(feature = \"grpc\")]\ninclude!(\"plexspaces.",
+    )
 }
 
 /// Recursively find all .proto files in a directory, excluding a path.

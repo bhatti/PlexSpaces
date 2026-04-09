@@ -41,44 +41,37 @@ Python WASM actors use the **WebAssembly Component Model** with **WIT (WebAssemb
 │  │   ├── wasi:clocks/*                                       │
 │  │   └── wasi:random/*                                       │
 │  └── PlexSpaces Host Functions                               │
-│      ├── plexspaces:simple-actor/host@0.1.0                 │
-│      │   ├── send(to, msg_type, payload_json) -> string     │
+│      ├── plexspaces:actor/host@0.1.0                 │
+│      │   ├── send(to, msg_type, payload: bytes) -> result   │
 │      │   ├── log(level, message)                             │
 │      │   └── now_ms() -> u64                                 │
 ├─────────────────────────────────────────────────────────────┤
 │  Python Component (componentize-py)                          │
-│  └── plexspaces:simple-actor/actor@0.1.0                    │
-│      ├── init(config_json) -> string                         │
-│      ├── handle(from, msg_type, payload_json) -> string     │
-│      ├── get_state() -> string                               │
-│      └── set_state(state_json) -> string                     │
+│  └── plexspaces:actor/actor@0.1.0                    │
+│      ├── init(config: bytes) -> result                       │
+│      ├── handle(from, msg_type, payload: bytes) -> result    │
+│      ├── get_state() -> result<bytes, actor-error>           │
+│      └── set_state(state: bytes) -> result                   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### WIT Interface (Simple Actor)
+### WIT Interface (Actor World)
 
-Located at `wit/plexspaces-simple-actor/world.wit`:
+Located at `wit/plexspaces-actor/world.wit`:
 
 ```wit
-package plexspaces:simple-actor@0.1.0;
+package plexspaces:actor@0.1.0;
 
 interface actor {
-    // Initialize actor, returns "" on success or "ERROR: ..." on failure
-    init: func(config-json: string) -> string;
-    
-    // Handle message, returns JSON response or "ERROR: ..."
-    handle: func(from-actor: string, msg-type: string, payload-json: string) -> string;
-    
-    // Get actor state as JSON
-    get-state: func() -> string;
-    
-    // Restore actor state, returns "" on success
-    set-state: func(state-json: string) -> string;
+    init: func(config: list<u8>) -> result<_, actor-error>;
+    handle: func(from-actor: string, msg-type: string, payload: list<u8>) -> result<list<u8>, actor-error>;
+    get-state: func() -> result<list<u8>, actor-error>;
+    set-state: func(state: list<u8>) -> result<_, actor-error>;
 }
 
 interface host {
     // Send message to another actor
-    send: func(to: string, msg-type: string, payload-json: string) -> string;
+    send: func(to: string, msg-type: string, payload: list<u8>) -> result<_, actor-error>;
     
     // Log message
     log: func(level: string, message: string);
@@ -93,7 +86,7 @@ world actor-world {
 }
 ```
 
-**Key Design Choice**: All complex data uses JSON strings instead of complex WIT types. This avoids `PyObject_SetItem` errors in componentize-py's pyo3 layer during Canonical ABI lifting.
+**Key Design Choice**: The actor-world ABI is protobuf-first. Python SDK decorators and generated protobuf models own encode/decode so Python application code stays typed while the host contract stays consistent with Rust, Go, and TypeScript.
 
 ## Building Python Actors
 
@@ -101,47 +94,33 @@ world actor-world {
 
 ```python
 # my_actor.py
-import json
 from wit_world import exports
+from generated.ping_pb2 import PingRequest, PingResponse, ActorState
 
 class Actor(exports.Actor):
     def __init__(self):
-        self._state = {}
+        self._state = ActorState()
     
-    def init(self, config_json: str) -> str:
-        """Initialize actor. Return "" on success, "ERROR: ..." on failure."""
-        try:
-            if config_json:
-                self._state = json.loads(config_json)
-            return ""  # Success
-        except Exception as e:
-            return f"ERROR: {e}"
+    def init(self, config: bytes) -> None:
+        """Initialize actor from protobuf config bytes."""
+        if config:
+            self._state.ParseFromString(config)
     
-    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
-        """Handle message. Return JSON response or "ERROR: ..."."""
-        try:
-            request = json.loads(payload_json) if payload_json else {}
-            operation = request.get('operation', msg_type)
-            
-            # Process based on operation
-            if operation == 'ping':
-                return json.dumps({'response': 'pong'})
-            else:
-                return json.dumps({'error': f'Unknown operation: {operation}'})
-        except Exception as e:
-            return f"ERROR: {e}"
+    def handle(self, from_actor: str, msg_type: str, payload: bytes) -> bytes:
+        """Handle message with protobuf request/response types."""
+        request = PingRequest()
+        request.ParseFromString(payload)
+        if msg_type == "ping":
+            return PingResponse(response="pong").SerializeToString()
+        raise ValueError(f"Unknown operation: {msg_type}")
     
-    def get_state(self) -> str:
-        """Get state as JSON."""
-        return json.dumps(self._state)
+    def get_state(self) -> bytes:
+        """Get state as protobuf bytes."""
+        return self._state.SerializeToString()
     
-    def set_state(self, state_json: str) -> str:
-        """Restore state. Return "" on success."""
-        try:
-            self._state = json.loads(state_json)
-            return ""
-        except Exception as e:
-            return f"ERROR: {e}"
+    def set_state(self, state: bytes) -> None:
+        """Restore state from protobuf bytes."""
+        self._state.ParseFromString(state)
 ```
 
 ### Step 2: Build Script
@@ -152,7 +131,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-WIT_DIR="$PROJECT_ROOT/wit/plexspaces-simple-actor"
+WIT_DIR="$PROJECT_ROOT/wit/plexspaces-actor"
 ACTOR_NAME="my_actor"
 
 source "$HOME/venv/bin/activate"
@@ -193,19 +172,18 @@ let wasi_ctx = wasmtime_wasi::WasiCtxBuilder::new()
     .build();
 ```
 
-### 2. Use JSON Strings for Complex Types
+### 2. Use Generated Protobuf Models for Shared Contracts
 
-**Problem**: Complex WIT types (records, lists, variants) cause Canonical ABI lifting issues in componentize-py.
+**Problem**: Pushing application structs directly through Canonical ABI types makes polyglot parity harder and creates a second model alongside the Rust framework types.
 
-**Solution**: Use simple `string` types with JSON serialization for all complex data. The `simple-actor` interface uses only strings:
+**Solution**: Keep actor-world on `bytes` + `result`, compile the repo protos for Python, and let the SDK/decorators map protobuf models to the WIT boundary:
 
 ```wit
-// ✅ Good - simple types
-handle: func(from-actor: string, msg-type: string, payload-json: string) -> string;
-
-// ❌ Avoid - complex types that may cause lifting issues
-handle: func(message: message-envelope) -> result<response, error>;
+// Canonical actor-world boundary
+handle: func(from-actor: string, msg-type: string, payload: list<u8>) -> result<list<u8>, actor-error>;
 ```
+
+This keeps Python aligned with Rust, Go, and TypeScript and avoids ad hoc JSON schemas drifting away from the framework protos.
 
 ### 3. componentize-py Versions
 
@@ -351,7 +329,7 @@ Ensure you're NOT using `.inherit_env()` in the WASI context. This is fixed in t
 ### Component Not Found
 
 Check that:
-1. WIT interface matches what's in `wit/plexspaces-simple-actor/`
+1. WIT interface matches what's in `wit/plexspaces-actor/`
 2. Python class exports `Actor` implementing `exports.Actor`
 3. All methods match WIT signatures exactly
 

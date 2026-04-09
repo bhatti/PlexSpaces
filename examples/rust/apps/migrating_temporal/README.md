@@ -1,12 +1,12 @@
 # Order Fulfillment Workflow (Rust WASM)
 
-E-commerce order fulfillment as a **Rust WASM** app on **plexspaces-simple-actor** (init, handle, get-state, set-state), aligned with Go/TypeScript/Python: `workflow_run` / `workflow_signal:*` / `workflow_query:*`.
+E-commerce order fulfillment as a **Rust WASM** app on **plexspaces-actor** (init, handle, get-state, set-state), aligned with Go/TypeScript/Python: `workflow_run` / `workflow_signal:*` / `workflow_query:*`.
 
 ## Stack (same class as `data_parallel_worker`)
 
-- `wit_bindgen::generate!` → `wit/plexspaces-simple-actor`, `actor-world`
+- `wit_bindgen::generate!` → `wit/plexspaces-actor`, `actor-world`
 - `#[gen_server_actor(wasm)]` + `#[plexspaces_handlers(wasm)]` — handlers for `workflow_run`, `workflow_signal:cancel`, `workflow_query:status`; `#[init_handler]` for config
-- `plexspaces::simple_actor::host` — `now_ms`, **`application_metrics_add`** (counters + latency maps for workflow compute/coordination; no scatter/gather). On **wasm32**, the Rust standard mutex is non-reentrant: never call `application_metrics_add` (or `resolve_application_id`, which uses the same state lock) **while holding** the workflow state mutex—merge metrics **after** the state update closure returns.
+- `plexspaces::actor::host` — `now_ms`, **`application_metrics_add`** (counters + latency maps for workflow compute/coordination; no scatter/gather). On **wasm32**, the Rust standard mutex is non-reentrant: never call `application_metrics_add` (or `resolve_application_id`, which uses the same state lock) **while holding** the workflow state mutex—merge metrics **after** the state update closure returns.
 - Thin `impl Guest` + `export!(...)` bridge (no Tokio, no hand-written `#[no_mangle]` exports)
 
 ## Purpose

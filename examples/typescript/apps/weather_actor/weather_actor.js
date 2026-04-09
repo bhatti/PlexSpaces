@@ -58,41 +58,16 @@ class WeatherActor extends PlexSpacesActor {
     getDefaultState() {
         return { actor_id: "", cache_hits: 0, cache_misses: 0 };
     }
-    init(configJSON) {
-        try {
-            const cfg = JSON.parse(configJSON);
-            if (cfg.actor_id)
-                this.state.actor_id = cfg.actor_id;
-        }
-        catch {
-            // ignore parse errors
+    onInit(config) {
+        if (typeof config.actor_id === "string" && config.actor_id) {
+            this.state.actor_id = config.actor_id;
         }
         host.log("info", `WeatherActor initialized: ${this.state.actor_id}`);
-        return "";
     }
-    handle(_from, msgType, payloadJSON) {
-        switch (msgType) {
-            case "get_weather":
-                return this.handleGetWeather(payloadJSON);
-            case "cache_stats":
-                return JSON.stringify({ hits: this.state.cache_hits, misses: this.state.cache_misses });
-            case "clear_cache":
-                this.state.cache_hits = 0;
-                this.state.cache_misses = 0;
-                return JSON.stringify({ cleared: true });
-            default:
-                return JSON.stringify({ error: `unknown message type: ${msgType}` });
-        }
-    }
-    handleGetWeather(payloadJSON) {
+    onGet_weather(payload) {
         let city = "London";
-        try {
-            const req = JSON.parse(payloadJSON);
-            if (req.city)
-                city = req.city;
-        }
-        catch {
-            // use default
+        if (typeof payload.city === "string" && payload.city) {
+            city = payload.city;
         }
         const cacheKey = `weather:${city}`;
         const cached = host.kvGet(cacheKey);
@@ -106,7 +81,7 @@ class WeatherActor extends PlexSpacesActor {
                 if (host.nowMs() - fetchedAt < CACHE_TTL_MS) {
                     this.state.cache_hits++;
                     host.log("debug", `Cache HIT for ${city}`);
-                    return JSON.stringify({ ...data, city, source: "cache" });
+                    return { ...data, city, source: "cache" };
                 }
             }
             catch {
@@ -130,12 +105,20 @@ class WeatherActor extends PlexSpacesActor {
             if (cacheWrite.startsWith("ERROR:")) {
                 host.log("warn", `Cache write failed for ${city}: ${cacheWrite}`);
             }
-            return JSON.stringify({ ...result, city, source: "api" });
+            return { ...result, city, source: "api" };
         }
         catch (err) {
             host.log("error", `Weather API call failed: ${err}`);
-            return JSON.stringify({ city, error: String(err), source: "api" });
+            return { city, error: String(err), source: "api" };
         }
+    }
+    onCache_stats(_payload) {
+        return { hits: this.state.cache_hits, misses: this.state.cache_misses };
+    }
+    onClear_cache(_payload) {
+        this.state.cache_hits = 0;
+        this.state.cache_misses = 0;
+        return { cleared: true };
     }
 }
 const router = new ActorRouter({

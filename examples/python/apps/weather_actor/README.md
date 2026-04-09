@@ -6,8 +6,8 @@ Demonstrates **outbound HTTP via a named service link** combined with **KV-based
 
 | Feature | Details |
 |---------|---------|
-| `ServiceHttpClient` | Ergonomic HTTP client backed by `"weather-api"` service link |
-| KV caching | `host.kv_get` / `host.kv_put` to cache results for 5 minutes |
+| `ServiceHttpClient` | Ergonomic HTTP client backed by `"weather-api"` service link and shared protobuf HTTP models |
+| KV caching | `host.kv_get` / `host.kv_put` cache protobuf-backed weather entries for 5 minutes |
 | Service link config | `[[runtime.service_links]]` in `release.toml` |
 | Required link validation | `[[applications.required_service_links]]` in `app-config.toml` |
 | Example harness | `./test.sh` runs contract tests, builds WASM, deploys the actor, exercises cache/API paths, and prints output + metrics |
@@ -41,9 +41,9 @@ initial_delay_ms = 100
 
 | Message | Payload | Response |
 |---------|---------|----------|
-| `get_weather` | `{"op":"get_weather","city":"London"}` | `{"city","temp_c","wind_kph","source"}` |
-| `cache_stats` | `{"op":"cache_stats"}` | `{"hits","misses"}` |
-| `clear_cache` | `{"op":"clear_cache"}` | `{"cleared":true}` |
+| `get_weather` | `WeatherRequest { city }` | `WeatherReply { city, temp_c, wind_kph, fetched_at_ms, source, error }` |
+| `cache_stats` | empty payload | `CacheStats { hits, misses }` |
+| `clear_cache` | empty payload | `ClearCacheReply { cleared }` |
 
 ## Further reading
 

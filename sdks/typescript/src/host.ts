@@ -4,7 +4,16 @@
 // PlexSpaces Host Functions (TypeScript SDK)
 //
 // Provides TypeScript wrappers for WIT host imports.
-// Uses virtual imports from 'plexspaces:simple-actor/host@0.1.0'.
+// Uses virtual imports from 'plexspaces:actor/host@0.1.0'.
+
+// Protobuf wire for WIT `payload` fields (matches Go WASM hostWire* / tuplespace_proto_wire).
+import {
+  decodeReadResponseAllTuples,
+  decodeReadResponseFirstTuple,
+  encodeReadRequest,
+  encodeWriteRequest,
+} from './wire/tuplespace-proto-wire.js';
+import { decodeHttpFetchResponseWire, encodeHttpFetchRequestWire } from './wire/http-fetch-proto-wire.js';
 
 // Virtual imports provided by jco componentize at runtime.
 // These map 1:1 to the WIT host interface functions.
@@ -57,7 +66,7 @@ import {
   applicationGetStatus as hostApplicationGetStatus,
   httpFetch as hostHttpFetch,
   // @ts-expect-error Virtual import
-} from 'plexspaces:simple-actor/host@0.1.0';
+} from 'plexspaces:actor/host@0.1.0';
 
 /**
  * Safe call helper — returns empty string if function is undefined.
@@ -69,6 +78,26 @@ function safeCall<T>(fn: ((...args: any[]) => T) | undefined, ...args: any[]): T
   return '';
 }
 
+/** Host list&lt;u8&gt; / payload: accept Uint8Array; some bindings surface Latin-1 string bytes. */
+function hostPayloadToBytes(result: unknown): Uint8Array {
+  if (result instanceof Uint8Array) return result;
+  if (typeof result === 'string') {
+    const out = new Uint8Array(result.length);
+    for (let i = 0; i < result.length; i++) out[i] = result.charCodeAt(i) & 0xff;
+    return out;
+  }
+  return new Uint8Array(0);
+}
+
+function hostErrorPrefixBytes(raw: Uint8Array): boolean {
+  const prefix = 'ERROR:';
+  if (raw.length < prefix.length) return false;
+  for (let i = 0; i < prefix.length; i++) {
+    if (raw[i] !== prefix.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
 /**
  * Tuple space helper: list-in, list-out API.
  * Use null in patterns for wildcards. Consistent with Python host.ts and Go host.TS().
@@ -76,44 +105,50 @@ function safeCall<T>(fn: ((...args: any[]) => T) | undefined, ...args: any[]): T
 export class TupleSpace {
   constructor(private host: Host) {}
 
-  /** Write a tuple. Elements must be JSON-serializable. Returns empty on success, "ERROR:..." on failure. */
+  /**
+   * Write a tuple. Values are encoded as plexspaces.tuplespace.v1 WriteRequest protobuf wire
+   * (same as Go `TupleSpace.Write` / Rust simple_component_host).
+   */
   write(tuple: unknown[]): string {
-    const json = JSON.stringify(tuple);
-    return this.host.tsWrite(json);
+    try {
+      const wire = encodeWriteRequest(tuple);
+      return this.host.tsWritePayload(wire);
+    } catch (e) {
+      return `ERROR: ${e instanceof Error ? e.message : String(e)}`;
+    }
   }
 
-  /** Take one matching tuple (destructive). Returns tuple as array or null if no match/error. */
+  /** Take one matching tuple (destructive). */
   take(pattern: unknown[]): unknown[] | null {
-    const json = JSON.stringify(pattern);
-    const raw = this.host.tsTake(json);
-    if (raw === '' || raw.startsWith('ERROR')) return null;
     try {
-      return JSON.parse(raw) as unknown[];
+      const wire = encodeReadRequest(pattern, true, 1);
+      const raw = this.host.tsTakePayload(wire);
+      if (raw.length === 0 || hostErrorPrefixBytes(raw)) return null;
+      return decodeReadResponseFirstTuple(raw);
     } catch {
       return null;
     }
   }
 
-  /** Read one matching tuple (non-destructive). Returns tuple as array or null if no match/error. */
+  /** Read one matching tuple (non-destructive). */
   read(pattern: unknown[]): unknown[] | null {
-    const json = JSON.stringify(pattern);
-    const raw = this.host.tsRead(json);
-    if (raw === '' || raw.startsWith('ERROR')) return null;
     try {
-      return JSON.parse(raw) as unknown[];
+      const wire = encodeReadRequest(pattern, false, 1);
+      const raw = this.host.tsReadPayload(wire);
+      if (raw.length === 0 || hostErrorPrefixBytes(raw)) return null;
+      return decodeReadResponseFirstTuple(raw);
     } catch {
       return null;
     }
   }
 
-  /** Read all matching tuples (non-destructive). Returns array of tuples (each tuple is an array). */
+  /** Read all matching tuples (non-destructive). */
   readAll(pattern: unknown[]): unknown[][] {
-    const json = JSON.stringify(pattern);
-    const raw = this.host.tsReadAll(json);
-    if (raw === '' || raw.startsWith('ERROR')) return [];
     try {
-      const out = JSON.parse(raw) as unknown;
-      return Array.isArray(out) ? (out as unknown[][]) : [];
+      const wire = encodeReadRequest(pattern, false, 1024);
+      const raw = this.host.tsReadAllPayload(wire);
+      if (raw.length === 0 || hostErrorPrefixBytes(raw)) return [];
+      return decodeReadResponseAllTuples(raw);
     } catch {
       return [];
     }
@@ -188,7 +223,12 @@ export class Host {
   /** Send message to another actor (fire-and-forget) */
   send(to: string, msgType: string, payload?: unknown): string {
     const payloadJson = payload !== undefined ? JSON.stringify(payload) : '';
-    return safeCall(hostSend, to, msgType, payloadJson) as string;
+    const raw = safeCall(hostSend, to, msgType, payloadJson);
+    // WIT `result<_, actor-error>` ok is unit; jco may yield `undefined` on success.
+    if (typeof raw !== 'string') {
+      return '';
+    }
+    return raw;
   }
 
   /** Send request and wait for response (request-reply) */
@@ -287,10 +327,26 @@ export class Host {
    * Send message to self after delay (returns timer ID for tracking).
    * Timer cancellation is managed by the framework's TimerFacet/ReminderFacet.
    * Stop the actor to cancel pending timers.
+   *
+   * WIT `payload` is opaque bytes; pass UTF-8 JSON bytes so the host matches Go/Rust guest JSON.
    */
   sendAfter(delayMs: number, msgType: string, payload?: unknown): string {
-    const payloadJson = payload !== undefined ? JSON.stringify(payload) : '{}';
-    return safeCall(hostSendAfter, BigInt(delayMs), msgType, payloadJson) as string;
+    const text = payload !== undefined ? JSON.stringify(payload) : '{}';
+    const payloadBytes = new TextEncoder().encode(text);
+    const raw = safeCall(hostSendAfter, BigInt(delayMs), msgType, payloadBytes);
+    if (typeof raw === 'string') {
+      return raw;
+    }
+    if (raw && typeof raw === 'object') {
+      const o = raw as { tag?: string | number; val?: unknown };
+      if (o.tag === 'ok' || o.tag === 0) {
+        return typeof o.val === 'string' ? o.val : '';
+      }
+      if (o.tag === 'err' || o.tag === 1) {
+        return `ERROR:${String(o.val ?? 'send-after failed')}`;
+      }
+    }
+    return '';
   }
 
   // ========================================================================
@@ -323,13 +379,29 @@ export class Host {
   kvList(prefix: string): string { return safeCall(hostKvList, prefix) as string; }
 
   // ========================================================================
-  // TupleSpace (low-level string API; prefer host.ts for list-in/list-out)
+  // TupleSpace (protobuf WriteRequest / ReadRequest / ReadResponse wire bytes)
   // ========================================================================
 
-  tsWrite(tupleJson: string): string { return safeCall(hostTsWrite, tupleJson) as string; }
-  tsRead(patternJson: string): string { return safeCall(hostTsRead, patternJson) as string; }
-  tsTake(patternJson: string): string { return safeCall(hostTsTake, patternJson) as string; }
-  tsReadAll(patternJson: string): string { return safeCall(hostTsReadAll, patternJson) as string; }
+  /** @internal TupleSpace — plexspaces.tuplespace.v1 wire bytes. */
+  tsWritePayload(data: Uint8Array): string {
+    const r = safeCall(hostTsWrite, data) as unknown;
+    return typeof r === 'string' ? r : '';
+  }
+
+  /** @internal */
+  tsReadPayload(data: Uint8Array): Uint8Array {
+    return hostPayloadToBytes(safeCall(hostTsRead, data));
+  }
+
+  /** @internal */
+  tsTakePayload(data: Uint8Array): Uint8Array {
+    return hostPayloadToBytes(safeCall(hostTsTake, data));
+  }
+
+  /** @internal */
+  tsReadAllPayload(data: Uint8Array): Uint8Array {
+    return hostPayloadToBytes(safeCall(hostTsReadAll, data));
+  }
 
   // ========================================================================
   // Distributed Locks
@@ -504,13 +576,25 @@ export class Host {
     headers?: Record<string, string>,
     body?: string,
   ): { status: number; headers: Record<string, string>; body: string } {
-    const headersJson = JSON.stringify(headers ?? {});
-    const bodyStr = body ?? '';
-    const result = safeCall(hostHttpFetch, linkName, method, pathAndQuery, headersJson, bodyStr) as string;
+    const bodyBytes = body !== undefined && body.length > 0 ? new TextEncoder().encode(body) : new Uint8Array(0);
+    const reqWire = encodeHttpFetchRequestWire(headers ?? {}, bodyBytes);
+    const result = safeCall(hostHttpFetch, linkName, method, pathAndQuery, reqWire) as unknown;
     if (typeof result === 'string' && result.startsWith('ERROR:')) {
       throw new Error(result);
     }
-    return JSON.parse(result as string) as { status: number; headers: Record<string, string>; body: string };
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) {
+      return { status: 0, headers: {}, body: '' };
+    }
+    if (hostErrorPrefixBytes(bytes)) {
+      throw new Error(new TextDecoder('utf-8', { fatal: false }).decode(bytes));
+    }
+    const asText = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    try {
+      return JSON.parse(asText) as { status: number; headers: Record<string, string>; body: string };
+    } catch {
+      return decodeHttpFetchResponseWire(bytes);
+    }
   }
 }
 

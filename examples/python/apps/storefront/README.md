@@ -22,12 +22,12 @@ One WASM actor implementing a **storefront backend**: store configuration, shopp
 
 ## Host KV API Used
 
-| WIT (simple-actor) | Purpose |
-|--------------------|--------|
-| `host.kv-get(key)` | Get value; empty or `ERROR:...` on failure. |
-| `host.kv-put(key, value)` | Set value; empty on success. |
-| `host.kv-delete(key)` | Delete key; empty on success. |
-| `host.kv-list(prefix)` | List keys with prefix; returns JSON array or `ERROR:...`. |
+| WIT (actor-world) | Purpose |
+|-------------------|---------|
+| `host.kv-get(key)` | Get raw value bytes or a typed actor error. |
+| `host.kv-put(key, value)` | Set raw value bytes. |
+| `host.kv-delete(key)` | Delete key. |
+| `host.kv-list(prefix)` | List keys with prefix. |
 
 Keys are namespaced by the runtime (per tenant/actor). This example uses logical prefixes: `config:...`, `cart:...`, `ratelimit:checkout:...`.
 

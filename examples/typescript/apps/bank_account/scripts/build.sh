@@ -8,7 +8,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXAMPLE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$EXAMPLE_DIR/../../../../" && pwd)"
-WIT_DIR="$REPO_ROOT/wit/plexspaces-simple-actor"
+WIT_DIR="$REPO_ROOT/wit/plexspaces-actor"
 OUTPUT_WASM="$EXAMPLE_DIR/account_actor.wasm"
 
 cd "$EXAMPLE_DIR"
@@ -59,8 +59,8 @@ else
   JCO="./node_modules/.bin/jco"
 fi
 
-# jco componentize the bundle (exports actor; no WASI so only plexspaces:simple-actor/host).
-if ! $JCO componentize account_actor_bundle.mjs --wit "$WIT_DIR" -o "$OUTPUT_WASM" --disable all 2>&1; then
+# jco componentize the bundle (exports actor; no WASI so only plexspaces:actor/host).
+if ! $JCO componentize account_actor_bundle.mjs --wit "$WIT_DIR" -n actor-world -o "$OUTPUT_WASM" --disable all 2>&1; then
   echo "  ERROR: jco componentize failed (see above)."
   exit 1
 fi

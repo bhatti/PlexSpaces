@@ -4,8 +4,11 @@
 # LuaTS → PlexSpaces: Event-driven data pipeline (CDC-style).
 #
 # Linda-style coordination: events as tuples in TupleSpace; consumers take/read by pattern.
+# Tuple fields must be primitives supported by the runtime (no dict/list — use JSON strings).
 # Run: write event stream to tuple space, then take events by pattern and aggregate (coord vs compute).
 # Publish: write single event tuple. Window flush: take events in window and aggregate (timer-style).
+
+import json
 
 from plexspaces import workflow_actor, state, handler, host
 
@@ -66,7 +69,8 @@ class PipelineActor:
                 self.status = "cancelled"
                 return self._finish(t0, compute_ms, "cancelled")
             source = payload.get("source", "ingest")
-            t = [TUPLE_PREFIX, self.pipeline_id, EVENT_TAG, source, seq, {"ts": host.now_ms(), "seq": seq}]
+            event_body = json.dumps({"ts": host.now_ms(), "seq": seq})
+            t = [TUPLE_PREFIX, self.pipeline_id, EVENT_TAG, source, seq, event_body]
             out = host.ts.write(t)
             if out and out.startswith("ERROR"):
                 host.log("warn", f"ts write failed: {out}")
@@ -145,7 +149,8 @@ class PipelineActor:
         if payload is None:
             payload = {}
         pipeline_id = kwargs.get("pipeline_id") or self.pipeline_id or "default"
-        t = [TUPLE_PREFIX, pipeline_id, EVENT_TAG, source or "api", seq, payload]
+        body = payload if isinstance(payload, str) else json.dumps(payload or {})
+        t = [TUPLE_PREFIX, pipeline_id, EVENT_TAG, source or "api", seq, body]
         out = host.ts.write(t)
         if out and out.startswith("ERROR"):
             return {"ok": False, "error": out}

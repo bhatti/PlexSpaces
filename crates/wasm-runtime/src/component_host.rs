@@ -341,10 +341,9 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
         let start_time = std::time::Instant::now();
         metrics::counter!("plexspaces_wasm_messaging_tell_total").increment(1);
 
-        let message_str = String::from_utf8_lossy(&payload).to_string();
         match self
             .host_functions
-            .send_message(&self.actor_id, &to, &msg_type, &message_str)
+            .send_message(&self.actor_id, &to, &msg_type, &payload)
             .await
         {
             Ok(_) => {
@@ -557,12 +556,11 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
 
         // Forward message using original sender as the 'from' parameter
         // This makes the message appear to come from the original sender
-        let message_str = String::from_utf8_lossy(&payload).to_string();
         // Drop span before await to ensure Send
         drop(_span);
         match self
             .host_functions
-            .send_message(&original_sender, &to, &msg_type, &message_str)
+            .send_message(&original_sender, &to, &msg_type, &payload)
             .await
         {
             Ok(_) => {
@@ -1034,9 +1032,8 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
             tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
 
             // Send message to actor's mailbox
-            let message_str = String::from_utf8_lossy(&payload_clone).to_string();
             if let Err(e) = host_functions_clone
-                .send_message(&actor_id_str, &actor_id_str, &msg_type_clone, &message_str)
+                .send_message(&actor_id_str, &actor_id_str, &msg_type_clone, &payload_clone)
                 .await
             {
                 tracing::warn!(

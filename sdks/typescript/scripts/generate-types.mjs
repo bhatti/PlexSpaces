@@ -9,9 +9,9 @@ import { dirname, join } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SDK_ROOT = join(__dirname, '..');
 // SDK is at: <repo>/sdks/typescript
-// WIT is at: <repo>/wit/plexspaces-simple-actor
+// WIT is at: <repo>/wit/plexspaces-actor
 const REPO_ROOT = join(SDK_ROOT, '../..');
-const WIT_DIR = join(REPO_ROOT, 'wit/plexspaces-simple-actor');
+const WIT_DIR = join(REPO_ROOT, 'wit/plexspaces-actor');
 const OUTPUT_DIR = join(SDK_ROOT, 'src/generated');
 
 // Check if jco is available
@@ -34,7 +34,7 @@ try {
 // Generate types
 try {
   execSync(
-    `"${jco}" types "${WIT_DIR}" -o "${OUTPUT_DIR}"`,
+    `"${jco}" types "${WIT_DIR}" -n actor-world -o "${OUTPUT_DIR}"`,
     { stdio: 'inherit', cwd: SDK_ROOT }
   );
   console.log('✓ Generated WIT types');

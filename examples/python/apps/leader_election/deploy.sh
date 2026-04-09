@@ -14,8 +14,6 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-ACTOR_NAME="LeaderElection"
-
 # Build WASM if needed
 if [ ! -f "$WASM_FILE" ]; then
     echo "📦 Building WASM actor..."
@@ -39,7 +37,7 @@ for OWNER in term1 term2; do
     echo "Deploying $APP_ID..."
     RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
         -F "application_id=$APP_ID" \
-        -F "name=$ACTOR_NAME" \
+        -F "name=$APP_ID" \
         -F "version=1.0.0" \
         -F "wasm_file=@$WASM_FILE;type=application/wasm" 2>&1) || true
     if echo "$RESPONSE" | grep -qi '"success":\s*true'; then

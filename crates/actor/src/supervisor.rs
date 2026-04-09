@@ -1750,11 +1750,6 @@ impl Supervisor {
         };
 
         let actor_count = child_info.len();
-        debug!(
-            supervisor_id = %self.id,
-            child_actor_count = actor_count,
-            "Shutting down child actors (reverse start order)"
-        );
 
         for (id, actor_arc, handle, shutdown_timeout) in child_info {
             // Phase 4: Enforce shutdown spec (BrutalKill, Timeout, Infinity)
@@ -1776,6 +1771,8 @@ impl Supervisor {
                         supervisor_id = %self.id,
                         child_id = %id,
                         timeout_ms = timeout_ms,
+                        child_actor_count = actor_count,
+                        shutdown_children_order = "reverse_start",
                         "Graceful shutdown with timeout"
                     );
                     // Phase 1: Unified Lifecycle - Graceful shutdown with facet lifecycle hooks

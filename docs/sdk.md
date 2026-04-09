@@ -305,33 +305,33 @@ class ChatRoom:
 | `host.error(message)` | Log error message |
 | `host.now_ms()` | Get current timestamp (ms) |
 | **Key-Value Storage** | |
-| `host.kv_get(key)` | Get value by key. Returns value string or empty if not found. |
-| `host.kv_put(key, value)` | Store key-value pair. Returns empty on success. |
-| `host.kv_delete(key)` | Delete key. Returns empty on success. |
-| `host.kv_list(prefix)` | List keys with prefix. Returns JSON array of keys. |
+| `host.kv_get(key)` | Get value bytes by key. SDKs decode protobuf or app-owned payloads from the returned bytes. |
+| `host.kv_put(key, value)` | Store key-value bytes. SDKs typically encode/decode protobuf messages for shared models. |
+| `host.kv_delete(key)` | Delete key. Returns success/error from the actor-world result. |
+| `host.kv_list(prefix)` | List keys with prefix. Returns string keys. |
 | **TupleSpace** | |
-| `host.ts.write(tuple_list)` | Write tuple (list-in). Use Python list; elements JSON-serializable. Returns empty on success. |
-| `host.ts.read(pattern)` | Read one match (non-destructive). Use `None` for wildcards. Returns list or None. |
-| `host.ts.take(pattern)` | Take one match (destructive). Returns list or None. |
-| `host.ts.read_all(pattern)` | Read all matches. Returns list of lists. Low-level: `host.ts_write` / `host.ts_take` / `host.ts_read_all` take JSON strings. |
+| `host.ts.write(tuple)` | Write a tuple using protobuf `WriteRequest` / SDK tuple helpers. |
+| `host.ts.read(pattern)` | Read one match (non-destructive) using protobuf `ReadRequest`. |
+| `host.ts.take(pattern)` | Take one match (destructive) using protobuf `ReadRequest`. |
+| `host.ts.read_all(pattern)` | Read all matches using protobuf tuple/pattern models. |
 | **Distributed Locks** | |
-| `host.lock_acquire(tenant_id, namespace, holder_id, lock_name, lease_secs, timeout_ms)` | Acquire lock. Returns JSON with lock_key, version, holder_id. |
+| `host.lock_acquire(tenant_id, namespace, holder_id, lock_name, lease_secs, timeout_ms)` | Acquire lock. Returns the shared lock protobuf model. |
 | `host.lock_release(lock_id, tenant_id, namespace, holder_id, lock_version)` | Release lock. Returns empty on success. |
-| `host.lock_renew(lock_id, tenant_id, namespace, holder_id, lock_version, lease_secs)` | Renew lock lease. Returns new version. |
+| `host.lock_renew(lock_id, tenant_id, namespace, holder_id, lock_version, lease_secs)` | Renew lock lease. Returns the shared lock protobuf model. |
 | **Blob Storage** | |
-| `host.blob_upload(path, data, content_type)` | Upload blob (base64 data). Returns empty on success. |
-| `host.blob_download(path)` | Download blob. Returns base64 data or empty if not found. |
-| `host.blob_delete(path)` | Delete blob. Returns empty on success. |
-| `host.blob_list(prefix)` | List blobs by prefix. Returns JSON array of blob IDs. |
+| `host.blob_upload(path, data, content_type)` | Upload blob bytes. Returns the stored blob id. |
+| `host.blob_download(path)` | Download blob bytes. |
+| `host.blob_delete(path)` | Delete blob. Returns success/error from the actor-world result. |
+| `host.blob_list(prefix)` | List blob ids by prefix. |
 | **Process Groups** | |
 | `host.process_groups.join(group)` | Join a process group (uses self actor ID) |
 | `host.process_groups.leave(group)` | Leave a process group |
 | `host.process_groups.broadcast(group, msg_type, payload)` | Broadcast to all group members; `msg_type` is used for routing so payload can be data-only. |
 | `host.process_groups.members(group)` | Get group member IDs |
 | **Elastic pool** | |
-| `host.pool_checkout(pool_name, timeout_ms)` (Python) / `host.PoolCheckout` (Go) / `host.poolCheckout` (TS) | Checkout an actor from a named pool. Returns handle `{actor_id, pool_name, checkout_id}` or null on failure. |
+| `host.pool_checkout(pool_name, timeout_ms)` (Python) / `host.PoolCheckout` (Go) / `host.poolCheckout` (TS) | Checkout an actor from a named pool. Returns the shared `ActorHandle` protobuf model. |
 | `host.pool_checkin(pool_name, actor_id, checkout_id, healthy)` | Checkin an actor to the pool. Use values from the handle returned by checkout. |
-| `host.pool_get_metrics(pool_name)` | Get pool metrics (total_actors, available_actors, busy_actors, current_load). Returns JSON or null if not available. |
+| `host.pool_get_metrics(pool_name)` | Get pool metrics as the shared `PoolMetrics` protobuf model. |
 | **ShardGroup / Application Metrics** | |
 | `host.create_shard_group(request)` | Create a shard group. Request uses proto field names such as `group_id`, `actor_type`, `shard_count`, and `placement`. |
 | `host.bulk_update_shard_group(request)` | Bulk update shards. Request uses proto field names such as `group_id`, `updates`, `consistency_level`, `timeout_ms`, and `wait_for_responses`. |
@@ -510,34 +510,28 @@ runtime:
 
 If you have existing actors using the WIT interface directly:
 
-**Before (Legacy - 150+ lines of boilerplate)**
+**Before (Low-level WIT - 150+ lines of boilerplate)**
 ```python
 from wit_world import exports
-import json
-
-_balance = 0
+from generated.bank_account_pb2 import AccountState, DepositRequest, DepositResponse
 
 class Actor(exports.Actor):
-    def init(self, config_json: str) -> str:
-        global _balance
-        _balance = 0
-        return ""
+    def __init__(self):
+        self.state = AccountState()
     
-    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
-        global _balance
-        data = json.loads(payload_json)
+    def handle(self, from_actor: str, msg_type: str, payload: bytes) -> bytes:
+        request = DepositRequest()
+        request.ParseFromString(payload)
         if msg_type == "deposit":
-            _balance += data["amount"]
-            return json.dumps({"balance": _balance})
-        # ... lots of boilerplate
+            self.state.balance += request.amount
+            return DepositResponse(balance=self.state.balance).SerializeToString()
+        raise ValueError(f"unknown operation: {msg_type}")
     
-    def get_state(self) -> str:
-        return json.dumps({"balance": _balance})
+    def get_state(self) -> bytes:
+        return self.state.SerializeToString()
     
-    def set_state(self, state_json: str) -> str:
-        global _balance
-        _balance = json.loads(state_json)["balance"]
-        return ""
+    def set_state(self, state: bytes) -> None:
+        self.state.ParseFromString(state)
 ```
 
 **After (SDK - ~20 lines)**
@@ -598,8 +592,12 @@ class TrainingWorker:
 
     @handler("train_step")
     def train_step(self) -> dict:
-        result = host.ask("parameter-server:ml-training", "get_weights",
-                          json.dumps({"worker_id": self.worker_id}), 5000)
+        result = host.ask(
+            "parameter-server:ml-training",
+            "get_weights",
+            GetWeightsRequest(worker_id=self.worker_id).SerializeToString(),
+            5000,
+        )
         # ... train ...
         return {"epoch": self.epoch}
 
@@ -656,7 +654,7 @@ actor_ref = client.spawn_actor_on_node(node_ids[0], "worker", "w-1")
 
 ## TypeScript SDK
 
-The TypeScript SDK uses **inheritance** instead of decorators: extend `PlexSpacesActor<TState>` and implement `getDefaultState()` plus `on<Op>(payload)` handlers. Same WIT world as Python (`plexspaces-simple-actor`).
+The TypeScript SDK uses **inheritance** instead of decorators: extend `PlexSpacesActor<TState>` and implement `getDefaultState()` plus `on<Op>(payload)` handlers. The SDK owns actor-world protobuf encode/decode so TypeScript code stays aligned with the same contract used by Rust, Python, and Go.
 
 ### Installation
 
@@ -708,9 +706,9 @@ export const actor = {
 
 - Compile: `tsc`
 - Bundle actor + SDK into one ESM file (e.g. with esbuild)
-- Build WASM: `jco componentize your-bundle.mjs --wit wit/plexspaces-simple-actor -o actor.wasm --disable all`
+- Build WASM: `jco componentize your-bundle.mjs --wit wit/plexspaces-actor -o actor.wasm --disable all`
 
-The `--disable all` flag ensures the component only imports `plexspaces:simple-actor/host` (no WASI), matching the PlexSpaces runtime linker.
+The `--disable all` flag ensures the component only imports `plexspaces:actor/host` (no WASI), matching the PlexSpaces runtime linker.
 
 **Note**: WIT TypeScript types are automatically generated by the SDK during build (`npm run build`). Client code doesn't need to generate or import these types - the SDK abstracts all WIT details away.
 
@@ -721,13 +719,13 @@ The `--disable all` flag ensures the component only imports `plexspaces:simple-a
 | `PlexSpacesActor<TState>` | Base class. `TState` is your state shape (plain object). |
 | `getDefaultState(): TState` | Override to return initial state. |
 | `onInit(config)` | Optional. Called from `init()` with parsed config. |
-| `on<Op>(payload)` | Handler for message op (e.g. `onDeposit`, `onBalance`). Dispatch is by `payload.op`. |
+| `on<Op>(payload)` | Handler for message op (e.g. `onDeposit`, `onBalance`). SDK decorators map payload bytes to generated models or plain objects. |
 | `protected state: TState` | Current state; read/write in handlers. |
-| `protected json(obj)`, `error(msg)` | Helpers for returning JSON or error strings. |
+| `protected encode(message)`, `decode(bytes, ctor)` | Helpers for protobuf-backed actor-world payloads. |
 
-**Host Functions**: The TypeScript SDK uses WIT virtual imports for host functions. jco componentize wires up `plexspaces:simple-actor/host@0.1.0` imports at build time. The SDK uses `host.log()` internally for error logging. WIT types are generated automatically by the SDK - clients don't need to generate or import them. See [TypeScript SDK README](../sdks/typescript/README.md#host-functions) for details.
+**Host Functions**: The TypeScript SDK uses WIT virtual imports for host functions. jco componentize wires up `plexspaces:actor/host@0.1.0` imports at build time. The SDK uses generated protobuf models for shared contracts and keeps actor-world encoding at the decorator layer. See [TypeScript SDK README](../sdks/typescript/README.md#host-functions) for details.
 
-**Serialization**: The SDK uses an iterative JSON serializer to avoid WASM recursion issues. Results are serialized to JSON strings in WASM and returned to the host, which parses them. This design avoids stack overflow issues in StarlingMonkey (the JavaScript engine used by jco componentize).
+**Serialization**: The actor-world boundary is protobuf-first. SDK decorators marshal generated protobuf messages to bytes and unmarshal replies so application code stays typed while the runtime stays aligned with the shared host contract.
 
 Observability (metrics, tracing) for WASM actors is provided by the PlexSpaces runtime; the TypeScript SDK does not add its own. See [sdks/typescript/README.md](../sdks/typescript/README.md) and [examples/typescript/apps/bank_account](../examples/typescript/apps/bank_account/README.md) for a full example and E2E test.
 
@@ -752,7 +750,7 @@ const actorRef = await client.spawnActorOnNode(ids[0], "worker", "w-1");
 
 ## Rust SDK
 
-The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use the same core macros across native Rust and deployable Rust WASM: `#[gen_server_actor]`, `#[handler("op")]`, and `#[plexspaces_handlers]`. For deployable Rust WASM actors on the `plexspaces:simple-actor` WIT surface, use the WASM mode forms `#[gen_server_actor(wasm)]` and `#[plexspaces_handlers(wasm)]`.
+The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use the same core macros across native Rust and deployable Rust WASM: `#[gen_server_actor]`, `#[handler("op")]`, and `#[plexspaces_handlers]`. For deployable Rust WASM actors on the `plexspaces:actor` WIT surface, use the WASM mode forms `#[gen_server_actor(wasm)]` and `#[plexspaces_handlers(wasm)]`.
 
 **Location**: `sdks/rust/plexspaces-sdk` and `sdks/rust/plexspaces-sdk-macros`.
 
@@ -999,13 +997,13 @@ let stats = client.bulk_update(
 - **Transport Boundary**: Local SDK usage stays in-process via ServiceLocator; remote gRPC APIs are built separately on top of the same proto/service contracts
 - **Labels Flow**: ShardGroup config.placement.required_labels (NodePlacement) → ActorResourceRequirements.placement → NodeSelector → Node placement
 
-For WASM apps using the simple-actor WIT world, node-local benchmark counters should be recorded
+For WASM apps using the actor-world WIT world, node-local benchmark counters should be recorded
 through `application-metrics-add` and read back with `application-get-status`. The SDK/WIT layer is
 only the decorator; the authoritative per-node application metrics live in the application manager
 inside the main Rust framework crates.
 
 **Cross-SDK WASM parity**: Python, TypeScript, Go, and Rust WASM all expose the same shard-group
-host surface through the simple-actor WIT world:
+host surface through the actor-world WIT world:
 - `create-shard-group`
 - `bulk-update-shard-group`
 - `map-shard-group`
@@ -1013,9 +1011,9 @@ host surface through the simple-actor WIT world:
 - `application-metrics-add`
 - `application-get-status`
 
-These WASM-facing SDK wrappers are transport decorators only. They serialize requests using the
-framework field names and delegate to the underlying framework `ActorService` / application-manager
-implementations through the WIT host boundary.
+These WASM-facing SDK wrappers are transport decorators only. They encode/decode the generated
+protobuf request and response models and delegate to the underlying framework `ActorService` /
+application-manager implementations through the WIT host boundary.
 
 See [Firecracker Multi-Tenant Example](../examples/rust/embedded/firecracker_multi_tenant/README.md) for a complete data-parallel actors demonstration.
 
@@ -1056,7 +1054,7 @@ client.checkin("my-pool", &handle.actor_id, &handle.checkout_id, true).await?;
 
 Node setup: register `PoolRegistry` (from `plexspaces_elastic_pool`), then create pools via the registry or `registry.register_pool(name, pool)` before starting.
 
-**WASM host API**: The simple-actor WIT exposes `pool-checkout`, `pool-checkin`, and `pool-get-metrics` so that Python, Go, TypeScript, and Rust WASM actors can use the same pool service. The same host now also exposes shard-group helpers for deployable apps: `create-shard-group`, `bulk-update-shard-group`, and `scatter-gather`. The runtime injects the framework `ActorService` and `ElasticPoolService` into `HostFunctions`, so the WIT surface stays a thin decorator over the core crates. When the relevant service is not configured, the host call returns `"ERROR:message"`. See [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) for pool usage and [Heat Diffusion](../examples/rust/apps/heat_diffusion/README.md) for shard-group scatter-gather from a Rust WASM app.
+**WASM host API**: The actor-world WIT exposes `pool-checkout`, `pool-checkin`, and `pool-get-metrics` so that Python, Go, TypeScript, and Rust WASM actors can use the same pool service. The same host also exposes shard-group helpers for deployable apps: `create-shard-group`, `bulk-update-shard-group`, `map-shard-group`, `broadcast-shard-group`, `reduce-shard-group`, `all-reduce-shard-group`, `barrier-shard-group`, `scatter-gather`, `spawn-actors`, `application-metrics-add`, `application-get-status`, and `http-fetch`. The runtime injects the framework `ActorService`, application manager, outbound HTTP client, and `ElasticPoolService` into `HostFunctions`, so the WIT surface stays a thin decorator over the core crates. Failures use WIT `result<_, actor-error>` and successful payloads are protobuf wire bytes for the generated SDK models.
 
 ### Example: GenServer with annotations (webhook_handler-style)
 
@@ -1584,7 +1582,7 @@ Access PlexSpaces capabilities via the `Host` singleton:
 The Go SDK implements the WASM Component Model canonical ABI directly in `exports.go`:
 
 - **`cabi_realloc`**: Memory allocation for host-to-guest string passing
-- **Qualified export names**: `plexspaces:simple-actor/actor@0.1.0#init`, `#handle`, `#get-state`, `#set-state`
+- **Qualified export names**: `plexspaces:actor/actor@0.1.0#init`, `#handle`, `#get-state`, `#set-state`
 - **Raw uint32 signatures**: String parameters as `(ptr, len)` pairs, returns via 8-byte return area
 - **`cabi_post_*` cleanup functions**: Called by host after reading return values
 

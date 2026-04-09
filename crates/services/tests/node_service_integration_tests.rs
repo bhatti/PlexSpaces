@@ -8,7 +8,7 @@ use plexspaces_core::{NodeRegistryTrait, ObjectRegistry as CoreObjectRegistry, S
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use plexspaces_proto::node::v1::{
     node_service_client::NodeServiceClient, ConnectNodesRequest, DisconnectNodesRequest,
-    ListConnectedNodesRequest,
+    ListConnectedNodesRequest, SecurityConfig,
 };
 use plexspaces_services::node_service::NodeServiceImpl;
 use std::sync::Arc;
@@ -56,6 +56,12 @@ async fn start_node_service_server(
     cluster_name: &str,
 ) -> Result<std::net::SocketAddr, Box<dyn std::error::Error + Send + Sync>> {
     let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    service_locator
+        .register_security_config(SecurityConfig {
+            disable_auth: true,
+            ..Default::default()
+        })
+        .await;
     let node_registry = create_test_node_registry(node_id).await;
     service_locator.register_node_registry(node_registry).await;
 
@@ -94,6 +100,12 @@ async fn start_node_service_server_with_registry(
     Box<dyn std::error::Error + Send + Sync>,
 > {
     let service_locator = Arc::new(plexspaces_services::ServiceLocatorImpl::new());
+    service_locator
+        .register_security_config(SecurityConfig {
+            disable_auth: true,
+            ..Default::default()
+        })
+        .await;
     let node_registry = create_test_node_registry(node_id).await;
     service_locator
         .register_node_registry(node_registry.clone())

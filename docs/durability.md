@@ -740,13 +740,13 @@ sequenceDiagram
     Framework->>WASM Actor: handle() messages
     WASM Actor->>WASM Actor: Update internal state
     Framework->>WASM Actor: get-state()
-    WASM Actor-->>Framework: {"balance": 800, "transactions": [...]}
+    WASM Actor-->>Framework: protobuf state bytes
     Framework->>Checkpoint Storage: Store checkpoint
 
     Note over Framework,Checkpoint Storage: Restart Recovery
     Framework->>Checkpoint Storage: Load latest checkpoint
-    Checkpoint Storage-->>Framework: {"balance": 800, "transactions": [...]}
-    Framework->>WASM Actor: set-state(state_json)
+    Checkpoint Storage-->>Framework: protobuf state bytes
+    Framework->>WASM Actor: set-state(state_bytes)
     WASM Actor->>WASM Actor: Restore internal state
     Note over WASM Actor: ✅ State Recovered
 ```
@@ -784,37 +784,28 @@ lifecycle semantics across all languages. See [Bank Account example](../../examp
 ### Implementation in Python WASM
 
 ```python
-import json
+from generated.bank_account_pb2 import AccountState, DepositRequest, DepositResponse
 
 class BankAccount:
     def __init__(self):
-        self.balance = 0
-        self.transactions = []
+        self.state = AccountState()
     
-    def get_state(self) -> str:
+    def get_state(self) -> bytes:
         """Called by framework to get state for checkpointing."""
-        return json.dumps({
-            "balance": self.balance,
-            "transactions": self.transactions
-        })
+        return self.state.SerializeToString()
     
-    def set_state(self, state_json: str) -> str:
+    def set_state(self, state_bytes: bytes) -> None:
         """Called by framework to restore state on restart."""
-        state = json.loads(state_json)
-        self.balance = state.get("balance", 0)
-        self.transactions = state.get("transactions", [])
-        return ""  # Empty string = success
+        self.state.ParseFromString(state_bytes)
     
-    def handle(self, from_actor: str, msg_type: str, payload_json: str) -> str:
+    def handle(self, from_actor: str, msg_type: str, payload: bytes) -> bytes:
         """Process banking operations."""
-        request = json.loads(payload_json)
-        operation = request.get("operation")
+        request = DepositRequest()
+        request.ParseFromString(payload)
         
-        if operation == "deposit":
-            amount = request.get("amount", 0)
-            self.balance += amount
-            self.transactions.append({"type": "deposit", "amount": amount})
-            return json.dumps({"balance": self.balance})
+        if msg_type == "deposit":
+            self.state.balance += request.amount
+            return DepositResponse(balance=self.state.balance).SerializeToString()
         # ... other operations
 ```
 

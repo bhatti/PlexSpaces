@@ -307,27 +307,24 @@ mod tests {
             })
             .collect();
 
-        let instances: Vec<_> = futures::future::join_all(
+        let instantiation_results: Vec<_> = futures::future::join_all(
             instances
                 .into_iter()
                 .map(|fut| timeout(Duration::from_secs(10), fut)),
         )
-        .await
-        .into_iter()
-        .map(|r| {
-            Arc::new(
-                r.expect("Instantiation timed out")
-                    .map_err(|e| {
-                        if should_skip(&e) {
-                            eprintln!("SKIP: {}", e);
-                            return;
-                        }
-                        panic!("Instantiation failed: {}", e);
-                    })
-                    .expect("Failed to create instance"),
-            )
-        })
-        .collect();
+        .await;
+
+        let mut instances: Vec<Arc<_>> = Vec::new();
+        for r in instantiation_results {
+            match r.expect("Instantiation timed out") {
+                Ok(inst) => instances.push(Arc::new(inst)),
+                Err(e) if should_skip(&e) => {
+                    eprintln!("SKIP: {}", e);
+                    return;
+                }
+                Err(e) => panic!("Instantiation failed: {}", e),
+            }
+        }
 
         // Send 2 messages concurrently to each actor (10 total messages)
         let num_messages_per_actor = 2;

@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: all build build-fast build-examples build-wasm run-examples test test-fast test-examples test-wasm clean clean-examples clean-all proto proto-build proto-buf proto-python proto-typescript proto-go proto-polyglot proto-install-deps fmt fmt-rust fmt-proto fmt-paths fmt-check lint doc install-tools coverage coverage-report test-coverage check-coverage coverage-crate bench help check
+.PHONY: all build build-fast build-fast-minimal build-cli build-cli-release build-sdks build-examples build-wasm run-examples test test-fast test-examples test-wasm clean clean-examples clean-all proto proto-build proto-buf proto-python proto-typescript proto-go proto-polyglot proto-install-deps fmt fmt-rust fmt-proto fmt-paths fmt-check lint doc install-tools coverage coverage-report test-coverage check-coverage coverage-crate bench help check
 
 # Variables
 CARGO = cargo
@@ -14,6 +14,16 @@ CARGO_BUILD_FEATURES ?= --all-features
 CARGO_TEST_FEATURES ?= --all-features
 CARGO_BUILD_JOBS ?= 0
 CARGO_TEST_JOBS ?= $(CARGO_BUILD_JOBS)
+# When 1, Cargo uses --jobs 1 so workspace crates compile one at a time (first failure is the one you fix).
+# When 0, use full parallelism from CARGO_BUILD_JOBS. Override: make build CARGO_FAIL_FAST=0
+CARGO_FAIL_FAST ?= 1
+# build-fast: 1 (default) = same Rust targets as make build (--all-targets: bins e.g. plexspaces-cli, tests, benches, examples).
+# Uses cargo check + shared target/ + CARGO_INCREMENTAL so unchanged code rebuilds little. 0 = libs + default bins only; use build-fast-minimal.
+CARGO_CHECK_ALL_TARGETS ?= 1
+# After cargo check, link the workspace CLI binary (check alone does not link). 0 = skip for fastest type-only runs.
+CARGO_BUILD_FAST_CLI ?= 1
+# Profile for that link step only: dev -> target/debug/plexspaces, release -> target/release/plexspaces
+CARGO_BUILD_FAST_CLI_PROFILE ?= dev
 
 # Python virtual environment for proto generation (betterproto).
 # Override with: make proto-python VENV_PATH=/path/to/venv
@@ -36,8 +46,12 @@ help:
 	@echo "  make proto-typescript     - Generate TypeScript models (buf + ts-proto)"
 	@echo "  make proto-go             - Generate Go models (buf + protoc-gen-go)"
 	@echo "  make proto-build          - Generate proto using tonic-build (no external deps)"
-	@echo "  make build            - Build workspace crates + polyglot SDKs (excludes examples/* workspace members)"
-	@echo "  make build-fast       - Fast Rust compile check for the workspace"
+	@echo "  make build            - cargo build --workspace --all-targets + SDKs (linked artifacts)"
+	@echo "  make build-fast       - check --workspace --all-targets + SDKs; optional link plexspaces CLI (CARGO_BUILD_FAST_CLI=0 to skip)"
+	@echo "  make build-fast-minimal - cargo check --workspace only + SDKs (skip tests/benches/examples)"
+	@echo "  make build-cli        - cargo build -p plexspaces-cli --bin plexspaces -> target/debug/plexspaces"
+	@echo "  make build-cli-release - same with --release -> target/release/plexspaces"
+	@echo "    (build-fast: CARGO_BUILD_FAST_CLI_PROFILE=release links release CLI after check)"
 	@echo "  make build-examples   - Build all examples"
 	@echo "  make build-wasm       - Build all WASM actors"
 	@echo "  make run-examples     - Run all examples (workspace + standalone)"
@@ -278,7 +292,7 @@ proto-typescript:
 
 ## Generate Go typed models via buf + protoc-gen-go → sdks/go/plexspaces/proto/
 ## Plugin: protoc-gen-go (install via: make proto-install-deps)
-## Generates core SDK types (common, actor_runtime, workflow) + transitive imports only.
+## Generates core SDK types (common, actor_runtime, workflow, application) + transitive imports only.
 ## managed.go_package_prefix in buf.gen.go.yaml ensures import paths match the SDK module.
 proto-go:
 	@echo "Generating Go proto models (buf + protoc-gen-go)..."
@@ -291,6 +305,7 @@ proto-go:
 		--path proto/plexspaces/v1/common.proto \
 		--path proto/plexspaces/v1/actors/actor_runtime.proto \
 		--path proto/plexspaces/v1/workflow/workflow.proto \
+		--path proto/plexspaces/v1/application/application.proto \
 		--include-imports
 	@cd sdks/go && go mod tidy > /dev/null 2>&1 || true
 	@echo "  ✓ Go: $$(find sdks/go/plexspaces/proto -name '*.go' 2>/dev/null | wc -l | tr -d ' ') files → sdks/go/plexspaces/proto/"
@@ -307,25 +322,11 @@ proto-polyglot: proto-python proto-typescript proto-go
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Build workspace crates + sdks/ (TypeScript npm build, Python pip -e, go build); excludes examples/* workspace members
-build:
-	@echo "Building workspace crates and SDKs..."
+# Polyglot SDKs (TypeScript, Python, Go). Shared by build and build-fast; tools use their own caches.
+build-sdks:
 	@set -euo pipefail; \
-	CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
-	if [ "$$CARGO_JOBS" = "0" ]; then \
-		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
-	fi; \
-		MESSAGE_FORMAT=$${VERBOSE:-human}; \
-		if [ "$${VERBOSE:-1}" = "0" ]; then \
-			MESSAGE_FORMAT=short; \
-		fi; \
-	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
-	export CARGO_INCREMENTAL=1; \
-	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
-	echo "Using $$CARGO_JOBS CPU cores (override with CARGO_BUILD_JOBS env var)"; \
-	$(CARGO) build $(CARGO_BUILD_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
-	@echo "Building SDKs..."
-	@if [ -d "sdks/typescript" ] && [ -f "sdks/typescript/package.json" ]; then \
+	echo "Building SDKs..."; \
+	if [ -d "sdks/typescript" ] && [ -f "sdks/typescript/package.json" ]; then \
 		echo "  Building TypeScript SDK..."; \
 		if command -v npm >/dev/null 2>&1; then \
 			(cd sdks/typescript && ([ -d "node_modules" ] || npm install --no-audit --no-fund >/dev/null 2>&1) && npm run build >/dev/null 2>&1); \
@@ -334,8 +335,8 @@ build:
 			echo "  ❌ npm not found, cannot build TypeScript SDK"; \
 			exit 1; \
 		fi; \
-	fi
-	@if [ -d "sdks/python" ] && [ -f "sdks/python/pyproject.toml" ]; then \
+	fi; \
+	if [ -d "sdks/python" ] && [ -f "sdks/python/pyproject.toml" ]; then \
 		echo "  Building Python SDK..."; \
 		PYTHON_SDK_BUILD_CMD=""; \
 		if [ -f "$$HOME/venv/bin/activate" ]; then \
@@ -350,33 +351,124 @@ build:
 			echo "  ❌ Python not found, cannot build Python SDK"; \
 			exit 1; \
 		fi; \
-	fi
-	@if [ -d "sdks/go" ] && [ -f "sdks/go/go.mod" ]; then \
+	fi; \
+	if [ -d "sdks/go" ] && [ -f "sdks/go/go.mod" ]; then \
 		echo "  Building Go SDK..."; \
 		if command -v go >/dev/null 2>&1; then \
-			(cd sdks/go && GOCACHE="$(CURDIR)/target/go-build-cache" go build ./... >/dev/null 2>&1); \
+			(cd sdks/go && GOCACHE="$(WORKSPACE_ROOT)/target/go-build-cache" go build ./... >/dev/null 2>&1); \
 			echo "  ✓ Go SDK built"; \
 		else \
 			echo "  ❌ go not found, cannot build Go SDK"; \
 			exit 1; \
 		fi; \
 	fi
-	@echo "Build complete!"
 
-build-fast:
-	@echo "Running fast workspace compile check..."
-	@CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
+# Workspace crates (examples/* are excluded from workspace — use build-examples). Full surface: --all-targets. Links artifacts.
+build:
+	@echo "Building workspace crates and SDKs..."
+	@set -euo pipefail; \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
 	fi; \
+	FAIL_FAST="$${CARGO_FAIL_FAST:-$(CARGO_FAIL_FAST)}"; \
+	ACTUAL_JOBS=$$CARGO_JOBS; \
+	if [ "$$FAIL_FAST" = "1" ]; then \
+		ACTUAL_JOBS=1; \
+		echo "Cargo fail-fast: --jobs 1 (first failing crate). Parallel: make build CARGO_FAIL_FAST=0"; \
+	else \
+		echo "Using $$CARGO_JOBS Cargo jobs (override count: CARGO_BUILD_JOBS=N)"; \
+	fi; \
 	MESSAGE_FORMAT=$${VERBOSE:-human}; \
-		if [ "$${VERBOSE:-1}" = "0" ]; then \
+	if [ "$${VERBOSE:-1}" = "0" ]; then \
 		MESSAGE_FORMAT=short; \
 	fi; \
 	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
 	export CARGO_INCREMENTAL=1; \
 	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
-	$(CARGO) check $(CARGO_BUILD_FEATURES) --workspace --lib --bins --tests --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT
+	$(CARGO) build $(CARGO_BUILD_FEATURES) --workspace --all-targets --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT
+	@$(MAKE) --no-print-directory build-sdks
+	@echo "Build complete!"
+
+# Same Rust/SDK steps as build, but cargo check (typecheck without link). Shares target/ + incremental with build; optional sccache.
+build-fast:
+	@echo "Running build-fast (same targets as make build; cargo check + SDKs)..."
+	@set -euo pipefail; \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
+	fi; \
+	FAIL_FAST="$${CARGO_FAIL_FAST:-$(CARGO_FAIL_FAST)}"; \
+	ACTUAL_JOBS=$$CARGO_JOBS; \
+	if [ "$$FAIL_FAST" = "1" ]; then \
+		ACTUAL_JOBS=1; \
+		echo "Cargo fail-fast: --jobs 1 (first failing crate). Parallel: make build-fast CARGO_FAIL_FAST=0"; \
+	else \
+		echo "Using $$CARGO_JOBS Cargo jobs (override count: CARGO_BUILD_JOBS=N)"; \
+	fi; \
+	CHECK_ALL="$${CARGO_CHECK_ALL_TARGETS:-$(CARGO_CHECK_ALL_TARGETS)}"; \
+	CHECK_EXTRA=""; \
+	if [ "$$CHECK_ALL" = "1" ]; then \
+		CHECK_EXTRA="--all-targets"; \
+		echo "build-fast: --all-targets (same as make build). Lighter: make build-fast-minimal"; \
+	else \
+		echo "build-fast: libs + default bins only. Full parity with build: make build-fast CARGO_CHECK_ALL_TARGETS=1"; \
+	fi; \
+	MESSAGE_FORMAT=$${VERBOSE:-human}; \
+	if [ "$${VERBOSE:-1}" = "0" ]; then \
+		MESSAGE_FORMAT=short; \
+	fi; \
+	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
+	export CARGO_INCREMENTAL=1; \
+	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
+	$(CARGO) check $(CARGO_BUILD_FEATURES) --workspace $$CHECK_EXTRA --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT; \
+	LINK_CLI="$${CARGO_BUILD_FAST_CLI:-$(CARGO_BUILD_FAST_CLI)}"; \
+	if [ "$$LINK_CLI" = "1" ]; then \
+		CLI_REL=""; \
+		CLI_PROF="$${CARGO_BUILD_FAST_CLI_PROFILE:-$(CARGO_BUILD_FAST_CLI_PROFILE)}"; \
+		if [ "$$CLI_PROF" = "release" ]; then CLI_REL="--release"; echo "build-fast: linking plexspaces CLI (release)"; \
+		else echo "build-fast: linking plexspaces CLI (debug)"; fi; \
+		$(CARGO) build $$CLI_REL $(CARGO_BUILD_FEATURES) -p plexspaces-cli --bin plexspaces --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT; \
+	fi
+	@$(MAKE) --no-print-directory build-sdks
+	@echo "Fast check complete!"
+
+# PlexSpaces CLI only (workspace package plexspaces-cli, binary name plexspaces).
+build-cli:
+	@set -euo pipefail; \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
+	fi; \
+	FAIL_FAST="$${CARGO_FAIL_FAST:-$(CARGO_FAIL_FAST)}"; \
+	ACTUAL_JOBS=$$CARGO_JOBS; \
+	if [ "$$FAIL_FAST" = "1" ]; then ACTUAL_JOBS=1; fi; \
+	MESSAGE_FORMAT=$${VERBOSE:-human}; \
+	if [ "$${VERBOSE:-1}" = "0" ]; then MESSAGE_FORMAT=short; fi; \
+	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
+	export CARGO_INCREMENTAL=1; \
+	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
+	$(CARGO) build $(CARGO_BUILD_FEATURES) -p plexspaces-cli --bin plexspaces --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT
+
+build-cli-release:
+	@set -euo pipefail; \
+	CARGO_JOBS=$${CARGO_BUILD_JOBS:-$(CARGO_BUILD_JOBS)}; \
+	if [ "$$CARGO_JOBS" = "0" ]; then \
+		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
+	fi; \
+	FAIL_FAST="$${CARGO_FAIL_FAST:-$(CARGO_FAIL_FAST)}"; \
+	ACTUAL_JOBS=$$CARGO_JOBS; \
+	if [ "$$FAIL_FAST" = "1" ]; then ACTUAL_JOBS=1; fi; \
+	MESSAGE_FORMAT=$${VERBOSE:-human}; \
+	if [ "$${VERBOSE:-1}" = "0" ]; then MESSAGE_FORMAT=short; fi; \
+	export CARGO_TARGET_DIR="$(WORKSPACE_TARGET_DIR)"; \
+	export CARGO_INCREMENTAL=1; \
+	if command -v sccache >/dev/null 2>&1; then export RUSTC_WRAPPER=sccache; fi; \
+	$(CARGO) build --release $(CARGO_BUILD_FEATURES) -p plexspaces-cli --bin plexspaces --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT
+
+# Skips integration tests, benches, and examples; still runs build-sdks.
+build-fast-minimal:
+	@$(MAKE) --no-print-directory build-fast CARGO_CHECK_ALL_TARGETS=0
 
 check: build-fast
 

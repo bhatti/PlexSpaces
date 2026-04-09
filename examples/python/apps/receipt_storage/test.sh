@@ -9,8 +9,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 WASM_FILE="$SCRIPT_DIR/receipt_actor.wasm"
-NODE_ADDR="${1:-localhost:8090}"
-HTTP_PORT="${2:-8091}"
+NODE_ADDR="${1:-localhost:8091}"
+HTTP_PORT="${2:-8092}"
 
 # Use shared target directory
 export CARGO_TARGET_DIR="$WORKSPACE_DIR/target"
@@ -80,13 +80,13 @@ if [ -x "$CLI_BIN" ]; then
     RESPONSE=$("$CLI_BIN" deploy \
         --node "$NODE_ADDR" \
         -i "$APP_ID" \
-        -n "receipt-store" \
+        -n "$APP_ID" \
         -w "$WASM_FILE" 2>&1) || true
 else
     RESPONSE=$(cargo run -q -p plexspaces-cli -- deploy \
         --node "$NODE_ADDR" \
         -i "$APP_ID" \
-        -n "receipt-store" \
+        -n "$APP_ID" \
         -w "$WASM_FILE" 2>&1) || true
 fi
 
@@ -124,7 +124,7 @@ send_receipt_op() {
     local payload="$2"
     
     # Use path format /api/v1/actors/{namespace}/{actor_type}
-    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/receipt-store" \
+    RESPONSE=$(curl -s -X POST "http://localhost:$HTTP_PORT/api/v1/actors/$APP_ID/$APP_ID" \
         -H "Content-Type: application/json" \
         -d "$payload" 2>/dev/null) || true
     

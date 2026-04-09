@@ -170,7 +170,7 @@ Custom facets follow the same lifecycle and supervision rules as built-ins; the 
 
 ### WASM host “services” vs facets
 
-Polyglot actors call **host functions** defined in `wit/plexspaces-simple-actor/world.wit` (import `host`). Those calls are implemented on the node using `ServiceLocator` (KV, tuple space, locks, blob, messaging, shard groups, etc.). That is the **supported** way to reach framework services from a guest—**not** ad-hoc HTTP clients inside the SDK that duplicate node policy. See [Polyglot WASM development](polyglot.md).
+Polyglot actors call **host functions** defined in `wit/plexspaces-actor/world.wit` (import `host`). Those calls are implemented on the node using `ServiceLocator` (KV, tuple space, locks, blob, messaging, shard groups, etc.). That is the **supported** way to reach framework services from a guest—**not** ad-hoc HTTP clients inside the SDK that duplicate node policy. See [Polyglot WASM development](polyglot.md).
 
 ---
 
@@ -253,16 +253,15 @@ grpcurl -plaintext localhost:8092 plexspaces.node.v1.ServiceLinkService/ListServ
 
 ### WASM actor host function
 
-WASM actors call outbound HTTP via the `http-fetch` host function defined in `wit/plexspaces-simple-actor/world.wit`:
+WASM actors call outbound HTTP via the `http-fetch` host function defined in `wit/plexspaces-actor/world.wit`:
 
 ```wit
 // Execute outbound HTTP request via named service link.
-// Returns JSON: {"status":200,"headers":{},"body":"..."} or "ERROR:message"
 http-fetch: func(link-name: string, method: string, path-and-query: string,
-                 headers-json: string, body: string) -> string;
+                 request: list<u8>) -> result<list<u8>, actor-error>;
 ```
 
-The host resolves `link-name` against the `OutboundHttpClient` registered in `ServiceLocator`; retries, circuit breaking, and auth injection happen transparently. See the [weather actor examples](#weather-actor-examples-service-link--kv-cache) for all four languages.
+The request/response payloads use protobuf `plexspaces.wasm.v1.HttpFetchRequest` and `HttpFetchResponse`. The host resolves `link-name` against the `OutboundHttpClient` registered in `ServiceLocator`; retries, circuit breaking, and auth injection happen transparently. See the [weather actor examples](#weather-actor-examples-service-link--kv-cache) for all four languages.
 
 ### Weather actor examples (service link + KV cache)
 
@@ -393,6 +392,7 @@ Node management, cluster operations, and health monitoring.
 - **Source of truth**: when shared DB mode is enabled, `NodeRegistry` treats `ObjectRegistry` as authoritative and only returns nodes from the same cluster whose `last_heartbeat` or `updated_at` is within the configured active-node window (default: 24 hours). SWIM supplements this with faster liveness updates but does not replace the backing-store view.
 - **Context ownership**: node-registry uses system-owned request context for membership reads and writes so user tenant/namespace context cannot leak into cluster membership state.
 - **Cluster labels**: node registrations persist cluster and placement labels in object metadata, and node-registry reconstructs `NodeRegistration.capabilities` from those metadata labels when it reads membership back from object-registry.
+- **Environment override**: `plexspaces_common::config_manager::initialize` sets `ReleaseSpec.node.cluster_name` from `PLEXSPACES_CLUSTER_NAME` when that variable is set and non-empty (same precedence as other `PLEXSPACES_*` overrides). Use the same value on every node in a multinode deployment so `ListConnectedNodes` and `from_registry` placement see a consistent cluster label.
 
 **Connect timeout**: For `connect_to_node_addresses` (and when the trait method is called with no timeout), the timeout is **1 second per address**, with a **minimum of 5 seconds** and **maximum of 5 minutes**. Explicit timeout on the gRPC `ConnectNodes` request is unchanged.
 

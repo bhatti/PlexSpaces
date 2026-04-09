@@ -6,16 +6,17 @@
 // Integration tests for the simple host elastic pool API (WIT host interface).
 // Uses a mock ElasticPoolService for deterministic, timing-independent tests:
 // no real pool, no sleeps, no background tasks. Validates that the host layer
-// calls the service and formats responses (JSON / "ERROR:...") correctly.
+// calls the service and returns protobuf responses with result-based errors.
 
 #[cfg(feature = "component-model")]
 mod tests {
     use async_trait::async_trait;
     use plexspaces_core::{ActorId, ElasticPoolService, PoolServiceError};
     use plexspaces_proto::pool::v1::{ActorHandle, PoolConfig, PoolMetrics};
-    use plexspaces_wasm_runtime::simple_component_host::plexspaces::simple_actor::host::Host;
+    use plexspaces_wasm_runtime::simple_component_host::plexspaces::actor::host::Host;
     use plexspaces_wasm_runtime::simple_component_host::SimpleHostImpl;
     use plexspaces_wasm_runtime::HostFunctions;
+    use prost::Message as _;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
@@ -157,21 +158,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_simple_host_pool_checkout_returns_json() {
+    async fn test_simple_host_pool_checkout_returns_protobuf() {
         let svc: Arc<dyn ElasticPoolService> = Arc::new(MockPoolService::with_pool("p1"));
         let mut host = create_host_with_service(svc);
 
-        let out = host.pool_checkout("p1".to_string(), 2000).await;
-        assert!(
-            !out.starts_with("ERROR:"),
-            "pool_checkout should succeed, got: {}",
-            out
-        );
-        let parsed: serde_json::Value =
-            serde_json::from_str(&out).expect("pool_checkout must return valid JSON");
-        assert_eq!(parsed["pool_name"], "p1");
-        assert_eq!(parsed["actor_id"], "mock-actor-1");
-        assert_eq!(parsed["checkout_id"], "mock-checkout-id");
+        let out = host
+            .pool_checkout("p1".to_string(), 2000)
+            .await
+            .expect("pool_checkout should succeed");
+        let parsed = ActorHandle::decode(out.as_slice())
+            .expect("pool_checkout must return valid protobuf");
+        assert_eq!(parsed.pool_name, "p1");
+        assert_eq!(parsed.actor_id, "mock-actor-1");
+        assert_eq!(parsed.checkout_id, "mock-checkout-id");
     }
 
     #[tokio::test]
@@ -187,34 +186,24 @@ mod tests {
                 true,
             )
             .await;
-        assert!(
-            !checkin_out.starts_with("ERROR:"),
-            "pool_checkin should succeed, got: {}",
-            checkin_out
-        );
-        assert_eq!(
-            checkin_out, "",
-            "checkin should return empty string on success"
-        );
+        assert!(checkin_out.is_ok(), "pool_checkin should succeed: {checkin_out:?}");
     }
 
     #[tokio::test]
-    async fn test_simple_host_pool_get_metrics_returns_json() {
+    async fn test_simple_host_pool_get_metrics_returns_protobuf() {
         let svc: Arc<dyn ElasticPoolService> = Arc::new(MockPoolService::with_pool("p3"));
         let mut host = create_host_with_service(svc);
 
-        let out = host.pool_get_metrics("p3".to_string()).await;
-        assert!(
-            !out.starts_with("ERROR:"),
-            "pool_get_metrics should succeed, got: {}",
-            out
-        );
-        let parsed: serde_json::Value =
-            serde_json::from_str(&out).expect("pool_get_metrics must return valid JSON");
-        assert_eq!(parsed["total_actors"], 3);
-        assert_eq!(parsed["available_actors"], 2);
-        assert_eq!(parsed["busy_actors"], 1);
-        assert_eq!(parsed["current_load"], 0.33);
+        let out = host
+            .pool_get_metrics("p3".to_string())
+            .await
+            .expect("pool_get_metrics should succeed");
+        let parsed =
+            PoolMetrics::decode(out.as_slice()).expect("pool_get_metrics must return protobuf");
+        assert_eq!(parsed.total_actors, 3);
+        assert_eq!(parsed.available_actors, 2);
+        assert_eq!(parsed.busy_actors, 1);
+        assert_eq!(parsed.current_load, 0.33);
     }
 
     #[tokio::test]
@@ -227,20 +216,16 @@ mod tests {
         );
 
         let out = host.pool_checkout("any-pool".to_string(), 100).await;
-        assert!(
-            out.starts_with("ERROR:"),
-            "pool_checkout without service should return ERROR, got: {}",
-            out
-        );
-        assert!(out.contains("not configured") || out.contains("Elastic pool"));
+        let err = out.expect_err("pool_checkout without service should fail");
+        assert!(err.contains("not configured") || err.contains("Elastic pool"));
 
         let out_checkin = host
             .pool_checkin("any".to_string(), "a".to_string(), "c".to_string(), true)
             .await;
-        assert!(out_checkin.starts_with("ERROR:"));
+        assert!(out_checkin.is_err());
 
         let out_metrics = host.pool_get_metrics("any".to_string()).await;
-        assert!(out_metrics.starts_with("ERROR:"));
+        assert!(out_metrics.is_err());
     }
 
     #[tokio::test]
@@ -249,11 +234,7 @@ mod tests {
         let mut host = create_host_with_service(svc);
 
         let out = host.pool_checkout("missing-pool".to_string(), 100).await;
-        assert!(
-            out.starts_with("ERROR:"),
-            "pool_checkout for missing pool should return ERROR, got: {}",
-            out
-        );
-        assert!(out.to_lowercase().contains("not found") || out.to_lowercase().contains("missing"));
+        let err = out.expect_err("pool_checkout for missing pool should fail");
+        assert!(err.to_lowercase().contains("not found") || err.to_lowercase().contains("missing"));
     }
 }

@@ -46,7 +46,7 @@ curl -s -X DELETE "http://localhost:$HTTP_PORT/api/v1/applications/$APP_ID" >/de
 sleep 1
 DEPLOY_OUT=$(curl -s -w "\n%{http_code}" -X POST "http://localhost:$HTTP_PORT/api/v1/applications/deploy" \
   -F "application_id=$APP_ID" \
-  -F "name=migrating-merlin-sweep-py" \
+  -F "name=$APP_ID" \
   -F "version=1.0.0" \
   -F "wasm_file=@$WASM_FILE;type=application/wasm" \
   -F "config=@$CONFIG_FILE" 2>&1)
@@ -109,7 +109,7 @@ echo ""
 
 echo "Step 8: Metrics from last run"
 echo "================================================================"
-if [ -n "$LAST_RUN" ] && echo "$LAST_RUN" | grep -q '"sweep_id"'; then
+if [ -n "$LAST_RUN" ] && echo "$LAST_RUN" | grep -q '"success":true'; then
   export WALL_MS
   export POOL_SIZE_ELASTIC
   export BATCH_SWEEPS
@@ -123,6 +123,14 @@ p = d.get('payload', d)
 if isinstance(p, str):
   try: p = json.loads(p)
   except: p = {}
+if not isinstance(p, dict):
+  p = {}
+if p.get('error'):
+  print('  Last run error:', p.get('error'))
+  sys.exit(0)
+if not p.get('sweep_id'):
+  print('  (No sweep_id in last response)')
+  sys.exit(0)
 sid = p.get('sweep_id', 'N/A')
 status = p.get('status', 'N/A')
 num_params = p.get('num_params', 0)

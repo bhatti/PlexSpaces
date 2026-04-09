@@ -21,9 +21,9 @@ export declare class SweepActor extends WorkflowActor<SweepState> {
     onWork_available(payload: Record<string, unknown>): Record<string, unknown>;
 }
 export declare const actor: {
-    init: (configJson: string) => string;
-    handle: (from: string, msgType: string, payloadJson: string) => string;
-    getState: () => string;
-    setState: (stateJson: string) => string;
+    init: (configJson: string) => void;
+    handle: (from: string, msgType: string, payloadJson: string) => Uint8Array<ArrayBufferLike>;
+    getState: () => Uint8Array<ArrayBufferLike>;
+    setState: (stateJson: string) => void;
 };
 export {};

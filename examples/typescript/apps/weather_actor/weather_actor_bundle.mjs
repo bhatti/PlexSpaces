@@ -1,11 +1,29 @@
 // ../../../../sdks/typescript/dist/actor.js
-import { log as hostLog } from "plexspaces:simple-actor/host@0.1.0";
+import { log as hostLog } from "plexspaces:actor/host@0.1.0";
 
 // ../../../../sdks/typescript/dist/decorators.js
 var ACTOR_METADATA = Symbol.for("plexspaces.actor.metadata");
 function getActorDefinition(target) {
   const ctor = typeof target === "function" ? target : target.constructor;
   return Reflect.get(ctor, ACTOR_METADATA);
+}
+
+// ../../../../sdks/typescript/dist/wit-payload.js
+function decodeWitPayloadUtf8(input) {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof ArrayBuffer) {
+    return new TextDecoder("utf-8", { fatal: false }).decode(new Uint8Array(input));
+  }
+  if (ArrayBuffer.isView(input)) {
+    const v = input;
+    return new TextDecoder("utf-8", { fatal: false }).decode(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+  }
+  return "";
+}
+function encodeWitPayloadUtf8(text) {
+  return new TextEncoder().encode(text);
 }
 
 // ../../../../sdks/typescript/dist/actor.js
@@ -27,21 +45,24 @@ var PlexSpacesActor = class {
   /** Optional: called from init() with parsed config. Override to apply config to state. */
   onInit(_config) {
   }
-  /** WIT init(config-json) -> string. Empty string = success, "ERROR:..." = failure. */
+  /**
+   * WIT `init(config: payload) -> result<_, actor-error>`.
+   * Success: return (unit). Failure: throw (jco maps throws to `err` for function-return `result`).
+   */
   init(configJson) {
     try {
-      const config = configJson && configJson.trim() ? JSON.parse(configJson) : {};
+      const text = decodeWitPayloadUtf8(configJson);
+      const config = text.trim() ? JSON.parse(text) : {};
       this.onInit(config);
       this.cachedStateJson = null;
-      return "";
     } catch {
-      return "ERROR:init failed";
+      throw new Error("ERROR:init failed");
     }
   }
   /**
-   * WIT handle(from-actor, msg-type, payload-json) -> result<string, string>.
+   * WIT `handle(...) -> result<payload, actor-error>` (`payload` is `list<u8>` → `Uint8Array` in jco).
    * Dispatches by msgType for Workflow behavior (workflow_run, workflow_signal:name, workflow_query:name),
-   * then by payload.op (or payload) to on<Op>(payload). Returns JSON string.
+   * then by payload.op (or payload) to on<Op>(payload). Returns UTF-8 JSON bytes.
    * Uses iterative serializer to avoid WASM recursion.
    *
    * Workflow behavior (aligned with Rust Workflow trait and Python @workflow_actor):
@@ -51,7 +72,8 @@ var PlexSpacesActor = class {
    */
   handle(_fromActor, msgType, payloadJson) {
     try {
-      const payload = payloadJson && payloadJson.trim() ? JSON.parse(payloadJson) : {};
+      const text = decodeWitPayloadUtf8(payloadJson);
+      const payload = text.trim() ? JSON.parse(text) : {};
       const definition = getActorDefinition(this);
       if (msgType === "workflow_run") {
         const runMethod = definition?.runHandler;
@@ -59,7 +81,7 @@ var PlexSpacesActor = class {
         if (typeof runFn === "function") {
           const result = runFn.call(this, payload);
           this.cachedStateJson = null;
-          return iterativeStringify(result ?? {});
+          return encodeWitPayloadUtf8(iterativeStringify(result ?? {}));
         }
       }
       if (msgType.startsWith("workflow_signal:")) {
@@ -73,7 +95,7 @@ var PlexSpacesActor = class {
             signalFn.call(this, name, payload);
           }
           this.cachedStateJson = null;
-          return "{}";
+          return encodeWitPayloadUtf8("{}");
         }
       }
       if (msgType.startsWith("workflow_query:")) {
@@ -82,7 +104,7 @@ var PlexSpacesActor = class {
         const queryFn = queryMethod ? this[queryMethod] : this.query;
         if (typeof queryFn === "function") {
           const result = queryMethod ? queryFn.call(this, payload) : queryFn.call(this, name, payload);
-          return iterativeStringify(result ?? {});
+          return encodeWitPayloadUtf8(iterativeStringify(result ?? {}));
         }
       }
       const opRaw = payload.message_type ?? payload.op ?? payload.msg_type;
@@ -98,48 +120,51 @@ var PlexSpacesActor = class {
         } catch (handlerError) {
           const errorMsg = handlerError instanceof Error ? handlerError.message : String(handlerError);
           actorLog("error", "actor.ts:handle", `Handler ${methodName} failed`, errorMsg);
-          return "ERROR:" + errorMsg;
+          throw new Error("ERROR:" + errorMsg);
         }
         this.cachedStateJson = null;
         try {
-          return iterativeStringify(result);
+          return encodeWitPayloadUtf8(iterativeStringify(result ?? {}));
         } catch (jsonError) {
           const errorMsg = jsonError instanceof Error ? jsonError.message : String(jsonError);
           actorLog("error", "actor.ts:handle", "JSON serialization failed", errorMsg);
-          return "ERROR:JSON serialization failed: " + errorMsg;
+          throw new Error("ERROR:JSON serialization failed: " + errorMsg);
         }
       }
       actorLog("warn", "actor.ts:handle", "Unknown operation", String(op));
-      return iterativeStringify({ error: "unknown_op", op: String(op) });
+      return encodeWitPayloadUtf8(iterativeStringify({ error: "unknown_op", op: String(op) }));
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
       actorLog("error", "actor.ts:handle", "Handle failed", errorMsg);
-      return "ERROR:" + errorMsg;
+      if (e instanceof Error && errorMsg.startsWith("ERROR:")) {
+        throw e;
+      }
+      throw new Error("ERROR:" + errorMsg);
     }
   }
-  /** WIT get-state() -> string. Returns JSON-serialized state. */
+  /** WIT `get-state() -> result<payload, actor-error>`. Returns JSON state as UTF-8 bytes. */
   getState() {
     if (this.cachedStateJson !== null) {
-      return this.cachedStateJson;
+      return encodeWitPayloadUtf8(this.cachedStateJson);
     }
     try {
       const serialized = iterativeStringify(this.state);
       this.cachedStateJson = serialized;
-      return serialized;
+      return encodeWitPayloadUtf8(serialized);
     } catch {
-      return "{}";
+      return encodeWitPayloadUtf8("{}");
     }
   }
-  /** WIT set-state(state-json) -> string. Empty = success, "ERROR:..." = failure. */
+  /** WIT `set-state(state: payload) -> result<_, actor-error>`. */
   setState(stateJson) {
     try {
-      if (stateJson && stateJson.trim()) {
-        this.state = JSON.parse(stateJson);
+      const text = decodeWitPayloadUtf8(stateJson);
+      if (text.trim()) {
+        this.state = JSON.parse(text);
         this.cachedStateJson = null;
       }
-      return "";
     } catch {
-      return "ERROR:set_state failed";
+      throw new Error("ERROR:set_state failed");
     }
   }
   capitalize(s) {
@@ -325,6 +350,339 @@ function iterativeStringify(root) {
   return result;
 }
 
+// ../../../../sdks/typescript/dist/wire/proto-wire-common.js
+function appendVarint(buf, xIn) {
+  if (!Number.isFinite(xIn) || xIn < 0 || xIn > Number.MAX_SAFE_INTEGER) {
+    throw new Error("appendVarint expects a non-negative safe integer");
+  }
+  let n = BigInt(Math.floor(xIn));
+  const parts = [];
+  while (n >= 0x80n) {
+    parts.push(Number(n & 0xffn) | 128);
+    n >>= 7n;
+  }
+  parts.push(Number(n));
+  return concatBytes(buf, new Uint8Array(parts));
+}
+function appendLengthDelimited(buf, fieldNum, inner) {
+  const tag = BigInt(fieldNum << 3 | 2);
+  let b = appendVarint(buf, Number(tag));
+  b = appendVarint(b, inner.length);
+  return concatBytes(b, inner);
+}
+function concatBytes(a, b) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+function readVarint(data, pos) {
+  let x = 0n;
+  let s = 0n;
+  const orig = pos;
+  for (let i = 0; i < 10; i++) {
+    if (pos >= data.length)
+      throw new Error("varint buffer underflow");
+    const b = data[pos];
+    pos++;
+    if (b < 128) {
+      return { value: x | BigInt(b) << s, n: pos - orig };
+    }
+    x |= BigInt(b & 127) << s;
+    s += 7n;
+  }
+  throw new Error("varint too long");
+}
+function skipField(data, pos, wireType) {
+  switch (wireType) {
+    case 0: {
+      const { n } = readVarint(data, pos);
+      return pos + n;
+    }
+    case 1:
+      if (pos + 8 > data.length)
+        throw new Error("fixed64 underflow");
+      return pos + 8;
+    case 2: {
+      const { value: ln, n } = readVarint(data, pos);
+      return pos + n + Number(ln);
+    }
+    case 5:
+      if (pos + 4 > data.length)
+        throw new Error("fixed32 underflow");
+      return pos + 4;
+    default:
+      throw new Error(`unknown wire type ${wireType}`);
+  }
+}
+function readLengthDelimited(data, pos) {
+  const { value: ln, n } = readVarint(data, pos);
+  const start = pos + n;
+  const end = start + Number(ln);
+  if (end > data.length)
+    throw new Error("length-delimited field truncated");
+  const copy = new Uint8Array(end - start);
+  copy.set(data.subarray(start, end));
+  return { slice: copy, nextPos: end };
+}
+
+// ../../../../sdks/typescript/dist/wire/tuplespace-proto-wire.js
+var MIN_INT64 = -9223372036854775808n;
+var MAX_INT64 = 9223372036854775807n;
+function encodeTupleField(v, allowWildcardStar) {
+  if (v === null || v === void 0) {
+    return appendVarint(new Uint8Array([56]), 1);
+  }
+  if (typeof v === "string") {
+    if (allowWildcardStar && v === "*") {
+      return appendVarint(new Uint8Array([56]), 1);
+    }
+    const enc = new TextEncoder();
+    const bytes = new Uint8Array(enc.encode(v));
+    let inner = new Uint8Array([26]);
+    inner = appendVarint(inner, bytes.length);
+    inner = concatBytes(inner, bytes);
+    return inner;
+  }
+  if (typeof v === "boolean") {
+    const inner = new Uint8Array([32]);
+    return appendVarint(inner, v ? 1 : 0);
+  }
+  if (typeof v === "number" && Number.isFinite(v)) {
+    const t = Math.trunc(v);
+    if (t === v && t >= Number(MIN_INT64) && t <= Number(MAX_INT64)) {
+      let inner2 = new Uint8Array([8]);
+      inner2 = appendVarintSigned(inner2, t);
+      return inner2;
+    }
+    let inner = new Uint8Array([17]);
+    const tmp = new Uint8Array(8);
+    new DataView(tmp.buffer).setFloat64(0, v, true);
+    inner = concatBytes(inner, tmp);
+    return inner;
+  }
+  throw new Error(`unsupported tuple field type ${typeof v}`);
+}
+function appendVarintSigned(buf, xIn) {
+  let x = BigInt(xIn);
+  if (x < 0n)
+    x = BigInt.asUintN(64, x);
+  const parts = [];
+  let n = x;
+  while (n >= 0x80n) {
+    parts.push(Number(n & 0xffn) | 128);
+    n >>= 7n;
+  }
+  parts.push(Number(n));
+  return concatBytes(buf, new Uint8Array(parts));
+}
+function encodeTupleFields(tuple, allowWildcardStar) {
+  let out = new Uint8Array(0);
+  for (const el of tuple) {
+    const tf = encodeTupleField(el, allowWildcardStar);
+    out = appendLengthDelimited(out, 2, tf);
+  }
+  return out;
+}
+function encodeWriteRequest(tuple) {
+  const tupleBody = encodeTupleFields(tuple, false);
+  return appendLengthDelimited(new Uint8Array(0), 1, tupleBody);
+}
+function encodeReadRequest(pattern, take, maxResults) {
+  const templateBody = encodeTupleFields(pattern, true);
+  let out = appendLengthDelimited(new Uint8Array(0), 1, templateBody);
+  if (take) {
+    out = concatBytes(out, new Uint8Array([32, 1]));
+  }
+  out = concatBytes(out, new Uint8Array([40]));
+  out = appendVarint(out, maxResults >>> 0);
+  return out;
+}
+function parseTupleFieldMsg(msg) {
+  let pos = 0;
+  let last = void 0;
+  while (pos < msg.length) {
+    const { value: tag, n: tn } = readVarint(msg, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (wt === 0) {
+      const { value: v, n: m } = readVarint(msg, pos);
+      pos += m;
+      if (fn === 1)
+        last = Number(v);
+      else if (fn === 4)
+        last = v !== 0n;
+      else if (fn === 6 || fn === 7)
+        last = null;
+    } else if (wt === 1) {
+      if (pos + 8 > msg.length)
+        throw new Error("double underflow");
+      const view = new DataView(msg.buffer, msg.byteOffset + pos, 8);
+      const d = view.getFloat64(0, true);
+      pos += 8;
+      if (fn === 2)
+        last = d;
+    } else if (wt === 2) {
+      const { slice: chunk, nextPos } = readLengthDelimited(msg, pos);
+      pos = nextPos;
+      if (fn === 3 || fn === 5) {
+        last = new TextDecoder("utf-8", { fatal: false }).decode(chunk);
+      }
+    } else {
+      pos = skipField(msg, pos, wt);
+    }
+  }
+  return last;
+}
+function parseTupleMsg(msg) {
+  const fields = [];
+  let pos = 0;
+  while (pos < msg.length) {
+    const { value: tag, n: tn } = readVarint(msg, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 2 && wt === 2) {
+      const { slice: sub, nextPos } = readLengthDelimited(msg, pos);
+      pos = nextPos;
+      fields.push(parseTupleFieldMsg(sub));
+    } else {
+      pos = skipField(msg, pos, wt);
+    }
+  }
+  return fields;
+}
+function parseReadResponseTuples(data) {
+  const tuples = [];
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      tuples.push(parseTupleMsg(slice));
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return tuples;
+}
+function decodeReadResponseFirstTuple(raw) {
+  if (raw.length === 0)
+    return null;
+  try {
+    const tuples = parseReadResponseTuples(raw);
+    if (tuples.length === 0)
+      return null;
+    return tuples[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+function decodeReadResponseAllTuples(raw) {
+  if (raw.length === 0)
+    return [];
+  try {
+    return parseReadResponseTuples(raw);
+  } catch {
+    return [];
+  }
+}
+
+// ../../../../sdks/typescript/dist/wire/http-fetch-proto-wire.js
+function utf8Valid(bytes) {
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function bytesToBase64Sync(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++)
+    bin += String.fromCharCode(bytes[i]);
+  if (typeof btoa !== "undefined")
+    return btoa(bin);
+  const Buf = globalThis.Buffer;
+  if (Buf)
+    return Buf.from(bytes).toString("base64");
+  throw new Error("base64 encode unavailable");
+}
+function encodeHttpFetchRequestWire(headers, body) {
+  let buf = new Uint8Array(0);
+  const enc = new TextEncoder();
+  for (const [k, v] of Object.entries(headers)) {
+    const kb = new Uint8Array(enc.encode(k));
+    const vb = new Uint8Array(enc.encode(v));
+    let entry = appendLengthDelimited(new Uint8Array(0), 1, kb);
+    entry = appendLengthDelimited(entry, 2, vb);
+    buf = appendLengthDelimited(buf, 1, entry);
+  }
+  const bodyUse = body && body.length > 0 ? new Uint8Array(body) : new Uint8Array(0);
+  buf = appendLengthDelimited(buf, 2, bodyUse);
+  return buf;
+}
+function parseStringStringMapEntry(entry) {
+  let pos = 0;
+  let key = "";
+  let val = "";
+  while (pos < entry.length) {
+    const { value: tag, n: tn } = readVarint(entry, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(entry, pos);
+      pos = nextPos;
+      key = new TextDecoder("utf-8", { fatal: false }).decode(slice);
+    } else if (fn === 2 && wt === 2) {
+      const { slice, nextPos } = readLengthDelimited(entry, pos);
+      pos = nextPos;
+      val = new TextDecoder("utf-8", { fatal: false }).decode(slice);
+    } else {
+      pos = skipField(entry, pos, wt);
+    }
+  }
+  return { key, val };
+}
+function decodeHttpFetchResponseWire(data) {
+  const out = {
+    status: 0,
+    headers: {},
+    body: ""
+  };
+  let pos = 0;
+  while (pos < data.length) {
+    const { value: tag, n: tn } = readVarint(data, pos);
+    pos += tn;
+    const fn = Number(tag >> 3n);
+    const wt = Number(tag & 7n);
+    if (fn === 1 && wt === 0) {
+      const { value: v, n: m } = readVarint(data, pos);
+      pos += m;
+      out.status = Number(v);
+    } else if (fn === 2 && wt === 2) {
+      const { slice: sl, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      const { key, val } = parseStringStringMapEntry(sl);
+      if (key)
+        out.headers[key] = val;
+    } else if (fn === 3 && wt === 2) {
+      const { slice: sl, nextPos } = readLengthDelimited(data, pos);
+      pos = nextPos;
+      out.body = utf8Valid(sl) ? new TextDecoder("utf-8", { fatal: false }).decode(sl) : bytesToBase64Sync(sl);
+    } else {
+      pos = skipField(data, pos, wt);
+    }
+  }
+  return out;
+}
+
 // ../../../../sdks/typescript/dist/host.js
 import {
   send as hostSend,
@@ -373,55 +731,82 @@ import {
   applicationMetricsAdd as hostApplicationMetricsAdd,
   applicationGetStatus as hostApplicationGetStatus,
   httpFetch as hostHttpFetch
-} from "plexspaces:simple-actor/host@0.1.0";
+} from "plexspaces:actor/host@0.1.0";
 function safeCall(fn, ...args) {
   if (typeof fn === "function") {
     return fn(...args);
   }
   return "";
 }
+function hostPayloadToBytes(result) {
+  if (result instanceof Uint8Array)
+    return result;
+  if (typeof result === "string") {
+    const out = new Uint8Array(result.length);
+    for (let i = 0; i < result.length; i++)
+      out[i] = result.charCodeAt(i) & 255;
+    return out;
+  }
+  return new Uint8Array(0);
+}
+function hostErrorPrefixBytes(raw) {
+  const prefix = "ERROR:";
+  if (raw.length < prefix.length)
+    return false;
+  for (let i = 0; i < prefix.length; i++) {
+    if (raw[i] !== prefix.charCodeAt(i))
+      return false;
+  }
+  return true;
+}
 var TupleSpace = class {
   constructor(host2) {
     this.host = host2;
   }
-  /** Write a tuple. Elements must be JSON-serializable. Returns empty on success, "ERROR:..." on failure. */
+  /**
+   * Write a tuple. Values are encoded as plexspaces.tuplespace.v1 WriteRequest protobuf wire
+   * (same as Go `TupleSpace.Write` / Rust simple_component_host).
+   */
   write(tuple) {
-    const json = JSON.stringify(tuple);
-    return this.host.tsWrite(json);
+    try {
+      const wire = encodeWriteRequest(tuple);
+      return this.host.tsWritePayload(wire);
+    } catch (e) {
+      return `ERROR: ${e instanceof Error ? e.message : String(e)}`;
+    }
   }
-  /** Take one matching tuple (destructive). Returns tuple as array or null if no match/error. */
+  /** Take one matching tuple (destructive). */
   take(pattern) {
-    const json = JSON.stringify(pattern);
-    const raw = this.host.tsTake(json);
-    if (raw === "" || raw.startsWith("ERROR"))
-      return null;
     try {
-      return JSON.parse(raw);
+      const wire = encodeReadRequest(pattern, true, 1);
+      const raw = this.host.tsTakePayload(wire);
+      if (raw.length === 0 || hostErrorPrefixBytes(raw))
+        return null;
+      return decodeReadResponseFirstTuple(raw);
     } catch {
       return null;
     }
   }
-  /** Read one matching tuple (non-destructive). Returns tuple as array or null if no match/error. */
+  /** Read one matching tuple (non-destructive). */
   read(pattern) {
-    const json = JSON.stringify(pattern);
-    const raw = this.host.tsRead(json);
-    if (raw === "" || raw.startsWith("ERROR"))
-      return null;
     try {
-      return JSON.parse(raw);
+      const wire = encodeReadRequest(pattern, false, 1);
+      const raw = this.host.tsReadPayload(wire);
+      if (raw.length === 0 || hostErrorPrefixBytes(raw))
+        return null;
+      return decodeReadResponseFirstTuple(raw);
     } catch {
       return null;
     }
   }
-  /** Read all matching tuples (non-destructive). Returns array of tuples (each tuple is an array). */
+  /** Read all matching tuples (non-destructive). */
   readAll(pattern) {
-    const json = JSON.stringify(pattern);
-    const raw = this.host.tsReadAll(json);
-    if (raw === "" || raw.startsWith("ERROR"))
-      return [];
     try {
-      const out = JSON.parse(raw);
-      return Array.isArray(out) ? out : [];
+      const wire = encodeReadRequest(pattern, false, 1024);
+      const raw = this.host.tsReadAllPayload(wire);
+      if (raw.length === 0 || hostErrorPrefixBytes(raw))
+        return [];
+      return decodeReadResponseAllTuples(raw);
     } catch {
       return [];
     }
@@ -474,7 +859,11 @@ var Host = class {
   /** Send message to another actor (fire-and-forget) */
   send(to, msgType, payload) {
     const payloadJson = payload !== void 0 ? JSON.stringify(payload) : "";
-    return safeCall(hostSend, to, msgType, payloadJson);
+    const raw = safeCall(hostSend, to, msgType, payloadJson);
+    if (typeof raw !== "string") {
+      return "";
+    }
+    return raw;
   }
   /** Send request and wait for response (request-reply) */
   ask(to, msgType, payload, timeoutMs = 5e3) {
@@ -560,10 +949,26 @@ var Host = class {
    * Send message to self after delay (returns timer ID for tracking).
    * Timer cancellation is managed by the framework's TimerFacet/ReminderFacet.
    * Stop the actor to cancel pending timers.
+   *
+   * WIT `payload` is opaque bytes; pass UTF-8 JSON bytes so the host matches Go/Rust guest JSON.
    */
   sendAfter(delayMs, msgType, payload) {
-    const payloadJson = payload !== void 0 ? JSON.stringify(payload) : "{}";
-    return safeCall(hostSendAfter, BigInt(delayMs), msgType, payloadJson);
+    const text = payload !== void 0 ? JSON.stringify(payload) : "{}";
+    const payloadBytes = new TextEncoder().encode(text);
+    const raw = safeCall(hostSendAfter, BigInt(delayMs), msgType, payloadBytes);
+    if (typeof raw === "string") {
+      return raw;
+    }
+    if (raw && typeof raw === "object") {
+      const o = raw;
+      if (o.tag === "ok" || o.tag === 0) {
+        return typeof o.val === "string" ? o.val : "";
+      }
+      if (o.tag === "err" || o.tag === 1) {
+        return `ERROR:${String(o.val ?? "send-after failed")}`;
+      }
+    }
+    return "";
   }
   // ========================================================================
   // Logging & Time
@@ -605,19 +1010,24 @@ var Host = class {
     return safeCall(hostKvList, prefix);
   }
   // ========================================================================
-  // TupleSpace (low-level string API; prefer host.ts for list-in/list-out)
+  // TupleSpace (protobuf WriteRequest / ReadRequest / ReadResponse wire bytes)
   // ========================================================================
-  tsWrite(tupleJson) {
-    return safeCall(hostTsWrite, tupleJson);
+  /** @internal TupleSpace — plexspaces.tuplespace.v1 wire bytes. */
+  tsWritePayload(data) {
+    const r = safeCall(hostTsWrite, data);
+    return typeof r === "string" ? r : "";
   }
-  tsRead(patternJson) {
-    return safeCall(hostTsRead, patternJson);
+  /** @internal */
+  tsReadPayload(data) {
+    return hostPayloadToBytes(safeCall(hostTsRead, data));
   }
-  tsTake(patternJson) {
-    return safeCall(hostTsTake, patternJson);
+  /** @internal */
+  tsTakePayload(data) {
+    return hostPayloadToBytes(safeCall(hostTsTake, data));
   }
-  tsReadAll(patternJson) {
-    return safeCall(hostTsReadAll, patternJson);
+  /** @internal */
+  tsReadAllPayload(data) {
+    return hostPayloadToBytes(safeCall(hostTsReadAll, data));
   }
   // ========================================================================
   // Distributed Locks
@@ -775,13 +1185,25 @@ var Host = class {
    * @returns Response object with status, headers, body
    */
   httpFetch(linkName, method, pathAndQuery, headers, body) {
-    const headersJson = JSON.stringify(headers ?? {});
-    const bodyStr = body ?? "";
-    const result = safeCall(hostHttpFetch, linkName, method, pathAndQuery, headersJson, bodyStr);
+    const bodyBytes = body !== void 0 && body.length > 0 ? new TextEncoder().encode(body) : new Uint8Array(0);
+    const reqWire = encodeHttpFetchRequestWire(headers ?? {}, bodyBytes);
+    const result = safeCall(hostHttpFetch, linkName, method, pathAndQuery, reqWire);
     if (typeof result === "string" && result.startsWith("ERROR:")) {
       throw new Error(result);
     }
-    return JSON.parse(result);
+    const bytes = hostPayloadToBytes(result);
+    if (bytes.length === 0) {
+      return { status: 0, headers: {}, body: "" };
+    }
+    if (hostErrorPrefixBytes(bytes)) {
+      throw new Error(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
+    }
+    const asText = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    try {
+      return JSON.parse(asText);
+    } catch {
+      return decodeHttpFetchResponseWire(bytes);
+    }
   }
 };
 var ServiceHttpClient = class {
@@ -851,10 +1273,11 @@ var ActorRouter = class {
     this.active = null;
     this.factories = routes;
   }
-  /** WIT init(config-json) -> string */
+  /** WIT `init(config: payload) -> result<_, actor-error>` */
   init(configJson) {
     try {
-      const config = configJson && configJson.trim() ? JSON.parse(configJson) : {};
+      const text = decodeWitPayloadUtf8(configJson);
+      const config = text.trim() ? JSON.parse(text) : {};
       const actorId = config.actor_id || "";
       const name = normalizeActorRole(actorId);
       let bestPrefix = "";
@@ -868,34 +1291,37 @@ var ActorRouter = class {
         }
       }
       if (!bestFactory) {
-        return "ERROR: no actor registered for prefix: " + name;
+        throw new Error("ERROR: no actor registered for prefix: " + name);
       }
       this.active = bestFactory();
-      return this.active.init(configJson);
-    } catch {
-      return "ERROR: router init failed";
+      this.active.init(text);
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("ERROR:")) {
+        throw e;
+      }
+      throw new Error("ERROR: router init failed");
     }
   }
-  /** WIT handle(from-actor, msg-type, payload-json) -> string */
+  /** WIT `handle(...) -> result<payload, actor-error>` */
   handle(fromActor, msgType, payloadJson) {
     if (!this.active) {
-      return '{"error":"no active actor (init not called)"}';
+      return encodeWitPayloadUtf8('{"error":"no active actor (init not called)"}');
     }
     return this.active.handle(fromActor, msgType, payloadJson);
   }
-  /** WIT get-state() -> string */
+  /** WIT `get-state() -> result<payload, actor-error>` */
   getState() {
     if (!this.active) {
-      return "{}";
+      return encodeWitPayloadUtf8("{}");
     }
     return this.active.getState();
   }
-  /** WIT set-state(state-json) -> string */
+  /** WIT `set-state(state: payload) -> result<_, actor-error>` */
   setState(stateJson) {
     if (!this.active) {
-      return "ERROR: no active actor";
+      throw new Error("ERROR: no active actor");
     }
-    return this.active.setState(stateJson);
+    this.active.setState(stateJson);
   }
 };
 
@@ -939,35 +1365,16 @@ var WeatherActor = class extends PlexSpacesActor {
   getDefaultState() {
     return { actor_id: "", cache_hits: 0, cache_misses: 0 };
   }
-  init(configJSON) {
-    try {
-      const cfg = JSON.parse(configJSON);
-      if (cfg.actor_id) this.state.actor_id = cfg.actor_id;
-    } catch {
+  onInit(config) {
+    if (typeof config.actor_id === "string" && config.actor_id) {
+      this.state.actor_id = config.actor_id;
     }
     host.log("info", `WeatherActor initialized: ${this.state.actor_id}`);
-    return "";
   }
-  handle(_from, msgType, payloadJSON) {
-    switch (msgType) {
-      case "get_weather":
-        return this.handleGetWeather(payloadJSON);
-      case "cache_stats":
-        return JSON.stringify({ hits: this.state.cache_hits, misses: this.state.cache_misses });
-      case "clear_cache":
-        this.state.cache_hits = 0;
-        this.state.cache_misses = 0;
-        return JSON.stringify({ cleared: true });
-      default:
-        return JSON.stringify({ error: `unknown message type: ${msgType}` });
-    }
-  }
-  handleGetWeather(payloadJSON) {
+  onGet_weather(payload) {
     let city = "London";
-    try {
-      const req = JSON.parse(payloadJSON);
-      if (req.city) city = req.city;
-    } catch {
+    if (typeof payload.city === "string" && payload.city) {
+      city = payload.city;
     }
     const cacheKey = `weather:${city}`;
     const cached = host.kvGet(cacheKey);
@@ -980,7 +1387,7 @@ var WeatherActor = class extends PlexSpacesActor {
         if (host.nowMs() - fetchedAt < CACHE_TTL_MS) {
           this.state.cache_hits++;
           host.log("debug", `Cache HIT for ${city}`);
-          return JSON.stringify({ ...data, city, source: "cache" });
+          return { ...data, city, source: "cache" };
         }
       } catch {
       }
@@ -1004,11 +1411,19 @@ var WeatherActor = class extends PlexSpacesActor {
       if (cacheWrite.startsWith("ERROR:")) {
         host.log("warn", `Cache write failed for ${city}: ${cacheWrite}`);
       }
-      return JSON.stringify({ ...result, city, source: "api" });
+      return { ...result, city, source: "api" };
     } catch (err) {
       host.log("error", `Weather API call failed: ${err}`);
-      return JSON.stringify({ city, error: String(err), source: "api" });
+      return { city, error: String(err), source: "api" };
     }
+  }
+  onCache_stats(_payload) {
+    return { hits: this.state.cache_hits, misses: this.state.cache_misses };
+  }
+  onClear_cache(_payload) {
+    this.state.cache_hits = 0;
+    this.state.cache_misses = 0;
+    return { cleared: true };
   }
 };
 var router = new ActorRouter({

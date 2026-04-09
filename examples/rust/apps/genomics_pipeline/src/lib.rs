@@ -3,7 +3,7 @@
 // Genomics Pipeline - Rust WASM app
 //
 // Leader actor:
-// - Creates a shard group of worker actors using the simple-actor WIT host.
+// - Creates a shard group of worker actors using the actor-world WIT host.
 // - Orchestrates QC, alignment, variant calling, and annotation with scatter/gather.
 // - Returns benchmark metrics with compute versus coordination split and per-node totals.
 //
@@ -13,17 +13,29 @@
 // - Reports stage-level compute and coordination timing.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Mutex, OnceLock};
+use prost::Message;
+use plexspaces_proto::actor::v1::{
+    CreateShardGroupRequest, CreateShardGroupResponse, DataParallelConfig, NodePlacement,
+    NodePlacementStrategy, PartitionStrategy, RebalancePolicy, ScatterGatherRequest,
+    ScatterGatherResponse, ShardGroupAggregationStrategy,
+};
+use plexspaces_proto::application::v1::{
+    ApplicationInfo, ApplicationMetrics, ApplicationStatus, GetApplicationStatusResponse,
+};
+use plexspaces_proto::common::v1::Message as ProtoMessage;
+use plexspaces_proto::prost_types;
 
 wit_bindgen::generate!({
-    path: "../../../../wit/plexspaces-simple-actor",
+    path: "../../../../wit/plexspaces-actor",
     world: "actor-world",
 });
 
-use exports::plexspaces::simple_actor::actor::Guest;
-use plexspaces::simple_actor::host;
-use plexspaces_sdk::simple_actor::SimpleActorHandlers;
+use exports::plexspaces::actor::actor::Guest;
+use plexspaces::actor::host;
+use plexspaces_sdk::simple_actor::ActorWorldHandlers;
 
 mod leader;
 mod worker;
@@ -196,6 +208,30 @@ fn host_info(message: impl AsRef<str>) {
     host::log("info", message.as_ref());
 }
 
+fn parse_payload(payload: &[u8]) -> Result<Value, String> {
+    if payload.is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    serde_json::from_slice(payload).map_err(|err| format!("invalid payload: {}", err))
+}
+
+fn parse_op(msg_type: &str, payload: &[u8]) -> Result<String, String> {
+    let payload = parse_payload(payload)?;
+    Ok(payload
+        .get("op")
+        .and_then(|value| value.as_str())
+        .unwrap_or(msg_type)
+        .to_string())
+}
+
+fn json_bytes(value: Value) -> Vec<u8> {
+    value.to_string().into_bytes()
+}
+
+fn json_error(err: impl Into<String>) -> Vec<u8> {
+    json_bytes(serde_json::json!({ "error": err.into() }))
+}
+
 fn actor_node_id(actor_id: &str) -> String {
     actor_id
         .rsplit_once('@')
@@ -223,14 +259,70 @@ fn current_application_id() -> String {
     with_state(|state| state.application_id.clone())
 }
 
-fn merge_application_metrics(metrics: serde_json::Value) -> Result<serde_json::Value, String> {
-    let response = host::application_metrics_add(&current_application_id(), &metrics.to_string());
-    if response.starts_with("ERROR:") {
-        Err(response)
-    } else {
-        serde_json::from_str(&response)
-            .map_err(|err| format!("invalid application metrics response: {}", err))
+fn json_object_to_metric_map(value: Option<&serde_json::Value>) -> HashMap<String, u64> {
+    value.and_then(|value| value.as_object()).map(|entries| {
+        entries.iter().filter_map(|(key, value)| value.as_u64().map(|parsed| (key.clone(), parsed))).collect()
+    }).unwrap_or_default()
+}
+
+fn application_metrics_from_json(metrics: serde_json::Value) -> ApplicationMetrics {
+    ApplicationMetrics {
+        actor_counts: json_object_to_metric_map(metrics.get("actor_counts")),
+        supervisor_count: metrics.get("supervisor_count").and_then(|value| value.as_u64()).unwrap_or(0) as u32,
+        uptime_seconds: metrics.get("uptime_seconds").and_then(|value| value.as_u64()).unwrap_or(0),
+        message_count: metrics.get("message_count").and_then(|value| value.as_u64()).unwrap_or(0),
+        error_count: metrics.get("error_count").and_then(|value| value.as_u64()).unwrap_or(0),
+        counter_metrics: json_object_to_metric_map(metrics.get("counter_metrics")),
+        latency_totals_ms: json_object_to_metric_map(metrics.get("latency_totals_ms")),
+        latency_max_ms: json_object_to_metric_map(metrics.get("latency_max_ms")),
+        latency_samples: json_object_to_metric_map(metrics.get("latency_samples")),
     }
+}
+
+fn application_status_name(status: i32) -> String {
+    ApplicationStatus::try_from(status).map(|status| status.as_str_name().to_ascii_lowercase()).unwrap_or_else(|_| "application_status_unspecified".to_string())
+}
+
+fn application_metrics_to_json(metrics: &ApplicationMetrics) -> serde_json::Value {
+    serde_json::json!({
+        "actor_counts": metrics.actor_counts,
+        "supervisor_count": metrics.supervisor_count,
+        "uptime_seconds": metrics.uptime_seconds,
+        "message_count": metrics.message_count,
+        "error_count": metrics.error_count,
+        "counter_metrics": metrics.counter_metrics,
+        "latency_totals_ms": metrics.latency_totals_ms,
+        "latency_max_ms": metrics.latency_max_ms,
+        "latency_samples": metrics.latency_samples,
+    })
+}
+
+fn application_info_to_json(application: &ApplicationInfo) -> serde_json::Value {
+    serde_json::json!({
+        "application_id": application.application_id,
+        "name": application.name,
+        "version": application.version,
+        "status": application_status_name(application.status),
+        "metrics": application.metrics.as_ref().map(application_metrics_to_json).unwrap_or(serde_json::json!({})),
+    })
+}
+
+fn application_status_response_to_json(response: &GetApplicationStatusResponse) -> serde_json::Value {
+    serde_json::json!({
+        "application": response.application.as_ref().map(application_info_to_json).unwrap_or(serde_json::Value::Null),
+        "state": serde_json::Value::Null,
+        "error": response.error,
+        "node_id": response.node_id,
+        "node_address": response.node_address,
+    })
+}
+
+fn merge_application_metrics(metrics: serde_json::Value) -> Result<serde_json::Value, String> {
+    let metrics_bytes = application_metrics_from_json(metrics).encode_to_vec();
+    let response = host::application_metrics_add(&current_application_id(), &metrics_bytes)?;
+    let response = ApplicationMetrics::decode(response.as_slice())
+        .map_err(|err| format!("invalid ApplicationMetrics protobuf: {}", err))?;
+    Ok(application_metrics_to_json(&response))
 }
 
 fn require_application_metrics_merge(
@@ -241,37 +333,101 @@ fn require_application_metrics_merge(
 }
 
 fn application_status(node_id_or_address: &str) -> Result<serde_json::Value, String> {
-    let response = host::application_get_status(&current_application_id(), node_id_or_address);
-    if response.starts_with("ERROR:") {
-        Err(response)
-    } else {
-        serde_json::from_str(&response)
-            .map_err(|err| format!("invalid application status response: {}", err))
-    }
+    let response = host::application_get_status(&current_application_id(), node_id_or_address)?;
+    let response = GetApplicationStatusResponse::decode(response.as_slice())
+        .map_err(|err| format!("invalid GetApplicationStatusResponse protobuf: {}", err))?;
+    Ok(application_status_response_to_json(&response))
+}
+
+fn shard_group_create_request_bytes(group_id: &str, actor_type: &str, shard_count: usize) -> Vec<u8> {
+    CreateShardGroupRequest {
+        config: Some(DataParallelConfig {
+            group_id: group_id.to_string(),
+            shard_count: shard_count as u32,
+            partition_strategy: PartitionStrategy::PartitionStrategyHash as i32,
+            rebalance_policy: RebalancePolicy::RebalancePolicyNone as i32,
+            placement: Some(NodePlacement {
+                strategy: NodePlacementStrategy::NodePlacementStrategyFromRegistry as i32,
+                ..Default::default()
+            }),
+        }),
+        actor_type: actor_type.to_string(),
+        shard_config: None,
+        initial_state: Vec::new(),
+        metadata: HashMap::new(),
+    }.encode_to_vec()
+}
+
+fn decode_shard_group_create_response(bytes: &[u8]) -> Result<Vec<String>, String> {
+    let response = CreateShardGroupResponse::decode(bytes)
+        .map_err(|err| format!("invalid CreateShardGroupResponse protobuf: {}", err))?;
+    Ok(response.group.map(|group| group.shard_actor_ids).unwrap_or_default())
+}
+
+fn scatter_gather_request_bytes(group_id: &str, aggregation: ShardGroupAggregationStrategy, payload: serde_json::Value, min_responses: usize, timeout_ms: u64) -> Vec<u8> {
+    ScatterGatherRequest {
+        group_id: group_id.to_string(),
+        query: Some(ProtoMessage {
+            id: format!("req-{}", host::now_ms()),
+            message_type: "call".to_string(),
+            payload: json_bytes(payload),
+            ..Default::default()
+        }),
+        timeout: Some(prost_types::Duration {
+            seconds: (timeout_ms / 1000) as i64,
+            nanos: ((timeout_ms % 1000) * 1_000_000) as i32,
+        }),
+        aggregation: aggregation as i32,
+        min_responses: min_responses as u32,
+    }.encode_to_vec()
+}
+
+fn decode_proto_json_payload(payload: &[u8], context: &str) -> Result<serde_json::Value, String> {
+    if payload.is_empty() { return Ok(serde_json::Value::Null); }
+    serde_json::from_slice(payload).map_err(|err| format!("invalid {} payload JSON: {}", context, err))
+}
+
+fn decode_scatter_gather_response(bytes: &[u8]) -> Result<Vec<serde_json::Value>, String> {
+    let response = ScatterGatherResponse::decode(bytes)
+        .map_err(|err| format!("invalid ScatterGatherResponse protobuf: {}", err))?;
+    response.shard_responses.into_iter().map(|shard| {
+        let payload = shard.response.as_ref().map(|message| decode_proto_json_payload(&message.payload, "scatter_gather")).transpose()?.unwrap_or(serde_json::Value::Null);
+        let actor_id = shard.response.as_ref().map(|message| message.sender_id.clone()).unwrap_or_default();
+        let latency_ms = shard.latency.map(|latency| {
+            let millis_from_seconds = latency.seconds.saturating_mul(1000);
+            let millis_from_nanos = i64::from(latency.nanos) / 1_000_000;
+            millis_from_seconds.saturating_add(millis_from_nanos).max(0) as u64
+        }).unwrap_or(0);
+        Ok(serde_json::json!({
+            "shard_id": shard.shard_id,
+            "shard_actor_id": shard.shard_actor_id,
+            "actor_id": actor_id,
+            "payload": payload,
+            "success": shard.success,
+            "error": shard.error,
+            "latency_ms": latency_ms,
+        }))
+    }).collect()
 }
 
 fn ensure_worker_initialization(shard_actor_ids: &[String]) -> Result<(), String> {
     let shard_count = shard_actor_ids.len();
     for (shard_index, shard_actor_id) in shard_actor_ids.iter().enumerate() {
-        let response = host::ask(
-            shard_actor_id,
-            "init",
-            &serde_json::json!({
-                "op": "init",
-                "shard_index": shard_index,
-                "shard_count": shard_count,
-            })
-            .to_string(),
-            10_000,
-        );
-        if response.starts_with("ERROR:") {
-            return Err(format!(
+        let request_bytes = serde_json::json!({
+            "op": "init",
+            "shard_index": shard_index,
+            "shard_count": shard_count,
+        })
+        .to_string()
+        .into_bytes();
+        let response = host::ask(shard_actor_id, "init", &request_bytes, 10_000).map_err(|err| {
+            format!(
                 "worker init failed for shard {} ({}): {}",
-                shard_index, shard_actor_id, response
-            ));
-        }
+                shard_index, shard_actor_id, err
+            )
+        })?;
 
-        let payload: serde_json::Value = serde_json::from_str(&response).map_err(|err| {
+        let payload: serde_json::Value = serde_json::from_slice(&response).map_err(|err| {
             format!(
                 "invalid worker init response for shard {} ({}): {}",
                 shard_index, shard_actor_id, err
@@ -582,53 +738,48 @@ fn json_u64(value: &serde_json::Value, key: &str) -> u64 {
         .unwrap_or(0)
 }
 
-fn handle_query() -> String {
+fn handle_query() -> Vec<u8> {
     with_state(|state| {
-        state
-            .last_result
-            .clone()
-            .unwrap_or_else(|| serde_json::json!({ "error": "no results yet" }))
-            .to_string()
+        json_bytes(
+            state
+                .last_result
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({ "error": "no results yet" })),
+        )
     })
 }
 
-fn handle_message(from_actor: String, msg_type: String, payload_json: String) -> String {
+fn handle_message(from_actor: String, msg_type: String, payload: Vec<u8>) -> Result<Vec<u8>, String> {
     let role = with_state(|state| state.role.clone());
-    let payload_value: serde_json::Value =
-        serde_json::from_str(&payload_json).unwrap_or_else(|_| serde_json::json!({}));
-    let op = payload_value
-        .get("op")
-        .and_then(|value| value.as_str())
-        .unwrap_or_else(|| msg_type.as_str())
-        .to_string();
+    let op = match parse_op(&msg_type, &payload) {
+        Ok(op) => op,
+        Err(err) => return Ok(json_error(err)),
+    };
 
     match (role.as_str(), op.as_str()) {
         ("leader", "run") => leader::LeaderActor::default()
-            .handle_operation(&from_actor, "run", &payload_json)
-            .unwrap_or_else(|err| serde_json::json!({ "error": err }).to_string()),
-        ("leader", "query") | ("worker", "query") => handle_query(),
+            .handle_operation(&from_actor, "run", &payload),
+        ("leader", "query") | ("worker", "query") => Ok(handle_query()),
         ("worker", "init") => worker::WorkerActor::default()
-            .handle_operation(&from_actor, "init", &payload_json)
-            .unwrap_or_else(|err| serde_json::json!({ "error": err }).to_string()),
+            .handle_operation(&from_actor, "init", &payload),
         ("worker", "process_stage") => worker::WorkerActor::default()
-            .handle_operation(&from_actor, "process_stage", &payload_json)
-            .unwrap_or_else(|err| serde_json::json!({ "error": err }).to_string()),
-        (_, "init") => serde_json::json!({ "status": "ok" }).to_string(),
-        _ => serde_json::json!({
-            "error": format!("unsupported op '{}' for role '{}'", op, role)
-        })
-        .to_string(),
+            .handle_operation(&from_actor, "process_stage", &payload),
+        (_, "init") => Ok(json_bytes(serde_json::json!({ "status": "ok" }))),
+        _ => Ok(json_error(format!(
+            "unsupported op '{}' for role '{}'",
+            op, role
+        ))),
     }
 }
 
 struct Component;
 
 impl Guest for Component {
-    fn init(config_json: String) -> String {
-        let config: InitConfig = match serde_json::from_str(&config_json) {
+    fn init(config: Vec<u8>) -> Result<(), String> {
+        let config: InitConfig = match serde_json::from_slice(&config) {
             Ok(config) => config,
             Err(err) => {
-                return format!("invalid init config: {}", err);
+                return Err(format!("invalid init config: {}", err));
             }
         };
         let role = config
@@ -638,10 +789,10 @@ impl Guest for Component {
             .cloned()
             .unwrap_or_default();
         if role != "leader" && role != "worker" {
-            return format!(
-                "ERROR: invalid init config: missing required role for actor {}",
+            return Err(format!(
+                "invalid init config: missing required role for actor {}",
                 config.actor_id.unwrap_or_else(|| "<unknown>".to_string())
-            );
+            ));
         }
 
         with_state(|state| {
@@ -657,26 +808,28 @@ impl Guest for Component {
             host::self_id(),
             role
         ));
-        String::new()
+        Ok(())
     }
 
-    fn handle(from_actor: String, msg_type: String, payload_json: String) -> String {
-        handle_message(from_actor, msg_type, payload_json)
+    fn handle(from_actor: String, msg_type: String, payload: Vec<u8>) -> Result<Vec<u8>, String> {
+        handle_message(from_actor, msg_type, payload)
     }
 
-    fn get_state() -> String {
-        with_state(|state| serde_json::to_string(state).unwrap_or_else(|_| "{}".to_string()))
+    fn get_state() -> Result<Vec<u8>, String> {
+        Ok(with_state(|state| {
+            serde_json::to_vec(state).unwrap_or_else(|_| b"{}".to_vec())
+        }))
     }
 
-    fn set_state(state_json: String) -> String {
-        let next: AppState = match serde_json::from_str(&state_json) {
+    fn set_state(state: Vec<u8>) -> Result<(), String> {
+        let next: AppState = match serde_json::from_slice(&state) {
             Ok(state) => state,
-            Err(err) => return format!("ERROR: invalid state: {}", err),
+            Err(err) => return Err(format!("invalid state: {}", err)),
         };
         with_state(|state| {
             *state = next;
         });
-        String::new()
+        Ok(())
     }
 }
 

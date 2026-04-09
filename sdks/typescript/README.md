@@ -82,7 +82,7 @@ export const actor = {
 
 - Compile: `tsc`
 - Bundle (e.g. esbuild) your entry into a single ESM file that exports `actor`.
-- Build WASM: `jco componentize your-bundle.mjs --wit wit/plexspaces-simple-actor -o actor.wasm --disable all`
+- Build WASM: `jco componentize your-bundle.mjs --wit wit/plexspaces-actor -o actor.wasm --disable all`
 
 See [examples/typescript/apps/bank_account](../../examples/typescript/apps/bank_account) for a full example and E2E test.
 
@@ -123,7 +123,7 @@ The TypeScript SDK works seamlessly with virtual actors - no code changes needed
 
 ## WIT Interface
 
-The SDK targets the **plexspaces-simple-actor** WIT world: `init`, `handle`, `get-state`, `set-state`. All data crosses the boundary as strings (JSON). See `wit/plexspaces-simple-actor/world.wit`.
+The SDK targets the **plexspaces-actor** WIT world: `init`, `handle`, `get-state`, `set-state`. All data crosses the boundary as strings (JSON). See `wit/plexspaces-actor/world.wit`.
 
 ### Host Functions
 
@@ -133,7 +133,7 @@ The SDK uses WIT host functions for runtime capabilities. Host functions are pro
 
 The SDK automatically handles logging via `host.log()` for error reporting and observability. In non-WASM environments (e.g., Node.js verification), host functions are undefined and logging gracefully degrades to no-op.
 
-**Available Host Functions** (from `plexspaces:simple-actor/host@0.1.0`):
+**Available Host Functions** (from `plexspaces:actor/host@0.1.0`):
 - `log(level: string, message: string)` - Log a message (used internally by SDK)
 - `send(to: string, msgType: string, payloadJson: string)` - Send message to another actor
 - `now_ms()` - Get current timestamp in milliseconds
@@ -141,7 +141,7 @@ The SDK automatically handles logging via `host.log()` for error reporting and o
 - **TupleSpace**: Prefer `host.ts` (list-in, list-out): `host.ts.write(tuple)`, `host.ts.take(pattern)` → tuple or null, `host.ts.readAll(pattern)` → tuple[]. Use `null` in patterns for wildcards. Low-level: `ts_write(tupleJson)`, `ts_take(patternJson)`, etc.
 - **Process groups**: `host.processGroups.broadcast(group, msgType, payload)` — `msgType` is used by the host for routing; payload can be data-only.
 - **Elastic pool**: `host.poolCheckout(poolName, timeoutMs)` → `{ actor_id, pool_name, checkout_id } | null`; `host.poolCheckin(poolName, actorId, checkoutId, healthy)`; `host.poolGetMetrics(poolName)` → metrics object or null. When the pool is not configured, checkout returns null; use process group broadcast as fallback. See [Parameter sweep (migrating_merlin)](../../examples/typescript/apps/migrating_merlin/README.md).
-- See `wit/plexspaces-simple-actor/world.wit` for complete interface
+- See `wit/plexspaces-actor/world.wit` for complete interface
 
 **Note**: The SDK uses `host.log()` internally for error logging. For custom logging in your actors, you can import and use host functions directly using the virtual import pattern (future enhancement: SDK may provide helper methods).
 

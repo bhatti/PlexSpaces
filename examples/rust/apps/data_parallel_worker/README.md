@@ -1,6 +1,6 @@
 # Data-parallel worker (Rust WASM)
 
-Deployable example: **shard group + scatter/gather** rounds over worker actors. This matches the main data-parallel pattern (fan-out query, gather per-shard results) while staying on the **SDK + WIT** stack (`wit_bindgen`, `plexspaces_sdk::simple_actor::SimpleActorHandlers`, `host::scatter_gather`).
+Deployable example: **shard group + scatter/gather** rounds over worker actors. This matches the main data-parallel pattern (fan-out query, gather per-shard results) while staying on the **SDK + WIT** stack (`wit_bindgen`, `plexspaces_sdk::simple_actor::ActorWorldHandlers`, `host::scatter_gather`).
 
 For comparison, see [parameter_server](../parameter_server/) (training-style gradients) and the Python host usage in [parameter_server Python](../../../python/apps/parameter_server/) — same WIT surface, different domain narrative.
 

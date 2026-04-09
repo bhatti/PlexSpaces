@@ -14,7 +14,7 @@ await esbuild.build({
   platform: "neutral",
   target: "es2020",
   packages: "bundle",
-  external: ["plexspaces:simple-actor/host@0.1.0"],
+  external: ["plexspaces:actor/host@0.1.0"],
 });
 
 console.log("  ✓ weather_actor_bundle.mjs");

@@ -202,6 +202,11 @@ impl Pattern {
         Pattern { fields }
     }
 
+    /// Pattern fields (exact, wildcard, type, or predicate slots).
+    pub fn fields(&self) -> &[PatternField] {
+        &self.fields
+    }
+
     /// Check if a tuple matches this pattern
     pub fn matches(&self, tuple: &Tuple) -> bool {
         if self.fields.len() != tuple.fields.len() {

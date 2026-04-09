@@ -81,10 +81,13 @@ func (l *LeaderActor) Init(configJSON string) string {
 	l.TopK = atoiDefault(config.Args["top_k"], l.TopK)
 	l.TotalCoordMs = 0
 	l.TotalComputeMs = 0
+	// WIT host.log (plexspaces:actor/host@0.1.0 log) — shows as tracing INFO with [WASM] on the node.
+	host.Info(fmt.Sprintf("data_lake_rag leader Init done actor_id=%s worker_count=%d", config.ActorID, l.WorkerCount))
 	return ""
 }
 
 func (l *LeaderActor) Handle(fromActor, msgType, payloadJSON string) string {
+	host.Info(fmt.Sprintf("data_lake_rag leader Handle msgType=%s fromActor=%s payload_len=%d", msgType, fromActor, len(payloadJSON)))
 	if msgType != "run" {
 		return marshal(map[string]any{"error": "unknown_op", "op": msgType})
 	}
@@ -97,10 +100,12 @@ func (w *WorkerActor) Init(configJSON string) string {
 		return "ERROR: " + err.Error()
 	}
 	w.SetRuntimeMetadata(config.ActorID)
+	host.Info(fmt.Sprintf("data_lake_rag worker Init done actor_id=%s", config.ActorID))
 	return ""
 }
 
 func (w *WorkerActor) Handle(fromActor, msgType, payloadJSON string) string {
+	host.Info(fmt.Sprintf("data_lake_rag worker Handle msgType=%s fromActor=%s", msgType, fromActor))
 	if msgType != "search_chunks" {
 		return marshal(map[string]any{"error": "unknown_op", "op": msgType})
 	}
@@ -124,7 +129,10 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		request.TopK = 5
 	}
 
+	host.Info(fmt.Sprintf("data_lake_rag leader run start worker_count=%d query_count=%d", request.WorkerCount, request.QueryCount))
+
 	groupID := fmt.Sprintf("data-lake-rag-go-%d", host.NowMs())
+	host.Info(fmt.Sprintf("data_lake_rag leader CreateShardGroup group_id=%s shard_count=%d", groupID, request.WorkerCount))
 	group, err := host.CreateShardGroup(map[string]any{
 		"group_id":           groupID,
 		"actor_type":         "worker",
@@ -210,7 +218,17 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		iterationBytes := 0
 		for _, shard := range shards {
 			shardMap, _ := shard.(map[string]any)
+			if shardTransportFailed(shardMap) {
+				iterationErrors++
+				totalErrors++
+				continue
+			}
 			payloadMap := normalizeWorkerPayload(mapValue(shardMap, "payload"))
+			if len(payloadMap) == 0 {
+				if p := mapValue(shardMap, "response"); p != nil {
+					payloadMap = normalizeWorkerPayload(p)
+				}
+			}
 			if status, _ := payloadMap["status"].(string); status == "ok" {
 				iterationResponses++
 				totalWorkerResponses++
@@ -231,7 +249,10 @@ func (l *LeaderActor) run(payloadJSON string) string {
 				if nodeID == "" {
 					nodeID = actorNodeID(stringValue(payloadMap["actor_id"]))
 				}
-				if nodeID != "" && nodeID != leaderNodeID {
+				if nodeID == "" || nodeID == "local" {
+					nodeID = actorNodeID(stringValue(shardMap["shard_actor_id"]))
+				}
+				if nodeID != "" && nodeID != leaderNodeID && nodeID != "local" {
 					remoteNodesWithWork[nodeID] = true
 				}
 				for _, rawCandidate := range anySlice(payloadMap["top_chunks"]) {
@@ -349,6 +370,11 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		}
 		actorCounts = append(actorCounts, metrics["actors"])
 	}
+	workerRemoteShardNodes := remoteWorkerShardHostNodeIDs(leaderNodeID, shardActorIDs)
+	if placementCount := len(workerRemoteShardNodes); placementCount > workerNodeCount {
+		// ApplicationGetStatus deltas often omit remote WASM latency_samples; shard placement is authoritative for multinode topology.
+		workerNodeCount = placementCount
+	}
 	actorDistributionSkew := 0
 	if len(actorCounts) > 0 {
 		minActors, maxActors := actorCounts[0], actorCounts[0]
@@ -423,6 +449,7 @@ func (l *LeaderActor) run(payloadJSON string) string {
 		"leader_node_id":            leaderNodeID,
 		"node_addresses":            nodeAddresses,
 		"shard_actor_ids":           shardActorIDs,
+		"worker_remote_shard_nodes": workerRemoteShardNodes,
 		"node_count":                len(nodeMetrics),
 		"worker_node_count":         workerNodeCount,
 		"actor_count":               len(shardActorIDs) + 1,
@@ -532,6 +559,50 @@ func actorNodeID(actorID string) string {
 	return "local"
 }
 
+// shardTransportFailed reports true when the scatter-gather layer marked the shard as failed.
+// JSON gateways may surface proto bools as float64; missing success means "try payload".
+func shardTransportFailed(shardMap map[string]any) bool {
+	if shardMap == nil {
+		return true
+	}
+	v, ok := shardMap["success"]
+	if !ok {
+		return false
+	}
+	switch t := v.(type) {
+	case bool:
+		return !t
+	case float64:
+		return t == 0
+	case int:
+		return t == 0
+	case int64:
+		return t == 0
+	case string:
+		return t == "false" || t == "0"
+	default:
+		return false
+	}
+}
+
+// remoteWorkerShardHostNodeIDs returns sorted unique node IDs that host worker shards (excludes leader and "local").
+func remoteWorkerShardHostNodeIDs(leaderNodeID string, shardActorIDs []string) []string {
+	seen := map[string]struct{}{}
+	for _, aid := range shardActorIDs {
+		n := actorNodeID(aid)
+		if n == "" || n == "local" || n == leaderNodeID {
+			continue
+		}
+		seen[n] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func actorRoleID(actorID string) string {
 	if actorID == "" {
 		return ""
@@ -556,6 +627,17 @@ func actorRoleID(actorID string) string {
 }
 
 func normalizeWorkerPayload(payload any) map[string]any {
+	if payload == nil {
+		return map[string]any{}
+	}
+	if s, ok := payload.(string); ok && s != "" {
+		var inner map[string]any
+		if json.Unmarshal([]byte(s), &inner) == nil {
+			payload = inner
+		} else {
+			return map[string]any{}
+		}
+	}
 	current, ok := payload.(map[string]any)
 	if !ok {
 		return map[string]any{}

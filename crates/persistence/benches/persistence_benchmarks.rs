@@ -39,7 +39,7 @@
 //! ```
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use plexspaces_mailbox::Message;
+use plexspaces_mailbox::new_message;
 use plexspaces_persistence::{
     execution_context::{ExecutionContext, ExecutionMode},
     CompressionType, EncryptionType, Journal, MemoryJournal, PromiseMetadata, PromiseResult,
@@ -135,7 +135,7 @@ fn benchmark_journal_writes(c: &mut Criterion) {
             |b, &size| {
                 b.to_async(&rt).iter(|| async {
                     let journal = MemoryJournal::new();
-                    let message = Message::new(b"benchmark data".to_vec());
+                    let message = new_message(b"benchmark data".to_vec());
 
                     for _ in 0..size {
                         journal.record_message_received(&message).await.unwrap();
@@ -362,7 +362,7 @@ fn benchmark_truncation(c: &mut Criterion) {
         // Pre-create journal entries
         let journal = rt.block_on(async {
             let journal = MemoryJournal::new();
-            let message = Message::new(b"test".to_vec());
+            let message = new_message(b"test".to_vec());
             for _ in 0..entry_count {
                 journal.record_message_received(&message).await.unwrap();
             }

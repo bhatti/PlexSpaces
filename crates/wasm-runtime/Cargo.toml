@@ -89,6 +89,7 @@ prometheus = "0.13"
 
 # Benchmarking
 criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+prost-types = { workspace = true }
 
 [features]
 default = ["component-model"]

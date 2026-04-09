@@ -1,5 +1,5 @@
 /**
- * Base class for PlexSpaces actors (simple-actor WIT: init, handle, get-state, set-state).
+ * Base class for PlexSpaces actors (actor-world WIT: init, handle, get-state, set-state).
  *
  * Subclass and override:
  * - getDefaultState(): initial state
@@ -22,12 +22,15 @@ export declare abstract class PlexSpacesActor<TState extends object = Record<str
     abstract getDefaultState(): TState;
     /** Optional: called from init() with parsed config. Override to apply config to state. */
     protected onInit(_config: Record<string, unknown>): void;
-    /** WIT init(config-json) -> string. Empty string = success, "ERROR:..." = failure. */
-    init(configJson: string): string;
     /**
-     * WIT handle(from-actor, msg-type, payload-json) -> result<string, string>.
+     * WIT `init(config: payload) -> result<_, actor-error>`.
+     * Success: return (unit). Failure: throw (jco maps throws to `err` for function-return `result`).
+     */
+    init(configJson: string | Uint8Array | ArrayBuffer | ArrayBufferView): void;
+    /**
+     * WIT `handle(...) -> result<payload, actor-error>` (`payload` is `list<u8>` → `Uint8Array` in jco).
      * Dispatches by msgType for Workflow behavior (workflow_run, workflow_signal:name, workflow_query:name),
-     * then by payload.op (or payload) to on<Op>(payload). Returns JSON string.
+     * then by payload.op (or payload) to on<Op>(payload). Returns UTF-8 JSON bytes.
      * Uses iterative serializer to avoid WASM recursion.
      *
      * Workflow behavior (aligned with Rust Workflow trait and Python @workflow_actor):
@@ -35,11 +38,11 @@ export declare abstract class PlexSpacesActor<TState extends object = Record<str
      * - msgType "workflow_signal:name" -> signal(name, payload)
      * - msgType "workflow_query:name" -> query(name, payload)
      */
-    handle(_fromActor: string, msgType: string, payloadJson: string): string;
-    /** WIT get-state() -> string. Returns JSON-serialized state. */
-    getState(): string;
-    /** WIT set-state(state-json) -> string. Empty = success, "ERROR:..." = failure. */
-    setState(stateJson: string): string;
+    handle(_fromActor: string, msgType: string, payloadJson: string | Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Array;
+    /** WIT `get-state() -> result<payload, actor-error>`. Returns JSON state as UTF-8 bytes. */
+    getState(): Uint8Array;
+    /** WIT `set-state(state: payload) -> result<_, actor-error>`. */
+    setState(stateJson: string | Uint8Array | ArrayBuffer | ArrayBufferView): void;
     protected capitalize(s: string): string;
     protected resolveDecoratedHandler(op: string, definition?: import("./decorators.js").ActorDefinitionMetadata | undefined): string | null;
     /**

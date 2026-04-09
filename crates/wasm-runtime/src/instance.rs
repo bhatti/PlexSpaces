@@ -36,7 +36,7 @@ pub struct ComponentContext {
     pub process_groups_impl: crate::component_host::ProcessGroupsImpl,
     pub locks_impl: crate::component_host::LocksImpl,
     pub registry_impl: crate::component_host::RegistryImpl,
-    /// Simple actor host for Python-compatible components
+    /// Actor-world host for deployable polyglot components.
     pub simple_host_impl: crate::simple_component_host::SimpleHostImpl,
 }
 
@@ -56,7 +56,7 @@ impl wasmtime_wasi::WasiView for ComponentContext {
 pub enum ComponentBindings {
     /// Full PlexspacesActor bindings (for Rust components)
     PlexspacesActor(crate::component_host::PlexspacesActor),
-    /// SimpleActor bindings (for Python-compatible components)
+    /// Actor-world bindings for deployable polyglot components.
     SimpleActor(crate::simple_component_host::ActorWorld),
 }
 
@@ -99,13 +99,13 @@ pub struct WasmInstance {
     #[cfg(feature = "component-model")]
     component_state: Option<Arc<Mutex<ComponentState>>>,
 
-    /// Engine clone for re-instantiation (SimpleActor only). Wasmtime traps "cannot enter
-    /// component instance" on the second sequential call on the same store; we replace
-    /// component state with a fresh Store+instance after each handle() for SimpleActor.
+    /// Engine clone for component re-instantiation. Wasmtime traps "cannot enter component
+    /// instance" on the second sequential call on the same store, so actor-world components
+    /// are replaced with a fresh Store+instance after each handle().
     #[cfg(feature = "component-model")]
     reinstantiation_engine: Option<Engine>,
 
-    /// TupleSpace provider for re-instantiation (SimpleActor only).
+    /// TupleSpace provider used when actor-world components are re-instantiated.
     #[cfg(feature = "component-model")]
     tuplespace_provider: Option<Arc<dyn plexspaces_core::TupleSpaceProvider>>,
 
@@ -113,10 +113,10 @@ pub struct WasmInstance {
     #[cfg(feature = "component-model")]
     durability_enabled: bool,
 
-    /// Original init config (JSON string) used during initial construction.
-    /// Stored so we can replay it during re-instantiation to preserve state.
+    /// Original init config bytes used during initial construction.
+    /// Stored so they can be replayed during re-instantiation before restoring state.
     #[cfg(feature = "component-model")]
-    original_init_config: Option<String>,
+    original_init_config: Option<Vec<u8>>,
 
     /// Re-instantiation lock (semaphore with permit count 1) to serialize re-instantiations
     ///
@@ -450,65 +450,48 @@ impl WasmInstance {
                                 ))
                             })?;
 
-                        // Add simple-actor host function bindings (for Python-compatible components)
-                        crate::simple_component_host::plexspaces::simple_actor::host::add_to_linker(
+                        // Add actor-world host function bindings (for Python-compatible components)
+                        crate::simple_component_host::plexspaces::actor::host::add_to_linker(
                             &mut component_linker,
                             |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
                         )
                         .map_err(|e| WasmError::InstantiationError(format!(
-                            "Failed to add simple-actor host bindings: {}", e
+                            "Failed to add actor-world host bindings: {}", e
                         )))?;
 
-                        // Try SimpleActor first (Python/componentize-py components); fall back to PlexspacesActor.
-                        // Detection via is_simple_actor_component can fail if import name format differs,
-                        // so try instantiation and use the result that works.
                         let is_simple_actor =
                             crate::simple_component_host::is_simple_actor_component(c);
                         if tracing::enabled!(tracing::Level::TRACE) {
                             tracing::trace!(
                                 actor_id = %actor_id,
                                 is_simple_actor = is_simple_actor,
-                                "Attempting component instantiation with WASI bindings"
+                                "Selecting component instantiation path from declared imports"
                             );
                         }
 
-                        let component_bindings =
-                            match crate::simple_component_host::ActorWorld::instantiate_async(
-                                &mut component_store,
-                                c,
-                                &component_linker,
-                            )
-                            .await
-                            {
-                                Ok(simple_bindings) => {
-                                    ComponentBindings::SimpleActor(simple_bindings)
-                                }
-                                Err(e) => {
-                                    let err_str = e.to_string();
-                                    if err_str.contains("plexspaces:simple-actor")
-                                        && err_str.contains("matching implementation was not found")
-                                    {
-                                        let imports: Vec<String> = c
-                                            .component_type()
-                                            .imports(engine)
-                                            .map(|(k, _)| format!("{}", k))
-                                            .collect();
-                                        tracing::error!(
-                                            actor_id = %actor_id,
-                                            component_imports = ?imports,
-                                            "Simple-actor component: host not in linker (linker key may not match component import names)"
-                                        );
-                                        return Err(WasmError::InstantiationError(format!(
-                                        "Simple-actor component but host not in linker. Component imports: {:?}. Error: {}",
-                                        imports, err_str
-                                    )));
-                                    }
-                                    tracing::debug!(
-                                        actor_id = %actor_id,
-                                        error = %err_str,
-                                        "Simple-actor instantiation failed, trying PlexspacesActor"
-                                    );
-                                    let plexspaces_bindings = crate::component_host::PlexspacesActor::instantiate_async(
+                        let component_bindings = if is_simple_actor {
+                            let simple_bindings =
+                                crate::simple_component_host::ActorWorld::instantiate_async(
+                                    &mut component_store,
+                                    c,
+                                    &component_linker,
+                                )
+                                .await
+                                .map_err(|e| {
+                                    let imports: Vec<String> = c
+                                        .component_type()
+                                        .imports(engine)
+                                        .map(|(k, _)| format!("{}", k))
+                                        .collect();
+                                    WasmError::InstantiationError(format!(
+                                        "actor-world component instantiation failed. imports={:?}, error={}",
+                                        imports, e
+                                    ))
+                                })?;
+                            ComponentBindings::SimpleActor(simple_bindings)
+                        } else {
+                            let plexspaces_bindings =
+                                crate::component_host::PlexspacesActor::instantiate_async(
                                     &mut component_store,
                                     c,
                                     &component_linker,
@@ -516,19 +499,16 @@ impl WasmInstance {
                                 .await
                                 .map_err(|e| {
                                     let error_msg = e.to_string();
-                                    if error_msg.contains("plexspaces:actor/") && error_msg.contains("matching implementation was not found") {
+                                    if error_msg.contains("plexspaces:actor/")
+                                        && error_msg.contains("matching implementation was not found")
+                                    {
                                         WasmError::InstantiationError(format!(
-                                            "Component requires plexspaces host function bindings (e.g., plexspaces:actor/logging@0.1.0). \
-                                            Error details: {}",
+                                            "Component requires plexspaces host function bindings. Error details: {}",
                                             error_msg
                                         ))
-                                    } else if error_msg.contains("plexspaces:simple-actor") && error_msg.contains("matching implementation was not found") {
-                                        WasmError::InstantiationError(format!(
-                                            "Component requires plexspaces:simple-actor/host (Python component). \
-                                            Error details: {}",
-                                            error_msg
-                                        ))
-                                    } else if error_msg.contains("wasi:") && error_msg.contains("matching implementation was not found") {
+                                    } else if error_msg.contains("wasi:")
+                                        && error_msg.contains("matching implementation was not found")
+                                    {
                                         WasmError::InstantiationError(format!(
                                             "Component requires WASI interface bindings. Error details: {}",
                                             error_msg
@@ -540,9 +520,8 @@ impl WasmInstance {
                                         ))
                                     }
                                 })?;
-                                    ComponentBindings::PlexspacesActor(plexspaces_bindings)
-                                }
-                            };
+                            ComponentBindings::PlexspacesActor(plexspaces_bindings)
+                        };
 
                         // Call init() function with initial state if provided
                         // For components, we'll call init after storing the instance
@@ -640,56 +619,49 @@ impl WasmInstance {
                             let mut state = component_state_ref.lock().await;
                             let ComponentState { store, bindings } = &mut *state;
 
-                            // Convert initial_state to JSON string for SimpleActor
-                            let config_json = if initial_state.is_empty() {
-                                String::new()
-                            } else {
-                                String::from_utf8_lossy(initial_state).to_string()
-                            };
-
-                            // Store original config for re-instantiation
-                            let original_config = if config_json.is_empty() {
+                            let original_config = if initial_state.is_empty() {
                                 None
                             } else {
-                                Some(config_json.clone())
+                                Some(initial_state.to_vec())
                             };
 
                             match bindings {
                                 ComponentBindings::SimpleActor(simple_bindings) => {
+                                    let initial_state_vec = initial_state.to_vec();
                                     let result = simple_bindings
-                                        .plexspaces_simple_actor_actor()
-                                        .call_init(store, &config_json)
+                                        .plexspaces_actor_actor()
+                                        .call_init(store, &initial_state_vec)
                                         .await
                                         .map_err(|e| {
                                             tracing::error!(
                                                 actor_id = %actor_id,
                                                 error = %e,
-                                                "Simple-actor init() call failed"
+                                                "actor-world init() call failed"
                                             );
                                             WasmError::ActorFunctionError(format!(
-                                                "Simple-actor init() failed: {}",
+                                                "actor-world init() failed: {}",
                                                 e
                                             ))
                                         })?;
 
-                                    if !result.is_empty() {
+                                    if let Err(error_msg) = result {
                                         tracing::error!(
                                             actor_id = %actor_id,
-                                            error = %result,
-                                            "Simple-actor init() returned error"
+                                            error = %error_msg,
+                                            "actor-world init() returned error"
                                         );
                                         return Err(WasmError::ActorFunctionError(format!(
-                                            "Simple-actor init() error: {}",
-                                            result
+                                            "actor-world init() error: {}",
+                                            error_msg
                                         )));
                                     }
 
                                     instance.original_init_config = original_config.clone();
-                                    if tracing::enabled!(tracing::Level::DEBUG) {
-                                        tracing::debug!(
+                                    if tracing::enabled!(tracing::Level::TRACE) {
+                                        tracing::trace!(
                                             actor_id = %actor_id,
-                                            config_len = config_json.len(),
-                                            "Simple-actor component initialized for re-instantiation"
+                                            config_len = initial_state.len(),
+                                            "actor-world component initialized for re-instantiation"
                                         );
                                     }
                                 }
@@ -697,7 +669,7 @@ impl WasmInstance {
                                     if !initial_state.is_empty() {
                                         let initial_state_vec = initial_state.to_vec();
                                         let result = plexspaces_bindings
-                                            .plexspaces_actor_actor()
+                                            .plexspaces_actor_native_actor()
                                             .call_init(store, &initial_state_vec)
                                             .await
                                             .map_err(|e| {
@@ -724,10 +696,8 @@ impl WasmInstance {
                                             )));
                                         }
 
-                                        // Store original config for PlexspacesActor (as JSON string)
-                                        instance.original_init_config = Some(
-                                            String::from_utf8_lossy(initial_state).to_string(),
-                                        );
+                                        instance.original_init_config =
+                                            Some(initial_state.to_vec());
 
                                         tracing::info!(
                                             actor_id = %actor_id,
@@ -736,6 +706,42 @@ impl WasmInstance {
                                     }
                                 }
                             }
+                        }
+
+                        // CRITICAL: Re-instantiate immediately after init() to avoid
+                        // wasmtime#8943 "cannot enter component instance" trap.
+                        // init() consumed the first "entry" into the component on this store;
+                        // the next call (handle) would trap on the same store. Creating a fresh
+                        // store+instance here ensures the first handle() call works correctly.
+                        {
+                            let component_state_ref = instance
+                                .component_state
+                                .as_ref()
+                                .expect("component_state set after instantiation");
+                            let state = component_state_ref.lock().await;
+                            let instance_ctx = state.store.data().instance_ctx.clone();
+                            let is_simple_actor =
+                                matches!(&state.bindings, ComponentBindings::SimpleActor(_));
+                            drop(state);
+
+                            let new_state = if is_simple_actor {
+                                instance
+                                    .create_fresh_simple_actor_state(&instance_ctx)
+                                    .await?
+                            } else {
+                                instance
+                                    .create_fresh_plexspaces_actor_state(&instance_ctx)
+                                    .await?
+                            };
+
+                            let mut guard = component_state_ref.lock().await;
+                            *guard = new_state;
+
+                            tracing::debug!(
+                                actor_id = %actor_id,
+                                binding_type = if is_simple_actor { "SimpleActor" } else { "PlexspacesActor" },
+                                "Post-init re-instantiation completed (wasmtime#8943 workaround)"
+                            );
                         }
 
                         return Ok(instance);
@@ -955,7 +961,7 @@ impl WasmInstance {
                                                 &from_actor,
                                                 &to_actor,
                                                 &message_type,
-                                                &message,
+                                                message.as_bytes(),
                                             )
                                             .await
                                         {
@@ -1514,7 +1520,7 @@ impl WasmInstance {
                 // Full PlexspacesActor bindings - init takes Vec<u8>
                 let initial_state_vec = initial_state.to_vec();
                 let result = plexspaces_bindings
-                    .plexspaces_actor_actor()
+                    .plexspaces_actor_native_actor()
                     .call_init(store, &initial_state_vec)
                     .await
                     .map_err(|e| {
@@ -1552,45 +1558,39 @@ impl WasmInstance {
                 }
             }
             ComponentBindings::SimpleActor(simple_bindings) => {
-                // SimpleActor bindings - init takes JSON string
-                let config_json = if initial_state.is_empty() {
-                    String::new()
-                } else {
-                    String::from_utf8_lossy(initial_state).to_string()
-                };
-
+                let initial_state_vec = initial_state.to_vec();
                 let result = simple_bindings
-                    .plexspaces_simple_actor_actor()
-                    .call_init(store, &config_json)
+                    .plexspaces_actor_actor()
+                    .call_init(store, &initial_state_vec)
                     .await
                     .map_err(|e| {
                         tracing::error!(
                             actor_id = %self.actor_id,
                             error = %e,
-                            "Simple actor init() call failed"
+                            "actor-world init() call failed"
                         );
                         WasmError::ActorFunctionError(format!(
-                            "Simple actor init() call failed: {}",
+                            "actor-world init() call failed: {}",
                             e
                         ))
                     })?;
 
-                // Empty string = success, non-empty = error message
-                if result.is_empty() {
+                if result.is_ok() {
                     tracing::info!(
                         actor_id = %self.actor_id,
-                        "Simple actor init() succeeded"
+                        "actor-world init() succeeded"
                     );
                     Ok(())
                 } else {
+                    let error_msg = result.err().unwrap_or_default();
                     tracing::error!(
                         actor_id = %self.actor_id,
-                        error = %result,
-                        "Simple actor init() returned error"
+                        error = %error_msg,
+                        "actor-world init() returned error"
                     );
                     Err(WasmError::ActorFunctionError(format!(
-                        "Simple actor init() returned error: {}",
-                        result
+                        "actor-world init() returned error: {}",
+                        error_msg
                     )))
                 }
             }
@@ -1602,11 +1602,21 @@ impl WasmInstance {
     #[cfg(feature = "component-model")]
     fn try_msg_type_from_payload(payload: &[u8]) -> Option<String> {
         let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
-        let s = value.get("msg_type")?.as_str()?.trim();
-        if s.is_empty() || s.eq_ignore_ascii_case("call") || s.eq_ignore_ascii_case("cast") {
-            return None;
+        let take_str = |key: &str| -> Option<String> {
+            value
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+        };
+        for key in ["message_type", "op", "msg_type"] {
+            if let Some(s) = take_str(key) {
+                if !s.is_empty() && !s.eq_ignore_ascii_case("call") && !s.eq_ignore_ascii_case("cast")
+                {
+                    return Some(s);
+                }
+            }
         }
-        Some(s.to_string())
+        None
     }
 
     /// Creates a fresh ComponentState (new Store + SimpleActor instance) for the next handle() call.
@@ -1704,13 +1714,13 @@ impl WasmInstance {
                 ))
             },
         )?;
-        crate::simple_component_host::plexspaces::simple_actor::host::add_to_linker(
+        crate::simple_component_host::plexspaces::actor::host::add_to_linker(
             &mut component_linker,
             |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
         )
         .map_err(|e| {
             WasmError::InstantiationError(format!(
-                "Failed to add simple-actor host bindings: {}",
+                "Failed to add actor-world host bindings: {}",
                 e
             ))
         })?;
@@ -1723,30 +1733,33 @@ impl WasmInstance {
         .map_err(|e| {
             WasmError::InstantiationError(format!("Simple-actor re-instantiation failed: {}", e))
         })?;
-        // Use original init config if available, otherwise use empty string
-        let init_config = self.original_init_config.as_deref().unwrap_or("");
+        let empty_config = Vec::new();
+        let init_config = self
+            .original_init_config
+            .as_ref()
+            .unwrap_or(&empty_config);
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
                 actor_id = %self.actor_id,
                 config_len = init_config.len(),
                 has_original_config = self.original_init_config.is_some(),
-                "Re-instantiating SimpleActor with original init config"
+                "Re-instantiating actor-world component with original init config"
             );
         }
         let result = simple_bindings
-            .plexspaces_simple_actor_actor()
+            .plexspaces_actor_actor()
             .call_init(&mut component_store, init_config)
             .await
             .map_err(|e| {
                 WasmError::ActorFunctionError(format!(
-                    "Simple-actor init() on fresh state failed: {}",
+                    "actor-world init() on fresh state failed: {}",
                     e
                 ))
             })?;
-        if !result.is_empty() {
+        if let Err(error_msg) = result {
             return Err(WasmError::ActorFunctionError(format!(
-                "Simple-actor init() on fresh state returned error: {}",
-                result
+                "actor-world init() on fresh state returned error: {}",
+                error_msg
             )));
         }
         Ok(ComponentState {
@@ -1849,13 +1862,13 @@ impl WasmInstance {
                 ))
             },
         )?;
-        crate::simple_component_host::plexspaces::simple_actor::host::add_to_linker(
+        crate::simple_component_host::plexspaces::actor::host::add_to_linker(
             &mut component_linker,
             |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
         )
         .map_err(|e| {
             WasmError::InstantiationError(format!(
-                "Failed to add simple-actor host bindings: {}",
+                "Failed to add actor-world host bindings: {}",
                 e
             ))
         })?;
@@ -1922,7 +1935,7 @@ impl WasmInstance {
         // Call handle based on binding type
         match bindings {
             ComponentBindings::PlexspacesActor(plexspaces_bindings) => {
-                let actor = plexspaces_bindings.plexspaces_actor_actor();
+                let actor = plexspaces_bindings.plexspaces_actor_native_actor();
                 // GenEvent/EventHandler: for "cast" or "info" try handle_event first (event handler pattern)
                 let used_handle_event =
                     (message_type_string == "cast" || message_type_string == "info") && {
@@ -2020,10 +2033,33 @@ impl WasmInstance {
                     return Ok(vec![]);
                 }
                 // Full PlexspacesActor bindings - handle_message takes Vec<u8>
-                let result = actor
+                // Capture result without early-returning so re-instantiation always happens.
+                let processed_result = match actor
                     .call_handle_message(&mut *store, &from_string, &message_type_string, &payload)
                     .await
-                    .map_err(|e| {
+                {
+                    Ok(Ok(response_payload)) => {
+                        let duration = start_time.elapsed();
+                        metrics::histogram!("plexspaces_wasm_component_message_duration_seconds")
+                            .record(duration.as_secs_f64());
+                        metrics::counter!("plexspaces_wasm_component_message_success_total")
+                            .increment(1);
+                        Ok(response_payload)
+                    }
+                    Ok(Err(error_message)) => {
+                        metrics::counter!("plexspaces_wasm_component_message_errors_total")
+                            .increment(1);
+                        tracing::warn!(
+                            actor_id = %self.actor_id,
+                            error_message = %error_message,
+                            "Component handle-message() returned error"
+                        );
+                        Err(WasmError::ActorFunctionError(format!(
+                            "Actor error: {}",
+                            error_message
+                        )))
+                    }
+                    Err(e) => {
                         let error_msg = e.to_string();
                         tracing::error!(
                             actor_id = %self.actor_id,
@@ -2033,178 +2069,121 @@ impl WasmInstance {
                         );
                         metrics::counter!("plexspaces_wasm_component_message_errors_total")
                             .increment(1);
-                        WasmError::ActorFunctionError(format!(
+                        Err(WasmError::ActorFunctionError(format!(
                             "Component handle-message() call failed: {}",
                             error_msg
-                        ))
-                    })?;
-
-                let duration = start_time.elapsed();
-
-                match result {
-                    Ok(response_payload) => {
-                        metrics::histogram!("plexspaces_wasm_component_message_duration_seconds")
-                            .record(duration.as_secs_f64());
-                        metrics::counter!("plexspaces_wasm_component_message_success_total")
-                            .increment(1);
-                        let instance_ctx = store.data().instance_ctx.clone();
-                        drop(state);
-
-                        // Acquire re-instantiation lock to serialize re-instantiations per actor
-                        let reinstantiation_lock =
-                            self.reinstantiation_lock.as_ref().ok_or_else(|| {
-                                WasmError::ActorFunctionError(
-                                    "Re-instantiation lock not available".to_string(),
-                                )
-                            })?;
-                        let _permit = reinstantiation_lock.acquire().await.map_err(|_e| {
-                            tracing::error!(
-                                actor_id = %self.actor_id,
-                                message_id = %message_id,
-                                "Failed to acquire re-instantiation lock (semaphore closed)"
-                            );
-                            WasmError::ActorFunctionError(
-                                "Failed to acquire re-instantiation lock: semaphore closed"
-                                    .to_string(),
-                            )
-                        })?;
-                        let reinstantiation_start = std::time::Instant::now();
-                        metrics::counter!("plexspaces_wasm_reinstantiation_total",
-                            "actor_id" => self.actor_id.clone()
-                        )
-                        .increment(1);
-
-                        // Acquire global reinstantiation cap (if set) so we stay under Wasmtime's memory-stripe limit.
-                        let component_state =
-                            self.component_state.as_ref().expect("component_state set");
-                        let new_state = {
-                            let _global_permit =
-                                if let Some(ref g) = self.global_reinstantiation_semaphore {
-                                    Some(g.acquire().await.map_err(|_| {
-                                        WasmError::ActorFunctionError(
-                                            "Global reinstantiation semaphore closed".to_string(),
-                                        )
-                                    })?)
-                                } else {
-                                    None
-                                };
-                            Self::create_fresh_plexspaces_actor_state(self, &instance_ctx).await
-                        }
-                        .map_err(|e| {
-                            let error_msg = e.to_string();
-                            metrics::counter!("plexspaces_wasm_reinstantiation_errors_total",
-                                "actor_id" => self.actor_id.clone(),
-                                "error_type" => "instantiation_failed"
-                            )
-                            .increment(1);
-                            tracing::error!(
-                                actor_id = %self.actor_id,
-                                message_id = %message_id,
-                                error = %error_msg,
-                                "PlexspacesActor re-instantiation after handle_message failed"
-                            );
-                            WasmError::ActorFunctionError(format!(
-                                "Failed to re-instantiate WASM actor after handle_message(): {}",
-                                error_msg
-                            ))
-                        })?;
-                        let mut guard = component_state.lock().await;
-                        *guard = new_state;
-
-                        let reinstantiation_duration = reinstantiation_start.elapsed();
-                        metrics::histogram!("plexspaces_wasm_reinstantiation_duration_seconds",
-                            "actor_id" => self.actor_id.clone()
-                        )
-                        .record(reinstantiation_duration.as_secs_f64());
-                        if tracing::enabled!(tracing::Level::TRACE) {
-                            tracing::trace!(
-                                actor_id = %self.actor_id,
-                                message_id = %message_id,
-                                duration_ms = reinstantiation_duration.as_millis(),
-                                "handle_message_component END PlexspacesActor Ok"
-                            );
-                        }
-                        Ok(response_payload)
-                    }
-                    Err(error_message) => {
-                        metrics::counter!("plexspaces_wasm_component_message_errors_total")
-                            .increment(1);
-                        tracing::warn!(
-                            actor_id = %self.actor_id,
-                            error_message = %error_message,
-                            "Component handle-message() returned error"
-                        );
-                        if tracing::enabled!(tracing::Level::TRACE) {
-                            tracing::trace!(
-                                actor_id = %self.actor_id,
-                                message_id = %message_id,
-                                "handle_message_component END PlexspacesActor Err"
-                            );
-                        }
-                        Err(WasmError::ActorFunctionError(format!(
-                            "Actor error: {}",
-                            error_message
                         )))
                     }
+                };
+
+                // CRITICAL: Always re-instantiate after call_handle_message, regardless
+                // of success or failure. Skipping re-instantiation on error leaves the
+                // store tainted and all subsequent calls will trap (wasmtime#8943).
+                let instance_ctx = store.data().instance_ctx.clone();
+                drop(state);
+
+                // Acquire re-instantiation lock to serialize re-instantiations per actor
+                let reinstantiation_lock =
+                    self.reinstantiation_lock.as_ref().ok_or_else(|| {
+                        WasmError::ActorFunctionError(
+                            "Re-instantiation lock not available".to_string(),
+                        )
+                    })?;
+                let _permit = reinstantiation_lock.acquire().await.map_err(|_e| {
+                    tracing::error!(
+                        actor_id = %self.actor_id,
+                        message_id = %message_id,
+                        "Failed to acquire re-instantiation lock (semaphore closed)"
+                    );
+                    WasmError::ActorFunctionError(
+                        "Failed to acquire re-instantiation lock: semaphore closed"
+                            .to_string(),
+                    )
+                })?;
+                let reinstantiation_start = std::time::Instant::now();
+                metrics::counter!("plexspaces_wasm_reinstantiation_total",
+                    "actor_id" => self.actor_id.clone()
+                )
+                .increment(1);
+
+                // Acquire global reinstantiation cap (if set) so we stay under Wasmtime's memory-stripe limit.
+                let component_state =
+                    self.component_state.as_ref().expect("component_state set");
+                let new_state = {
+                    let _global_permit =
+                        if let Some(ref g) = self.global_reinstantiation_semaphore {
+                            Some(g.acquire().await.map_err(|_| {
+                                WasmError::ActorFunctionError(
+                                    "Global reinstantiation semaphore closed".to_string(),
+                                )
+                            })?)
+                        } else {
+                            None
+                        };
+                    Self::create_fresh_plexspaces_actor_state(self, &instance_ctx).await
                 }
+                .map_err(|e| {
+                    let error_msg = e.to_string();
+                    metrics::counter!("plexspaces_wasm_reinstantiation_errors_total",
+                        "actor_id" => self.actor_id.clone(),
+                        "error_type" => "instantiation_failed"
+                    )
+                    .increment(1);
+                    tracing::error!(
+                        actor_id = %self.actor_id,
+                        message_id = %message_id,
+                        error = %error_msg,
+                        "PlexspacesActor re-instantiation after handle_message failed"
+                    );
+                    WasmError::ActorFunctionError(format!(
+                        "Failed to re-instantiate WASM actor after handle_message(): {}",
+                        error_msg
+                    ))
+                })?;
+                let mut guard = component_state.lock().await;
+                *guard = new_state;
+
+                let reinstantiation_duration = reinstantiation_start.elapsed();
+                metrics::histogram!("plexspaces_wasm_reinstantiation_duration_seconds",
+                    "actor_id" => self.actor_id.clone()
+                )
+                .record(reinstantiation_duration.as_secs_f64());
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
+                        actor_id = %self.actor_id,
+                        message_id = %message_id,
+                        duration_ms = reinstantiation_duration.as_millis(),
+                        "handle_message_component END PlexspacesActor"
+                    );
+                }
+                processed_result
             }
             ComponentBindings::SimpleActor(simple_bindings) => {
-                // SimpleActor bindings - handle takes JSON strings
-                // Convert payload to JSON string (it should already be JSON)
-                let payload_json = String::from_utf8_lossy(&payload).to_string();
-
                 tracing::debug!(
                     actor_id = %self.actor_id,
                     message_id = %message_id,
                     from_actor = %from_string,
                     msg_type = %message_type_string,
-                    payload_json = %payload_json,
                     payload_len = payload.len(),
                     payload_hex = %hex::encode(&payload[..payload.len().min(200)]),
-                    "SimpleActor handle() call - payload JSON"
+                    "actor-world handle() call"
                 );
 
-                // Validate JSON before calling WASM handler
-                if let Err(e) = serde_json::from_str::<serde_json::Value>(&payload_json) {
-                    tracing::error!(
-                        actor_id = %self.actor_id,
-                        message_id = %message_id,
-                        from_actor = %from_string,
-                        msg_type = %message_type_string,
-                        payload_json = %payload_json,
-                        payload_len = payload.len(),
-                        payload_hex = %hex::encode(&payload[..payload.len().min(200)]),
-                        error = %e,
-                        "Invalid JSON payload before calling WASM handle()"
-                    );
-                    return Err(WasmError::ActorFunctionError(format!(
-                        "Invalid JSON payload: {}",
-                        e
-                    )));
-                }
                 let result = simple_bindings
-                    .plexspaces_simple_actor_actor()
+                    .plexspaces_actor_actor()
                     .call_handle(
                         &mut *store,
                         &from_string,
                         &message_type_string,
-                        &payload_json,
+                        &payload,
                     )
                     .await;
-                // Process the result first (before re-instantiation)
-                // handle() returns a plain string (JSON-serialized result)
-                // Errors are encoded in the JSON payload (e.g., {"error": "message"})
-                // or prefixed with "ERROR:" for framework-level errors
-                let processed_result: Result<String, WasmError> = match result {
-                    Ok(json_string) => {
-                        // Actor returned JSON string directly (serialized by iterative serializer)
-                        // Check if it's a framework-level error (starts with "ERROR:")
-                        if json_string.starts_with("ERROR:") {
-                            Err(WasmError::ActorFunctionError(json_string))
-                        } else {
-                            Ok(json_string)
-                        }
-                    }
+                let processed_result: Result<Vec<u8>, WasmError> = match result {
+                    Ok(Ok(response_bytes)) => Ok(response_bytes),
+                    Ok(Err(error_msg)) => Err(WasmError::ActorFunctionError(format!(
+                        "Actor error: {}",
+                        error_msg
+                    ))),
                     Err(e) => {
                         let error_msg = e.to_string();
                         let message_pattern = if message_type_string.eq_ignore_ascii_case("call") {
@@ -2220,9 +2199,8 @@ impl WasmInstance {
                             msg_type = %message_type_string,
                             pattern = %message_pattern,
                             error_first_line = %error_first_line,
-                            payload_json = %payload_json,
                             payload_len = payload.len(),
-                            "Simple actor handle() call failed"
+                            "actor-world handle() call failed"
                         );
                         if tracing::enabled!(tracing::Level::TRACE) {
                             tracing::trace!(
@@ -2242,46 +2220,44 @@ impl WasmInstance {
                     }
                 };
 
-                // Check if we have an error before proceeding to re-instantiation
-                // If error, convert String error to Vec<u8> error response and return early
-                if let Err(ref e) = processed_result {
-                    tracing::error!(
-                        actor_id = %self.actor_id,
-                        message_id = %message_id,
-                        error = %e,
-                        "❌ SimpleActor handle() failed - NOT proceeding to re-instantiation"
-                    );
-                    // Convert error to JSON error response format
-                    let error_json = serde_json::json!({
-                        "status": "error",
-                        "error": e.to_string()
-                    });
-                    return Ok(serde_json::to_string(&error_json)
-                        .unwrap_or_else(|_| format!(r#"{{"status":"error","error":"{}"}}"#, e))
-                        .into_bytes());
-                }
-
                 // CRITICAL: Capture instance_ctx and saved_state (get_state) WHILE we hold the lock,
                 // then drop the lock BEFORE acquiring reinstantiation_lock. This avoids deadlock:
                 // we never re-acquire component_state lock in this path until after create_fresh.
+                //
+                // Re-instantiation MUST happen regardless of whether handle() succeeded or failed.
+                // If we skip re-instantiation on error, the store is tainted and ALL subsequent
+                // handle() calls will trap with "cannot enter component instance" (wasmtime#8943).
                 let instance_ctx = store.data().instance_ctx.clone();
-                let saved_state = {
+                let saved_state = if processed_result.is_ok() {
+                    // Only try to capture state if handle() succeeded - the store may be
+                    // in an inconsistent state after a trap/error.
                     if let ComponentBindings::SimpleActor(ref old_simple) = bindings {
                         match old_simple
-                            .plexspaces_simple_actor_actor()
+                            .plexspaces_actor_actor()
                             .call_get_state(&mut *store)
                             .await
                         {
-                            Ok(state_json) => {
+                            Ok(Ok(state_bytes)) => {
                                 if tracing::enabled!(tracing::Level::TRACE) {
                                     tracing::trace!(
                                         actor_id = %self.actor_id,
                                         message_id = %message_id,
-                                        state_len = state_json.len(),
+                                        state_len = state_bytes.len(),
                                         "Captured actor state before re-instantiation (while holding lock)"
                                     );
                                 }
-                                Some(state_json)
+                                Some(state_bytes)
+                            }
+                            Ok(Err(error_msg)) => {
+                                tracing::error!(
+                                    actor_id = %self.actor_id,
+                                    message_id = %message_id,
+                                    from_actor = %from_string,
+                                    msg_type = %message_type_string,
+                                    error = %error_msg,
+                                    "Actor get_state() returned error before re-instantiation; state will be lost"
+                                );
+                                None
                             }
                             Err(e) => {
                                 tracing::error!(
@@ -2298,6 +2274,15 @@ impl WasmInstance {
                     } else {
                         None
                     }
+                } else {
+                    // handle() failed - state capture is unreliable, skip it.
+                    // Re-instantiation will still proceed to create a fresh store.
+                    tracing::warn!(
+                        actor_id = %self.actor_id,
+                        message_id = %message_id,
+                        "actor-world handle() failed; re-instantiating to recover store (state will reset)"
+                    );
+                    None
                 };
                 drop(state);
                 // Re-instantiate after handle() to avoid re-entrancy trap (wasmtime component model).
@@ -2378,18 +2363,18 @@ impl WasmInstance {
                 let component_state = self.component_state.as_ref().expect("component_state set");
                 let mut guard = component_state.lock().await;
                 *guard = new_state;
-                if let Some(ref state_json) = saved_state {
+                if let Some(ref state_bytes) = saved_state {
                     let ComponentState {
                         store: new_store,
                         bindings: new_bindings,
                     } = &mut *guard;
                     if let ComponentBindings::SimpleActor(ref new_simple) = new_bindings {
                         match new_simple
-                            .plexspaces_simple_actor_actor()
-                            .call_set_state(new_store, state_json)
+                            .plexspaces_actor_actor()
+                            .call_set_state(new_store, state_bytes)
                             .await
                         {
-                            Ok(result) if result.is_empty() => {
+                            Ok(Ok(())) => {
                                 if tracing::enabled!(tracing::Level::TRACE) {
                                     tracing::trace!(
                                         actor_id = %self.actor_id,
@@ -2398,11 +2383,11 @@ impl WasmInstance {
                                     );
                                 }
                             }
-                            Ok(result) => {
+                            Ok(Err(error_msg)) => {
                                 tracing::warn!(
                                     actor_id = %self.actor_id,
                                     message_id = %message_id,
-                                    error = %result,
+                                    error = %error_msg,
                                     "set_state() returned error on new instance"
                                 );
                             }
@@ -2424,60 +2409,29 @@ impl WasmInstance {
                     "actor_id" => self.actor_id.clone()
                 )
                 .record(reinstantiation_duration.as_secs_f64());
-                // Result is already serialized JSON string from structured types
                 let final_result = processed_result?;
 
                 let duration = start_time.elapsed();
 
-                // Result is a JSON string - check if it's an error response
-                // Error responses have {"status":"error",...} format
-                if final_result.starts_with("ERROR:") {
-                    let error_message =
-                        final_result.strip_prefix("ERROR:").unwrap_or(&final_result);
-                    metrics::counter!("plexspaces_wasm_component_message_errors_total")
-                        .increment(1);
-                    tracing::warn!(
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!(
                         actor_id = %self.actor_id,
-                        error_message = %error_message,
-                        "Simple actor handle() returned error"
+                        message_id = %message_id,
+                        saved_state_len = saved_state.as_ref().map(|s| s.len()).unwrap_or(0),
+                        "actor-world handle() succeeded after re-instantiation"
                     );
-                    if tracing::enabled!(tracing::Level::TRACE) {
-                        tracing::trace!(
-                            actor_id = %self.actor_id,
-                            message_id = %message_id,
-                            "handle_message_component END SimpleActor returned ERROR"
-                        );
-                    }
-                    Err(WasmError::ActorFunctionError(format!(
-                        "Actor error: {}",
-                        error_message
-                    )))
-                } else {
-                    // Re-instantiation already happened above (before processing result).
-                    // We use original_init_config to ensure proper initialization, but state changes
-                    // from handle() are lost. For proper state preservation, we need fix #2 (return
-                    // state from handle) or fix #3 (host function persistence).
-                    if tracing::enabled!(tracing::Level::DEBUG) {
-                        tracing::debug!(
-                            actor_id = %self.actor_id,
-                            message_id = %message_id,
-                            saved_state_len = saved_state.as_ref().map(|s| s.len()).unwrap_or(0),
-                            "SimpleActor handle() succeeded after re-instantiation"
-                        );
-                    }
-                    metrics::histogram!("plexspaces_wasm_component_message_duration_seconds")
-                        .record(duration.as_secs_f64());
-                    metrics::counter!("plexspaces_wasm_component_message_success_total")
-                        .increment(1);
-                    if tracing::enabled!(tracing::Level::TRACE) {
-                        tracing::trace!(
-                            actor_id = %self.actor_id,
-                            message_id = %message_id,
-                            "handle_message_component END SimpleActor Ok"
-                        );
-                    }
-                    Ok(final_result.into_bytes())
                 }
+                metrics::histogram!("plexspaces_wasm_component_message_duration_seconds")
+                    .record(duration.as_secs_f64());
+                metrics::counter!("plexspaces_wasm_component_message_success_total").increment(1);
+                if tracing::enabled!(tracing::Level::TRACE) {
+                    tracing::trace!(
+                        actor_id = %self.actor_id,
+                        message_id = %message_id,
+                        "handle_message_component END actor-world Ok"
+                    );
+                }
+                Ok(final_result)
             }
         }
     }
@@ -2488,7 +2442,7 @@ impl WasmInstance {
     /// This is the recommended pattern for WASM actor durability.
     ///
     /// ## Returns
-    /// State as JSON string bytes, or empty if no state
+    /// State as component-defined bytes, or empty if no state.
     ///
     /// ## Errors
     /// Returns error if get_state call fails
@@ -2522,22 +2476,32 @@ impl WasmInstance {
         let ComponentState { store, bindings } = &mut *state;
 
         let result = match bindings {
-            ComponentBindings::SimpleActor(simple_bindings) => simple_bindings
-                .plexspaces_simple_actor_actor()
-                .call_get_state(store)
-                .await
-                .map(|s| s.into_bytes())
-                .map_err(|e| {
-                    WasmError::ActorFunctionError(format!("get-state() call failed: {}", e))
-                }),
-            ComponentBindings::PlexspacesActor(plexspaces_bindings) => plexspaces_bindings
+            ComponentBindings::SimpleActor(simple_bindings) => match simple_bindings
                 .plexspaces_actor_actor()
                 .call_get_state(store)
                 .await
-                .map(|s| s.into_bytes())
-                .map_err(|e| {
-                    WasmError::ActorFunctionError(format!("get-state() call failed: {}", e))
-                }),
+            {
+                Ok(Ok(state_bytes)) => Ok(state_bytes),
+                Ok(Err(error_msg)) => Err(WasmError::ActorFunctionError(format!(
+                    "get-state() returned error: {}",
+                    error_msg
+                ))),
+                Err(e) => Err(WasmError::ActorFunctionError(format!(
+                    "get-state() call failed: {}",
+                    e
+                ))),
+            },
+            ComponentBindings::PlexspacesActor(plexspaces_bindings) => match plexspaces_bindings
+                .plexspaces_actor_native_actor()
+                .call_get_state(store)
+                .await
+            {
+                Ok(state_string) => Ok(state_string.into_bytes()),
+                Err(e) => Err(WasmError::ActorFunctionError(format!(
+                    "get-state() call failed: {}",
+                    e
+                ))),
+            },
         };
 
         let duration = start_time.elapsed();
@@ -2583,7 +2547,7 @@ impl WasmInstance {
     /// This is called after restart to restore state from persistence.
     ///
     /// ## Arguments
-    /// * `state_json` - State as JSON string
+    /// * `state_bytes` - State bytes returned by `get-state()`
     ///
     /// ## Returns
     /// Empty string on success, error message on failure
@@ -2597,7 +2561,7 @@ impl WasmInstance {
     /// - `plexspaces_wasm_set_state_errors_total`: Failed set-state calls
     /// - `plexspaces_wasm_set_state_duration_seconds`: Duration of set-state calls
     #[cfg(feature = "component-model")]
-    pub async fn set_state_component(&self, state_json: &str) -> WasmResult<()> {
+    pub async fn set_state_component(&self, state_bytes: &[u8]) -> WasmResult<()> {
         metrics::counter!("plexspaces_wasm_set_state_total",
             "actor_id" => self.actor_id.clone()
         )
@@ -2619,21 +2583,27 @@ impl WasmInstance {
         let ComponentState { store, bindings } = &mut *state;
 
         let result = match bindings {
-            ComponentBindings::SimpleActor(simple_bindings) => simple_bindings
-                .plexspaces_simple_actor_actor()
-                .call_set_state(store, state_json)
+            ComponentBindings::SimpleActor(simple_bindings) => match simple_bindings
+                .plexspaces_actor_actor()
+                .call_set_state(store, &state_bytes.to_vec())
                 .await
-                .map_err(|e| {
-                    WasmError::ActorFunctionError(format!("set-state() call failed: {}", e))
-                }),
-            ComponentBindings::PlexspacesActor(_plexspaces_bindings) => {
-                // Full PlexspacesActor doesn't have set_state in the same interface
-                // It uses a different state management pattern
-                Err(WasmError::ActorFunctionError(
-                    "set-state() not available for full PlexspacesActor (use checkpoint pattern)"
+            {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(error_msg)) => Err(WasmError::ActorFunctionError(format!(
+                    "set-state() returned error: {}",
+                    error_msg
+                ))),
+                Err(e) => Err(WasmError::ActorFunctionError(format!(
+                    "set-state() call failed: {}",
+                    e
+                ))),
+            },
+            ComponentBindings::PlexspacesActor(_plexspaces_bindings) => Err(
+                WasmError::ActorFunctionError(
+                    "set-state() not available for plexspaces-actor native components"
                         .to_string(),
-                ))
-            }
+                ),
+            ),
         };
 
         let duration = start_time.elapsed();
@@ -2642,35 +2612,20 @@ impl WasmInstance {
         )
         .record(duration.as_secs_f64());
 
-        // Handle result and record metrics
         match result {
-            Ok(result_str) => {
-                // Empty string means success, non-empty is error
-                if result_str.is_empty() {
-                    metrics::counter!("plexspaces_wasm_set_state_success_total",
-                        "actor_id" => self.actor_id.clone()
-                    )
-                    .increment(1);
+            Ok(()) => {
+                metrics::counter!("plexspaces_wasm_set_state_success_total",
+                    "actor_id" => self.actor_id.clone()
+                )
+                .increment(1);
 
-                    tracing::info!(
-                        actor_id = %self.actor_id,
-                        state_len = state_json.len(),
-                        duration_ms = duration.as_millis(),
-                        "✅ WASM actor state restored via set-state()"
-                    );
-                    Ok(())
-                } else {
-                    metrics::counter!("plexspaces_wasm_set_state_errors_total",
-                        "actor_id" => self.actor_id.clone(),
-                        "error" => "actor_error"
-                    )
-                    .increment(1);
-
-                    Err(WasmError::ActorFunctionError(format!(
-                        "set-state() returned error: {}",
-                        result_str
-                    )))
-                }
+                tracing::info!(
+                    actor_id = %self.actor_id,
+                    state_len = state_bytes.len(),
+                    duration_ms = duration.as_millis(),
+                    "WASM actor state restored via set-state()"
+                );
+                Ok(())
             }
             Err(e) => {
                 metrics::counter!("plexspaces_wasm_set_state_errors_total",
@@ -2926,13 +2881,7 @@ impl WasmInstance {
             return Ok(0);
         }
 
-        // Convert bytes to JSON string for set-state
-        let state_json = String::from_utf8(state_bytes.clone()).map_err(|e| {
-            WasmError::ActorFunctionError(format!("Invalid UTF-8 in checkpoint: {}", e))
-        })?;
-
-        // Restore state to actor
-        self.set_state_component(&state_json).await?;
+        self.set_state_component(&state_bytes).await?;
 
         let duration = start_time.elapsed();
         metrics::histogram!("plexspaces_wasm_checkpoint_load_duration_seconds",
@@ -2956,7 +2905,7 @@ mod tests {
     use crate::WasmError;
 
     /// Ensures the canonical error message "Simple actor handle() call failed" is used when
-    /// a simple-actor handle() fails. Logging uses this message (with error_first_line only;
+    /// a actor-world handle() fails. Logging uses this message (with error_first_line only;
     /// full backtrace only at DEBUG). Instance cleanup (Drop) still runs after this error.
     #[test]
     fn test_simple_actor_handle_failed_error_message() {

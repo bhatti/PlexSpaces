@@ -8,8 +8,8 @@ pub(super) struct LeaderActor;
 #[plexspaces_handlers(wasm)]
 impl LeaderActor {
     #[handler("run")]
-    fn run(&mut self, _from_actor: &str, payload_json: &str) -> Result<String, String> {
-        Ok(handle_leader_run(payload_json))
+    fn run(&mut self, _from_actor: &str, payload: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(handle_leader_run(payload))
     }
 }
 
@@ -21,30 +21,26 @@ fn ensure_worker_initialization(
         let next_actor_id = shard_actor_ids[(shard_id + 1) % shard_actor_ids.len()].clone();
         let previous_actor_id =
             shard_actor_ids[(shard_id + shard_actor_ids.len() - 1) % shard_actor_ids.len()].clone();
-        let response = host::ask(
-            shard_actor_id,
-            "init",
-            &serde_json::json!({
-                "op": "init",
-                "shard_id": shard_id,
-                "worker_count": request.worker_count,
-                "rounds": request.rounds,
-                "vector_size": request.vector_size,
-                "values_per_shard": request.values_per_shard,
-                "next_actor_id": next_actor_id,
-                "previous_actor_id": previous_actor_id,
-            })
-            .to_string(),
-            10_000,
-        );
-        if response.starts_with("ERROR:") {
-            return Err(format!(
+        let request_bytes = serde_json::json!({
+            "op": "init",
+            "shard_id": shard_id,
+            "worker_count": request.worker_count,
+            "rounds": request.rounds,
+            "vector_size": request.vector_size,
+            "values_per_shard": request.values_per_shard,
+            "next_actor_id": next_actor_id,
+            "previous_actor_id": previous_actor_id,
+        })
+        .to_string()
+        .into_bytes();
+        let response = host::ask(shard_actor_id, "init", &request_bytes, 10_000).map_err(|err| {
+            format!(
                 "worker init failed for shard {} ({}): {}",
-                shard_id, shard_actor_id, response
-            ));
-        }
+                shard_id, shard_actor_id, err
+            )
+        })?;
 
-        let payload: serde_json::Value = serde_json::from_str(&response).map_err(|err| {
+        let payload: serde_json::Value = serde_json::from_slice(&response).map_err(|err| {
             format!(
                 "invalid worker init response for shard {} ({}): {}",
                 shard_id, shard_actor_id, err
@@ -67,49 +63,32 @@ fn ensure_worker_initialization(
     Ok(())
 }
 
-pub(super) fn handle_leader_run(payload_json: &str) -> String {
-    let request: RunRequest = match serde_json::from_str(payload_json) {
+pub(super) fn handle_leader_run(payload: &[u8]) -> Vec<u8> {
+    let request: RunRequest = match serde_json::from_slice(payload) {
         Ok(request) => request,
         Err(err) => {
-            return serde_json::json!({ "error": format!("invalid run payload: {}", err) })
-                .to_string()
+            return super::json_bytes(
+                serde_json::json!({ "error": format!("invalid run payload: {}", err) }),
+            )
         }
     };
     if request.worker_count == 0 || request.rounds == 0 {
-        return serde_json::json!({ "error": "worker_count and rounds must be greater than zero" })
-            .to_string();
+        return super::json_bytes(
+            serde_json::json!({ "error": "worker_count and rounds must be greater than zero" }),
+        );
     }
 
     let group_id = format!("ring-allreduce-{}", host::now_ms());
-    let create_request = serde_json::json!({
-        "group_id": group_id,
-        "actor_type": "worker",
-        "shard_count": request.worker_count,
-        "partition_strategy": "hash",
-        "rebalance_policy": "manual",
-        "placement": {
-            "strategy": "from_registry"
-        },
-        "initial_state": {},
-    });
-    let create_response = host::create_shard_group(&create_request.to_string());
-    if create_response.starts_with("ERROR:") {
-        return serde_json::json!({ "error": create_response }).to_string();
-    }
-    let create_payload: serde_json::Value = match serde_json::from_str(&create_response) {
-        Ok(value) => value,
-        Err(err) => {
-            return serde_json::json!({ "error": format!("invalid create_shard_group response: {}", err) })
-                .to_string()
-        }
+    let create_request_bytes =
+        shard_group_create_request_bytes(&group_id, "worker", request.worker_count);
+    let create_response = match host::create_shard_group(&create_request_bytes) {
+        Ok(response) => response,
+        Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
     };
-    let shard_actor_ids: Vec<String> = create_payload
-        .get("shard_actor_ids")
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_str().map(str::to_string))
-        .collect();
+    let shard_actor_ids = match decode_shard_group_create_response(&create_response) {
+        Ok(actor_ids) => actor_ids,
+        Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
+    };
 
     let leader_node_id = actor_node_id(&host::self_id());
     let mut per_node_metrics: HashMap<String, NodeMetrics> = HashMap::new();
@@ -121,7 +100,7 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
 
     let init_start = host::now_ms();
     if let Err(err) = ensure_worker_initialization(&shard_actor_ids, &request) {
-        return serde_json::json!({ "error": err }).to_string();
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
     leader_coordination_ms += host::now_ms().saturating_sub(init_start);
     leader_message_count += shard_actor_ids.len() as u64;
@@ -141,10 +120,9 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
                 start_statuses.insert(node_id.clone(), status);
             }
             Err(err) => {
-                return serde_json::json!({
+                return super::json_bytes(serde_json::json!({
                     "error": format!("failed to capture application status for {}: {}", node_id, err),
-                })
-                .to_string();
+                }));
             }
         }
     }
@@ -170,34 +148,27 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
         for phase in 0..ring_steps_per_round {
             leader_message_count += 1;
             let scatter_request = serde_json::json!({
-                "group_id": group_id,
-                "query": {
-                    "op": "ring_step",
-                    "round": round,
-                    "phase": phase,
-                },
-                "aggregation": "concat",
-                "min_responses": request.worker_count,
-                "timeout_ms": 30000,
+                "op": "ring_step",
+                "round": round,
+                "phase": phase,
             });
             let scatter_start = host::now_ms();
-            let response = host::scatter_gather(&scatter_request.to_string());
-            leader_coordination_ms += host::now_ms().saturating_sub(scatter_start);
-            if response.starts_with("ERROR:") {
-                return serde_json::json!({ "error": response }).to_string();
-            }
-            let parsed: serde_json::Value = match serde_json::from_str(&response) {
-                Ok(value) => value,
-                Err(err) => {
-                    return serde_json::json!({ "error": format!("invalid scatter_gather response: {}", err) })
-                        .to_string()
-                }
+            let scatter_request_bytes = scatter_gather_request_bytes(
+                &group_id,
+                plexspaces_proto::actor::v1::ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
+                scatter_request,
+                request.worker_count,
+                30_000,
+            );
+            let response = match host::scatter_gather(&scatter_request_bytes) {
+                Ok(response) => response,
+                Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
             };
-            let shard_responses = parsed
-                .get("shard_responses")
-                .and_then(|value| value.as_array())
-                .cloned()
-                .unwrap_or_default();
+            leader_coordination_ms += host::now_ms().saturating_sub(scatter_start);
+            let shard_responses = match decode_scatter_gather_response(&response) {
+                Ok(shard_responses) => shard_responses,
+                Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
+            };
             let phase_compute_start = host::now_ms();
 
             for shard in shard_responses {
@@ -275,33 +246,26 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
 
         leader_message_count += 1;
         let finalize_request = serde_json::json!({
-            "group_id": group_id,
-            "query": {
-                "op": "finalize_round",
-                "round": round,
-            },
-            "aggregation": "concat",
-            "min_responses": request.worker_count,
-            "timeout_ms": 30000,
+            "op": "finalize_round",
+            "round": round,
         });
         let finalize_start = host::now_ms();
-        let finalize_response = host::scatter_gather(&finalize_request.to_string());
-        leader_coordination_ms += host::now_ms().saturating_sub(finalize_start);
-        if finalize_response.starts_with("ERROR:") {
-            return serde_json::json!({ "error": finalize_response }).to_string();
-        }
-        let finalize_payload: serde_json::Value = match serde_json::from_str(&finalize_response) {
-            Ok(value) => value,
-            Err(err) => {
-                return serde_json::json!({ "error": format!("invalid finalize response: {}", err) })
-                    .to_string()
-            }
+        let finalize_request_bytes = scatter_gather_request_bytes(
+            &group_id,
+            plexspaces_proto::actor::v1::ShardGroupAggregationStrategy::ShardGroupAggregationConcat,
+            finalize_request,
+            request.worker_count,
+            30_000,
+        );
+        let finalize_response = match host::scatter_gather(&finalize_request_bytes) {
+            Ok(response) => response,
+            Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
         };
-        let finalize_responses = finalize_payload
-            .get("shard_responses")
-            .and_then(|value| value.as_array())
-            .cloned()
-            .unwrap_or_default();
+        leader_coordination_ms += host::now_ms().saturating_sub(finalize_start);
+        let finalize_responses = match decode_scatter_gather_response(&finalize_response) {
+            Ok(shard_responses) => shard_responses,
+            Err(err) => return super::json_bytes(serde_json::json!({ "error": err })),
+        };
         let finalize_compute_start = host::now_ms();
         for shard in finalize_responses {
             let raw_payload = shard
@@ -369,7 +333,7 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
         }),
         "leader metrics update",
     ) {
-        return serde_json::json!({ "error": err }).to_string();
+        return super::json_bytes(serde_json::json!({ "error": err }));
     }
 
     let mut node_addresses = serde_json::Map::new();
@@ -388,10 +352,9 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
                 end_statuses.insert(node_id.clone(), status);
             }
             Err(err) => {
-                return serde_json::json!({
+                return super::json_bytes(serde_json::json!({
                     "error": format!("failed to collect final application status for {}: {}", node_id, err),
-                })
-                .to_string();
+                }));
             }
         }
     }
@@ -528,5 +491,5 @@ pub(super) fn handle_leader_run(payload_json: &str) -> String {
     with_state(|state| {
         state.last_result = Some(result.clone());
     });
-    result.to_string()
+    super::json_bytes(result)
 }

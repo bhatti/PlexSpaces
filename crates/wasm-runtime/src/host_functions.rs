@@ -22,6 +22,7 @@ use plexspaces_proto::actor::v1::{
 };
 use plexspaces_proto::application::v1::{ApplicationInfo, ApplicationMetrics};
 use plexspaces_proto::common::v1::Message;
+use plexspaces_proto::wasm::v1::HttpFetchRequest;
 use std::sync::Arc;
 
 use plexspaces_blob::BlobService;
@@ -44,7 +45,7 @@ pub trait MessageSender: Send + Sync {
     /// * `from` - Sender actor ID
     /// * `to` - Recipient actor ID (can be "actor@node" format for remote)
     /// * `message_type` - Message type (handler name, e.g. "ping", "cleanup_expired")
-    /// * `message` - Message payload (JSON string)
+    /// * `message` - Message payload bytes
     ///
     /// ## Returns
     /// Success or error
@@ -53,7 +54,7 @@ pub trait MessageSender: Send + Sync {
         from: &str,
         to: &str,
         message_type: &str,
-        message: &str,
+        message: &[u8],
     ) -> Result<(), String>;
 
     /// Send a message and wait for reply (request-reply pattern)
@@ -452,80 +453,31 @@ impl HostFunctions {
         self.outbound_http_client.as_ref()
     }
 
-    /// Execute an outbound HTTP request via a named service link.
-    ///
-    /// Returns JSON string: `{"status":200,"headers":{...},"body":"base64..."}` on success,
-    /// or `"ERROR:message"` on failure (unknown link, circuit open, network error, etc.).
+    /// Execute an outbound HTTP request via a named service link and return the core response.
     pub async fn http_fetch(
         &self,
         link_name: &str,
         method: &str,
         path_and_query: &str,
-        headers_json: &str,
-        body_b64: &str,
-    ) -> String {
-        use base64::Engine as _;
-        use plexspaces_core::{OutboundHttpRequest, OutboundHttpResponse};
-
+        request: HttpFetchRequest,
+    ) -> Result<plexspaces_core::OutboundHttpResponse, String> {
+        use plexspaces_core::OutboundHttpRequest;
         let client = match &self.outbound_http_client {
-            Some(c) => c,
-            None => {
-                return format!("ERROR:outbound HTTP client not configured (no service links in RuntimeConfig)");
-            }
+            Some(client) => client,
+            None => return Err("outbound HTTP client not configured".to_string()),
         };
 
-        // Parse extra headers from JSON object (or empty)
-        let extra_headers: Vec<(String, String)> = if headers_json.is_empty() {
-            vec![]
-        } else {
-            match serde_json::from_str::<serde_json::Value>(headers_json) {
-                Ok(serde_json::Value::Object(map)) => map
-                    .into_iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
-                    .collect(),
-                _ => vec![],
-            }
-        };
-
-        // Decode base64 body
-        let body: Vec<u8> = if body_b64.is_empty() {
-            vec![]
-        } else {
-            match base64::engine::general_purpose::STANDARD.decode(body_b64) {
-                Ok(b) => b,
-                Err(e) => {
-                    return format!("ERROR:invalid base64 body: {}", e);
-                }
-            }
-        };
-
-        let req = OutboundHttpRequest {
+        let outbound_request = OutboundHttpRequest {
             method: method.to_string(),
             path_and_query: path_and_query.to_string(),
-            headers: extra_headers,
-            body,
+            headers: request.headers.into_iter().collect(),
+            body: request.body,
         };
 
-        match client.execute(link_name, req).await {
-            Ok(OutboundHttpResponse {
-                status,
-                headers,
-                body: resp_body,
-            }) => {
-                let body_b64 = base64::engine::general_purpose::STANDARD.encode(&resp_body);
-                let headers_map: serde_json::Map<String, serde_json::Value> = headers
-                    .into_iter()
-                    .map(|(k, v)| (k, serde_json::Value::String(v)))
-                    .collect();
-                serde_json::json!({
-                    "status": status,
-                    "headers": headers_map,
-                    "body": body_b64,
-                })
-                .to_string()
-            }
-            Err(e) => format!("ERROR:{}", e),
-        }
+        client
+            .execute(link_name, outbound_request)
+            .await
+            .map_err(|err| err.to_string())
     }
 
     /// Send message via message sender if available
@@ -534,7 +486,7 @@ impl HostFunctions {
         from: &str,
         to: &str,
         message_type: &str,
-        message: &str,
+        message: &[u8],
     ) -> Result<(), String> {
         if let Some(sender) = &self.message_sender {
             sender.send_message(from, to, message_type, message).await
@@ -544,7 +496,7 @@ impl HostFunctions {
                 from = from,
                 to = to,
                 message_type = message_type,
-                message = message,
+                message_len = message.len(),
                 "Message sender not configured, message not delivered"
             );
             Ok(())
@@ -553,8 +505,8 @@ impl HostFunctions {
 
     /// Get key-value store operation helper
     ///
-    /// WIT compatibility: simple-actor uses `host.kv-get(key) -> string`; full plexspaces-actor
-    /// uses `keyvalue.get(ctx, key) -> result<option<payload>, actor-error>`. Both end up here.
+    /// actor-world and native `plexspaces-actor` both resolve through this helper with
+    /// request-scoped key-value semantics from the core store implementation.
     pub async fn get_keyvalue(
         &self,
         ctx: &RequestContext,

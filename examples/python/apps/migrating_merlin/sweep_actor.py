@@ -8,6 +8,11 @@
 #   If pool is not configured, falls back to process group broadcast.
 # - Workers (work_available): take tasks from tuple space, run simulation, write results.
 # Convention: sweep:coord-1 = coordinator; sweep:worker-0, worker-1, ... = pool workers.
+#
+# TupleSpace writes use the WASM WriteRequest proto (TupleField: int/double/string/bool/bytes).
+# Structured payloads must be JSON strings, not dicts — see sdks/python/plexspaces/proto_wire.py.
+
+import json
 
 from plexspaces import workflow_actor, state, handler, host
 
@@ -68,8 +73,9 @@ class SweepActor:
         # Tuple space: scatter parameter-sweep tasks (list-in/list-out)
         for i in range(num_params):
             param_val = payload.get("param_base", 0) + i
+            task_body = json.dumps({"param": param_val})
             out = host.ts.write(
-                [TUPLE_PREFIX, self.sweep_id, "task", f"p{i}", {"param": param_val}]
+                [TUPLE_PREFIX, self.sweep_id, "task", f"p{i}", task_body]
             )
             if out and out.startswith("ERROR"):
                 host.log("warn", f"ts write failed: {out}")
@@ -204,13 +210,14 @@ class SweepActor:
                 break
             param_id = taken[3] if len(taken) > 3 else ""
             compute_ms += SIMULATION_MS
+            result_body = json.dumps({"ok": True, "ms": SIMULATION_MS})
             host.ts.write(
                 [
                     TUPLE_PREFIX,
                     sweep_id,
                     "result",
                     param_id,
-                    {"ok": True, "ms": SIMULATION_MS},
+                    result_body,
                 ]
             )
             processed += 1

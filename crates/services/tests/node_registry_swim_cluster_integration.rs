@@ -132,13 +132,7 @@ async fn swim_reconcile_stamps_local_cluster_when_peer_ping_omits_cluster_name(
     )
     .await?;
 
-    let observer = spawn_gossip_node(
-        "node-a",
-        "127.0.0.1:0",
-        "heat",
-        Some("heat"),
-    )
-    .await?;
+    let observer = spawn_gossip_node("node-a", "127.0.0.1:0", "heat", Some("heat")).await?;
 
     let endpoint = format!("http://127.0.0.1:{}", observer.grpc_addr.port());
     let mut client = NodeServiceClient::connect(endpoint).await?;

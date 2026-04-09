@@ -21,7 +21,9 @@
 // ```
 
 #[cfg(feature = "native")]
-use plexspaces_core::{OutboundHttpClient, OutboundHttpRequest, OutboundHttpResponse, ServiceLocator};
+use plexspaces_core::{
+    OutboundHttpClient, OutboundHttpRequest, OutboundHttpResponse, ServiceLocator,
+};
 #[cfg(feature = "native")]
 use serde::{de::DeserializeOwned, Serialize};
 #[cfg(feature = "native")]
@@ -140,7 +142,11 @@ impl ServiceHttpClient {
     /// - `SerializationError` if `body` cannot be serialized.
     /// - `HttpError` if status is not 2xx.
     /// - `DeserializationError` if the response body is not valid JSON of type `T`.
-    pub async fn post_json<B, T>(&self, path_and_query: &str, body: &B) -> Result<T, ServiceHttpClientError>
+    pub async fn post_json<B, T>(
+        &self,
+        path_and_query: &str,
+        body: &B,
+    ) -> Result<T, ServiceHttpClientError>
     where
         B: Serialize,
         T: DeserializeOwned,
@@ -162,7 +168,11 @@ impl ServiceHttpClient {
     /// PUT JSON to the service link.
     ///
     /// Serializes `body` as JSON, sends a PUT request, deserializes the response body as JSON.
-    pub async fn put_json<B, T>(&self, path_and_query: &str, body: &B) -> Result<T, ServiceHttpClientError>
+    pub async fn put_json<B, T>(
+        &self,
+        path_and_query: &str,
+        body: &B,
+    ) -> Result<T, ServiceHttpClientError>
     where
         B: Serialize,
         T: DeserializeOwned,
@@ -230,9 +240,11 @@ impl ServiceHttpClient {
         &self,
         resp: OutboundHttpResponse,
     ) -> Result<T, ServiceHttpClientError> {
-        serde_json::from_slice(&resp.body).map_err(|e| ServiceHttpClientError::DeserializationError {
-            link: self.link_name.clone(),
-            source: e,
+        serde_json::from_slice(&resp.body).map_err(|e| {
+            ServiceHttpClientError::DeserializationError {
+                link: self.link_name.clone(),
+                source: e,
+            }
         })
     }
 }
@@ -322,6 +334,8 @@ mod tests {
     async fn test_client_not_available_error() {
         // Test that ClientNotAvailable is properly formatted
         let err = ServiceHttpClientError::ClientNotAvailable;
-        assert!(err.to_string().contains("outbound HTTP client not available"));
+        assert!(err
+            .to_string()
+            .contains("outbound HTTP client not available"));
     }
 }

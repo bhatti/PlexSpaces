@@ -447,9 +447,7 @@ impl HostFunctions {
     }
 
     /// Get outbound HTTP client if available
-    pub fn outbound_http_client(
-        &self,
-    ) -> Option<&Arc<dyn plexspaces_core::OutboundHttpClient>> {
+    pub fn outbound_http_client(&self) -> Option<&Arc<dyn plexspaces_core::OutboundHttpClient>> {
         self.outbound_http_client.as_ref()
     }
 

@@ -2495,7 +2495,8 @@ mod tests {
             Some(&"heat".to_string())
         );
 
-        let heat_ctx = RequestContext::new_without_auth(String::new(), "heat".to_string()).with_admin(true);
+        let heat_ctx =
+            RequestContext::new_without_auth(String::new(), "heat".to_string()).with_admin(true);
         let (listed, _) = registry
             .list_nodes(&heat_ctx, Some("heat"), 100, "")
             .await

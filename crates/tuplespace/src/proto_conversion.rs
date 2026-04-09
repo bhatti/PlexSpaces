@@ -103,18 +103,14 @@ pub fn proto_template_to_pattern(
     for proto_field in &proto_tuple.fields {
         let field = match &proto_field.value {
             Some(ProtoValue::Wildcard(_)) => PatternField::Wildcard,
-            Some(ProtoValue::Integer(value)) => {
-                PatternField::Exact(TupleField::Integer(*value))
-            }
+            Some(ProtoValue::Integer(value)) => PatternField::Exact(TupleField::Integer(*value)),
             Some(ProtoValue::Float(value)) => {
                 PatternField::Exact(TupleField::Float(OrderedFloat::new(*value)))
             }
             Some(ProtoValue::String(value)) => {
                 PatternField::Exact(TupleField::String(value.clone()))
             }
-            Some(ProtoValue::Boolean(value)) => {
-                PatternField::Exact(TupleField::Boolean(*value))
-            }
+            Some(ProtoValue::Boolean(value)) => PatternField::Exact(TupleField::Boolean(*value)),
             Some(ProtoValue::Binary(value)) => {
                 PatternField::Exact(TupleField::Binary(value.clone()))
             }
@@ -173,7 +169,11 @@ pub fn tuple_to_proto_tuple(tuple: &Tuple) -> ProtoTuple {
 
     ProtoTuple {
         id: ulid::Ulid::new().to_string(),
-        fields: tuple.fields().iter().map(tuple_field_to_proto_field).collect(),
+        fields: tuple
+            .fields()
+            .iter()
+            .map(tuple_field_to_proto_field)
+            .collect(),
         timestamp,
         lease,
         metadata: Default::default(),

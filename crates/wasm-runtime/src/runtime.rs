@@ -829,7 +829,7 @@ impl plexspaces_core::WasmRuntimeTrait for WasmRuntime {
             object_registry,
             journal_storage,
             concrete_blob_service,
-            None,  // elastic_pool_service - caller can add via create_instance when using pool
+            None, // elastic_pool_service - caller can add via create_instance when using pool
             outbound_http_client,
             false, // durability_enabled - caller controls via config when using instantiate()
             #[cfg(feature = "component-model")]

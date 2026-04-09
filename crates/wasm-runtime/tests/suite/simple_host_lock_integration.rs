@@ -8,13 +8,13 @@
 
 #[cfg(feature = "component-model")]
 mod tests {
-    use prost::Message as _;
     use plexspaces_core::ActorId;
     use plexspaces_locks::sql::SqliteLockManager;
     use plexspaces_proto::locks::prv::Lock as ProtoLock;
     use plexspaces_wasm_runtime::simple_component_host::plexspaces::actor::host::Host;
     use plexspaces_wasm_runtime::simple_component_host::SimpleHostImpl;
     use plexspaces_wasm_runtime::HostFunctions;
+    use prost::Message as _;
     use std::sync::Arc;
 
     async fn create_simple_host_with_lock_manager() -> SimpleHostImpl {
@@ -74,7 +74,10 @@ mod tests {
                 version,
             )
             .await;
-        assert!(release_out.is_ok(), "lock_release should succeed: {release_out:?}");
+        assert!(
+            release_out.is_ok(),
+            "lock_release should succeed: {release_out:?}"
+        );
     }
 
     #[tokio::test]
@@ -106,9 +109,16 @@ mod tests {
             )
             .await
             .expect("lock_renew should succeed");
-        let renewed = ProtoLock::decode(renew_out.as_slice()).expect("valid protobuf lock expected");
-        assert_ne!(renewed.version, version, "renew should return a new version");
-        assert!(!renewed.version.is_empty(), "renew should return non-empty version");
+        let renewed =
+            ProtoLock::decode(renew_out.as_slice()).expect("valid protobuf lock expected");
+        assert_ne!(
+            renewed.version, version,
+            "renew should return a new version"
+        );
+        assert!(
+            !renewed.version.is_empty(),
+            "renew should return non-empty version"
+        );
 
         // Release with the new version
         let release_out = host
@@ -120,7 +130,10 @@ mod tests {
                 renewed.version,
             )
             .await;
-        assert!(release_out.is_ok(), "release after renew should succeed: {release_out:?}");
+        assert!(
+            release_out.is_ok(),
+            "release after renew should succeed: {release_out:?}"
+        );
     }
 
     #[tokio::test]
@@ -150,7 +163,10 @@ mod tests {
                 version,
             )
             .await;
-        assert!(release_out.is_err(), "release with wrong holder should fail");
+        assert!(
+            release_out.is_err(),
+            "release with wrong holder should fail"
+        );
     }
 
     #[tokio::test]

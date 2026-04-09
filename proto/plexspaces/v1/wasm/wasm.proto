@@ -96,25 +96,24 @@ message HttpFetchRequest {
     json_schema: {
       title: "HttpFetchRequest"
       description: "Actor-world outbound HTTP request metadata/body exchanged as protobuf bytes."
-      required: ["headers", "body"]
+      required: [
+        "headers",
+        "body"
+      ]
     }
   };
 
   // Request headers to merge with service-link defaults and auth headers.
   map<string, string> headers = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Additional request headers merged with the configured service link."
-    }
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Additional request headers merged with the configured service link."}
   ];
 
   // Raw request body bytes.
   bytes body = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).bytes = {max_len: 10485760},
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Raw request body bytes encoded at the actor-world boundary."
-    }
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Raw request body bytes encoded at the actor-world boundary."}
   ];
 }
 
@@ -124,34 +123,35 @@ message HttpFetchResponse {
     json_schema: {
       title: "HttpFetchResponse"
       description: "Actor-world outbound HTTP response exchanged as protobuf bytes."
-      required: ["status", "headers", "body"]
+      required: [
+        "status",
+        "headers",
+        "body"
+      ]
     }
   };
 
   // HTTP status code.
   uint32 status = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).uint32 = {gte: 100, lte: 599},
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "HTTP status code returned by the named service link."
-    }
+    (buf.validate.field).uint32 = {
+      gte: 100
+      lte: 599
+    },
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "HTTP status code returned by the named service link."}
   ];
 
   // Response headers.
   map<string, string> headers = 2 [
     (google.api.field_behavior) = REQUIRED,
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Response headers returned by the named service link."
-    }
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Response headers returned by the named service link."}
   ];
 
   // Raw response body bytes.
   bytes body = 3 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).bytes = {max_len: 10485760},
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Raw response body bytes returned by the named service link."
-    }
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Raw response body bytes returned by the named service link."}
   ];
 }
 

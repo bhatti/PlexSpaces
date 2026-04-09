@@ -45,8 +45,7 @@ use plexspaces_proto::{
 };
 use plexspaces_tuplespace::{
     proto_field_to_tuple_field, proto_template_to_pattern, proto_tuple_to_tuple,
-    tuple_field_to_proto_field, tuple_to_proto_tuple, Pattern, Tuple, TupleField,
-    TupleSpaceError,
+    tuple_field_to_proto_field, tuple_to_proto_tuple, Pattern, Tuple, TupleField, TupleSpaceError,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -95,8 +94,7 @@ impl TupleSpaceServiceImpl {
 
     /// Convert proto Tuple to internal Tuple
     fn convert_proto_tuple_to_internal(proto_tuple: &ProtoTuple) -> Result<Tuple, Status> {
-        proto_tuple_to_tuple(proto_tuple)
-            .map_err(|err| Status::invalid_argument(err.to_string()))
+        proto_tuple_to_tuple(proto_tuple).map_err(|err| Status::invalid_argument(err.to_string()))
     }
 
     /// Convert proto template (used in read/take) to internal Pattern

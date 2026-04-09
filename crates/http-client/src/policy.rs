@@ -51,7 +51,10 @@ fn merge_layer(dst: &mut ClientTransportPolicy, src: &ClientTransportPolicy) {
 }
 
 /// Build circuit breaker config for a link, using policy or production-safe defaults.
-pub fn circuit_breaker_for_link(link_name: &str, policy: &ClientTransportPolicy) -> CircuitBreakerConfig {
+pub fn circuit_breaker_for_link(
+    link_name: &str,
+    policy: &ClientTransportPolicy,
+) -> CircuitBreakerConfig {
     if let Some(cb) = policy.circuit_breaker.clone() {
         let mut c = cb;
         if c.name.is_empty() {
@@ -157,16 +160,20 @@ mod tests {
             name: "api".to_string(),
             ..Default::default()
         });
-        let ok = [plexspaces_proto::application::v1::ApplicationServiceLinkRequirement {
-            link_name: "api".to_string(),
-            policy_template: None,
-        }];
+        let ok = [
+            plexspaces_proto::application::v1::ApplicationServiceLinkRequirement {
+                link_name: "api".to_string(),
+                policy_template: None,
+            },
+        ];
         assert!(validate_application_service_links(&rt, &ok).is_ok());
 
-        let bad = [plexspaces_proto::application::v1::ApplicationServiceLinkRequirement {
-            link_name: "missing".to_string(),
-            policy_template: None,
-        }];
+        let bad = [
+            plexspaces_proto::application::v1::ApplicationServiceLinkRequirement {
+                link_name: "missing".to_string(),
+                policy_template: None,
+            },
+        ];
         assert!(validate_application_service_links(&rt, &bad).is_err());
     }
 
@@ -179,16 +186,20 @@ mod tests {
         });
         rt.outbound_policy_templates
             .insert("fast".to_string(), empty_transport_policy());
-        let ok = [plexspaces_proto::application::v1::ApplicationServiceLinkRequirement {
-            link_name: "api".to_string(),
-            policy_template: Some("fast".to_string()),
-        }];
+        let ok = [
+            plexspaces_proto::application::v1::ApplicationServiceLinkRequirement {
+                link_name: "api".to_string(),
+                policy_template: Some("fast".to_string()),
+            },
+        ];
         assert!(validate_application_service_links(&rt, &ok).is_ok());
 
-        let bad = [plexspaces_proto::application::v1::ApplicationServiceLinkRequirement {
-            link_name: "api".to_string(),
-            policy_template: Some("nope".to_string()),
-        }];
+        let bad = [
+            plexspaces_proto::application::v1::ApplicationServiceLinkRequirement {
+                link_name: "api".to_string(),
+                policy_template: Some("nope".to_string()),
+            },
+        ];
         assert!(validate_application_service_links(&rt, &bad).is_err());
     }
 }

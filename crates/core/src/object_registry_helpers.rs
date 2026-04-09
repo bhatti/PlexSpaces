@@ -258,9 +258,8 @@ pub async fn register_outbound_service_link<T: ObjectRegistryTrait + ?Sized>(
     let cap = match transport {
         OutboundTransport::OutboundTransportGrpc => "grpc",
         OutboundTransport::OutboundTransportChannel => "channel",
-        OutboundTransport::OutboundTransportHttp | OutboundTransport::OutboundTransportUnspecified => {
-            "http"
-        }
+        OutboundTransport::OutboundTransportHttp
+        | OutboundTransport::OutboundTransportUnspecified => "http",
     };
     let mut labels = HashMap::new();
     labels.insert("plexspaces.link_name".to_string(), link.name.clone());
@@ -289,9 +288,7 @@ pub async fn register_outbound_service_link<T: ObjectRegistryTrait + ?Sized>(
 
     let tenant_ns = format!("{}:{}", ctx.tenant_id(), ctx.namespace());
     let mut cache = DISCOVERY_CACHE.write().await;
-    cache.remove_matching(|key| {
-        key.starts_with("service_link:") && key.contains(&tenant_ns)
-    });
+    cache.remove_matching(|key| key.starts_with("service_link:") && key.contains(&tenant_ns));
 
     object_registry.register(ctx, registration).await
 }

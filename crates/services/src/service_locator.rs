@@ -2330,16 +2330,16 @@ async fn initialize_services_impl(
     // P3: optional ObjectRegistry rows for links with publish_to_registry (discovery by link name).
     {
         use plexspaces_core::RequestContext;
-        let link_pub_ctx = RequestContext::new_without_auth(
-            "plexspaces".to_string(),
-            "runtime".to_string(),
-        );
+        let link_pub_ctx =
+            RequestContext::new_without_auth("plexspaces".to_string(), "runtime".to_string());
         for link in &final_runtime_config.service_links {
             if !link.publish_to_registry {
                 continue;
             }
             if link.name.is_empty() || link.base_url.is_empty() {
-                tracing::warn!("service_links: skip object-registry publish (empty name or base_url)");
+                tracing::warn!(
+                    "service_links: skip object-registry publish (empty name or base_url)"
+                );
                 continue;
             }
             match plexspaces_core::object_registry_helpers::register_outbound_service_link(

@@ -49,8 +49,8 @@ import "google/api/field_behavior.proto";
 import "google/protobuf/duration.proto";
 import "plexspaces/v1/application/application.proto";
 import "plexspaces/v1/channel/channel.proto";
-import "plexspaces/v1/node/outbound.proto";
 import "plexspaces/v1/common.proto";
+import "plexspaces/v1/node/outbound.proto";
 import "plexspaces/v1/security/security.proto";
 import "plexspaces/v1/storage/blob.proto";
 import "plexspaces/v1/storage/storage_config.proto";
@@ -581,17 +581,13 @@ message RuntimeConfig {
   repeated ServiceLinkConfig service_links = 14 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).repeated = {max_items: 256},
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Catalog of named outbound dependencies (HTTP first); merged with app requirements at deploy."
-    }
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Catalog of named outbound dependencies (HTTP first); merged with app requirements at deploy."}
   ];
 
   // Default policy merged into every outbound HTTP call unless overridden by templates or links.
   ClientTransportPolicy default_outbound_client_policy = 15 [
     (google.api.field_behavior) = OPTIONAL,
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Node-wide defaults for connect/request timeouts, retry, and circuit breaker."
-    }
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Node-wide defaults for connect/request timeouts, retry, and circuit breaker."}
   ];
 
   // Named policy templates referenced by ServiceLinkConfig.policy_template or application requirements.
@@ -599,11 +595,15 @@ message RuntimeConfig {
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).map = {
       max_pairs: 64
-      keys: {string: {min_len: 1, max_len: 128, pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"}}
+      keys: {
+        string: {
+          min_len: 1
+          max_len: 128
+          pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+        }
+      }
     },
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Reusable ClientTransportPolicy fragments merged by template name."
-    }
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Reusable ClientTransportPolicy fragments merged by template name."}
   ];
 }
 

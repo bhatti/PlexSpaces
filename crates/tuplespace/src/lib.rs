@@ -32,8 +32,8 @@ pub mod storage;
 pub mod config;
 
 // Provider abstraction and capability system
-pub mod provider;
 pub mod proto_conversion;
+pub mod provider;
 
 // Redis backend (optional)
 #[cfg(feature = "redis-backend")]

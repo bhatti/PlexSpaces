@@ -56,13 +56,15 @@ impl ResilientOutboundHttpClient {
                 .unwrap_or(OutboundTransport::OutboundTransportUnspecified);
             if matches!(
                 transport,
-                OutboundTransport::OutboundTransportHttp | OutboundTransport::OutboundTransportUnspecified
+                OutboundTransport::OutboundTransportHttp
+                    | OutboundTransport::OutboundTransportUnspecified
             ) {
                 any_http_declared = true;
             }
             if !matches!(
                 transport,
-                OutboundTransport::OutboundTransportHttp | OutboundTransport::OutboundTransportUnspecified
+                OutboundTransport::OutboundTransportHttp
+                    | OutboundTransport::OutboundTransportUnspecified
             ) {
                 tracing::debug!(
                     link = %link.name,
@@ -352,9 +354,7 @@ impl OutboundHttpClient for ResilientOutboundHttpClient {
                             "kind" => "request"
                         )
                         .increment(1);
-                        return Err(CoreOutboundError::RequestFailed(
-                            last_err.unwrap_or(msg),
-                        ));
+                        return Err(CoreOutboundError::RequestFailed(last_err.unwrap_or(msg)));
                     }
                 }
             }
@@ -409,13 +409,7 @@ mod tests {
 
     #[test]
     fn join_url_paths() {
-        assert_eq!(
-            join_url("https://a.com", "/x").unwrap(),
-            "https://a.com/x"
-        );
-        assert_eq!(
-            join_url("https://a.com/", "y").unwrap(),
-            "https://a.com/y"
-        );
+        assert_eq!(join_url("https://a.com", "/x").unwrap(), "https://a.com/x");
+        assert_eq!(join_url("https://a.com/", "y").unwrap(), "https://a.com/y");
     }
 }

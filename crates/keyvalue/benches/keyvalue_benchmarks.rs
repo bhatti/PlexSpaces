@@ -457,32 +457,36 @@ fn bench_prefix_scan(c: &mut Criterion) {
     for &count in &[10, 100, 1000] {
         group.throughput(Throughput::Elements(count as u64));
 
-        group.bench_with_input(BenchmarkId::new("sqlite_mem", count), &count, |b, &count| {
-            let store = new_sqlite_memory(&rt);
-            let value = test_value(config.small_value_size);
+        group.bench_with_input(
+            BenchmarkId::new("sqlite_mem", count),
+            &count,
+            |b, &count| {
+                let store = new_sqlite_memory(&rt);
+                let value = test_value(config.small_value_size);
 
-            // Pre-populate with multiple prefixes
-            let ctx = test_ctx();
-            rt.block_on(async {
-                for i in 0..count {
-                    let key = format!("prefix-a:{:08}", i);
-                    store.put(&ctx, &key, value.clone()).await.unwrap();
-
-                    let key = format!("prefix-b:{:08}", i);
-                    store.put(&ctx, &key, value.clone()).await.unwrap();
-                }
-            });
-
-            b.to_async(&rt).iter(|| {
-                let store = store.clone();
+                // Pre-populate with multiple prefixes
                 let ctx = test_ctx();
+                rt.block_on(async {
+                    for i in 0..count {
+                        let key = format!("prefix-a:{:08}", i);
+                        store.put(&ctx, &key, value.clone()).await.unwrap();
 
-                async move {
-                    let keys = store.list(&ctx, "prefix-a:").await.unwrap();
-                    black_box(keys);
-                }
-            });
-        });
+                        let key = format!("prefix-b:{:08}", i);
+                        store.put(&ctx, &key, value.clone()).await.unwrap();
+                    }
+                });
+
+                b.to_async(&rt).iter(|| {
+                    let store = store.clone();
+                    let ctx = test_ctx();
+
+                    async move {
+                        let keys = store.list(&ctx, "prefix-a:").await.unwrap();
+                        black_box(keys);
+                    }
+                });
+            },
+        );
     }
 
     group.finish();

@@ -106,8 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Create a minimal ActorContext for sending messages
     // In a real actor, you would get this from handle_message() parameter
     use plexspaces_node::create_default_service_locator;
-    let service_locator =
-        create_default_service_locator(Some("node1".to_string()), None).await;
+    let service_locator = create_default_service_locator(Some("node1".to_string()), None).await;
     let ctx = ActorContext::new(
         "node1".to_string(),
         "default".to_string(),

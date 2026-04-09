@@ -166,8 +166,8 @@ mod tests {
             .pool_checkout("p1".to_string(), 2000)
             .await
             .expect("pool_checkout should succeed");
-        let parsed = ActorHandle::decode(out.as_slice())
-            .expect("pool_checkout must return valid protobuf");
+        let parsed =
+            ActorHandle::decode(out.as_slice()).expect("pool_checkout must return valid protobuf");
         assert_eq!(parsed.pool_name, "p1");
         assert_eq!(parsed.actor_id, "mock-actor-1");
         assert_eq!(parsed.checkout_id, "mock-checkout-id");
@@ -186,7 +186,10 @@ mod tests {
                 true,
             )
             .await;
-        assert!(checkin_out.is_ok(), "pool_checkin should succeed: {checkin_out:?}");
+        assert!(
+            checkin_out.is_ok(),
+            "pool_checkin should succeed: {checkin_out:?}"
+        );
     }
 
     #[tokio::test]

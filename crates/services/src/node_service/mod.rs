@@ -63,7 +63,9 @@ use plexspaces_proto::node::v1::{
     UnregisterNodeResponse,
 };
 
-use crate::node_address::{canonical_node_address_key, dialable_node_address, node_addresses_equivalent};
+use crate::node_address::{
+    canonical_node_address_key, dialable_node_address, node_addresses_equivalent,
+};
 use crate::request_context_from_grpc_request;
 
 /// Metrics tracking for NodeService
@@ -1285,7 +1287,10 @@ impl NodeServiceImpl {
                     );
                     if reg.node_id.starts_with(Self::UNKNOWN_NODE_ID_PREFIX) {
                         let _ = node_registry
-                            .kickoff_seed_reconcile_ping(reg.node_id.clone(), reg.node_address.clone())
+                            .kickoff_seed_reconcile_ping(
+                                reg.node_id.clone(),
+                                reg.node_address.clone(),
+                            )
                             .await;
                     }
                     connected.insert(reg.node_id, reg.node_address);
@@ -1306,7 +1311,10 @@ impl NodeServiceImpl {
                                     "Registered seed node for background probe"
                                 );
                                 let _ = node_registry
-                                    .kickoff_seed_reconcile_ping(node_id.clone(), node_address.clone())
+                                    .kickoff_seed_reconcile_ping(
+                                        node_id.clone(),
+                                        node_address.clone(),
+                                    )
                                     .await;
                                 connected.insert(node_id, node_address);
                                 metrics::counter!(

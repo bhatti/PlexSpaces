@@ -302,7 +302,7 @@ mod tests {
                     None,
                     None,
                     None, // elastic_pool_service
-                None, // outbound_http_client
+                    None, // outbound_http_client
                 )
             })
             .collect();

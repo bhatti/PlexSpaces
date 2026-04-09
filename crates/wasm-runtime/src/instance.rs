@@ -455,9 +455,12 @@ impl WasmInstance {
                             &mut component_linker,
                             |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
                         )
-                        .map_err(|e| WasmError::InstantiationError(format!(
-                            "Failed to add actor-world host bindings: {}", e
-                        )))?;
+                        .map_err(|e| {
+                            WasmError::InstantiationError(format!(
+                                "Failed to add actor-world host bindings: {}",
+                                e
+                            ))
+                        })?;
 
                         let is_simple_actor =
                             crate::simple_component_host::is_simple_actor_component(c);
@@ -1610,7 +1613,9 @@ impl WasmInstance {
         };
         for key in ["message_type", "op", "msg_type"] {
             if let Some(s) = take_str(key) {
-                if !s.is_empty() && !s.eq_ignore_ascii_case("call") && !s.eq_ignore_ascii_case("cast")
+                if !s.is_empty()
+                    && !s.eq_ignore_ascii_case("call")
+                    && !s.eq_ignore_ascii_case("cast")
                 {
                     return Some(s);
                 }
@@ -1719,10 +1724,7 @@ impl WasmInstance {
             |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
         )
         .map_err(|e| {
-            WasmError::InstantiationError(format!(
-                "Failed to add actor-world host bindings: {}",
-                e
-            ))
+            WasmError::InstantiationError(format!("Failed to add actor-world host bindings: {}", e))
         })?;
         let simple_bindings = crate::simple_component_host::ActorWorld::instantiate_async(
             &mut component_store,
@@ -1734,10 +1736,7 @@ impl WasmInstance {
             WasmError::InstantiationError(format!("Simple-actor re-instantiation failed: {}", e))
         })?;
         let empty_config = Vec::new();
-        let init_config = self
-            .original_init_config
-            .as_ref()
-            .unwrap_or(&empty_config);
+        let init_config = self.original_init_config.as_ref().unwrap_or(&empty_config);
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
                 actor_id = %self.actor_id,
@@ -1867,10 +1866,7 @@ impl WasmInstance {
             |ctx: &mut ComponentContext| &mut ctx.simple_host_impl,
         )
         .map_err(|e| {
-            WasmError::InstantiationError(format!(
-                "Failed to add actor-world host bindings: {}",
-                e
-            ))
+            WasmError::InstantiationError(format!("Failed to add actor-world host bindings: {}", e))
         })?;
         let plexspaces_bindings = crate::component_host::PlexspacesActor::instantiate_async(
             &mut component_store,
@@ -2083,12 +2079,9 @@ impl WasmInstance {
                 drop(state);
 
                 // Acquire re-instantiation lock to serialize re-instantiations per actor
-                let reinstantiation_lock =
-                    self.reinstantiation_lock.as_ref().ok_or_else(|| {
-                        WasmError::ActorFunctionError(
-                            "Re-instantiation lock not available".to_string(),
-                        )
-                    })?;
+                let reinstantiation_lock = self.reinstantiation_lock.as_ref().ok_or_else(|| {
+                    WasmError::ActorFunctionError("Re-instantiation lock not available".to_string())
+                })?;
                 let _permit = reinstantiation_lock.acquire().await.map_err(|_e| {
                     tracing::error!(
                         actor_id = %self.actor_id,
@@ -2096,8 +2089,7 @@ impl WasmInstance {
                         "Failed to acquire re-instantiation lock (semaphore closed)"
                     );
                     WasmError::ActorFunctionError(
-                        "Failed to acquire re-instantiation lock: semaphore closed"
-                            .to_string(),
+                        "Failed to acquire re-instantiation lock: semaphore closed".to_string(),
                     )
                 })?;
                 let reinstantiation_start = std::time::Instant::now();
@@ -2107,19 +2099,18 @@ impl WasmInstance {
                 .increment(1);
 
                 // Acquire global reinstantiation cap (if set) so we stay under Wasmtime's memory-stripe limit.
-                let component_state =
-                    self.component_state.as_ref().expect("component_state set");
+                let component_state = self.component_state.as_ref().expect("component_state set");
                 let new_state = {
-                    let _global_permit =
-                        if let Some(ref g) = self.global_reinstantiation_semaphore {
-                            Some(g.acquire().await.map_err(|_| {
-                                WasmError::ActorFunctionError(
-                                    "Global reinstantiation semaphore closed".to_string(),
-                                )
-                            })?)
-                        } else {
-                            None
-                        };
+                    let _global_permit = if let Some(ref g) = self.global_reinstantiation_semaphore
+                    {
+                        Some(g.acquire().await.map_err(|_| {
+                            WasmError::ActorFunctionError(
+                                "Global reinstantiation semaphore closed".to_string(),
+                            )
+                        })?)
+                    } else {
+                        None
+                    };
                     Self::create_fresh_plexspaces_actor_state(self, &instance_ctx).await
                 }
                 .map_err(|e| {
@@ -2171,12 +2162,7 @@ impl WasmInstance {
 
                 let result = simple_bindings
                     .plexspaces_actor_actor()
-                    .call_handle(
-                        &mut *store,
-                        &from_string,
-                        &message_type_string,
-                        &payload,
-                    )
+                    .call_handle(&mut *store, &from_string, &message_type_string, &payload)
                     .await;
                 let processed_result: Result<Vec<u8>, WasmError> = match result {
                     Ok(Ok(response_bytes)) => Ok(response_bytes),
@@ -2598,12 +2584,11 @@ impl WasmInstance {
                     e
                 ))),
             },
-            ComponentBindings::PlexspacesActor(_plexspaces_bindings) => Err(
-                WasmError::ActorFunctionError(
-                    "set-state() not available for plexspaces-actor native components"
-                        .to_string(),
-                ),
-            ),
+            ComponentBindings::PlexspacesActor(_plexspaces_bindings) => {
+                Err(WasmError::ActorFunctionError(
+                    "set-state() not available for plexspaces-actor native components".to_string(),
+                ))
+            }
         };
 
         let duration = start_time.elapsed();

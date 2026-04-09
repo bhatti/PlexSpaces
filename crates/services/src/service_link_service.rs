@@ -81,7 +81,10 @@ impl ServiceLinkServiceImpl {
                 tracing::warn!("ServiceLinkService: rebuilt client is empty (no HTTP links)");
             }
             Err(e) => {
-                tracing::error!("ServiceLinkService: failed to rebuild OutboundHttpClient: {}", e);
+                tracing::error!(
+                    "ServiceLinkService: failed to rebuild OutboundHttpClient: {}",
+                    e
+                );
             }
         }
     }
@@ -147,7 +150,10 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
             guard.remove(&name).is_some()
         };
         if !removed {
-            return Err(Status::not_found(format!("service link '{}' not found", name)));
+            return Err(Status::not_found(format!(
+                "service link '{}' not found",
+                name
+            )));
         }
         self.rebuild_client().await;
         tracing::info!(%name, "ServiceLinkService: removed service link");
@@ -175,7 +181,10 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
             Some(link) => Ok(Response::new(GetServiceLinkResponse {
                 link: Some(link.clone()),
             })),
-            None => Err(Status::not_found(format!("service link '{}' not found", name))),
+            None => Err(Status::not_found(format!(
+                "service link '{}' not found",
+                name
+            ))),
         }
     }
 
@@ -199,7 +208,11 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
         let mut all: Vec<ServiceLinkConfig> = guard.values().cloned().collect();
         all.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let page_size = if req.page_size > 0 { req.page_size as usize } else { usize::MAX };
+        let page_size = if req.page_size > 0 {
+            req.page_size as usize
+        } else {
+            usize::MAX
+        };
         let start = if req.page_token.is_empty() {
             0usize
         } else {
@@ -207,7 +220,8 @@ impl ServiceLinkService for ServiceLinkServiceImpl {
                 .position(|l| l.name > req.page_token)
                 .unwrap_or(all.len())
         };
-        let page: Vec<ServiceLinkConfig> = all.iter().skip(start).take(page_size).cloned().collect();
+        let page: Vec<ServiceLinkConfig> =
+            all.iter().skip(start).take(page_size).cloned().collect();
         let next_page_token = if page.len() == page_size && start + page_size < all.len() {
             page.last().map(|l| l.name.clone()).unwrap_or_default()
         } else {
@@ -265,7 +279,10 @@ mod tests {
             name: "payments-api".to_string(),
         });
         let get_resp = svc.get_service_link(get_req).await.unwrap();
-        assert_eq!(get_resp.into_inner().link.unwrap().base_url, "https://payments-api.example.com");
+        assert_eq!(
+            get_resp.into_inner().link.unwrap().base_url,
+            "https://payments-api.example.com"
+        );
     }
 
     #[tokio::test]
@@ -273,10 +290,23 @@ mod tests {
         let sl = make_service_locator();
         let svc = ServiceLinkServiceImpl::new(sl).await;
 
-        svc.add_service_link(authed_request(AddServiceLinkRequest { link: Some(weather_link("svc-a")) })).await.unwrap();
-        svc.remove_service_link(authed_request(RemoveServiceLinkRequest { name: "svc-a".to_string() })).await.unwrap();
+        svc.add_service_link(authed_request(AddServiceLinkRequest {
+            link: Some(weather_link("svc-a")),
+        }))
+        .await
+        .unwrap();
+        svc.remove_service_link(authed_request(RemoveServiceLinkRequest {
+            name: "svc-a".to_string(),
+        }))
+        .await
+        .unwrap();
 
-        let err = svc.get_service_link(authed_request(GetServiceLinkRequest { name: "svc-a".to_string() })).await.unwrap_err();
+        let err = svc
+            .get_service_link(authed_request(GetServiceLinkRequest {
+                name: "svc-a".to_string(),
+            }))
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), tonic::Code::NotFound);
     }
 
@@ -288,13 +318,17 @@ mod tests {
         // Add a link so a client gets registered
         svc.add_service_link(authed_request(AddServiceLinkRequest {
             link: Some(weather_link("temp-link")),
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
         assert!(sl.get_outbound_http_client().await.is_some());
 
         // Remove it — client must be unregistered
         svc.remove_service_link(authed_request(RemoveServiceLinkRequest {
             name: "temp-link".to_string(),
-        })).await.unwrap();
+        }))
+        .await
+        .unwrap();
         assert!(sl.get_outbound_http_client().await.is_none());
     }
 
@@ -302,7 +336,12 @@ mod tests {
     async fn test_remove_nonexistent_returns_not_found() {
         let sl = make_service_locator();
         let svc = ServiceLinkServiceImpl::new(sl).await;
-        let err = svc.remove_service_link(authed_request(RemoveServiceLinkRequest { name: "no-such".to_string() })).await.unwrap_err();
+        let err = svc
+            .remove_service_link(authed_request(RemoveServiceLinkRequest {
+                name: "no-such".to_string(),
+            }))
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), tonic::Code::NotFound);
     }
 
@@ -319,10 +358,14 @@ mod tests {
             .unwrap();
         }
 
-        let resp = svc.list_service_links(authed_request(ListServiceLinksRequest {
-            page_size: 0,
-            page_token: String::new(),
-        })).await.unwrap().into_inner();
+        let resp = svc
+            .list_service_links(authed_request(ListServiceLinksRequest {
+                page_size: 0,
+                page_token: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(resp.links.len(), 3);
         // Sorted by name
         assert_eq!(resp.links[0].name, "svc-a");
@@ -344,20 +387,28 @@ mod tests {
         }
 
         // Page 1: first 2 entries (sorted: alpha, beta, delta, epsilon, gamma)
-        let page1 = svc.list_service_links(authed_request(ListServiceLinksRequest {
-            page_size: 2,
-            page_token: String::new(),
-        })).await.unwrap().into_inner();
+        let page1 = svc
+            .list_service_links(authed_request(ListServiceLinksRequest {
+                page_size: 2,
+                page_token: String::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(page1.links.len(), 2);
         assert_eq!(page1.links[0].name, "alpha");
         assert_eq!(page1.links[1].name, "beta");
         assert!(!page1.next_page_token.is_empty());
 
         // Page 2: next 2 entries
-        let page2 = svc.list_service_links(authed_request(ListServiceLinksRequest {
-            page_size: 2,
-            page_token: page1.next_page_token,
-        })).await.unwrap().into_inner();
+        let page2 = svc
+            .list_service_links(authed_request(ListServiceLinksRequest {
+                page_size: 2,
+                page_token: page1.next_page_token,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
         assert_eq!(page2.links.len(), 2);
     }
 
@@ -365,13 +416,16 @@ mod tests {
     async fn test_add_invalid_link_missing_name() {
         let sl = make_service_locator();
         let svc = ServiceLinkServiceImpl::new(sl).await;
-        let err = svc.add_service_link(authed_request(AddServiceLinkRequest {
-            link: Some(ServiceLinkConfig {
-                name: String::new(),
-                base_url: "https://example.com".to_string(),
-                ..Default::default()
-            }),
-        })).await.unwrap_err();
+        let err = svc
+            .add_service_link(authed_request(AddServiceLinkRequest {
+                link: Some(ServiceLinkConfig {
+                    name: String::new(),
+                    base_url: "https://example.com".to_string(),
+                    ..Default::default()
+                }),
+            }))
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 
@@ -379,13 +433,16 @@ mod tests {
     async fn test_add_invalid_link_missing_base_url() {
         let sl = make_service_locator();
         let svc = ServiceLinkServiceImpl::new(sl).await;
-        let err = svc.add_service_link(authed_request(AddServiceLinkRequest {
-            link: Some(ServiceLinkConfig {
-                name: "my-link".to_string(),
-                base_url: String::new(),
-                ..Default::default()
-            }),
-        })).await.unwrap_err();
+        let err = svc
+            .add_service_link(authed_request(AddServiceLinkRequest {
+                link: Some(ServiceLinkConfig {
+                    name: "my-link".to_string(),
+                    base_url: String::new(),
+                    ..Default::default()
+                }),
+            }))
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 
@@ -393,7 +450,10 @@ mod tests {
     async fn test_add_no_link_returns_invalid_argument() {
         let sl = make_service_locator();
         let svc = ServiceLinkServiceImpl::new(sl).await;
-        let err = svc.add_service_link(authed_request(AddServiceLinkRequest { link: None })).await.unwrap_err();
+        let err = svc
+            .add_service_link(authed_request(AddServiceLinkRequest { link: None }))
+            .await
+            .unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 
@@ -408,7 +468,9 @@ mod tests {
         sl.register_runtime_config(rc).await;
         let svc = ServiceLinkServiceImpl::new(Arc::new(sl)).await;
 
-        let get = authed_request(GetServiceLinkRequest { name: "pre-seeded".to_string() });
+        let get = authed_request(GetServiceLinkRequest {
+            name: "pre-seeded".to_string(),
+        });
         let resp = svc.get_service_link(get).await.unwrap();
         assert_eq!(resp.into_inner().link.unwrap().name, "pre-seeded");
     }

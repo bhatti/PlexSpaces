@@ -411,9 +411,8 @@ impl ActorServiceImpl {
             // `payload_from_request_json`, which uses raw_decode on "Extra data"). Some gateways
             // or clients append a second JSON document or stray bytes after a valid object.
             let mut de = serde_json::Deserializer::from_slice(payload);
-            let _: serde_json::Value = Deserialize::deserialize(&mut de).map_err(|e| {
-                Status::invalid_argument(format!("Invalid JSON payload: {}", e))
-            })?;
+            let _: serde_json::Value = Deserialize::deserialize(&mut de)
+                .map_err(|e| Status::invalid_argument(format!("Invalid JSON payload: {}", e)))?;
             Ok(payload.to_vec())
         }
     }
@@ -4422,8 +4421,7 @@ mod tests {
         // VirtualActorManager must always be present in the actor-registry; set it here.
         {
             use plexspaces_core::VirtualActorManager;
-            let virtual_actor_manager =
-                Arc::new(VirtualActorManager::new(actor_registry.clone()));
+            let virtual_actor_manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
             actor_registry
                 .set_virtual_actor_manager(virtual_actor_manager)
                 .await;
@@ -4768,10 +4766,7 @@ mod tests {
         let mut message = create_test_message(b"test".to_vec());
         message.receiver_id = "controller:cart-1".to_string();
 
-        ActorServiceImpl::set_message_receiver_id(
-            &mut message,
-            "cart-1//controller::app-ns@node1",
-        );
+        ActorServiceImpl::set_message_receiver_id(&mut message, "cart-1//controller::app-ns@node1");
 
         assert_eq!(message.receiver_id, "cart-1//controller::app-ns@node1");
     }

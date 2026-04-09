@@ -270,7 +270,7 @@ async fn test_component_init_function() {
             None,
             None,
             None, // elastic_pool_service
-                None, // outbound_http_client
+            None, // outbound_http_client
         ),
     )
     .await;
@@ -336,7 +336,7 @@ async fn test_component_handle_message() {
             None,
             None,
             None, // elastic_pool_service
-                None, // outbound_http_client
+            None, // outbound_http_client
         ),
     )
     .await;
@@ -469,7 +469,7 @@ async fn test_component_empty_initial_state() {
             None,
             None,
             None, // elastic_pool_service
-                None, // outbound_http_client
+            None, // outbound_http_client
         ),
     )
     .await;
@@ -533,7 +533,7 @@ async fn test_component_observability() {
             None,
             None,
             None, // elastic_pool_service
-                None, // outbound_http_client
+            None, // outbound_http_client
         ),
     )
     .await;
@@ -605,7 +605,7 @@ async fn test_component_different_message_types() {
             None,
             None,
             None, // elastic_pool_service
-                None, // outbound_http_client
+            None, // outbound_http_client
         ),
     )
     .await;

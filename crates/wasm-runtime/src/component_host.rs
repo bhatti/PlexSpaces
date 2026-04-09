@@ -1033,7 +1033,12 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
 
             // Send message to actor's mailbox
             if let Err(e) = host_functions_clone
-                .send_message(&actor_id_str, &actor_id_str, &msg_type_clone, &payload_clone)
+                .send_message(
+                    &actor_id_str,
+                    &actor_id_str,
+                    &msg_type_clone,
+                    &payload_clone,
+                )
                 .await
             {
                 tracing::warn!(

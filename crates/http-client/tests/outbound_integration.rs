@@ -212,9 +212,8 @@ async fn outbound_http_client_supports_concurrent_calls() {
         ..Default::default()
     });
 
-    let client = Arc::new(
-        ResilientOutboundHttpClient::from_runtime_config(&rt).expect("build client"),
-    );
+    let client =
+        Arc::new(ResilientOutboundHttpClient::from_runtime_config(&rt).expect("build client"));
 
     let mut handles = Vec::new();
     for _ in 0..24 {

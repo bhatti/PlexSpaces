@@ -2834,13 +2834,9 @@ mod tests {
             behavior_kind: Some("GenServer".to_string()),
             ..Default::default()
         };
-        let canonical =
-            "01ABC//worker::data-lake-rag-go@test-node-8093".to_string();
-        let init_config = super::init_config_from_initial_state_or_child_spec(
-            b"{}",
-            &child_spec,
-            &canonical,
-        );
+        let canonical = "01ABC//worker::data-lake-rag-go@test-node-8093".to_string();
+        let init_config =
+            super::init_config_from_initial_state_or_child_spec(b"{}", &child_spec, &canonical);
         let value: serde_json::Value = serde_json::from_slice(&init_config).unwrap();
         assert_eq!(
             value.get("actor_id").and_then(|v| v.as_str()),

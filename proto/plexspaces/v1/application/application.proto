@@ -166,9 +166,7 @@ message ApplicationSpec {
   repeated ApplicationServiceLinkRequirement required_service_links = 16 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).repeated = {max_items: 128},
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Links that must exist in RuntimeConfig.service_links (or equivalent) when the app deploys."
-    }
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Links that must exist in RuntimeConfig.service_links (or equivalent) when the app deploys."}
   ];
 }
 
@@ -183,7 +181,11 @@ message ApplicationServiceLinkRequirement {
 
   string link_name = 1 [
     (google.api.field_behavior) = REQUIRED,
-    (buf.validate.field).string = {min_len: 1, max_len: 256, pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"},
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 256
+      pattern: "^[a-zA-Z0-9][a-zA-Z0-9._-]*$"
+    },
     (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
       description: "Must match ServiceLinkConfig.name on the node."
       example: "\"payments-api\""
@@ -193,9 +195,7 @@ message ApplicationServiceLinkRequirement {
   optional string policy_template = 2 [
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).string = {max_len: 128},
-    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
-      description: "Optional RuntimeConfig.outbound_policy_templates key merged for this link."
-    }
+    (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {description: "Optional RuntimeConfig.outbound_policy_templates key merged for this link."}
   ];
 }
 

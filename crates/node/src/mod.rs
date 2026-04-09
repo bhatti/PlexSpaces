@@ -1371,7 +1371,13 @@ impl Node {
             .service_locator
             .get_node_config()
             .await
-            .and_then(|c| if !c.grpc_address.is_empty() { Some(c.grpc_address) } else { None })
+            .and_then(|c| {
+                if !c.grpc_address.is_empty() {
+                    Some(c.grpc_address)
+                } else {
+                    None
+                }
+            })
             .unwrap_or_else(|| self.config.listen_addr.clone());
         let grpc_address = plexspaces_common::dialable_node_address(&effective_addr);
 
@@ -2069,7 +2075,10 @@ impl Node {
         let server_builder = {
             use plexspaces_proto::node::v1::service_link_service_server::ServiceLinkServiceServer;
             use plexspaces_services::service_link_service::ServiceLinkServiceImpl;
-            let sls = ServiceLinkServiceImpl::new(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>).await;
+            let sls = ServiceLinkServiceImpl::new(
+                self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>
+            )
+            .await;
             server_builder.add_service(
                 ServiceLinkServiceServer::new(sls)
                     .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE)
@@ -2964,7 +2973,10 @@ impl Node {
                         .get("cluster")
                         .map(|value| value.as_str())
                         .filter(|value| !value.is_empty());
-                    let page_size = match params.get("page_size").and_then(|value| value.parse::<i32>().ok()) {
+                    let page_size = match params
+                        .get("page_size")
+                        .and_then(|value| value.parse::<i32>().ok())
+                    {
                         Some(size) if size > 0 => (size as u32).min(1000),
                         _ => 100,
                     };
@@ -2974,10 +2986,8 @@ impl Node {
                         .unwrap_or("")
                         .to_string();
 
-                    let node_registry = service_locator
-                        .get_node_registry()
-                        .await
-                        .ok_or_else(|| {
+                    let node_registry =
+                        service_locator.get_node_registry().await.ok_or_else(|| {
                             (
                                 StatusCode::SERVICE_UNAVAILABLE,
                                 "NodeRegistry not available".to_string(),

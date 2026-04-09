@@ -83,7 +83,9 @@ macro_rules! export_actor_world_app {
             ::std::sync::OnceLock::new();
 
         impl $crate::simple_actor::Guest for __PlexspacesActorWorldComponent {
-            fn init(config: ::std::vec::Vec<u8>) -> ::core::result::Result<(), ::std::string::String> {
+            fn init(
+                config: ::std::vec::Vec<u8>,
+            ) -> ::core::result::Result<(), ::std::string::String> {
                 match <$app_ty as $crate::simple_actor::ActorWorldApp>::init(config) {
                     Ok(app) => {
                         if let Some(cell) = __PLEXSPACES_ACTOR_WORLD_APP.get() {
@@ -126,7 +128,9 @@ macro_rules! export_actor_world_app {
                 )
             }
 
-            fn set_state(state: ::std::vec::Vec<u8>) -> ::core::result::Result<(), ::std::string::String> {
+            fn set_state(
+                state: ::std::vec::Vec<u8>,
+            ) -> ::core::result::Result<(), ::std::string::String> {
                 let next_state =
                     <$app_ty as $crate::simple_actor::ActorWorldApp>::decode_state(&state)?;
                 let cell = __PLEXSPACES_ACTOR_WORLD_APP

@@ -84,7 +84,7 @@ mod tests {
             None,               // journal_storage
             Some(blob_service), // blob_service
             None,               // elastic_pool_service
-            None, // outbound_http_client
+            None,               // outbound_http_client
         ))
     }
 

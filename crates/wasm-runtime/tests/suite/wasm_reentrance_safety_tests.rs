@@ -66,9 +66,7 @@ mod tests {
 
     /// Helper: create a WasmInstance from the shared calculator fixture.
     /// Returns None if the fixture is not available or incompatible (test should be skipped).
-    async fn create_instance(
-        actor_id: &str,
-    ) -> Option<plexspaces_wasm_runtime::WasmInstance> {
+    async fn create_instance(actor_id: &str) -> Option<plexspaces_wasm_runtime::WasmInstance> {
         let runtime = WasmRuntime::new().await.expect("Failed to create runtime");
         let wasm_bytes = get_shared_wasm_bytes().await?;
 
@@ -204,8 +202,7 @@ mod tests {
                     let resp_str = String::from_utf8_lossy(&resp);
                     let expected_sum = i + (i + 1);
                     assert!(
-                        resp_str.contains(&expected_sum.to_string())
-                            || resp_str.contains("result"),
+                        resp_str.contains(&expected_sum.to_string()) || resp_str.contains("result"),
                         "Call {} expected sum {} in response, got: {}",
                         i,
                         expected_sum,
@@ -262,11 +259,7 @@ mod tests {
             })
             .collect();
 
-        let results = timeout(
-            Duration::from_secs(120),
-            futures::future::join_all(handles),
-        )
-        .await;
+        let results = timeout(Duration::from_secs(120), futures::future::join_all(handles)).await;
 
         let results: Vec<_> = match results {
             Ok(results) => results
@@ -376,10 +369,7 @@ mod tests {
                     );
                 } else {
                     // State format may vary - as long as we got a response, re-instantiation worked
-                    eprintln!(
-                        "State response (format varies): {}",
-                        resp_str
-                    );
+                    eprintln!("State response (format varies): {}", resp_str);
                 }
             }
             Ok(Err(e)) if should_skip(e) => {

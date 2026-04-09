@@ -44,7 +44,11 @@ pub fn backoff_duration_for_attempt(
         .map(|d| duration_proto_to_ms(d).max(initial_ms))
         .unwrap_or(30_000);
     let mult = policy.backoff_multiplier;
-    let mult = if mult.is_finite() && mult >= 1.0 { mult } else { 2.0 };
+    let mult = if mult.is_finite() && mult >= 1.0 {
+        mult
+    } else {
+        2.0
+    };
 
     let exp = (attempt_after_failure as f64).max(1.0);
     let raw = (initial_ms as f64) * mult.powf(exp - 1.0);

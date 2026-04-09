@@ -971,7 +971,10 @@ message CreateShardGroupRequest {
     json_schema: {
       title: "Create Shard Group Request"
       description: "Request to create a shard group"
-      required: ["config", "actor_type"]
+      required: [
+        "config",
+        "actor_type"
+      ]
     }
   };
   // Group strategy (group_id, shard_count, partition_strategy, rebalance_policy, placement)
@@ -983,9 +986,10 @@ message CreateShardGroupRequest {
   string actor_type = 2 [
     (google.api.field_behavior) = REQUIRED,
     (buf.validate.field).string = {
-    min_len: 1
-    max_len: 128
-  }];
+      min_len: 1
+      max_len: 128
+    }
+  ];
   // Per-shard ActorConfig (optional data_parallel_config here is ignored; use config above)
   ActorConfig shard_config = 3;
   bytes initial_state = 4;
@@ -1079,7 +1083,11 @@ message SendToShardRequest {
     json_schema: {
       title: "Send To Shard Request"
       description: "Request to route a message to a shard by partition key"
-      required: ["group_id", "partition_key", "message"]
+      required: [
+        "group_id",
+        "partition_key",
+        "message"
+      ]
     }
   };
   string group_id = 1 [
@@ -1127,7 +1135,10 @@ message ScatterGatherRequest {
     json_schema: {
       title: "Scatter Gather Request"
       description: "Request to query all shards and aggregate results"
-      required: ["group_id", "query"]
+      required: [
+        "group_id",
+        "query"
+      ]
     }
   };
   string group_id = 1 [
@@ -1181,7 +1192,10 @@ message BulkUpdateShardGroupRequest {
     json_schema: {
       title: "Bulk Update Shard Group Request"
       description: "Request to apply multiple updates across a shard group"
-      required: ["group_id", "updates"]
+      required: [
+        "group_id",
+        "updates"
+      ]
     }
   };
   // Group to update
@@ -1245,7 +1259,10 @@ message MapShardGroupRequest {
     json_schema: {
       title: "Map Shard Group Request"
       description: "Request to apply a function to all shards"
-      required: ["group_id", "map_function"]
+      required: [
+        "group_id",
+        "map_function"
+      ]
     }
   };
   // Group to map over
@@ -1304,7 +1321,10 @@ message BroadcastShardGroupRequest {
     json_schema: {
       title: "Broadcast Shard Group Request"
       description: "Request to broadcast a message to all shards"
-      required: ["group_id", "message"]
+      required: [
+        "group_id",
+        "message"
+      ]
     }
   };
   string group_id = 1 [
@@ -1338,7 +1358,10 @@ message ReduceShardGroupRequest {
     json_schema: {
       title: "Reduce Shard Group Request"
       description: "Request to reduce values across a shard group"
-      required: ["group_id", "map_function"]
+      required: [
+        "group_id",
+        "map_function"
+      ]
     }
   };
   string group_id = 1 [
@@ -1375,7 +1398,10 @@ message AllReduceShardGroupRequest {
     json_schema: {
       title: "All Reduce Shard Group Request"
       description: "Request to run all-reduce across a shard group"
-      required: ["group_id", "map_function"]
+      required: [
+        "group_id",
+        "map_function"
+      ]
     }
   };
   string group_id = 1 [
@@ -1412,7 +1438,10 @@ message BarrierShardGroupRequest {
     json_schema: {
       title: "Barrier Shard Group Request"
       description: "Request to synchronize a shard group barrier round"
-      required: ["group_id", "barrier_id"]
+      required: [
+        "group_id",
+        "barrier_id"
+      ]
     }
   };
   string group_id = 1 [
@@ -1451,7 +1480,10 @@ message ScaleShardGroupRequest {
     json_schema: {
       title: "Scale Shard Group Request"
       description: "Request to scale a shard group"
-      required: ["group_id", "new_shard_count"]
+      required: [
+        "group_id",
+        "new_shard_count"
+      ]
     }
   };
   // Group to scale
@@ -2894,9 +2926,7 @@ service ActorService {
   rpc AskReply(AskReplyRequest) returns (AskReplyResponse) {
     option (google.api.http) = {
       get: "/api/v1/actors/{namespace}/{actor_type}"
-      additional_bindings: {
-        get: "/api/v1/actors/{namespace}/{actor_type}/ask"
-      }
+      additional_bindings: {get: "/api/v1/actors/{namespace}/{actor_type}/ask"}
       additional_bindings: {
         post: "/api/v1/actors/{namespace}/{actor_type}/ask"
         body: "*"

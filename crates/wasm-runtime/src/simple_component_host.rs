@@ -184,12 +184,7 @@ impl SimpleHostImpl {
 #[async_trait::async_trait]
 impl plexspaces::actor::host::Host for SimpleHostImpl {
     /// Send a message to another actor (fire-and-forget at the WIT boundary).
-    async fn send(
-        &mut self,
-        to: String,
-        msg_type: String,
-        payload: Vec<u8>,
-    ) -> Result<(), String> {
+    async fn send(&mut self, to: String, msg_type: String, payload: Vec<u8>) -> Result<(), String> {
         metrics::counter!("plexspaces_wasm_simple_send_total").increment(1);
         let self_id = self.actor_id.to_string();
 
@@ -291,11 +286,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
     /// Key-value put (string-only). Returns empty on success.
     /// Values are stored as UTF-8 bytes so kv_store remains human-readable for actor keys
     /// (object-registry uses the same table with protobuf for its entries).
-    async fn kv_put(
-        &mut self,
-        key: String,
-        value: Vec<u8>,
-    ) -> Result<(), String> {
+    async fn kv_put(&mut self, key: String, value: Vec<u8>) -> Result<(), String> {
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(actor_id = %self.actor_id, key = %key, value_len = value.len(), "wasm kv_put entry");
         }
@@ -385,7 +376,9 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         match provider.read(&pattern).await {
             Ok(tuples) => {
                 if let Some(tuple) = tuples.first() {
-                    Ok(Self::encode_read_response(vec![tuple_to_proto_tuple(tuple)]))
+                    Ok(Self::encode_read_response(vec![tuple_to_proto_tuple(
+                        tuple,
+                    )]))
                 } else {
                     Ok(Self::encode_read_response(Vec::new()))
                 }
@@ -409,7 +402,9 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         let proto_template = Self::decode_template_request(&pattern_data)?;
         let pattern = proto_template_to_pattern(&proto_template).map_err(|err| err.to_string())?;
         match provider.take(&pattern).await {
-            Ok(Some(tuple)) => Ok(Self::encode_read_response(vec![tuple_to_proto_tuple(&tuple)])),
+            Ok(Some(tuple)) => Ok(Self::encode_read_response(vec![tuple_to_proto_tuple(
+                &tuple,
+            )])),
             Ok(None) => Ok(Self::encode_read_response(Vec::new())),
             Err(e) => {
                 tracing::warn!(actor_id = %self.actor_id, error = %e, "wasm ts_take failed");
@@ -419,10 +414,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
     }
 
     /// TupleSpace read-all matching tuples (non-destructive) using protobuf `ReadRequest` bytes.
-    async fn ts_read_all(
-        &mut self,
-        pattern_data: Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
+    async fn ts_read_all(&mut self, pattern_data: Vec<u8>) -> Result<Vec<u8>, String> {
         let provider = match &self.tuplespace_provider {
             Some(p) => p,
             None => {
@@ -734,9 +726,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
             Err(plexspaces_blob::BlobError::NotFound(_)) => {
                 Err(format!("Blob not found: {}", blob_id))
             }
-            Err(e) => {
-                Err(e.to_string())
-            }
+            Err(e) => Err(e.to_string()),
         }
     }
 
@@ -1195,10 +1185,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         }
     }
 
-    async fn create_shard_group(
-        &mut self,
-        request_data: Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
+    async fn create_shard_group(&mut self, request_data: Vec<u8>) -> Result<Vec<u8>, String> {
         let req = Self::decode_proto::<CreateShardGroupRequest>(
             &request_data,
             "CreateShardGroupRequest",
@@ -1210,10 +1197,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         }
     }
 
-    async fn bulk_update_shard_group(
-        &mut self,
-        request_data: Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
+    async fn bulk_update_shard_group(&mut self, request_data: Vec<u8>) -> Result<Vec<u8>, String> {
         let mut req = Self::decode_proto::<BulkUpdateShardGroupRequest>(
             &request_data,
             "BulkUpdateShardGroupRequest",
@@ -1230,10 +1214,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         }
     }
 
-    async fn map_shard_group(
-        &mut self,
-        request_data: Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
+    async fn map_shard_group(&mut self, request_data: Vec<u8>) -> Result<Vec<u8>, String> {
         let mut req =
             Self::decode_proto::<MapShardGroupRequest>(&request_data, "MapShardGroupRequest")?;
         if let Some(map_function) = req.map_function.as_mut() {
@@ -1248,10 +1229,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         }
     }
 
-    async fn scatter_gather(
-        &mut self,
-        request_data: Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
+    async fn scatter_gather(&mut self, request_data: Vec<u8>) -> Result<Vec<u8>, String> {
         let mut req =
             Self::decode_proto::<ScatterGatherRequest>(&request_data, "ScatterGatherRequest")?;
         if let Some(query) = req.query.as_mut() {
@@ -1266,10 +1244,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         }
     }
 
-    async fn broadcast_shard_group(
-        &mut self,
-        request_data: Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
+    async fn broadcast_shard_group(&mut self, request_data: Vec<u8>) -> Result<Vec<u8>, String> {
         let mut req = Self::decode_proto::<BroadcastShardGroupRequest>(
             &request_data,
             "BroadcastShardGroupRequest",
@@ -1286,10 +1261,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         }
     }
 
-    async fn reduce_shard_group(
-        &mut self,
-        request_data: Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
+    async fn reduce_shard_group(&mut self, request_data: Vec<u8>) -> Result<Vec<u8>, String> {
         let mut req = Self::decode_proto::<ReduceShardGroupRequest>(
             &request_data,
             "ReduceShardGroupRequest",
@@ -1306,10 +1278,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         }
     }
 
-    async fn all_reduce_shard_group(
-        &mut self,
-        request_data: Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
+    async fn all_reduce_shard_group(&mut self, request_data: Vec<u8>) -> Result<Vec<u8>, String> {
         let mut req = Self::decode_proto::<AllReduceShardGroupRequest>(
             &request_data,
             "AllReduceShardGroupRequest",
@@ -1326,10 +1295,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         }
     }
 
-    async fn barrier_shard_group(
-        &mut self,
-        request_data: Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
+    async fn barrier_shard_group(&mut self, request_data: Vec<u8>) -> Result<Vec<u8>, String> {
         let req = Self::decode_proto::<BarrierShardGroupRequest>(
             &request_data,
             "BarrierShardGroupRequest",
@@ -1341,12 +1307,8 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         }
     }
 
-    async fn spawn_actors(
-        &mut self,
-        request_data: Vec<u8>,
-    ) -> Result<Vec<u8>, String> {
-        let req =
-            Self::decode_proto::<SpawnActorsRequest>(&request_data, "SpawnActorsRequest")?;
+    async fn spawn_actors(&mut self, request_data: Vec<u8>) -> Result<Vec<u8>, String> {
+        let req = Self::decode_proto::<SpawnActorsRequest>(&request_data, "SpawnActorsRequest")?;
         let ctx = self.pg_context();
         match self.host_functions.spawn_actors(&ctx, req).await {
             Ok(response) => Ok(Self::encode_proto(&response)),
@@ -1359,8 +1321,7 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
         application_id: String,
         metrics: Vec<u8>,
     ) -> Result<Vec<u8>, String> {
-        let metrics =
-            Self::decode_proto::<ApplicationMetrics>(&metrics, "ApplicationMetrics")?;
+        let metrics = Self::decode_proto::<ApplicationMetrics>(&metrics, "ApplicationMetrics")?;
         let ctx = self.pg_context();
         match self
             .host_functions
@@ -1383,15 +1344,15 @@ impl plexspaces::actor::host::Host for SimpleHostImpl {
             .get_application_status(&ctx, &application_id, &node_id)
             .await
         {
-            Ok((application, node_address)) => Ok(Self::encode_proto(
-                &GetApplicationStatusResponse {
+            Ok((application, node_address)) => {
+                Ok(Self::encode_proto(&GetApplicationStatusResponse {
                     application: Some(application),
                     state: None,
                     error: None,
                     node_id,
                     node_address,
-                },
-            )),
+                }))
+            }
             Err(err) => Err(err.to_string()),
         }
     }
@@ -1438,19 +1399,15 @@ mod tests {
     use super::*;
     use crate::simple_component_host::plexspaces::actor::host::Host;
     use async_trait::async_trait;
-    use plexspaces_core::{
-        OutboundHttpClient, OutboundHttpRequest, OutboundHttpResponse,
-    };
+    use plexspaces_core::{OutboundHttpClient, OutboundHttpRequest, OutboundHttpResponse};
     use plexspaces_proto::actor::v1::{
         BroadcastShardGroupRequest, CollectiveReduction, CreateShardGroupRequest,
-        CreateShardGroupResponse, DataParallelConfig, MapShardGroupRequest,
-        MapShardGroupResponse, NodePlacement, NodePlacementStrategy, ReduceShardGroupRequest,
-        ScatterGatherRequest, ScatterGatherResponse, ScatterGatherStats, ShardGroup,
-        ShardQueryResponse, SpawnActorRequest, SpawnActorsRequest, SpawnActorsResponse,
+        CreateShardGroupResponse, DataParallelConfig, MapShardGroupRequest, MapShardGroupResponse,
+        NodePlacement, NodePlacementStrategy, ReduceShardGroupRequest, ScatterGatherRequest,
+        ScatterGatherResponse, ScatterGatherStats, ShardGroup, ShardQueryResponse,
+        SpawnActorRequest, SpawnActorsRequest, SpawnActorsResponse,
     };
-    use plexspaces_proto::application::v1::{
-        ApplicationMetrics, GetApplicationStatusResponse,
-    };
+    use plexspaces_proto::application::v1::{ApplicationMetrics, GetApplicationStatusResponse};
     use plexspaces_proto::wasm::v1::{HttpFetchRequest, HttpFetchResponse};
     use prost::Message as _;
     use std::sync::Arc;
@@ -1848,7 +1805,10 @@ mod tests {
             .await,
         );
         let group = response.group.expect("group should be set");
-        assert_eq!(group.config.expect("config should be set").group_id, "heat-group");
+        assert_eq!(
+            group.config.expect("config should be set").group_id,
+            "heat-group"
+        );
         assert_eq!(group.shard_actor_ids[0], "worker-0@node-a");
     }
 
@@ -1971,23 +1931,22 @@ mod tests {
         )));
         let mut host =
             SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
-        let response = decode_proto_response::<
-            plexspaces_proto::actor::v1::BroadcastShardGroupResponse,
-        >(
-            host.broadcast_shard_group(
-                BroadcastShardGroupRequest {
-                    group_id: "mpi-group".to_string(),
-                    message: Some(Message {
-                        message_type: "broadcast".to_string(),
-                        payload: b"broadcast".to_vec(),
+        let response =
+            decode_proto_response::<plexspaces_proto::actor::v1::BroadcastShardGroupResponse>(
+                host.broadcast_shard_group(
+                    BroadcastShardGroupRequest {
+                        group_id: "mpi-group".to_string(),
+                        message: Some(Message {
+                            message_type: "broadcast".to_string(),
+                            payload: b"broadcast".to_vec(),
+                            ..Default::default()
+                        }),
                         ..Default::default()
-                    }),
-                    ..Default::default()
-                }
-                .encode_to_vec(),
-            )
-            .await,
-        );
+                    }
+                    .encode_to_vec(),
+                )
+                .await,
+            );
         let shard = response
             .shard_responses
             .first()
@@ -2006,8 +1965,7 @@ mod tests {
         )));
         let mut host =
             SimpleHostImpl::new(ActorId::from("leader:test@node-a"), host_functions, None);
-        let response =
-            decode_proto_response::<plexspaces_proto::actor::v1::ReduceShardGroupResponse>(
+        let response = decode_proto_response::<plexspaces_proto::actor::v1::ReduceShardGroupResponse>(
             host.reduce_shard_group(
                 ReduceShardGroupRequest {
                     group_id: "mpi-group".to_string(),
@@ -2065,7 +2023,11 @@ mod tests {
         let result = response.results.first().expect("one spawn result expected");
         assert!(result.success);
         assert_eq!(
-            result.response.as_ref().expect("spawn response expected").actor_ref,
+            result
+                .response
+                .as_ref()
+                .expect("spawn response expected")
+                .actor_ref,
             "worker-0@node-a"
         );
     }
@@ -2100,7 +2062,10 @@ mod tests {
             .await,
         );
         assert_eq!(response.status, 200);
-        assert_eq!(response.headers.get("x-link"), Some(&"weather-api".to_string()));
+        assert_eq!(
+            response.headers.get("x-link"),
+            Some(&"weather-api".to_string())
+        );
         assert_eq!(response.headers.get("x-method"), Some(&"POST".to_string()));
         assert_eq!(response.body, b"request-body".to_vec());
     }

@@ -29,6 +29,11 @@
 
 use crate::ActorId;
 
+fn unknown_linked_actor_id() -> ActorId {
+    ActorId::new("unknown", "system", "default", "unknown")
+        .expect("fallback linked actor id must be valid")
+}
+
 /// Exit reason for actor termination (Erlang/OTP-style)
 ///
 /// ## Erlang Equivalent
@@ -104,7 +109,7 @@ impl ExitReason {
             ExitReason::Linked { actor_id, reason } => {
                 Some(plexspaces_proto::v1::actor::ExitReasonDetails {
                     error_message: String::new(),
-                    linked_actor_id: actor_id.clone(),
+                    linked_actor_id: actor_id.to_string(),
                     linked_reason: reason.to_proto() as i32,
                 })
             }
@@ -143,12 +148,12 @@ impl ExitReason {
                 let actor_id = details
                     .and_then(|d| {
                         if !d.linked_actor_id.is_empty() {
-                            Some(d.linked_actor_id.clone())
+                            ActorId::from_canonical(&d.linked_actor_id).ok()
                         } else {
                             None
                         }
                     })
-                    .unwrap_or_else(|| "unknown".to_string());
+                    .unwrap_or_else(unknown_linked_actor_id);
                 let linked_reason = details
                     .and_then(|d| {
                         if d.linked_reason != 0 {
@@ -190,7 +195,7 @@ impl ExitReason {
         }
     }
 
-    /// Convert from string representation (for backward compatibility)
+    /// Convert from string representation.
     ///
     /// ## Purpose
     /// Converts string exit reasons (from old notify_actor_down API) to ExitReason enum.
@@ -216,7 +221,8 @@ impl ExitReason {
                 // Parse "linked:actor-id:reason" format
                 let parts: Vec<&str> = s.splitn(3, ':').collect();
                 if parts.len() >= 3 {
-                    let linked_actor_id = parts[1].to_string();
+                    let linked_actor_id = ActorId::from_canonical(parts[1])
+                        .unwrap_or_else(|_| unknown_linked_actor_id());
                     let linked_reason_str = parts[2];
                     let linked_reason = ExitReason::from_str(linked_reason_str);
                     ExitReason::Linked {
@@ -277,7 +283,7 @@ mod tests {
     fn test_exit_reason_linked() {
         let linked_reason = ExitReason::Error("nested error".to_string());
         let reason = ExitReason::Linked {
-            actor_id: "actor-1".to_string(),
+            actor_id: ActorId::new("actor-1", "worker", "default", "node-1").unwrap(),
             reason: Box::new(linked_reason),
         };
         assert!(!reason.is_normal());

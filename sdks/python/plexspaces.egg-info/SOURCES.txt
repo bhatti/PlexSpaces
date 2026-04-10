@@ -4,6 +4,7 @@ plexspaces/__init__.py
 plexspaces/decorators.py
 plexspaces/host.py
 plexspaces/leader_worker.py
+plexspaces/proto_wire.py
 plexspaces/runtime.py
 plexspaces/workflow.py
 plexspaces.egg-info/PKG-INFO
@@ -87,5 +88,6 @@ tests/test_decorators.py
 tests/test_host.py
 tests/test_host_collective.py
 tests/test_host_tuple_space.py
+tests/test_http_fetch_wire.py
 tests/test_runtime.py
 tests/test_workflow_retry.py

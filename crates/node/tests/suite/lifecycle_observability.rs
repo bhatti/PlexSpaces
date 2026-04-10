@@ -32,10 +32,11 @@
 //! - ✅ Events contain correct metadata (actor_id, timestamp, reason)
 //! - ✅ Event ordering is correct (Created → Starting → Activated → Terminated)
 
-use super::test_helpers::spawn_actor_helper;
+use super::test_helpers::{spawn_actor_helper, test_runtime_actor_id};
 
 use plexspaces_actor::Actor;
 use plexspaces_behavior::MockBehavior;
+use plexspaces_core::ActorId;
 use plexspaces_core::ServiceLocator;
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{Node, NodeBuilder, NodeId};
@@ -78,15 +79,13 @@ async fn test_lifecycle_event_full_spawn_sequence() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(
-        MailboxConfig::default(),
-        "spawn-test-actor@test-node".to_string(),
-    )
+    let actor_id = test_runtime_actor_id("spawn-test-actor", "test-node");
+    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
     .await
     .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
-        "spawn-test-actor@test-node".to_string(),
+        actor_id.clone(),
         behavior,
         mailbox,
         "default".to_string(),
@@ -105,7 +104,7 @@ async fn test_lifecycle_event_full_spawn_sequence() {
             .expect("Channel closed before receiving Created event")
     };
 
-    assert_eq!(created_event.actor_id, "spawn-test-actor@test-node");
+    assert_eq!(created_event.actor_id, actor_id.to_string());
     assert!(created_event.timestamp.is_some());
     assert!(matches!(
         created_event.event_type,
@@ -121,7 +120,7 @@ async fn test_lifecycle_event_full_spawn_sequence() {
             .expect("Channel closed before receiving Starting event")
     };
 
-    assert_eq!(starting_event.actor_id, "spawn-test-actor@test-node");
+    assert_eq!(starting_event.actor_id, actor_id.to_string());
     assert!(starting_event.timestamp.is_some());
     assert!(matches!(
         starting_event.event_type,
@@ -137,7 +136,7 @@ async fn test_lifecycle_event_full_spawn_sequence() {
             .expect("Channel closed before receiving Activated event")
     };
 
-    assert_eq!(activated_event.actor_id, "spawn-test-actor@test-node");
+    assert_eq!(activated_event.actor_id, actor_id.to_string());
     assert!(activated_event.timestamp.is_some());
     assert!(matches!(
         activated_event.event_type,
@@ -185,12 +184,13 @@ async fn test_lifecycle_event_subscription_receives_termination() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string())
+    let actor_id = test_runtime_actor_id("test-actor", "test-node");
+    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
         .await
         .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
-        "test-actor@test-node".to_string(),
+        actor_id.clone(),
         behavior,
         mailbox,
         "default".to_string(),
@@ -237,7 +237,7 @@ async fn test_lifecycle_event_subscription_receives_termination() {
     // Manually publish lifecycle event (watch_actor_termination would do this when join handle completes)
     let now = chrono::Utc::now();
     let lifecycle_event = ActorLifecycleEvent {
-        actor_id: actor_id.clone(),
+        actor_id: actor_id.to_string(),
         timestamp: Some(Timestamp {
             seconds: now.timestamp(),
             nanos: now.timestamp_subsec_nanos() as i32,
@@ -262,7 +262,7 @@ async fn test_lifecycle_event_subscription_receives_termination() {
         .expect("Channel closed before receiving event");
 
     // Verify event details
-    assert_eq!(event.actor_id, "test-actor@test-node");
+    assert_eq!(event.actor_id, actor_id.to_string());
     assert!(event.timestamp.is_some());
 
     // Check event type - should be Terminated with reason "normal"
@@ -308,15 +308,13 @@ async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(
-        MailboxConfig::default(),
-        "multicast-actor@test-node".to_string(),
-    )
+    let actor_id = test_runtime_actor_id("multicast-actor", "test-node");
+    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
     .await
     .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
-        "multicast-actor@test-node".to_string(),
+        actor_id.clone(),
         behavior,
         mailbox,
         "default".to_string(),
@@ -362,7 +360,7 @@ async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
     // Manually publish lifecycle event (watch_actor_termination would do this when join handle completes)
     let now = chrono::Utc::now();
     let lifecycle_event = ActorLifecycleEvent {
-        actor_id: actor_id.clone(),
+        actor_id: actor_id.to_string(),
         timestamp: Some(Timestamp {
             seconds: now.timestamp(),
             nanos: now.timestamp_subsec_nanos() as i32,
@@ -399,9 +397,9 @@ async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
         .expect("OpenTelemetry channel closed");
 
     // Verify all three received the same actor_id
-    assert_eq!(prometheus_event.actor_id, "multicast-actor@test-node");
-    assert_eq!(statsd_event.actor_id, "multicast-actor@test-node");
-    assert_eq!(otel_event.actor_id, "multicast-actor@test-node");
+    assert_eq!(prometheus_event.actor_id, actor_id.to_string());
+    assert_eq!(statsd_event.actor_id, actor_id.to_string());
+    assert_eq!(otel_event.actor_id, actor_id.to_string());
 
     // Verify all are Terminated events
     use plexspaces_proto::actor_lifecycle_event::EventType;
@@ -443,15 +441,13 @@ async fn test_lifecycle_event_timestamps() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(
-        MailboxConfig::default(),
-        "timestamp-actor@test-node".to_string(),
-    )
+    let actor_id = test_runtime_actor_id("timestamp-actor", "test-node");
+    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
     .await
     .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
-        "timestamp-actor@test-node".to_string(),
+        actor_id.clone(),
         behavior,
         mailbox,
         "default".to_string(),
@@ -514,15 +510,13 @@ async fn test_lifecycle_event_unsubscribe() {
 
     // Create and spawn actor
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(
-        MailboxConfig::default(),
-        "unsubscribe-actor@test-node".to_string(),
-    )
+    let actor_id = test_runtime_actor_id("unsubscribe-actor", "test-node");
+    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
     .await
     .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
-        "unsubscribe-actor@test-node".to_string(),
+        actor_id.clone(),
         behavior,
         mailbox,
         "default".to_string(),
@@ -648,12 +642,13 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
 
     // Spawn actor on node2
     let behavior = Box::new(MockBehavior::new());
-    let mailbox = Mailbox::new(MailboxConfig::default(), "remote-worker@node2".to_string())
+    let actor_id = ActorId::new("remote-worker", "gen_server", "default", "node2").unwrap();
+    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
         .await
         .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
-        "remote-worker@node2".to_string(),
+        actor_id.clone(),
         behavior,
         mailbox,
         "default".to_string(),
@@ -700,7 +695,7 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
     // Manually publish lifecycle event (watch_actor_termination would do this when join handle completes)
     let now = chrono::Utc::now();
     let lifecycle_event = ActorLifecycleEvent {
-        actor_id: actor_id.clone(),
+        actor_id: actor_id.to_string(),
         timestamp: Some(Timestamp {
             seconds: now.timestamp(),
             nanos: now.timestamp_subsec_nanos() as i32,
@@ -725,7 +720,7 @@ async fn test_remote_actor_termination_with_lifecycle_events() {
         .expect("Channel closed before receiving event");
 
     // Verify event details
-    assert_eq!(event.actor_id, "remote-worker@node2");
+    assert_eq!(event.actor_id, actor_id.to_string());
     assert!(event.timestamp.is_some());
 
     // Check event type

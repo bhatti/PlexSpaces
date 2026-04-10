@@ -11,7 +11,7 @@
 //! - ActorRegistry for ask (request-reply) via registered ActorRef
 //! - ActorFactory for stop_actor with tenant isolation
 //!
-//! Actor IDs follow the `name:namespace@node_id` format (e.g.,
+//! Actor IDs follow the canonical `{name}//{actor_type}::{namespace}@{node_id}` format (e.g.,
 //! `parameter-server:ray-ps@test-node`). The actor registry stores and looks
 //! up actors by their full ID — callers must always provide fully-qualified
 //! IDs. The WASM host bridge passes IDs through unchanged.
@@ -344,7 +344,7 @@ impl MessageSender for ActorServiceMessageSender {
 
     #[instrument(skip(self), fields(from = %from, actor_id = %actor_id))]
     async fn stop_actor(&self, from: &str, actor_id: &str, _timeout_ms: u64) -> Result<(), String> {
-        use plexspaces_core::{actor_id::parse_actor_id, ActorFactory, ActorId, RequestContext};
+        use plexspaces_core::{ActorFactory, ActorId, RequestContext};
 
         let actor_factory: Arc<dyn ActorFactory> =
             self.service_locator
@@ -355,17 +355,18 @@ impl MessageSender for ActorServiceMessageSender {
         // Resolve caller scope from the registered sender so stop_actor respects
         // tenant and namespace boundaries without relying on parallel registry maps.
         let ctx = if let Some(registry) = self.service_locator.actor_registry().await {
-            if let Some(sender) = registry.lookup_actor(&from.to_string()).await {
-                let tenant_id = sender.tenant_id().unwrap_or_default().to_string();
-                let namespace = sender.namespace().unwrap_or_default().to_string();
-                RequestContext::new_without_auth(tenant_id, namespace)
-            } else if let Some((tenant_id, namespace)) =
-                registry.get_actor_metadata(&from.to_string()).await
-            {
-                RequestContext::new_without_auth(tenant_id, namespace)
-            } else if let Ok(parsed) = parse_actor_id(from) {
-                let namespace = parsed.namespace.unwrap_or_default();
-                RequestContext::new_without_auth(String::new(), namespace)
+            if let Ok(sender_id) = ActorId::from_canonical(from) {
+                if let Some(sender) = registry.lookup_actor(&sender_id).await {
+                    let tenant_id = sender.tenant_id().unwrap_or_default().to_string();
+                    let namespace = sender.namespace().unwrap_or_default().to_string();
+                    RequestContext::new_without_auth(tenant_id, namespace)
+                } else if let Some((tenant_id, namespace)) =
+                    registry.get_actor_metadata(&sender_id).await
+                {
+                    RequestContext::new_without_auth(tenant_id, namespace)
+                } else {
+                    RequestContext::new_without_auth(String::new(), sender_id.namespace().to_string())
+                }
             } else {
                 RequestContext::new_without_auth(String::new(), String::new())
             }
@@ -373,7 +374,8 @@ impl MessageSender for ActorServiceMessageSender {
             RequestContext::new_without_auth(String::new(), String::new())
         };
 
-        let actor_id_typed = ActorId::from(actor_id.to_string());
+        let actor_id_typed = ActorId::from_canonical(actor_id)
+            .map_err(|e| format!("Invalid canonical actor ID '{actor_id}': {e}"))?;
         actor_factory
             .stop_actor(&ctx, &actor_id_typed)
             .await
@@ -397,8 +399,10 @@ impl MessageSender for ActorServiceMessageSender {
             .await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
 
-        let actor1_id = ActorId::from(actor_id.to_string());
-        let actor2_id = ActorId::from(linked_actor_id.to_string());
+        let actor1_id = ActorId::from_canonical(actor_id)
+            .map_err(|e| format!("Invalid canonical actor ID '{actor_id}': {e}"))?;
+        let actor2_id = ActorId::from_canonical(linked_actor_id)
+            .map_err(|e| format!("Invalid canonical linked actor ID '{linked_actor_id}': {e}"))?;
 
         actor_registry
             .link(&actor1_id, &actor2_id)
@@ -424,8 +428,10 @@ impl MessageSender for ActorServiceMessageSender {
             .await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
 
-        let actor1_id = ActorId::from(actor_id.to_string());
-        let actor2_id = ActorId::from(linked_actor_id.to_string());
+        let actor1_id = ActorId::from_canonical(actor_id)
+            .map_err(|e| format!("Invalid canonical actor ID '{actor_id}': {e}"))?;
+        let actor2_id = ActorId::from_canonical(linked_actor_id)
+            .map_err(|e| format!("Invalid canonical linked actor ID '{linked_actor_id}': {e}"))?;
 
         actor_registry
             .unlink(&actor1_id, &actor2_id)
@@ -448,8 +454,10 @@ impl MessageSender for ActorServiceMessageSender {
             .await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
 
-        let target_id = ActorId::from(actor_id.to_string());
-        let monitor_id = ActorId::from(from.to_string());
+        let target_id = ActorId::from_canonical(actor_id)
+            .map_err(|e| format!("Invalid canonical actor ID '{actor_id}': {e}"))?;
+        let monitor_id = ActorId::from_canonical(from)
+            .map_err(|e| format!("Invalid canonical monitor actor ID '{from}': {e}"))?;
         let monitor_ref = ulid::Ulid::new().to_string();
 
         // Create a channel for termination notifications
@@ -532,8 +540,10 @@ impl MessageSender for ActorServiceMessageSender {
                 .await
                 .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
 
-            let target_id = ActorId::from(actor_id.to_string());
-            let monitor_id = ActorId::from(from.to_string());
+            let target_id = ActorId::from_canonical(actor_id)
+                .map_err(|e| format!("Invalid canonical actor ID '{actor_id}': {e}"))?;
+            let monitor_id = ActorId::from_canonical(from)
+                .map_err(|e| format!("Invalid canonical monitor actor ID '{from}': {e}"))?;
 
             actor_registry
                 .demonitor(&target_id, &monitor_id, &monitor_ref_string)

@@ -64,13 +64,13 @@ async fn test_virtual_actor_type_registration_on_spawn() {
 
     // Spawn first actor with virtual_actor facet
     // This should automatically register the actor type
-    let actor_id1: ActorId = format!("test-actor-1@{}", node.id()).parse().unwrap();
+    let actor_name1 = "test-actor-1";
     let actor1 = TestVirtualActor::new(42);
 
     let actor_ref1 = spawn(
         &ctx,
         service_locator.clone(),
-        actor_id1.clone(),
+        actor_name1,
         "test-namespace",
         actor1,
     )
@@ -127,13 +127,13 @@ async fn test_virtual_actor_type_registration_on_spawn() {
 
     // Now spawn a different actor ID of the same type
     // This should work because the type is registered
-    let actor_id2: ActorId = format!("test-actor-2@{}", node.id()).parse().unwrap();
+    let actor_name2 = "test-actor-2";
     let actor2 = TestVirtualActor::new(100);
 
     let actor_ref2 = spawn(
         &ctx,
         service_locator.clone(),
-        actor_id2.clone(),
+        actor_name2,
         "test-namespace",
         actor2,
     )
@@ -150,7 +150,7 @@ async fn test_virtual_actor_type_registration_on_spawn() {
 
     // Test that we can activate a new actor ID of the same type
     // (This tests that type-level registration enables activation)
-    let _actor_id3: ActorId = format!("test-actor-3@{}", node.id()).parse().unwrap();
+    let actor_name3 = "test-actor-3";
 
     // Check if actor type is virtual (should be, because we registered it)
     assert!(
@@ -171,8 +171,13 @@ async fn test_virtual_actor_type_registration_on_spawn() {
 
     // Verify type-level registration enables activation for a different actor ID of the same type.
     // Build actor_id3 in full format so the node can resolve type and namespace for get_or_activate.
-    let actor_id3_str = format!("test-actor-3//GenServer::test-namespace@{}", node.id());
-    let actor_id3: ActorId = actor_id3_str.parse().expect("invalid actor_id");
+    let actor_id3 = ActorId::new(
+        actor_name3,
+        "GenServer",
+        "test-namespace",
+        node.id().to_string(),
+    )
+        .expect("invalid actor_id");
     let actor_ref3 = plexspaces_sdk::ActorRef::remote(
         actor_id3.clone(),
         "test-tenant".to_string(),
@@ -211,13 +216,13 @@ async fn test_virtual_actor_type_registration_idempotent() {
     let ctx = RequestContext::new_without_auth("test-tenant".into(), "test-namespace".into());
 
     // Spawn first actor - registers type
-    let actor_id1: ActorId = format!("actor-1@{}", node.id()).parse().unwrap();
+    let actor_name1 = "actor-1";
     let actor1 = TestVirtualActor::new(1);
 
     spawn(
         &ctx,
         service_locator.clone(),
-        actor_id1.clone(),
+        actor_name1,
         "test-namespace",
         actor1,
     )
@@ -232,13 +237,13 @@ async fn test_virtual_actor_type_registration_idempotent() {
         .unwrap();
 
     // Spawn second actor of same type - should overwrite (idempotent)
-    let actor_id2: ActorId = format!("actor-2@{}", node.id()).parse().unwrap();
+    let actor_name2 = "actor-2";
     let actor2 = TestVirtualActor::new(2);
 
     spawn(
         &ctx,
         service_locator.clone(),
-        actor_id2.clone(),
+        actor_name2,
         "test-namespace",
         actor2,
     )

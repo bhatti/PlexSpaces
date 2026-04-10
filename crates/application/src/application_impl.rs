@@ -153,7 +153,7 @@ impl SpecApplication {
         service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
         supervisor_spec: &SupervisorSpec,
     ) -> Result<Vec<String>, ApplicationError> {
-        let mut actor_ids = Vec::new();
+        let mut actor_ids: Vec<String> = Vec::new();
         let spawned_actor_ids = self.spawned_actor_ids.clone();
 
         info!(
@@ -201,7 +201,6 @@ impl SpecApplication {
 
             // Use child.id as actor_type (start_module removed - was confusing)
             let actor_type = child.id.clone();
-            let actor_id = format!("{}@{}", child.id, node.id());
 
             // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
             // Use ActorFactory::spawn_actor() which supports facets directly.
@@ -212,6 +211,18 @@ impl SpecApplication {
             let tenant_id = String::new();
             let namespace = self.spec.namespace.clone();
             let ctx = RequestContext::new_without_auth(tenant_id, namespace);
+            let actor_id = plexspaces_core::ActorId::new(
+                &child.id,
+                &actor_type,
+                &self.spec.namespace,
+                node.id(),
+            )
+            .map_err(|e| {
+                ApplicationError::ConfigError(format!(
+                    "Invalid child actor ID for '{}' in application '{}': {}",
+                    child.id, self.spec.name, e
+                ))
+            })?;
 
             // Get ActorFactory from ApplicationNode (avoids circular dependency - application can't depend on services)
             let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = node.actor_factory().await
@@ -258,9 +269,7 @@ impl SpecApplication {
             };
 
             // Spawn actor with facets using ActorFactory
-            let actor_id_parsed = actor_id.parse().map_err(|e| {
-                ApplicationError::StartupFailed(format!("Invalid actor ID '{}': {}", actor_id, e))
-            })?;
+            let actor_id_parsed = actor_id.clone();
 
             // Check if this child is a supervisor - if so, recursively spawn its children
             use plexspaces_proto::application::v1::ChildType as ProtoChildType;
@@ -290,7 +299,7 @@ impl SpecApplication {
                             facet_count = child.facets.len(),
                             "Spawned supervisor actor"
                         );
-                        actor_ids.push(actor_id);
+                        actor_ids.push(actor_id.to_string());
                     }
                     Err(e) => {
                         error!(
@@ -347,7 +356,7 @@ impl SpecApplication {
                             facet_count = child.facets.len(),
                             "Spawned actor with facets"
                         );
-                        actor_ids.push(actor_id);
+                        actor_ids.push(actor_id.to_string());
                     }
                     Err(e) => {
                         let err_str = e.to_string();
@@ -666,7 +675,15 @@ impl Application for SpecApplication {
                 );
 
                 for actor_id in actor_ids.iter().rev() {
-                    if let Err(e) = actor_factory.stop_actor(&ctx, actor_id).await {
+                    let actor_id = plexspaces_core::ActorId::from_canonical(actor_id).map_err(
+                        |e| {
+                            ApplicationError::ActorStopFailed(
+                                actor_id.clone(),
+                                format!("Invalid canonical actor ID during shutdown: {}", e),
+                            )
+                        },
+                    )?;
+                    if let Err(e) = actor_factory.stop_actor(&ctx, &actor_id).await {
                         error!(
                             application = %self.spec.name,
                             actor_id = %actor_id,

@@ -432,13 +432,13 @@ fn create_processor_spec(
     service_locator: Arc<dyn plexspaces_core::ServiceLocator>,
 ) -> ChildSpec {
     let id = processor_id.to_string();
-    let id_for_factory = id.clone();
+    let name_for_factory = id.clone();
     let ctx_for_factory = ctx.clone();
     let service_locator_for_factory = service_locator.clone();
     let event_type_for_factory = event_type.clone();
     
     let start_fn: StartFn = Arc::new(move || {
-        let actor_id = id_for_factory.clone();
+        let actor_name = name_for_factory.clone();
         let ctx = ctx_for_factory.clone();
         let service_locator = service_locator_for_factory.clone();
         let event_type = event_type_for_factory.clone();
@@ -458,12 +458,11 @@ fn create_processor_spec(
                 .ok_or_else(|| ActorError::InvalidState("ActorRegistry not found".to_string()))?;
             let node_id = actor_registry.local_node_id().to_string();
             
-            // Use ActorBuilder to create actor (matches existing design patterns)
-            // ActorBuilder handles mailbox creation, context setup, etc.
-            // Note: ActorBuilder extracts node_id from actor_id if it has @node format
-            let actor_instance = StreamProcessor::new(&actor_id, event_type);
+            // Use ActorBuilder to create actor from the logical actor name.
+            // ActorBuilder handles mailbox creation, context setup, and structured ID construction.
+            let actor_instance = StreamProcessor::new(&actor_name, event_type);
             let mut actor = ActorBuilder::new(Box::new(actor_instance))
-                .with_id(actor_id.clone())
+                .with_name(actor_name)
                 .with_namespace(ctx.namespace().to_string())
                 .with_tenant_id(ctx.tenant_id().to_string())
                 .build()
@@ -484,7 +483,7 @@ fn create_processor_spec(
             
             // Create ActorRef for supervisor (core ActorRef is just identity, not message sender)
             // Supervisor handles mailbox internally - we just need the identity
-            let actor_ref = ActorRef::new(actor_id.clone())
+            let actor_ref = ActorRef::new(actor.id().clone())
                 .map_err(|e| ActorError::InvalidState(format!("Failed to create ActorRef: {}", e)))?;
             
             Ok(StartedChild::Worker { actor, actor_ref })

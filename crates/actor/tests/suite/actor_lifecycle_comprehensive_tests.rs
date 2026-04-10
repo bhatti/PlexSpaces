@@ -39,6 +39,16 @@ use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use ulid::Ulid;
 
+fn linked_actor_id(name: &str) -> ActorId {
+    ActorId::new(
+        name.to_string(),
+        "GenServer".to_string(),
+        "default".to_string(),
+        "test-node".to_string(),
+    )
+    .expect("linked actor id should be valid")
+}
+
 // =============================================================================
 // LIFECYCLE HOOKS TEST ACTORS (from lifecycle_hooks_tests.rs)
 // =============================================================================
@@ -367,7 +377,7 @@ async fn test_handle_exit_called_when_linked_actor_dies() {
     let mut actor_impl_test = TestLifecycleActor::new();
     let handle_exit_called_test = actor_impl_test.handle_exit_called.clone();
     let handle_exit_action_test = actor_impl_test.handle_exit_action.clone();
-    let from = ActorId::from("linked-actor");
+    let from = linked_actor_id("linked-actor");
     let reason = ExitReason::Error("linked actor crashed".to_string());
 
     let result = ActorTrait::handle_exit(&mut actor_impl_test, &ctx, &from, &reason).await;

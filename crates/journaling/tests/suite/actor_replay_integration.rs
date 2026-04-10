@@ -22,7 +22,7 @@ mod actor_integration_tests {
     use plexspaces_actor::Actor as ActorStruct;
     use plexspaces_core::Message;
     use plexspaces_core::{
-        Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, ServiceLocator,
+        Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, ServiceLocator,
     };
     #[cfg(feature = "postgres-backend")]
     use plexspaces_journaling::sql::PostgresJournalStorage;
@@ -36,8 +36,12 @@ mod actor_integration_tests {
 
     /// `ActorStruct::new` uses a stub service locator without an actor registry.
     /// `start` / facet attach register the actor and require a real `ServiceLocator` (same pattern as `plexspaces_actor` unit tests).
+    fn test_actor_id(name: &str, namespace: &str) -> ActorId {
+        ActorId::new(name, "Counter", namespace, "test-node").expect("valid actor id")
+    }
+
     async fn actor_with_service_locator(
-        id: String,
+        id: ActorId,
         behavior: Box<dyn plexspaces_core::Actor>,
         mailbox: Mailbox,
         tenant_id: String,
@@ -46,11 +50,7 @@ mod actor_integration_tests {
         let locator_impl =
             plexspaces_node::service_locator_helpers::create_default_service_locator(None, None)
                 .await;
-        let node_id = ServiceLocator::get_node_config(locator_impl.as_ref())
-            .await
-            .map(|n| n.id)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "test-node".to_string());
+        let node_id = id.node_id().to_string();
         let service_locator: Arc<dyn plexspaces_core::ServiceLocator> = locator_impl;
         let context = Arc::new(ActorContext::new(
             node_id,
@@ -127,7 +127,7 @@ mod actor_integration_tests {
         let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor".to_string())
             .await
             .unwrap();
-        let actor_id = "counter-actor".to_string();
+        let actor_id = test_actor_id("counter-actor", "default");
 
         // Create actor
         let mut actor = actor_with_service_locator(
@@ -159,7 +159,7 @@ mod actor_integration_tests {
         for i in 1..=5 {
             let mut msg = create_test_message(format!("increment-{}", i).into_bytes());
             msg.message_type = "increment".to_string();
-            msg.receiver_id = actor_id.clone();
+            msg.receiver_id = actor_id.to_string();
 
             // Send message to actor (this will be journaled by DurabilityFacet)
             actor.send(msg).await.unwrap();
@@ -172,7 +172,7 @@ mod actor_integration_tests {
         storage.flush().await.unwrap();
 
         // Verify journal entries
-        let entries = storage.replay_from(&actor_id, 0).await.unwrap();
+        let entries = storage.replay_from(&actor_id.to_string(), 0).await.unwrap();
         assert!(entries.len() >= 5, "Should have at least 5 journal entries");
 
         // Stop actor
@@ -180,7 +180,7 @@ mod actor_integration_tests {
 
         // Restart actor (simulate crash recovery)
         let behavior2 = Box::new(CounterActor::new());
-        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone())
+        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.to_string())
             .await
             .unwrap();
         let mut actor2 = actor_with_service_locator(
@@ -209,7 +209,7 @@ mod actor_integration_tests {
         actor2.start().await.unwrap();
 
         // Verify entries still exist
-        let entries_after = storage.replay_from(&actor_id, 0).await.unwrap();
+        let entries_after = storage.replay_from(&actor_id.to_string(), 0).await.unwrap();
         assert!(
             entries_after.len() >= 5,
             "Entries should persist after restart"
@@ -242,7 +242,7 @@ mod actor_integration_tests {
         let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor-2".to_string())
             .await
             .unwrap();
-        let actor_id = "counter-actor-2".to_string();
+        let actor_id = test_actor_id("counter-actor-2", "default");
 
         let mut actor = actor_with_service_locator(
             actor_id.clone(),
@@ -270,7 +270,7 @@ mod actor_integration_tests {
         for i in 1..=10 {
             let mut msg = create_test_message(format!("increment-{}", i).into_bytes());
             msg.message_type = "increment".to_string();
-            msg.receiver_id = actor_id.clone();
+            msg.receiver_id = actor_id.to_string();
             actor.send(msg).await.unwrap();
         }
 
@@ -279,7 +279,7 @@ mod actor_integration_tests {
 
         // Create checkpoint manually
         let checkpoint = Checkpoint {
-            actor_id: actor_id.clone(),
+            actor_id: actor_id.to_string(),
             sequence: 20, // 10 messages * 2 entries
             timestamp: Some(plexspaces_proto::prost_types::Timestamp::from(
                 std::time::SystemTime::now(),
@@ -295,7 +295,7 @@ mod actor_integration_tests {
         for i in 11..=15 {
             let mut msg = create_test_message(format!("increment-{}", i).into_bytes());
             msg.message_type = "increment".to_string();
-            msg.receiver_id = actor_id.clone();
+            msg.receiver_id = actor_id.to_string();
             actor.send(msg).await.unwrap();
         }
 
@@ -306,7 +306,7 @@ mod actor_integration_tests {
 
         // Restart actor
         let behavior2 = Box::new(CounterActor::new());
-        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone())
+        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.to_string())
             .await
             .unwrap();
         let mut actor2 = actor_with_service_locator(
@@ -332,7 +332,10 @@ mod actor_integration_tests {
         actor2.start().await.unwrap();
 
         // Verify checkpoint exists (may be higher due to automatic checkpointing)
-        let checkpoint_after = storage.get_latest_checkpoint(&actor_id).await.unwrap();
+        let checkpoint_after = storage
+            .get_latest_checkpoint(&actor_id.to_string())
+            .await
+            .unwrap();
         assert!(
             checkpoint_after.sequence >= 20,
             "Checkpoint should be at sequence >= 20 (got {})",
@@ -368,7 +371,7 @@ mod actor_integration_tests {
         let mailbox = Mailbox::new(mailbox_config_default(), "counter-actor-3".to_string())
             .await
             .unwrap();
-        let actor_id = "counter-actor-3".to_string();
+        let actor_id = test_actor_id("counter-actor-3", "default");
 
         let mut actor = actor_with_service_locator(
             actor_id.clone(),
@@ -403,7 +406,7 @@ mod actor_integration_tests {
         for i in 1..=5 {
             let mut msg = create_test_message(format!("increment-{}", i).into_bytes());
             msg.message_type = "increment".to_string();
-            msg.receiver_id = actor_id.clone();
+            msg.receiver_id = actor_id.to_string();
             actor.send(msg).await.unwrap();
         }
 
@@ -412,7 +415,7 @@ mod actor_integration_tests {
 
         // Create checkpoint with state
         let checkpoint = Checkpoint {
-            actor_id: actor_id.clone(),
+            actor_id: actor_id.to_string(),
             sequence: 10,
             timestamp: Some(plexspaces_proto::prost_types::Timestamp::from(
                 std::time::SystemTime::now(),
@@ -431,7 +434,7 @@ mod actor_integration_tests {
         let behavior2 = Box::new(CounterActorWrapper {
             counter: Arc::clone(&counter2),
         });
-        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.clone())
+        let mailbox2 = Mailbox::new(mailbox_config_default(), actor_id.to_string())
             .await
             .unwrap();
         let mut actor2 = actor_with_service_locator(

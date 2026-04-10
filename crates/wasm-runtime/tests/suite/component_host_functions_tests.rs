@@ -393,7 +393,8 @@ mod tests {
     #[tokio::test]
     async fn test_tuplespace_impl_placeholders() {
         // ARRANGE
-        let mut tuplespace = TuplespaceImpl::new(None, "test-actor".to_string());
+        let actor_id = ActorId::from("test-actor".to_string());
+        let mut tuplespace = TuplespaceImpl::new(None, actor_id);
 
         // ACT & ASSERT: Without a tuplespace provider, operations return errors
         let write_result = tuplespace.write(test_context("", ""), vec![]).await;
@@ -483,7 +484,8 @@ mod tests {
     async fn test_durability_impl_placeholders() {
         // ARRANGE
         let host_functions = Arc::new(HostFunctions::new());
-        let mut durability = DurabilityImpl::new("test-actor".to_string(), host_functions);
+        let actor_id = ActorId::from("test-actor".to_string());
+        let mut durability = DurabilityImpl::new(actor_id, host_functions);
 
         // ACT & ASSERT: Without journal storage, persist returns error
         let persist_result = durability

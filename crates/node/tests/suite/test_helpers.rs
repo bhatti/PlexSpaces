@@ -39,10 +39,16 @@ pub fn app_request_with_tenant<T: Send>(body: T) -> Request<T> {
     req
 }
 
-fn parse_node_id(actor_id: &ActorId) -> Option<String> {
-    plexspaces_core::actor_id::parse_actor_id(actor_id)
-        .ok()
-        .map(|parsed| parsed.node_id)
+/// Build a canonical actor ID for tests that register concrete runtime actors.
+pub fn test_runtime_actor_id(name: &str, node_id: &str) -> ActorId {
+    ActorId::new(name, "gen_server", "default", node_id)
+        .expect("test runtime actor IDs must be valid")
+}
+
+/// Build a canonical actor ID for generic node integration tests.
+pub fn test_actor_id(name: &str, node_id: &str) -> ActorId {
+    ActorId::new(name, "test_actor", "default", node_id)
+        .expect("test actor IDs must be valid")
 }
 
 async fn actor_exists_locally(actor_registry: &ActorRegistry, actor_id: &ActorId) -> bool {
@@ -64,9 +70,6 @@ pub async fn lookup_actor_ref(
     node: &Node,
     actor_id: &ActorId,
 ) -> Result<Option<ActorRef>, plexspaces_node::NodeError> {
-    // Normalize actor ID to include node ID if missing
-    let actor_id = normalize_actor_id(node, actor_id);
-
     // Get ActorRegistry from ServiceLocator
     let actor_registry: Arc<ActorRegistry> = node
         .service_locator()
@@ -76,7 +79,7 @@ pub async fn lookup_actor_ref(
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
 
-    if actor_exists_locally(&actor_registry, &actor_id).await {
+    if actor_exists_locally(&actor_registry, actor_id).await {
         Ok(Some(ActorRef::remote(
             actor_id.clone(),
             "".to_string(),
@@ -85,7 +88,7 @@ pub async fn lookup_actor_ref(
             node.service_locator().clone(),
         )))
     } else {
-        let node_id = parse_node_id(&actor_id).unwrap_or_else(|| node.id().as_str().to_string());
+        let node_id = actor_id.node_id().to_string();
         if node_id != node.id().as_str() {
             Ok(Some(ActorRef::remote(
                 actor_id.clone(),
@@ -150,9 +153,6 @@ pub async fn activate_virtual_actor(
     node: &Node,
     actor_id: &ActorId,
 ) -> Result<ActorRef, plexspaces_node::NodeError> {
-    // Normalize actor ID
-    let actor_id = normalize_actor_id(node, actor_id);
-
     // Get ActorFactory from ServiceLocator
     let actor_factory: Arc<dyn plexspaces_actor::ActorFactory> = node
         .service_locator()
@@ -164,7 +164,7 @@ pub async fn activate_virtual_actor(
 
     // Use ActorFactory to activate
     actor_factory
-        .activate_virtual_actor(&actor_id)
+        .activate_virtual_actor(actor_id)
         .await
         .map_err(|e| {
             plexspaces_node::NodeError::ActorRegistrationFailed(
@@ -174,9 +174,9 @@ pub async fn activate_virtual_actor(
         })?;
 
     // Get ActorRef from ActorRegistry
-    lookup_actor_ref(node, &actor_id)
+    lookup_actor_ref(node, actor_id)
         .await?
-        .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id))
+        .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.to_string()))
 }
 
 /// Get or activate an actor (replaces Node::get_or_activate_actor)
@@ -189,9 +189,6 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = Result<plexspaces_actor::Actor, plexspaces_node::NodeError>>,
 {
-    // Normalize actor ID
-    let actor_id = normalize_actor_id(node, &actor_id);
-
     // Get ActorRegistry and ActorFactory from ServiceLocator
     let actor_registry: Arc<ActorRegistry> = node
         .service_locator()
@@ -213,10 +210,9 @@ where
         // Actor exists - get ActorRef
         lookup_actor_ref(node, &actor_id)
             .await?
-            .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.clone()))
+            .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.to_string()))
     } else {
-        let parsed_node_id =
-            parse_node_id(&actor_id).unwrap_or_else(|| node.id().as_str().to_string());
+        let parsed_node_id = actor_id.node_id().to_string();
         if parsed_node_id != node.id().as_str() {
             Ok(ActorRef::remote(
                 actor_id.clone(),
@@ -267,7 +263,7 @@ where
             // Registration is synchronous - get ActorRef from registry to ensure we have the correct ID (normalized)
             lookup_actor_ref(node, &actor_id)
                 .await?
-                .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.clone()))
+                .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.to_string()))
         }
     }
 }
@@ -283,12 +279,12 @@ pub fn spawn_actor_builder_helper(_node: &Node) {
 /// Helper to register an actor with MessageSender (replaces register_local)
 pub async fn register_actor_with_message_sender(
     node: &Node,
-    actor_id: &str,
+    actor_id: &ActorId,
     mailbox: Arc<plexspaces_mailbox::Mailbox>,
 ) {
     use plexspaces_core::MessageSender;
     let wrapper = Arc::new(ActorRef::local(
-        actor_id.to_string(),
+        actor_id.clone(),
         String::new(),
         String::new(),
         mailbox,
@@ -309,9 +305,9 @@ pub async fn register_actor_with_message_sender(
     actor_registry
         .register_actor(
             &ctx,
-            actor_id.to_string(),
+            actor_id.clone(),
             wrapper,
-            "TestActor".to_string(),
+            actor_id.actor_type().to_string(),
             None,
             None,
             None,
@@ -345,9 +341,6 @@ pub async fn find_actor_helper(
     node: &Node,
     actor_id: &ActorId,
 ) -> Result<plexspaces_node::ActorLocation, plexspaces_node::NodeError> {
-    // Normalize actor ID
-    let actor_id = normalize_actor_id(node, actor_id);
-
     // Get ActorRegistry from ServiceLocator
     let actor_registry: Arc<ActorRegistry> = node
         .service_locator()
@@ -357,16 +350,16 @@ pub async fn find_actor_helper(
             plexspaces_node::NodeError::ConfigError("ActorRegistry not found".to_string())
         })?;
 
-    if actor_exists_locally(&actor_registry, &actor_id).await {
+    if actor_exists_locally(&actor_registry, actor_id).await {
         Ok(plexspaces_node::ActorLocation::Local(actor_id.clone()))
     } else {
-        let node_id = parse_node_id(&actor_id).unwrap_or_else(|| node.id().as_str().to_string());
+        let node_id = actor_id.node_id().to_string();
         if node_id != node.id().as_str() {
             Ok(plexspaces_node::ActorLocation::Remote(
                 plexspaces_node::NodeId::from(node_id),
             ))
         } else {
-            Err(plexspaces_node::NodeError::ActorNotFound(actor_id))
+            Err(plexspaces_node::NodeError::ActorNotFound(actor_id.to_string()))
         }
     }
 }
@@ -424,24 +417,7 @@ pub async fn spawn_actor_helper(
         })?;
 
     // Get ActorRef from ActorRegistry (should be local since we just spawned it)
-    // Note: actor_id may have been normalized by spawn_built_actor, so we use the original
-    // and let lookup_actor_ref normalize it
     lookup_actor_ref(node, &actor_id)
         .await?
-        .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id))
-}
-
-/// Normalize actor ID to include node ID if missing
-fn normalize_actor_id(node: &Node, actor_id: &ActorId) -> ActorId {
-    if let Ok((actor_name, node_id)) = plexspaces_core::ActorRef::parse_actor_id(actor_id) {
-        // Actor ID already has @ format
-        if node_id == node.id().as_str() {
-            actor_id.clone()
-        } else {
-            format!("{}@{}", actor_name, node.id().as_str())
-        }
-    } else {
-        // Actor ID doesn't have @ format - append node ID
-        format!("{}@{}", actor_id, node.id().as_str())
-    }
+        .ok_or_else(|| plexspaces_node::NodeError::ActorNotFound(actor_id.to_string()))
 }

@@ -290,7 +290,7 @@ async fn main() -> Result<()> {
             SubscriptionPlan::premium()
         };
 
-        let actor_id = ActorId::from(format!("subscription-{}@billing-node", user_id));
+        let actor_name = format!("subscription-{}", user_id);
         
         // Create both facets for each subscription
         let timer_facet = Box::new(TimerFacet::new(serde_json::json!({}), 50, service_locator.clone())) as Box<dyn Facet>;
@@ -304,18 +304,18 @@ async fn main() -> Result<()> {
         let actor = SubscriptionActor::new(&user_id, &email, plan);
 
         // Spawn actor with both facets
-        let _actor_ref = spawn_with_facets(
+        let actor_ref = spawn_with_facets(
             &ctx,
             service_locator.clone(),
-            &actor_id,
+            actor_name,
             "billing",
             actor,
             vec![timer_facet, reminder_facet],
         )
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to spawn actor {}: {}", actor_id, e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to spawn subscription actor for {}: {}", user_id, e))?;
 
-        subscription_ids.push(actor_id);
+        subscription_ids.push(actor_ref.id().clone());
         metrics_tracker.increment_message();
 
         if i < 3 || i == num_subscriptions - 1 {

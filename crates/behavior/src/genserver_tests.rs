@@ -104,7 +104,7 @@ mod tests {
                                     Some(msg.correlation_id.as_str())
                                 },
                                 &msg.sender_id,
-                                msg.receiver_id.clone(),
+                                ctx.actor_id().clone(),
                                 reply,
                             )
                             .await; // Ignore errors in tests
@@ -129,7 +129,7 @@ mod tests {
                             Some(msg.correlation_id.as_str())
                         },
                         &msg.sender_id,
-                        msg.receiver_id.clone(), // This actor's ID (the receiver of the original message)
+                        ctx.actor_id().clone(),
                         reply,
                     )
                     .await; // Ignore errors in tests

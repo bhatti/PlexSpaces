@@ -745,16 +745,22 @@ Actors are isolated:
 
 ### ActorId
 
-Unique identifier for actors in format `name@node_id`:
+Structured identifier for actors with canonical string form
+`name//actor_type::namespace@node_id`:
 
 ```rust
-type ActorId = String; // Format: "actor-name@node-id"
+pub struct ActorId {
+    name: String,
+    actor_type: String,
+    namespace: String,
+    node_id: String,
+}
 ```
 
 **Examples**:
-- `"counter@node1"` - Local actor
-- `"user-123@node2"` - Remote actor
-- `"virtual-actor@node1"` - Virtual actor (always addressable)
+- `"counter//gen_server::default@node1"` - Actor on the local node
+- `"user-123//session::prod@node2"` - Actor on a remote node
+- `"virtual-actor//virtual_counter::default@node1"` - Virtual actor identity
 
 ### ActorRef
 
@@ -762,18 +768,15 @@ Lightweight, location-transparent handle to an actor:
 
 ```rust
 pub struct ActorRef {
-    actor_id: ActorId,
-    namespace: String,      // Source of truth for namespace (from app/actor)
-    location: ActorLocation,
-    service_locator: Arc<ServiceLocator>,
+    id: ActorId,
 }
 ```
 
 **Operations**:
 - `tell(message)` - Fire-and-forget messaging
 - `ask(message, timeout)` - Request-reply messaging
-- `actor_id()` - Get actor identifier
-- `namespace()` - Get actor's namespace
+- `id()` - Get structured actor identity
+- `namespace()` - Get actor namespace from the identity
 
 **Multi-tenancy**:
 ```rust

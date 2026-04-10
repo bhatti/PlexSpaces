@@ -55,7 +55,7 @@ use tonic::Request;
 use wat;
 
 use super::test_helpers::{
-    app_request_with_tenant, get_or_activate_actor_helper, lookup_actor_ref,
+    app_request_with_tenant, get_or_activate_actor_helper, lookup_actor_ref, test_runtime_actor_id,
 };
 
 /// Helper to create a test message
@@ -124,7 +124,12 @@ impl GenServer for TestActor {
             ctx.send_reply(
                 correlation_id,
                 &msg.sender_id,
-                msg.receiver_id.clone(),
+                ActorId::from_canonical(&msg.receiver_id).map_err(|e| {
+                    BehaviorError::ProcessingError(format!(
+                        "Failed to parse sender actor id for reply: {}",
+                        e
+                    ))
+                })?,
                 reply_msg,
             )
             .await
@@ -242,7 +247,7 @@ async fn create_test_node_with_server() -> Arc<Node> {
 /// Helper to wait for actors to be registered (yield-based polling, no sleep)
 async fn wait_for_actors_registered(
     node: &Node,
-    expected_actor_ids: &[String],
+    expected_actor_ids: &[ActorId],
     timeout_duration: Duration,
 ) -> bool {
     let registry = node
@@ -256,10 +261,10 @@ async fn wait_for_actors_registered(
 
     while start.elapsed() < timeout_duration {
         let registered_ids = registry.registered_actor_ids().await;
-        let expected_set: std::collections::HashSet<String> =
+        let expected_set: std::collections::HashSet<ActorId> =
             expected_actor_ids.iter().cloned().collect();
-        let registered_set: std::collections::HashSet<String> =
-            registered_ids.iter().map(|id| id.to_string()).collect();
+        let registered_set: std::collections::HashSet<ActorId> =
+            registered_ids.iter().cloned().collect();
 
         if expected_set.is_subset(&registered_set) {
             return true;
@@ -280,7 +285,7 @@ async fn wait_for_actors_registered(
 /// Helper to wait for eager actors to be active
 async fn wait_for_eager_actors_active(
     node: &Node,
-    expected_actor_ids: &[String],
+    expected_actor_ids: &[ActorId],
     timeout_duration: Duration,
 ) -> bool {
     let registry = node
@@ -363,7 +368,7 @@ async fn test_eager_virtual_actors_activation() {
         let node_id = node.id().as_str();
 
         // Register eager virtual actor directly
-        let actor_id_1 = format!("eager-worker-1@{}", node_id);
+        let actor_id_1 = test_runtime_actor_id("eager-worker-1", node_id);
         let _actor_ref_1 = get_or_activate_actor_helper(&node, actor_id_1.clone(), || async {
             let behavior = Box::new(TestActor);
             let actor = ActorBuilder::new(behavior)
@@ -428,7 +433,7 @@ async fn test_lazy_virtual_actors_registration() {
         let node_id = node.id().as_str();
 
         // Register lazy virtual actor directly
-        let actor_id = format!("lazy-worker-1@{}", node_id);
+        let actor_id = test_runtime_actor_id("lazy-worker-1", node_id);
         let _actor_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
             let behavior = Box::new(TestActor);
             let actor = ActorBuilder::new(behavior)
@@ -495,7 +500,7 @@ async fn test_mixed_eager_lazy_virtual_actors() {
         let node_id = node.id().as_str();
 
         // Register eager virtual actor
-        let eager_id = format!("eager-mixed-1@{}", node_id);
+        let eager_id = test_runtime_actor_id("eager-mixed-1", node_id);
         let _eager_ref = get_or_activate_actor_helper(&node, eager_id.clone(), || async {
             let behavior = Box::new(TestActor);
             let actor = ActorBuilder::new(behavior)
@@ -527,7 +532,7 @@ async fn test_mixed_eager_lazy_virtual_actors() {
         .unwrap();
 
         // Register lazy virtual actor
-        let lazy_id = format!("lazy-mixed-1@{}", node_id);
+        let lazy_id = test_runtime_actor_id("lazy-mixed-1", node_id);
         let _lazy_ref = get_or_activate_actor_helper(&node, lazy_id.clone(), || async {
             let behavior = Box::new(TestActor);
             let actor = ActorBuilder::new(behavior)
@@ -696,7 +701,7 @@ async fn test_application_deployment_with_eager_virtual_actors() {
         }
 
         // Wait for actor to be registered (with longer timeout for WASM deployment)
-        let actor_id = format!("eager-worker-1@{}", node_id);
+        let actor_id = test_runtime_actor_id("eager-worker-1", node_id);
         eprintln!("🔵 [TEST] Waiting for actor to be registered: {}", actor_id);
         let registered =
             wait_for_actors_registered(&node, &[actor_id.clone()], Duration::from_secs(10)).await;

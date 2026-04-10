@@ -82,7 +82,7 @@ let reminder_facet = Box::new(ReminderFacet::new(storage, json!({}), 50)) as Box
 let actor_ref = spawn_with_facets(
     &ctx,
     service_locator,
-    "subscription-user-456@node",
+    "subscription-user-456",
     "billing",
     SubscriptionActor::new("user-456", plan),
     vec![timer_facet, reminder_facet],

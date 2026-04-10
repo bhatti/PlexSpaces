@@ -194,7 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn actor using SDK helper
     let actor_ref = spawn_with_facets(
         &ctx, service_locator.clone(),
-        ActorId::from("counter@node1"), "default",
+        "counter", "default",
         Counter::new(), vec![],
     ).await?;
     

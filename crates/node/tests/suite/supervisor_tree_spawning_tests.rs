@@ -27,7 +27,7 @@
 //! 6. The entire tree is spawned when an application is deployed
 
 use super::test_helpers::app_request_with_tenant;
-use plexspaces_core::{service_names, ApplicationManager, ServiceLocator};
+use plexspaces_core::{service_names, ActorId, ApplicationManager, ServiceLocator};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
@@ -149,7 +149,7 @@ async fn create_test_node_with_server() -> Arc<Node> {
 /// Helper to wait for actors to be registered (more reliable than activated check)
 async fn wait_for_actors_activated(
     node: &Node,
-    expected_actor_ids: &[String],
+    expected_actor_ids: &[ActorId],
     timeout_duration: Duration,
 ) -> bool {
     // Get ActorRegistry
@@ -166,10 +166,10 @@ async fn wait_for_actors_activated(
     while start.elapsed() < timeout_duration {
         // Check if all actors are registered (registered_actor_ids is updated when actors are spawned)
         let registered_ids = registry.registered_actor_ids().await;
-        let expected_set: std::collections::HashSet<String> =
+        let expected_set: std::collections::HashSet<ActorId> =
             expected_actor_ids.iter().cloned().collect();
-        let registered_set: std::collections::HashSet<String> =
-            registered_ids.iter().map(|id| id.to_string()).collect();
+        let registered_set: std::collections::HashSet<ActorId> =
+            registered_ids.iter().cloned().collect();
 
         if expected_set.is_subset(&registered_set) {
             return true;
@@ -192,6 +192,10 @@ async fn wait_for_actors_activated(
     }
 
     false
+}
+
+fn expected_runtime_actor_id(name: &str, node_id: &str) -> ActorId {
+    ActorId::new(name, name, "default", node_id).expect("supervision test actor IDs must be valid")
 }
 
 /// Helper to wait for application state using polling (no events available for this)
@@ -366,7 +370,7 @@ fn create_nested_supervisor_tree() -> SupervisorSpec {
 }
 
 /// Get all actor IDs from ActorRegistry
-async fn get_all_actor_ids(node: &Node) -> Vec<String> {
+async fn get_all_actor_ids(node: &Node) -> Vec<plexspaces_core::ActorId> {
     let actor_registry = node
         .service_locator()
         .actor_registry()
@@ -378,7 +382,7 @@ async fn get_all_actor_ids(node: &Node) -> Vec<String> {
 }
 
 /// Get actor type for an actor ID
-async fn get_actor_type(node: &Node, actor_id: &str) -> Option<String> {
+async fn get_actor_type(node: &Node, actor_id: &plexspaces_core::ActorId) -> Option<String> {
     let actor_registry = node
         .service_locator()
         .actor_registry()
@@ -387,7 +391,7 @@ async fn get_actor_type(node: &Node, actor_id: &str) -> Option<String> {
 
     let index = actor_registry.actor_type_index().read().await;
     for ((_tenant, _namespace, actor_type), actor_ids) in index.iter() {
-        if actor_ids.contains(&actor_id.to_string()) {
+        if actor_ids.contains(actor_id) {
             return Some(actor_type.clone());
         }
     }
@@ -618,9 +622,9 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
         // Wait for actors to be activated using lifecycle events
         let node_id = node.id().as_str();
         let expected_actors = vec![
-            format!("worker-1@{}", node_id),
-            format!("worker-2@{}", node_id),
-            format!("worker-3@{}", node_id),
+            expected_runtime_actor_id("worker-1", node_id),
+            expected_runtime_actor_id("worker-2", node_id),
+            expected_runtime_actor_id("worker-3", node_id),
         ];
         let actors_activated =
             wait_for_actors_activated(&node, &expected_actors, Duration::from_secs(1)).await;
@@ -635,9 +639,9 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
         // Verify all 3 workers are spawned
         let node_id = node.id().as_str();
         let expected_actors = vec![
-            format!("worker-1@{}", node_id),
-            format!("worker-2@{}", node_id),
-            format!("worker-3@{}", node_id),
+            expected_runtime_actor_id("worker-1", node_id),
+            expected_runtime_actor_id("worker-2", node_id),
+            expected_runtime_actor_id("worker-3", node_id),
         ];
 
         for expected_actor in &expected_actors {
@@ -652,7 +656,7 @@ async fn test_simple_supervisor_tree_all_workers_spawned() {
         // Verify actor types are set correctly
         for expected_actor in &expected_actors {
             let actor_type = get_actor_type(&node, expected_actor).await;
-            let expected_type = expected_actor.split('@').next().unwrap();
+            let expected_type = expected_actor.name();
             assert_eq!(
                 actor_type,
                 Some(expected_type.to_string()),
@@ -750,10 +754,10 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
         // - nested-worker-1 (worker under child supervisor)
         // - nested-worker-2 (worker under child supervisor)
         let expected_actors = vec![
-            format!("root-worker-1@{}", node_id),
-            format!("child-supervisor@{}", node_id), // Supervisor should be spawned as actor
-            format!("nested-worker-1@{}", node_id),
-            format!("nested-worker-2@{}", node_id),
+            expected_runtime_actor_id("root-worker-1", node_id),
+            expected_runtime_actor_id("child-supervisor", node_id), // Supervisor should be spawned as actor
+            expected_runtime_actor_id("nested-worker-1", node_id),
+            expected_runtime_actor_id("nested-worker-2", node_id),
         ];
 
         for expected_actor in &expected_actors {
@@ -768,7 +772,7 @@ async fn test_nested_supervisor_tree_all_actors_spawned() {
         // Verify actor types are set correctly
         for expected_actor in &expected_actors {
             let actor_type = get_actor_type(&node, expected_actor).await;
-            let expected_type = expected_actor.split('@').next().unwrap();
+            let expected_type = expected_actor.name();
             assert_eq!(
                 actor_type,
                 Some(expected_type.to_string()),
@@ -1009,11 +1013,11 @@ async fn test_deeply_nested_supervisor_tree() {
         //   - level2-supervisor (supervisor actor)
         //     - deep-worker-1 (worker)
         let expected_actors = vec![
-            format!("root-worker@{}", node_id),
-            format!("level1-supervisor@{}", node_id),
-            format!("level2-worker@{}", node_id),
-            format!("level2-supervisor@{}", node_id),
-            format!("deep-worker-1@{}", node_id),
+            expected_runtime_actor_id("root-worker", node_id),
+            expected_runtime_actor_id("level1-supervisor", node_id),
+            expected_runtime_actor_id("level2-worker", node_id),
+            expected_runtime_actor_id("level2-supervisor", node_id),
+            expected_runtime_actor_id("deep-worker-1", node_id),
         ];
 
         for expected_actor in &expected_actors {
@@ -1027,8 +1031,8 @@ async fn test_deeply_nested_supervisor_tree() {
 
         // Verify all supervisors are spawned as actors (Erlang-style)
         let supervisor_actors = vec![
-            format!("level1-supervisor@{}", node_id),
-            format!("level2-supervisor@{}", node_id),
+            expected_runtime_actor_id("level1-supervisor", node_id),
+            expected_runtime_actor_id("level2-supervisor", node_id),
         ];
 
         for supervisor_actor in &supervisor_actors {
@@ -1039,7 +1043,7 @@ async fn test_deeply_nested_supervisor_tree() {
             );
 
             let actor_type = get_actor_type(&node, supervisor_actor).await;
-            let expected_type = supervisor_actor.split('@').next().unwrap();
+            let expected_type = supervisor_actor.name();
             assert_eq!(
                 actor_type,
                 Some(expected_type.to_string()),
@@ -1230,14 +1234,14 @@ async fn test_complex_supervisor_hierarchy() {
         //   - level3-worker (worker)
         let expected_actors = vec![
             // Level 1
-            format!("root-worker@{}", node_id),
-            format!("level1-supervisor@{}", node_id),
+            expected_runtime_actor_id("root-worker", node_id),
+            expected_runtime_actor_id("level1-supervisor", node_id),
             // Level 2
-            format!("level2-worker@{}", node_id),
-            format!("level2-supervisor@{}", node_id),
+            expected_runtime_actor_id("level2-worker", node_id),
+            expected_runtime_actor_id("level2-supervisor", node_id),
             // Level 3
-            format!("level3-supervisor@{}", node_id),
-            format!("level3-worker@{}", node_id),
+            expected_runtime_actor_id("level3-supervisor", node_id),
+            expected_runtime_actor_id("level3-worker", node_id),
         ];
 
         // Verify all actors are spawned
@@ -1252,9 +1256,9 @@ async fn test_complex_supervisor_hierarchy() {
 
         // Verify all supervisors are spawned as actors (Erlang-style)
         let supervisor_actors = vec![
-            format!("level1-supervisor@{}", node_id),
-            format!("level2-supervisor@{}", node_id),
-            format!("level3-supervisor@{}", node_id),
+            expected_runtime_actor_id("level1-supervisor", node_id),
+            expected_runtime_actor_id("level2-supervisor", node_id),
+            expected_runtime_actor_id("level3-supervisor", node_id),
         ];
 
         for supervisor_actor in &supervisor_actors {
@@ -1265,7 +1269,7 @@ async fn test_complex_supervisor_hierarchy() {
             );
 
             let actor_type = get_actor_type(&node, supervisor_actor).await;
-            let expected_type = supervisor_actor.split('@').next().unwrap();
+            let expected_type = supervisor_actor.name();
             assert_eq!(
                 actor_type,
                 Some(expected_type.to_string()),
@@ -1286,14 +1290,14 @@ async fn test_complex_supervisor_hierarchy() {
 
         // Verify actor types for all workers
         let worker_actors = vec![
-            format!("root-worker@{}", node_id),
-            format!("level2-worker@{}", node_id),
-            format!("level3-worker@{}", node_id),
+            expected_runtime_actor_id("root-worker", node_id),
+            expected_runtime_actor_id("level2-worker", node_id),
+            expected_runtime_actor_id("level3-worker", node_id),
         ];
 
         for worker_actor in &worker_actors {
             let actor_type = get_actor_type(&node, worker_actor).await;
-            let expected_type = worker_actor.split('@').next().unwrap();
+            let expected_type = worker_actor.name();
             assert_eq!(
                 actor_type,
                 Some(expected_type.to_string()),
@@ -1360,12 +1364,12 @@ async fn test_multiple_sibling_supervisors() {
         //   - supervisor-b-worker-1 (worker)
         // - root-worker (worker)
         let expected_actors = vec![
-            format!("supervisor-a@{}", node_id),
-            format!("supervisor-a-worker-1@{}", node_id),
-            format!("supervisor-a-worker-2@{}", node_id),
-            format!("supervisor-b@{}", node_id),
-            format!("supervisor-b-worker-1@{}", node_id),
-            format!("root-worker@{}", node_id),
+            expected_runtime_actor_id("supervisor-a", node_id),
+            expected_runtime_actor_id("supervisor-a-worker-1", node_id),
+            expected_runtime_actor_id("supervisor-a-worker-2", node_id),
+            expected_runtime_actor_id("supervisor-b", node_id),
+            expected_runtime_actor_id("supervisor-b-worker-1", node_id),
+            expected_runtime_actor_id("root-worker", node_id),
         ];
 
         // Verify all actors are spawned
@@ -1380,8 +1384,8 @@ async fn test_multiple_sibling_supervisors() {
 
         // Verify both sibling supervisors are spawned as actors
         let supervisor_actors = vec![
-            format!("supervisor-a@{}", node_id),
-            format!("supervisor-b@{}", node_id),
+            expected_runtime_actor_id("supervisor-a", node_id),
+            expected_runtime_actor_id("supervisor-b", node_id),
         ];
 
         for supervisor_actor in &supervisor_actors {
@@ -1481,9 +1485,9 @@ async fn test_auto_generated_supervisor_tree() {
         // With simple supervisor tree, we expect 3 workers
         let node_id = node.id().as_str();
         let expected_actors = vec![
-            format!("worker-1@{}", node_id),
-            format!("worker-2@{}", node_id),
-            format!("worker-3@{}", node_id),
+            expected_runtime_actor_id("worker-1", node_id),
+            expected_runtime_actor_id("worker-2", node_id),
+            expected_runtime_actor_id("worker-3", node_id),
         ];
 
         for expected_actor in &expected_actors {
@@ -1636,22 +1640,20 @@ async fn test_actor_type_tracking_complex_tree() {
 
         // Verify every actor has the correct type (matching its ChildSpec.id)
         for actor_id in &actor_ids {
-            // Extract the actor name (part before @)
-            if let Some(actor_name) = actor_id.split('@').next() {
-                let actor_type = get_actor_type(&node, actor_id).await;
-                assert!(
-                    actor_type.is_some(),
-                    "Actor {} should have a type registered",
-                    actor_id
-                );
-                assert_eq!(
-                    actor_type,
-                    Some(actor_name.to_string()),
-                    "Actor {} should have type matching its name '{}'",
-                    actor_id,
-                    actor_name
-                );
-            }
+            let actor_name = actor_id.name();
+            let actor_type = get_actor_type(&node, actor_id).await;
+            assert!(
+                actor_type.is_some(),
+                "Actor {} should have a type registered",
+                actor_id
+            );
+            assert_eq!(
+                actor_type,
+                Some(actor_name.to_string()),
+                "Actor {} should have type matching its name '{}'",
+                actor_id,
+                actor_name
+            );
         }
     })
     .await
@@ -1812,10 +1814,10 @@ async fn test_erlang_style_supervision_structure() {
         // - worker_b (worker under sub_sup)
         // - worker_c (worker under sub_sup)
         let expected_actors = vec![
-            format!("worker_a@{}", node_id),
-            format!("sub_sup@{}", node_id), // Supervisor must be spawned as actor
-            format!("worker_b@{}", node_id),
-            format!("worker_c@{}", node_id),
+            expected_runtime_actor_id("worker_a", node_id),
+            expected_runtime_actor_id("sub_sup", node_id), // Supervisor must be spawned as actor
+            expected_runtime_actor_id("worker_b", node_id),
+            expected_runtime_actor_id("worker_c", node_id),
         ];
 
         // Verify all actors are spawned
@@ -1829,7 +1831,7 @@ async fn test_erlang_style_supervision_structure() {
         }
 
         // Verify supervisors are spawned as actors (Erlang-style)
-        let supervisor_actor = format!("sub_sup@{}", node_id);
+        let supervisor_actor = expected_runtime_actor_id("sub_sup", node_id);
         assert!(
             actor_ids.contains(&supervisor_actor),
             "Supervisor 'sub_sup' should be spawned as an actor (Erlang-style)"
@@ -1838,7 +1840,7 @@ async fn test_erlang_style_supervision_structure() {
         // Verify actor types match ChildSpec.id (for dashboard visibility)
         for expected_actor in &expected_actors {
             let actor_type = get_actor_type(&node, expected_actor).await;
-            let expected_type = expected_actor.split('@').next().unwrap();
+            let expected_type = expected_actor.name();
             assert_eq!(
                 actor_type,
                 Some(expected_type.to_string()),

@@ -547,7 +547,7 @@ impl Supervisor {
         // Send event
         let _ = self
             .event_tx
-            .send(SupervisorEvent::ChildStarted(child_id))
+            .send(SupervisorEvent::ChildStarted(child_id.into()))
             .await;
 
         Ok(actor_ref)
@@ -771,7 +771,7 @@ impl Supervisor {
         // Send event (child supervisor started)
         let _ = self
             .event_tx
-            .send(SupervisorEvent::ChildStarted(child_id))
+            .send(SupervisorEvent::ChildStarted(child_id.into()))
             .await;
 
         Ok(())
@@ -850,7 +850,9 @@ impl Supervisor {
                 .await;
             Ok(())
         } else {
-            Err(SupervisorError::ChildNotFound(supervisor_id.to_string()))
+            Err(SupervisorError::ChildNotFound(
+                supervisor_id.to_string().into(),
+            ))
         }
     }
 
@@ -1015,7 +1017,7 @@ impl Supervisor {
                 let _ = self
                     .event_tx
                     .send(SupervisorEvent::MaxRestartsExceeded(
-                        supervisor_id.to_string(),
+                        supervisor_id.to_string().into(),
                     ))
                     .await;
 
@@ -1023,7 +1025,7 @@ impl Supervisor {
                 if let Some(parent) = &self.parent {
                     let _ = parent
                         .handle_failure(
-                            &self.id,
+                            &self.id.clone().into(),
                             format!("Child supervisor {} exceeded max restarts", supervisor_id),
                             Some(plexspaces_core::ExitReason::Error(format!(
                                 "Max restarts exceeded"
@@ -1081,7 +1083,7 @@ impl Supervisor {
             let _ = self
                 .event_tx
                 .send(SupervisorEvent::ChildRestarted(
-                    supervisor_id.to_string(),
+                    supervisor_id.to_string().into(),
                     supervised_supervisor.restart_count,
                 ))
                 .await;
@@ -1300,7 +1302,9 @@ impl Supervisor {
 
         if failed_index.is_none() {
             drop(children);
-            return Err(SupervisorError::ChildNotFound(failed_id.to_string()));
+            return Err(SupervisorError::ChildNotFound(
+                failed_id.to_string().into(),
+            ));
         }
 
         let failed_idx = failed_index.unwrap();
@@ -1787,7 +1791,7 @@ impl Supervisor {
                         let shutdown_start = std::time::Instant::now();
                         metrics::counter!("plexspaces_supervisor_child_shutdown_total",
                             "supervisor_id" => self.id.clone(),
-                            "child_id" => id.clone()
+                            "child_id" => id.to_string()
                         )
                         .increment(1);
 
@@ -1796,13 +1800,13 @@ impl Supervisor {
                         let shutdown_duration = shutdown_start.elapsed();
                         metrics::histogram!("plexspaces_supervisor_child_shutdown_duration_seconds",
                             "supervisor_id" => self.id.clone(),
-                            "child_id" => id.clone()
+                            "child_id" => id.to_string()
                         ).record(shutdown_duration.as_secs_f64());
 
                         if result.is_err() {
                             metrics::counter!("plexspaces_supervisor_child_shutdown_errors_total",
                                 "supervisor_id" => self.id.clone(),
-                                "child_id" => id.clone()
+                                "child_id" => id.to_string()
                             )
                             .increment(1);
                             warn!(
@@ -2275,7 +2279,14 @@ impl Supervisor {
                 // Store ChildSpec directly (proto-first design with facets support)
                 let supervised = SupervisedActor {
                     actor: Arc::new(RwLock::new(actor)),
-                    actor_ref: ActorRef::new(spec.actor_or_supervisor_id.clone())
+                    actor_ref: ActorRef::new(
+                        ActorId::from_canonical(&spec.actor_or_supervisor_id).map_err(|e| {
+                            SupervisorError::ActorCreationFailed(format!(
+                                "invalid child actor id '{}': {}",
+                                spec.actor_or_supervisor_id, e
+                            ))
+                        })?,
+                    )
                         .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?,
                     handle: Some(handle),
                     restart_count: 0,
@@ -2286,15 +2297,22 @@ impl Supervisor {
 
                 // Add to children
                 let mut children = self.children.write().await;
-                children.insert(spec.actor_or_supervisor_id.clone(), supervised);
+                children.insert(spec.actor_or_supervisor_id.clone().into(), supervised);
                 drop(children);
 
                 // Phase 3: Register parent-child relationship
                 if let Some(service_locator) = &self.service_locator {
                     if let Some(registry) = service_locator.actor_registry().await {
                         let supervisor_id = ActorId::from(self.id.clone());
+                        let child_id =
+                            ActorId::from_canonical(&spec.actor_or_supervisor_id).map_err(|e| {
+                                SupervisorError::ActorCreationFailed(format!(
+                                    "invalid child actor id '{}': {}",
+                                    spec.actor_or_supervisor_id, e
+                                ))
+                            })?;
                         registry
-                            .register_parent_child(&supervisor_id, &spec.actor_or_supervisor_id)
+                            .register_parent_child(&supervisor_id, &child_id)
                             .await;
                     }
                 }
@@ -2303,11 +2321,11 @@ impl Supervisor {
                 let _ = self
                     .event_tx
                     .send(SupervisorEvent::ChildStarted(
-                        spec.actor_or_supervisor_id.clone(),
+                        spec.actor_or_supervisor_id.clone().into(),
                     ))
                     .await;
 
-                Ok(spec.actor_or_supervisor_id)
+                Ok(spec.actor_or_supervisor_id.into())
             }
             StartedChild::Supervisor { supervisor: _ } => {
                 // For supervisor children, we need to add them via add_supervisor_child
@@ -2424,7 +2442,7 @@ impl Supervisor {
             };
 
             result.push(ChildInfo {
-                child_id: id.clone(),
+                child_id: id.to_string(),
                 child_type: match child.spec.child_type {
                     crate::child_spec::ChildType::Actor => {
                         plexspaces_proto::supervision::v1::ChildType::ChildTypeActor
@@ -2435,7 +2453,7 @@ impl Supervisor {
                 } as i32,
                 status: status as i32,
                 restart_count: child.restart_count,
-                pid: id.clone(), // In Erlang, this would be the Pid
+                pid: id.to_string(), // In Erlang, this would be the Pid
             });
         }
         drop(children);
@@ -2855,9 +2873,18 @@ impl SupervisorBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_core::ActorId;
     use plexspaces_behavior::MockBehavior;
     use plexspaces_mailbox::{Mailbox, MailboxConfig};
     use plexspaces_node::create_default_service_locator;
+
+    fn test_actor_id(name: &str) -> ActorId {
+        ActorId::new(name, "worker", "default", "localhost").expect("test actor id must be valid")
+    }
+
+    fn test_actor_id_string(name: &str) -> String {
+        test_actor_id(name).to_string()
+    }
 
     /// Helper function to create a ChildSpec for tests
     /// Uses async factory pattern (ChildSpec standard)
@@ -2867,11 +2894,14 @@ mod tests {
     ) -> crate::ChildSpec {
         use crate::child_spec::{ChildSpec, ChildType as CSChildType, StartedChild};
 
+        let child_id = id.clone();
+        let actor_id_string = test_actor_id_string(&id);
         let id_for_factory = id.clone();
         let start_fn: crate::child_spec::StartFn = Arc::new(move || {
-            let actor_id = id_for_factory.clone();
+            let child_name = id_for_factory.clone();
             Box::pin(async move {
-                let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+                let actor_id = test_actor_id(&child_name);
+                let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
                     .await
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                 let actor = Actor::new(
@@ -2889,8 +2919,8 @@ mod tests {
         });
 
         ChildSpec {
-            child_id: id.clone(),
-            actor_or_supervisor_id: id,
+            child_id,
+            actor_or_supervisor_id: actor_id_string,
             restart_strategy: restart,
             shutdown_timeout: Some(Duration::from_secs(5)),
             child_type: CSChildType::Actor,
@@ -2906,7 +2936,7 @@ mod tests {
         strategy: SupervisionStrategy,
     ) -> (Supervisor, mpsc::Receiver<SupervisorEvent>) {
         let service_locator = create_default_service_locator(None, None).await;
-        Supervisor::new(id, strategy, service_locator)
+        Supervisor::new(test_actor_id_string(&id), strategy, service_locator)
     }
 
     /// Helper function to create a ChildSpec with sync factory
@@ -2914,23 +2944,25 @@ mod tests {
     fn create_child_spec_sync(id: String, restart: RestartPolicy) -> crate::ChildSpec {
         use crate::child_spec::{ChildSpec, RestartStrategy as CSRestartStrategy};
 
+        let actor_id_string = test_actor_id_string(&id);
         let id_for_factory = id.clone();
         let sync_factory: Arc<dyn Fn() -> Result<Actor, ActorError> + Send + Sync> =
             Arc::new(move || {
-                let actor_id = id_for_factory.clone();
+                let child_name = id_for_factory.clone();
                 // Create mailbox on a separate thread to avoid blocking async runtime
                 let mailbox = std::thread::spawn(move || {
+                    let actor_id = test_actor_id(&child_name);
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(Mailbox::new(MailboxConfig::default(), actor_id.clone()))
+                    rt.block_on(Mailbox::new(MailboxConfig::default(), actor_id.to_string()))
                 })
                 .join()
                 .expect("Thread panicked")
                 .expect("Failed to create mailbox in factory");
                 Ok(Actor::new(
-                    id_for_factory.clone(),
+                    test_actor_id(&id_for_factory),
                     Box::new(MockBehavior::new()),
                     mailbox,
                     "test-tenant".to_string(),
@@ -2940,8 +2972,8 @@ mod tests {
             });
 
         // Create ActorRef for the sync factory wrapper
-        let actor_ref =
-            plexspaces_core::ActorRef::new(id.clone()).expect("Failed to create actor ref");
+        let actor_ref = plexspaces_core::ActorRef::new(test_actor_id(&id))
+            .expect("Failed to create actor ref");
 
         // Convert RestartPolicy to RestartStrategy
         let restart_strategy = match restart {
@@ -2951,7 +2983,7 @@ mod tests {
             RestartPolicy::ExponentialBackoff { .. } => CSRestartStrategy::Permanent,
         };
 
-        ChildSpec::worker_sync(id.clone(), id, sync_factory, actor_ref)
+        ChildSpec::worker_sync(id, actor_id_string, sync_factory, actor_ref)
             .with_restart(restart_strategy)
     }
 
@@ -2967,17 +2999,16 @@ mod tests {
         .await;
 
         // Add a child
-        let spec =
-            create_child_spec_sync("test-child@localhost".to_string(), RestartPolicy::Permanent);
+        let spec = create_child_spec_sync("test-child".to_string(), RestartPolicy::Permanent);
 
         let actor_ref = supervisor.add_child(spec).await.unwrap();
-        assert_eq!(actor_ref.id().as_str(), "test-child@localhost");
+        assert_eq!(actor_ref.id(), &test_actor_id("test-child"));
 
         // Check event
         if let Some(event) = event_rx.recv().await {
             match event {
                 SupervisorEvent::ChildStarted(id) => {
-                    assert_eq!(id.as_str(), "test-child@localhost");
+                    assert_eq!(id, test_actor_id("test-child"));
                 }
                 _ => panic!("Unexpected event"),
             }
@@ -2994,11 +3025,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_supervisor_builder() {
-        let spec =
-            create_child_spec_sync("worker-1@localhost".to_string(), RestartPolicy::Transient);
+        let spec = create_child_spec_sync("worker-1".to_string(), RestartPolicy::Transient);
 
         let service_locator = create_default_service_locator(None, None).await;
-        let (_supervisor, _event_rx) = SupervisorBuilder::new("root".to_string())
+        let (_supervisor, _event_rx) = SupervisorBuilder::new(test_actor_id_string("root"))
             .with_strategy(SupervisionStrategy::OneForAll {
                 max_restarts: 5,
                 within_seconds: 30,
@@ -3022,7 +3052,7 @@ mod tests {
 
         // Add a child
         let spec = create_child_spec_sync(
-            "removable-child@localhost".to_string(),
+            "removable-child".to_string(),
             RestartPolicy::Permanent,
         );
 
@@ -3031,7 +3061,7 @@ mod tests {
 
         // Remove the child
         supervisor
-            .remove_child(&"removable-child@localhost".to_string())
+            .remove_child(&test_actor_id("removable-child"))
             .await
             .unwrap();
 
@@ -3039,7 +3069,7 @@ mod tests {
         if let Some(event) = event_rx.recv().await {
             match event {
                 SupervisorEvent::ChildStopped(id) => {
-                    assert_eq!(id.as_str(), "removable-child@localhost");
+                    assert_eq!(id, test_actor_id("removable-child"));
                 }
                 _ => panic!("Expected ChildStopped event"),
             }
@@ -3059,7 +3089,7 @@ mod tests {
 
         // Try to remove a child that doesn't exist
         let result = supervisor
-            .remove_child(&"nonexistent@localhost".to_string())
+            .remove_child(&test_actor_id("nonexistent"))
             .await;
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -3081,7 +3111,7 @@ mod tests {
 
         // Add a child
         let spec = create_child_spec_sync(
-            "failing-child@localhost".to_string(),
+            "failing-child".to_string(),
             RestartPolicy::Permanent,
         );
 
@@ -3091,7 +3121,7 @@ mod tests {
         // Handle failure
         supervisor
             .handle_failure(
-                &"failing-child@localhost".to_string(),
+                &test_actor_id("failing-child"),
                 "test error".to_string(),
                 None, // Will be parsed from reason string
             )
@@ -3102,7 +3132,7 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         match event {
             SupervisorEvent::ChildFailed(id, reason) => {
-                assert_eq!(id.as_str(), "failing-child@localhost");
+                assert_eq!(id, test_actor_id("failing-child"));
                 assert_eq!(reason, "test error");
             }
             _ => panic!("Expected ChildFailed event, got {:?}", event),
@@ -3112,7 +3142,7 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         match event {
             SupervisorEvent::ChildRestarted(id, count) => {
-                assert_eq!(id.as_str(), "failing-child@localhost");
+                assert_eq!(id, test_actor_id("failing-child"));
                 assert_eq!(count, 1); // First restart
             }
             _ => panic!("Expected ChildRestarted event, got {:?}", event),
@@ -3131,8 +3161,7 @@ mod tests {
         .await;
 
         // Add a temporary child (should not restart)
-        let spec =
-            create_child_spec_sync("temp-child@localhost".to_string(), RestartPolicy::Temporary);
+        let spec = create_child_spec_sync("temp-child".to_string(), RestartPolicy::Temporary);
 
         supervisor.add_child(spec).await.unwrap();
         let _ = event_rx.recv().await; // Consume ChildStarted
@@ -3140,7 +3169,7 @@ mod tests {
         // Handle failure
         supervisor
             .handle_failure(
-                &"temp-child@localhost".to_string(),
+                &test_actor_id("temp-child"),
                 "test error".to_string(),
                 None, // Will be parsed from reason string
             )
@@ -3173,7 +3202,7 @@ mod tests {
         .await;
 
         let spec = create_child_spec_sync(
-            "crash-child@localhost".to_string(),
+            "crash-child".to_string(),
             RestartPolicy::Permanent,
         );
 
@@ -3184,7 +3213,7 @@ mod tests {
         for i in 0..3 {
             let result = supervisor
                 .handle_failure(
-                    &"crash-child@localhost".to_string(),
+                    &test_actor_id("crash-child"),
                     format!("crash {}", i),
                     None,
                 )
@@ -3208,7 +3237,7 @@ mod tests {
                 let event = event_rx.recv().await.unwrap();
                 match event {
                     SupervisorEvent::MaxRestartsExceeded(id) => {
-                        assert_eq!(id.as_str(), "crash-child@localhost");
+                        assert_eq!(id, test_actor_id("crash-child"));
                     }
                     _ => panic!("Expected MaxRestartsExceeded event"),
                 }
@@ -3228,7 +3257,7 @@ mod tests {
         .await;
 
         let spec = create_child_spec_sync(
-            "stats-child@localhost".to_string(),
+            "stats-child".to_string(),
             RestartPolicy::Permanent,
         );
 
@@ -3238,7 +3267,7 @@ mod tests {
         // Trigger a failure and restart
         supervisor
             .handle_failure(
-                &"stats-child@localhost".to_string(),
+                &test_actor_id("stats-child"),
                 "test error".to_string(),
                 None, // Will be parsed from reason string
             )
@@ -3269,7 +3298,7 @@ mod tests {
 
         // Add multiple children (reduced to 2 for faster tests)
         for i in 0..2 {
-            let id = format!("child-{}@localhost", i);
+            let id = format!("child-{}", i);
             let spec = create_child_spec_sync(id.clone(), RestartPolicy::Permanent);
 
             supervisor.add_child(spec).await.unwrap();
@@ -3370,7 +3399,7 @@ mod tests {
 
         // Add 3 children
         for i in 0..3 {
-            let id = format!("child-{}@localhost", i);
+            let id = format!("child-{}", i);
             let spec = create_child_spec_sync(id.clone(), RestartPolicy::Permanent);
             supervisor.add_child(spec).await.unwrap();
             let _ = event_rx.recv().await; // Consume ChildStarted
@@ -3379,7 +3408,7 @@ mod tests {
         // Trigger failure on child-1
         supervisor
             .handle_failure(
-                &"child-1@localhost".to_string(),
+                &test_actor_id("child-1"),
                 "test error".to_string(),
                 None,
             )
@@ -3390,7 +3419,7 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         match event {
             SupervisorEvent::ChildFailed(id, _) => {
-                assert_eq!(id.as_str(), "child-1@localhost");
+                assert_eq!(id, test_actor_id("child-1"));
             }
             _ => panic!("Expected ChildFailed event"),
         }
@@ -3402,7 +3431,7 @@ mod tests {
             let event = event_rx.recv().await.unwrap();
             match event {
                 SupervisorEvent::ChildRestarted(id, _) => {
-                    restarted_ids.push(id.as_str().to_string());
+                    restarted_ids.push(id);
                 }
                 _ => panic!("Expected ChildRestarted event"),
             }
@@ -3410,9 +3439,9 @@ mod tests {
 
         // All 3 children should be restarted
         assert_eq!(restarted_ids.len(), 3);
-        assert!(restarted_ids.contains(&"child-0@localhost".to_string()));
-        assert!(restarted_ids.contains(&"child-1@localhost".to_string()));
-        assert!(restarted_ids.contains(&"child-2@localhost".to_string()));
+        assert!(restarted_ids.contains(&test_actor_id("child-0")));
+        assert!(restarted_ids.contains(&test_actor_id("child-1")));
+        assert!(restarted_ids.contains(&test_actor_id("child-2")));
     }
 
     #[tokio::test]
@@ -3428,7 +3457,7 @@ mod tests {
 
         // Add 3 children
         for i in 0..3 {
-            let id = format!("child-{}@localhost", i);
+            let id = format!("child-{}", i);
             let spec = create_child_spec_sync(id.clone(), RestartPolicy::Permanent);
             supervisor.add_child(spec).await.unwrap();
             let _ = event_rx.recv().await; // Consume ChildStarted
@@ -3437,7 +3466,7 @@ mod tests {
         // Trigger failure on child-1
         supervisor
             .handle_failure(
-                &"child-1@localhost".to_string(),
+                &test_actor_id("child-1"),
                 "test error".to_string(),
                 None,
             )
@@ -3448,7 +3477,7 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         match event {
             SupervisorEvent::ChildFailed(id, _) => {
-                assert_eq!(id.as_str(), "child-1@localhost");
+                assert_eq!(id, test_actor_id("child-1"));
             }
             _ => panic!("Expected ChildFailed event"),
         }
@@ -3458,7 +3487,7 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         match event {
             SupervisorEvent::ChildRestarted(id, count) => {
-                assert_eq!(id.as_str(), "child-1@localhost");
+                assert_eq!(id, test_actor_id("child-1"));
                 assert_eq!(count, 1);
             }
             _ => panic!("Expected ChildRestarted event"),
@@ -3481,7 +3510,7 @@ mod tests {
 
         // Add a child
         let spec = create_child_spec_sync(
-            "adaptive-child@localhost".to_string(),
+            "adaptive-child".to_string(),
             RestartPolicy::Permanent,
         );
 
@@ -3491,7 +3520,7 @@ mod tests {
         // Trigger failure with adaptive strategy
         supervisor
             .handle_failure(
-                &"adaptive-child@localhost".to_string(),
+                &test_actor_id("adaptive-child"),
                 "test error".to_string(),
                 None, // Will be parsed from reason string
             )
@@ -3509,7 +3538,7 @@ mod tests {
         let event = event_rx.recv().await.unwrap();
         match event {
             SupervisorEvent::ChildRestarted(id, count) => {
-                assert_eq!(id.as_str(), "adaptive-child@localhost");
+                assert_eq!(id, test_actor_id("adaptive-child"));
                 assert_eq!(count, 1);
             }
             _ => panic!("Expected ChildRestarted event"),
@@ -3576,7 +3605,7 @@ mod tests {
         .await;
 
         let spec = create_child_spec_sync(
-            "window-child@localhost".to_string(),
+            "window-child".to_string(),
             RestartPolicy::Permanent,
         );
 
@@ -3586,7 +3615,7 @@ mod tests {
         // First restart
         supervisor
             .handle_failure(
-                &"window-child@localhost".to_string(),
+                &test_actor_id("window-child"),
                 "error 1".to_string(),
                 None,
             )
@@ -3598,7 +3627,7 @@ mod tests {
         // Second restart (within window)
         supervisor
             .handle_failure(
-                &"window-child@localhost".to_string(),
+                &test_actor_id("window-child"),
                 "error 2".to_string(),
                 None,
             )
@@ -3613,7 +3642,7 @@ mod tests {
         // Third restart (outside window - should reset counter)
         let result = supervisor
             .handle_failure(
-                &"window-child@localhost".to_string(),
+                &test_actor_id("window-child"),
                 "error 3".to_string(),
                 None,
             )

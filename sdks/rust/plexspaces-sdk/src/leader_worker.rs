@@ -3,7 +3,7 @@
 //
 // Leader-worker helpers for multi-node: first node is leader, splits work across workers
 // on same or other nodes. Prefer virtual actors: they are created lazily on first message
-// receive, so the leader just sends to `actor_id@node_id` with no explicit ensure or spawn.
+// receive, so the leader just sends to the canonical actor ID with no explicit ensure or spawn.
 // Use spawn_actor_on_node only for non-virtual workers.
 
 use anyhow::{Context, Result};
@@ -48,17 +48,17 @@ pub async fn list_worker_node_ids(
 /// ## Arguments
 /// - `node_id`: Target node ID (must be in registry after ConnectNodes).
 /// - `actor_type`: Pre-deployed actor type on the target node (e.g. `"worker"`).
-/// - `actor_id`: Optional; if empty, the server generates a ULID.
+/// - `actor_name`: Optional logical actor name; if empty, the server generates one.
 ///
 /// ## Returns
-/// The actor ref string (e.g. `"worker-ulid@node_id"`) for messaging.
+/// The canonical actor ref string for messaging.
 #[cfg(feature = "grpc")]
 pub async fn spawn_actor_on_node(
     _ctx: &RequestContext,
     service_locator: Arc<dyn ServiceLocator>,
     node_id: &str,
     actor_type: &str,
-    actor_id: String,
+    actor_name: String,
     initial_state: Vec<u8>,
     config: Option<plexspaces_proto::actor::v1::ActorConfig>,
     labels: std::collections::HashMap<String, String>,
@@ -75,7 +75,7 @@ pub async fn spawn_actor_on_node(
 
     let req = SpawnActorRequest {
         actor_type: actor_type.to_string(),
-        actor_id,
+        actor_id: actor_name,
         initial_state,
         config,
         labels,

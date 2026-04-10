@@ -45,7 +45,6 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::sync::Arc;
-    use tokio::time::{sleep, Duration};
 
     /// Create a test RequestContext with tenant and namespace
     fn test_ctx(tenant_id: &str, namespace: &str) -> RequestContext {

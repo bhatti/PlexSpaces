@@ -13,7 +13,6 @@
 use matrix_multiply::MatrixWorker;
 use plexspaces_sdk::{spawn, GenServerRef, RequestContext, json};
 use plexspaces_node::{NodeBuilder, CoordinationComputeTracker};
-use plexspaces_core::ActorId;
 use std::time::{Duration, Instant};
 use tracing::info;
 use anyhow::Result;
@@ -76,9 +75,9 @@ async fn main() -> Result<()> {
 
     for worker_id in 0..num_workers {
         let actor = MatrixWorker::new(worker_id);
-        let actor_id = ActorId::from(format!("worker-{}@matrix-node", worker_id));
+        let actor_name = format!("worker-{}", worker_id);
 
-        let actor_ref = spawn(&ctx, service_locator.clone(), actor_id.clone(), namespace, actor).await
+        let actor_ref = spawn(&ctx, service_locator.clone(), actor_name, namespace, actor).await
             .map_err(|e| anyhow::anyhow!("Failed to spawn worker {}: {}", worker_id, e))?;
 
         let worker_ref = GenServerRef::new(actor_ref);

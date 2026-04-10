@@ -54,12 +54,10 @@
 // - **Provides**: Core abstraction for ALL distributed computation in PlexSpaces
 //
 // ## Design Decisions
-// - **Why actor_id is plain string** (not wrapper message):
-//   - Simplifies distributed lookup (no extra layer to unwrap)
-//   - Human-readable for debugging (e.g., "namespace/counter-123")
-//   - Compatible with various ID schemes (UUID, hierarchical, ULID)
-//   - Works across all languages (no proto dependency for IDs)
-//   - Format: "{namespace}/{actor_name}" or "{node_id}/{actor_name}"
+// - **Why actor_id remains a string field here**:
+//   - Actor identity is defined structurally by plexspaces.common.v1.ActorId
+//   - Runtime envelopes still carry the canonical string for storage and wire compatibility
+//   - Format: "{name}//{actor_type}::{namespace}@{node_id}"
 //
 // - **Why separate ActorState enum**:
 //   - Enables state machine validation (can't go from TERMINATED to ACTIVE)
@@ -582,6 +580,14 @@ message Actor {
   // When actor is part of an application deployment, namespace must match application namespace.
   // Source of truth for namespace is the application (when deploying) or actor creation request.
   string namespace = 14;
+
+  // User-specified actor name. Together with actor_type, namespace, and node_id
+  // this forms the structured ActorId.
+  string name = 15 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+    pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+  }];
 }
 
 // Actor lifecycle states.
@@ -2322,7 +2328,7 @@ message ActorMigrating {
 // Works the same for local and remote processes (location transparent).
 //
 // ## Design Notes
-// - actor_id: The actor to monitor (can be "actor@node" for remote)
+// - actor_id: Canonical actor ID for the actor to monitor
 // - supervisor_id: The supervisor that wants notifications (for logging/debugging)
 // - supervisor_callback: gRPC address where to send NotifyActorDown
 //   (e.g., "http://supervisor-node:8000")
@@ -2670,7 +2676,7 @@ service ActorService {
   // - This RPC is called ON the target node (node2 receives the request)
   // - The caller (node1) sends gRPC request to node2's ActorService
   // - node2 validates actor_type exists locally, then spawns
-  // - Returns ActorRef in format "actor_id@node2" for location-transparent messaging
+  // - Returns canonical ActorRef string for location-transparent messaging
   // - actor_id is optional: if provided (client-specified), use it; if not, server generates ULID
   //
   // ## Security
@@ -2802,7 +2808,7 @@ service ActorService {
   // ## Design Notes
   // - supervisor_id: The actor that wants to be notified (usually a supervisor)
   // - supervisor_callback: gRPC address where to send NotifyActorDown
-  // - actor_id can be local or remote (format: "actor@node")
+  // - actor_id can be local or remote and always uses canonical ActorId format
   // - Returns monitor_ref for potential demonitor() in future
   rpc MonitorActor(MonitorActorRequest) returns (MonitorActorResponse) {
     option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {

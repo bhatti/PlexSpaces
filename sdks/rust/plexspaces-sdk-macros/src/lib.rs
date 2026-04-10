@@ -1091,7 +1091,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                             ctx.send_reply(
                                 Some(&msg.correlation_id),
                                 &msg.sender_id,
-                                msg.receiver_id.clone(),
+                                ctx.actor_id().clone(),
                                 reply,
                             ).await.map_err(|e| plexspaces_core::BehaviorError::ProcessingError(e.to_string()))?;
                         }
@@ -1141,7 +1141,7 @@ pub fn plexspaces_handlers(attr: TokenStream, item: TokenStream) -> TokenStream 
                         ctx.send_reply(
                             Some(&msg.correlation_id),
                             &msg.sender_id,
-                            msg.receiver_id.clone(),
+                            ctx.actor_id().clone(),
                             reply,
                         ).await.map_err(|e| {
                             plexspaces_core::BehaviorError::ProcessingError(e.to_string())

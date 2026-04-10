@@ -67,7 +67,7 @@ use plexspaces_proto::scheduler::v1::ScheduleActorRequest;
 let scheduler = SchedulingServiceImpl::new(state_store, node_selector, capacity_tracker);
 
 let request = ScheduleActorRequest {
-    actor_id: "counter@node1".to_string(),
+    actor_id: "counter//gen_server::default@node1".to_string(),
     resource_requirements: Some(ResourceRequirements {
         cpu_millicores: 100,
         memory_bytes: 64 * 1024 * 1024,
@@ -115,4 +115,3 @@ This crate is used by:
 - Implementation: `crates/scheduler/src/`
 - Tests: `crates/scheduler/tests/`
 - Proto definitions: `proto/plexspaces/v1/scheduler.proto`
-

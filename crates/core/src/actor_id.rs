@@ -16,400 +16,398 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with PlexSpaces. If not, see <https://www.gnu.org/licenses/>.
 
-//! Actor ID Factory - Unified actor ID construction and parsing
+//! Structured actor identity.
 //!
-//! ## Purpose
-//! Provides factory methods for building and parsing actor IDs consistently across the codebase.
-//! Follows proto-first design: actor IDs include actor_type from proto Actor message.
-//!
-//! ## Actor ID Format
-//! Format: `{id}//{actor_type}::{namespace}@{node_id}`
-//! - `id`: Base actor identifier (can be ULID, client-provided, or empty)
-//! - `actor_type`: Actor type from proto (e.g., "read-state-tracker", "GenServer")
-//! - `namespace`: Optional namespace for multi-tenancy
-//! - `node_id`: Node identifier
-//!
-//! ## Delimiters
-//! - `//`: Separates base ID from actor_type (allows client-provided IDs with slashes)
-//! - `::`: Separates actor_type from namespace (allows actor_type with colons)
-//! - `@`: Separates namespace from node_id (standard format)
-//!
-//! ## Examples
-//! - `user-123//read-state-tracker::orbit-read-state-ts@node-1`
-//! - `//read-state-tracker::orbit-read-state-ts@node-1` (no base ID, ULID generated)
-//! - `//GenServer::default@node-1` (no namespace)
-//! - `counter@node-1` (legacy format, backward compatible)
+//! `ActorId` is constructed from validated fields and owns the canonical
+//! string form `{name}//{actor_type}::{namespace}@{node_id}`.
+//! Parsing is limited to canonical deserialization boundaries.
 
-use crate::ActorId;
+use plexspaces_proto::common::v1::ActorId as ProtoActorId;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::borrow::Borrow;
+use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::ops::Deref;
 
-/// Error types for actor ID operations
-#[derive(Debug, Clone, thiserror::Error)]
+use crate::{TEMP_SENDER_ACTOR_TYPE, TEMP_SENDER_PREFIX};
+
+const NAME_PATTERN: &str = "^[a-zA-Z0-9][a-zA-Z0-9_-]*$";
+
+/// Errors raised while constructing or restoring an [`ActorId`].
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum ActorIdError {
-    /// Invalid actor ID format
-    #[error("Invalid actor ID format: {0}")]
+    /// Actor name does not satisfy the canonical validation rules.
+    #[error("Invalid actor name '{0}': must match {NAME_PATTERN}")]
+    InvalidName(String),
+
+    /// One of the required fields is empty.
+    #[error("Missing required field: {0}")]
+    MissingField(&'static str),
+
+    /// The canonical string representation is malformed.
+    #[error("Invalid canonical format: {0}")]
     InvalidFormat(String),
-
-    /// Missing required component
-    #[error("Missing required component: {0}")]
-    MissingComponent(String),
 }
 
-/// Parsed actor ID components
-#[derive(Debug, Clone)]
-pub struct ParsedActorId {
-    /// Base actor identifier (can be empty, ULID will be generated)
-    pub id: String,
-    /// Actor type from proto (required)
-    pub actor_type: String,
-    /// Namespace (optional)
-    pub namespace: Option<String>,
-    /// Node ID (required)
-    pub node_id: String,
+/// Structured actor identity.
+#[derive(Clone, Debug)]
+pub struct ActorId {
+    canonical: String,
+    name: String,
+    actor_type: String,
+    namespace: String,
+    node_id: String,
 }
 
-impl ParsedActorId {
-    /// Rebuild actor ID from parsed components
-    pub fn to_actor_id(&self) -> ActorId {
-        build_actor_id(
-            &self.id,
-            &self.actor_type,
-            self.namespace.as_deref(),
-            &self.node_id,
-        )
-    }
-}
+impl ActorId {
+    /// Build a new structured actor ID.
+    pub fn new(
+        name: impl Into<String>,
+        actor_type: impl Into<String>,
+        namespace: impl Into<String>,
+        node_id: impl Into<String>,
+    ) -> Result<Self, ActorIdError> {
+        let name = name.into();
+        let actor_type = actor_type.into();
+        let namespace = namespace.into();
+        let node_id = node_id.into();
 
-/// Build actor ID from components
-///
-/// ## Purpose
-/// Creates a standardized actor ID from individual components.
-/// Follows proto-first design: actor_type is required (from proto Actor message).
-///
-/// ## Arguments
-/// * `id` - Base actor identifier (can be empty, ULID will be generated later)
-/// * `actor_type` - Actor type from proto (required)
-/// * `namespace` - Optional namespace for multi-tenancy
-/// * `node_id` - Node identifier (required)
-///
-/// ## Returns
-/// Actor ID in format: `{id}//{actor_type}::{namespace}@{node_id}`
-///
-/// ## Examples
-/// ```rust
-/// use plexspaces_core::actor_id::build_actor_id;
-///
-/// // Full format
-/// let actor_id = build_actor_id("user-123", "read-state-tracker", Some("orbit-read-state-ts"), "node-1");
-/// // Result: "user-123//read-state-tracker::orbit-read-state-ts@node-1"
-///
-/// // No base ID (ULID will be generated)
-/// let actor_id = build_actor_id("", "read-state-tracker", Some("orbit-read-state-ts"), "node-1");
-/// // Result: "//read-state-tracker::orbit-read-state-ts@node-1"
-///
-/// // No namespace
-/// let actor_id = build_actor_id("counter", "GenServer", None, "node-1");
-/// // Result: "counter//GenServer@node-1"
-/// ```
-pub fn build_actor_id(
-    id: &str,
-    actor_type: &str,
-    namespace: Option<&str>,
-    node_id: &str,
-) -> ActorId {
-    if actor_type.is_empty() {
-        // Legacy format: just id@node_id (backward compatibility)
-        if id.is_empty() {
-            format!("@{}", node_id)
-        } else {
-            format!("{}@{}", id, node_id)
-        }
-    } else if let Some(ns) = namespace {
-        if id.is_empty() {
-            format!("//{}::{}@{}", actor_type, ns, node_id)
-        } else {
-            format!("{}//{}::{}@{}", id, actor_type, ns, node_id)
-        }
-    } else {
-        if id.is_empty() {
-            format!("//{}@{}", actor_type, node_id)
-        } else {
-            format!("{}//{}@{}", id, actor_type, node_id)
-        }
-    }
-}
+        validate_name(&name)?;
+        validate_required("actor_type", &actor_type)?;
+        validate_required("namespace", &namespace)?;
+        validate_required("node_id", &node_id)?;
 
-/// Parse actor ID into components
-///
-/// ## Purpose
-/// Parses an actor ID into its components, supporting both new format and legacy format.
-///
-/// ## Arguments
-/// * `actor_id` - Actor ID to parse
-///
-/// ## Returns
-/// `Ok(ParsedActorId)` with parsed components, `Err(ActorIdError)` if format is invalid
-///
-/// ## Format Support
-/// - New format: `{id}//{actor_type}::{namespace}@{node_id}`
-/// - Legacy format: `{actor_name}@{node_id}` (parsed as id="", actor_type=actor_name, namespace=None)
-///
-/// ## Examples
-/// ```rust
-/// use plexspaces_core::actor_id::parse_actor_id;
-///
-/// // New format
-/// let parsed = parse_actor_id("user-123//read-state-tracker::orbit-read-state-ts@node-1")?;
-/// assert_eq!(parsed.id, "user-123");
-/// assert_eq!(parsed.actor_type, "read-state-tracker");
-/// assert_eq!(parsed.namespace, Some("orbit-read-state-ts".to_string()));
-/// assert_eq!(parsed.node_id, "node-1");
-///
-/// // Legacy format
-/// let parsed = parse_actor_id("counter@node-1")?;
-/// assert_eq!(parsed.id, "");
-/// assert_eq!(parsed.actor_type, "counter");
-/// assert_eq!(parsed.namespace, None);
-/// assert_eq!(parsed.node_id, "node-1");
-/// ```
-pub fn parse_actor_id(actor_id: &str) -> Result<ParsedActorId, ActorIdError> {
-    // Split by @ to get node_id
-    let (before_node, node_id) = actor_id.rsplit_once('@').ok_or_else(|| {
-        ActorIdError::InvalidFormat(format!("Missing @ delimiter in actor ID: {}", actor_id))
-    })?;
+        let canonical = format!("{name}//{actor_type}::{namespace}@{node_id}");
 
-    if node_id.is_empty() {
-        return Err(ActorIdError::InvalidFormat(format!(
-            "Empty node_id in actor ID: {}",
-            actor_id
-        )));
-    }
-
-    // Try new format: {id}//{actor_type}::{namespace} or {id}//{actor_type}
-    if let Some((before_type, after_type)) = before_node.split_once("//") {
-        // Has actor_type separator
-        if let Some((actor_type, namespace)) = after_type.split_once("::") {
-            // Has namespace separator
-            Ok(ParsedActorId {
-                id: before_type.to_string(),
-                actor_type: actor_type.to_string(),
-                namespace: Some(namespace.to_string()),
-                node_id: node_id.to_string(),
-            })
-        } else {
-            // No namespace separator, actor_type is everything after //
-            Ok(ParsedActorId {
-                id: before_type.to_string(),
-                actor_type: after_type.to_string(),
-                namespace: None,
-                node_id: node_id.to_string(),
-            })
-        }
-    } else {
-        // Legacy format: {actor_name}@{node_id}
-        // Parse as id="", actor_type=actor_name, namespace=None
-        Ok(ParsedActorId {
-            id: String::new(),
-            actor_type: before_node.to_string(),
-            namespace: None,
-            node_id: node_id.to_string(),
+        Ok(Self {
+            canonical,
+            name,
+            actor_type,
+            namespace,
+            node_id,
         })
     }
+
+    /// Restore an actor ID from its canonical string representation.
+    pub fn from_canonical(canonical: &str) -> Result<Self, ActorIdError> {
+        let (before_node, node_id) = canonical
+            .rsplit_once('@')
+            .ok_or_else(|| ActorIdError::InvalidFormat(format!("missing @ in '{canonical}'")))?;
+        let (name, after_name) = before_node
+            .split_once("//")
+            .ok_or_else(|| ActorIdError::InvalidFormat(format!("missing // in '{canonical}'")))?;
+        let (actor_type, namespace) = after_name
+            .split_once("::")
+            .ok_or_else(|| ActorIdError::InvalidFormat(format!("missing :: in '{canonical}'")))?;
+
+        Self::new(name, actor_type, namespace, node_id)
+    }
+
+    /// Convert a proto actor ID into the Rust representation.
+    pub fn from_proto(proto: &ProtoActorId) -> Result<Self, ActorIdError> {
+        Self::new(
+            proto.name.clone(),
+            proto.actor_type.clone(),
+            proto.namespace.clone(),
+            proto.node_id.clone(),
+        )
+    }
+
+    /// Convert this actor ID to the proto representation.
+    pub fn to_proto(&self) -> ProtoActorId {
+        ProtoActorId {
+            name: self.name.clone(),
+            actor_type: self.actor_type.clone(),
+            namespace: self.namespace.clone(),
+            node_id: self.node_id.clone(),
+        }
+    }
+
+    /// User-specified actor name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Registered actor type.
+    pub fn actor_type(&self) -> &str {
+        &self.actor_type
+    }
+
+    /// Actor namespace.
+    pub fn namespace(&self) -> &str {
+        &self.namespace
+    }
+
+    /// Hosting node identifier.
+    pub fn node_id(&self) -> &str {
+        &self.node_id
+    }
+
+    /// Canonical string form.
+    pub fn as_str(&self) -> &str {
+        &self.canonical
+    }
+
+    /// Return a cloned actor ID with a different node ID.
+    pub fn with_node_id(&self, node_id: impl Into<String>) -> Result<Self, ActorIdError> {
+        Self::new(
+            self.name.clone(),
+            self.actor_type.clone(),
+            self.namespace.clone(),
+            node_id,
+        )
+    }
+
+    /// Create a temporary sender actor identity used by ask/reply routing.
+    pub fn temporary_sender(
+        correlation_id: impl AsRef<str>,
+        namespace: impl Into<String>,
+        node_id: impl Into<String>,
+    ) -> Result<Self, ActorIdError> {
+        Self::new(
+            format!("{}_{}", TEMP_SENDER_PREFIX, correlation_id.as_ref()),
+            TEMP_SENDER_ACTOR_TYPE,
+            namespace,
+            node_id,
+        )
+    }
+
+    /// Returns true when this actor ID represents a temporary sender actor.
+    pub fn is_temporary_sender(&self) -> bool {
+        self.actor_type == TEMP_SENDER_ACTOR_TYPE
+            && self.name.starts_with(&format!("{TEMP_SENDER_PREFIX}_"))
+    }
 }
 
-/// Extract actor type from actor ID
-///
-/// ## Purpose
-/// Convenience function to extract just the actor_type from an actor ID.
-///
-/// ## Returns
-/// `Some(actor_type)` if parsing succeeds, `None` if format is invalid
-pub fn extract_actor_type(actor_id: &str) -> Option<String> {
-    parse_actor_id(actor_id).ok().map(|p| p.actor_type)
+fn validate_required(field: &'static str, value: &str) -> Result<(), ActorIdError> {
+    if value.is_empty() {
+        Err(ActorIdError::MissingField(field))
+    } else {
+        Ok(())
+    }
 }
 
-/// Extract namespace from actor ID
-///
-/// ## Purpose
-/// Convenience function to extract just the namespace from an actor ID.
-///
-/// ## Returns
-/// `Some(namespace)` if present, `None` if not present or format is invalid
-pub fn extract_namespace(actor_id: &str) -> Option<String> {
-    parse_actor_id(actor_id).ok().and_then(|p| p.namespace)
+fn validate_name(name: &str) -> Result<(), ActorIdError> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(ActorIdError::InvalidName(name.to_string()));
+    };
+
+    if !first.is_ascii_alphanumeric() {
+        return Err(ActorIdError::InvalidName(name.to_string()));
+    }
+
+    if chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_') {
+        Ok(())
+    } else {
+        Err(ActorIdError::InvalidName(name.to_string()))
+    }
 }
 
-/// Extract base ID from actor ID
-///
-/// ## Purpose
-/// Convenience function to extract just the base ID from an actor ID.
-///
-/// ## Returns
-/// Base ID (can be empty), or `None` if format is invalid
-pub fn extract_base_id(actor_id: &str) -> Option<String> {
-    parse_actor_id(actor_id).ok().map(|p| p.id)
+impl Hash for ActorId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.canonical.hash(state);
+    }
+}
+
+impl PartialEq for ActorId {
+    fn eq(&self, other: &Self) -> bool {
+        self.canonical == other.canonical
+    }
+}
+
+impl Eq for ActorId {}
+
+impl PartialOrd for ActorId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ActorId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.canonical.cmp(&other.canonical)
+    }
+}
+
+impl fmt::Display for ActorId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.canonical)
+    }
+}
+
+impl AsRef<str> for ActorId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Deref for ActorId {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl Borrow<str> for ActorId {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl From<ActorId> for String {
+    fn from(value: ActorId) -> Self {
+        value.canonical
+    }
+}
+
+impl From<String> for ActorId {
+    fn from(value: String) -> Self {
+        match Self::from_canonical(&value) {
+            Ok(actor_id) => actor_id,
+            Err(error) => panic!("invalid canonical ActorId '{value}': {error}"),
+        }
+    }
+}
+
+impl From<&str> for ActorId {
+    fn from(value: &str) -> Self {
+        Self::from(value.to_string())
+    }
+}
+
+impl PartialEq<str> for ActorId {
+    fn eq(&self, other: &str) -> bool {
+        self.canonical == other
+    }
+}
+
+impl PartialEq<String> for ActorId {
+    fn eq(&self, other: &String) -> bool {
+        self.canonical == *other
+    }
+}
+
+impl Serialize for ActorId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ActorId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let canonical = String::deserialize(deserializer)?;
+        Self::from_canonical(&canonical).map_err(serde::de::Error::custom)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
-    fn test_build_actor_id_full() {
-        let actor_id = build_actor_id(
-            "user-123",
-            "read-state-tracker",
-            Some("orbit-read-state-ts"),
-            "node-1",
+    fn creates_valid_actor_id() {
+        let actor_id = ActorId::new("counter", "gen_server", "default", "node-1").unwrap();
+
+        assert_eq!(actor_id.name(), "counter");
+        assert_eq!(actor_id.actor_type(), "gen_server");
+        assert_eq!(actor_id.namespace(), "default");
+        assert_eq!(actor_id.node_id(), "node-1");
+        assert_eq!(actor_id.as_str(), "counter//gen_server::default@node-1");
+    }
+
+    #[test]
+    fn rejects_invalid_names() {
+        for name in ["", "-counter", "bad@name", "bad//name", "bad::name", "bad space"] {
+            let err = ActorId::new(name, "worker", "default", "node-1").unwrap_err();
+            assert!(matches!(err, ActorIdError::InvalidName(_)));
+        }
+    }
+
+    #[test]
+    fn rejects_missing_required_fields() {
+        assert_eq!(
+            ActorId::new("counter", "", "default", "node-1").unwrap_err(),
+            ActorIdError::MissingField("actor_type")
         );
         assert_eq!(
-            actor_id,
-            "user-123//read-state-tracker::orbit-read-state-ts@node-1"
-        );
-    }
-
-    #[test]
-    fn test_build_actor_id_no_base_id() {
-        let actor_id = build_actor_id(
-            "",
-            "read-state-tracker",
-            Some("orbit-read-state-ts"),
-            "node-1",
-        );
-        assert_eq!(actor_id, "//read-state-tracker::orbit-read-state-ts@node-1");
-    }
-
-    #[test]
-    fn test_build_actor_id_no_namespace() {
-        let actor_id = build_actor_id("counter", "GenServer", None, "node-1");
-        assert_eq!(actor_id, "counter//GenServer@node-1");
-    }
-
-    #[test]
-    fn test_build_actor_id_legacy() {
-        let actor_id = build_actor_id("counter", "", None, "node-1");
-        assert_eq!(actor_id, "counter@node-1");
-    }
-
-    #[test]
-    fn test_parse_actor_id_new_format() {
-        let parsed =
-            parse_actor_id("user-123//read-state-tracker::orbit-read-state-ts@node-1").unwrap();
-        assert_eq!(parsed.id, "user-123");
-        assert_eq!(parsed.actor_type, "read-state-tracker");
-        assert_eq!(parsed.namespace, Some("orbit-read-state-ts".to_string()));
-        assert_eq!(parsed.node_id, "node-1");
-    }
-
-    #[test]
-    fn test_parse_actor_id_legacy_format() {
-        let parsed = parse_actor_id("counter@node-1").unwrap();
-        assert_eq!(parsed.id, "");
-        assert_eq!(parsed.actor_type, "counter");
-        assert_eq!(parsed.namespace, None);
-        assert_eq!(parsed.node_id, "node-1");
-    }
-
-    #[test]
-    fn test_parse_actor_id_no_namespace() {
-        let parsed = parse_actor_id("counter//GenServer@node-1").unwrap();
-        assert_eq!(parsed.id, "counter");
-        assert_eq!(parsed.actor_type, "GenServer");
-        assert_eq!(parsed.namespace, None);
-        assert_eq!(parsed.node_id, "node-1");
-    }
-
-    #[test]
-    fn test_extract_actor_type() {
-        assert_eq!(
-            extract_actor_type("user-123//read-state-tracker::orbit-read-state-ts@node-1"),
-            Some("read-state-tracker".to_string())
+            ActorId::new("counter", "worker", "", "node-1").unwrap_err(),
+            ActorIdError::MissingField("namespace")
         );
         assert_eq!(
-            extract_actor_type("counter@node-1"),
-            Some("counter".to_string())
+            ActorId::new("counter", "worker", "default", "").unwrap_err(),
+            ActorIdError::MissingField("node_id")
         );
     }
 
     #[test]
-    fn test_extract_namespace() {
-        assert_eq!(
-            extract_namespace("user-123//read-state-tracker::orbit-read-state-ts@node-1"),
-            Some("orbit-read-state-ts".to_string())
-        );
-        assert_eq!(extract_namespace("counter@node-1"), None);
+    fn display_uses_canonical_form() {
+        let actor_id = ActorId::new("counter", "worker", "prod", "node-7").unwrap();
+        assert_eq!(actor_id.to_string(), "counter//worker::prod@node-7");
     }
 
     #[test]
-    fn test_round_trip() {
-        let original = "user-123//read-state-tracker::orbit-read-state-ts@node-1";
-        let parsed = parse_actor_id(original).unwrap();
-        let rebuilt = parsed.to_actor_id();
-        assert_eq!(original, rebuilt);
+    fn canonical_round_trip() {
+        let canonical = "counter//worker::prod@node-7";
+        let actor_id = ActorId::from_canonical(canonical).unwrap();
+        assert_eq!(actor_id.to_string(), canonical);
     }
 
     #[test]
-    fn test_parse_actor_id_invalid_format() {
-        // Missing @ delimiter
-        assert!(parse_actor_id("invalid").is_err());
+    fn hash_and_eq_use_identity_components() {
+        let a = ActorId::new("counter", "worker", "prod", "node-7").unwrap();
+        let b = ActorId::new("counter", "worker", "prod", "node-7").unwrap();
+        let c = ActorId::new("counter", "worker", "prod", "node-8").unwrap();
 
-        // Empty node_id
-        assert!(parse_actor_id("actor@").is_err());
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 
     #[test]
-    fn test_build_actor_id_edge_cases() {
-        // Empty everything except node_id
-        let actor_id = build_actor_id("", "", None, "node-1");
-        assert_eq!(actor_id, "@node-1");
+    fn with_node_id_clones_components() {
+        let actor_id = ActorId::new("counter", "worker", "prod", "node-7").unwrap();
+        let moved = actor_id.with_node_id("node-8").unwrap();
 
-        // Empty base_id, has actor_type and namespace
-        let actor_id = build_actor_id("", "test-type", Some("ns"), "node-1");
-        assert_eq!(actor_id, "//test-type::ns@node-1");
+        assert_eq!(moved.name(), "counter");
+        assert_eq!(moved.actor_type(), "worker");
+        assert_eq!(moved.namespace(), "prod");
+        assert_eq!(moved.node_id(), "node-8");
     }
 
     #[test]
-    fn test_extract_functions() {
-        // Test extract_actor_type
-        assert_eq!(
-            extract_actor_type("user-123//read-state-tracker::orbit-read-state-ts@node-1"),
-            Some("read-state-tracker".to_string())
-        );
-        assert_eq!(
-            extract_actor_type("counter@node-1"),
-            Some("counter".to_string())
-        );
-        assert_eq!(extract_actor_type("invalid"), None);
+    fn serde_round_trip_uses_canonical_string() {
+        let actor_id = ActorId::new("counter", "worker", "prod", "node-7").unwrap();
+        let json = serde_json::to_string(&actor_id).unwrap();
+        let restored: ActorId = serde_json::from_str(&json).unwrap();
 
-        // Test extract_namespace
-        assert_eq!(
-            extract_namespace("user-123//read-state-tracker::orbit-read-state-ts@node-1"),
-            Some("orbit-read-state-ts".to_string())
-        );
-        assert_eq!(extract_namespace("counter@node-1"), None);
-        assert_eq!(extract_namespace("invalid"), None);
-
-        // Test extract_base_id
-        assert_eq!(
-            extract_base_id("user-123//read-state-tracker::orbit-read-state-ts@node-1"),
-            Some("user-123".to_string())
-        );
-        assert_eq!(extract_base_id("counter@node-1"), Some("".to_string()));
-        assert_eq!(extract_base_id("invalid"), None);
+        assert_eq!(json, "\"counter//worker::prod@node-7\"");
+        assert_eq!(restored, actor_id);
     }
 
     #[test]
-    fn test_parsed_actor_id_to_actor_id() {
-        let parsed = ParsedActorId {
-            id: "user-123".to_string(),
-            actor_type: "read-state-tracker".to_string(),
-            namespace: Some("orbit-read-state-ts".to_string()),
-            node_id: "node-1".to_string(),
-        };
+    fn string_equality_and_borrow_lookup_work() {
+        let actor_id = ActorId::new("counter", "worker", "prod", "node-7").unwrap();
+        let mut ids = HashMap::new();
+        ids.insert(actor_id.clone(), 42_u8);
 
-        let actor_id = parsed.to_actor_id();
-        assert_eq!(
-            actor_id,
-            "user-123//read-state-tracker::orbit-read-state-ts@node-1"
-        );
+        assert_eq!(actor_id.to_string(), "counter//worker::prod@node-7");
+        assert_eq!(ids.get("counter//worker::prod@node-7"), Some(&42_u8));
+    }
+
+    #[test]
+    fn proto_round_trip_preserves_components() {
+        let actor_id = ActorId::new("counter", "worker", "prod", "node-7").unwrap();
+        let proto = actor_id.to_proto();
+        let restored = ActorId::from_proto(&proto).unwrap();
+
+        assert_eq!(restored, actor_id);
     }
 }

@@ -28,5 +28,10 @@ rustflags = [
     "-C", "link-arg=-fuse-ld=lld",
 ]
 
-# macOS uses the default linker (no special flags needed)
+[target.'cfg(target_os = "macos")']
+# Work around Apple clang/ld crashes seen when linking large test binaries.
+rustflags = [
+    "-C", "link-arg=-Wl,-ld_classic",
+]
+
 # Windows uses the default linker (no special flags needed)

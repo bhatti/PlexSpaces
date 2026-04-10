@@ -101,9 +101,7 @@ pub mod parallel;
 
 // Unified routing module
 pub mod routing;
-pub use routing::{
-    ask_helper, extract_node_id, is_actor_local, route_local, route_message, route_remote,
-};
+pub use routing::{ask_helper, is_actor_local, route_local, route_message, route_remote};
 
 // Re-export SupervisorStats from proto (for public API)
 pub use plexspaces_proto::supervision::v1::SupervisorStats;

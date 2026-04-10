@@ -341,9 +341,10 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         // This is a convenience - in production, groups should be created explicitly
         let _ = self.registry.create_group(ctx, group_name).await;
 
-        // Convert actor_id string to ActorId
+        // Process-group storage keeps canonical strings; service boundaries parse them once.
         use plexspaces_core::ActorId;
-        let actor_id = ActorId::from(actor_id.to_string());
+        let actor_id = ActorId::from_canonical(actor_id)
+            .map_err(|e| format!("Invalid canonical actor id '{}': {}", actor_id, e))?;
 
         self.registry
             .join_group(ctx, group_name, &actor_id, topics)
@@ -358,7 +359,8 @@ impl ProcessGroupService for ProcessGroupServiceWrapper {
         actor_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use plexspaces_core::ActorId;
-        let actor_id = ActorId::from(actor_id.to_string());
+        let actor_id = ActorId::from_canonical(actor_id)
+            .map_err(|e| format!("Invalid canonical actor id '{}': {}", actor_id, e))?;
 
         self.registry
             .leave_group(ctx, group_name, &actor_id)

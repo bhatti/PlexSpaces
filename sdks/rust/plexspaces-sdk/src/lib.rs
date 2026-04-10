@@ -321,7 +321,7 @@ fn actor_ref_from_sender(
 pub async fn spawn_workflow_actor<B>(
     ctx: &RequestContext,
     service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
-    actor_id: impl Into<ActorId>,
+    actor_name: impl Into<String>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<WorkflowRef, WorkflowRefError>
@@ -331,7 +331,7 @@ where
     let actor_ref = spawn_with_facets(
         ctx,
         service_locator,
-        actor_id,
+        actor_name,
         ctx.namespace(),
         behavior,
         facets,
@@ -363,13 +363,7 @@ pub use serde_json::{json, Value};
 /// struct MyActor { ... }
 ///
 /// // Facets are automatically created from the annotation!
-/// let actor_ref = spawn(
-///     &ctx,
-///     service_locator,
-///     "my-actor@node",
-///     "default",
-///     MyActor::new(),
-/// ).await?;
+/// let actor_ref = spawn(&ctx, service_locator, "my-actor", "default", MyActor::new()).await?;
 /// ```
 ///
 /// ## Note
@@ -379,7 +373,7 @@ pub use serde_json::{json, Value};
 pub async fn spawn<B>(
     ctx: &RequestContext,
     service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
-    actor_id: impl Into<ActorId>,
+    actor_name: impl Into<String>,
     namespace: impl AsRef<str>,
     behavior: B,
 ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>>
@@ -388,7 +382,7 @@ where
 {
     let declared = B::declared_facets();
     let facets = create_facets(declared, &serde_json::json!({}), service_locator.clone())?;
-    spawn_with_facets(ctx, service_locator, actor_id, namespace, behavior, facets).await
+    spawn_with_facets(ctx, service_locator, actor_name, namespace, behavior, facets).await
 }
 
 /// Spawn a durable actor using its declared facets with storage backend.
@@ -407,7 +401,7 @@ where
 /// let actor_ref = spawn_with_storage(
 ///     &ctx,
 ///     service_locator,
-///     "my-actor@node",
+///     "my-actor",
 ///     "default",
 ///     MyDurableActor::new(),
 ///     storage,
@@ -417,7 +411,7 @@ where
 pub async fn spawn_with_storage<B>(
     ctx: &RequestContext,
     service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
-    actor_id: impl Into<ActorId>,
+    actor_name: impl Into<String>,
     namespace: impl AsRef<str>,
     behavior: B,
     storage: std::sync::Arc<dyn plexspaces_journaling::JournalStorage>,
@@ -432,7 +426,7 @@ where
         Some(storage),
         service_locator.clone(),
     )?;
-    spawn_with_facets(ctx, service_locator, actor_id, namespace, behavior, facets).await
+    spawn_with_facets(ctx, service_locator, actor_name, namespace, behavior, facets).await
 }
 
 /// Spawn an actor with explicit facets (low-level API).
@@ -445,7 +439,7 @@ where
 /// let actor_ref = spawn_with_facets(
 ///     &ctx,
 ///     service_locator,
-///     "my-actor@node",
+///     "my-actor",
 ///     "default",
 ///     MyActor::new(),
 ///     vec![Box::new(TimerFacet::new(json!({}), 50))],
@@ -465,7 +459,7 @@ where
 /// let actor_ref = spawn_with_facets(
 ///     &ctx,
 ///     service_locator,
-///     "my-actor@node",
+///     "my-actor",
 ///     "default",
 ///     MyActor::new(),
 ///     vec![Box::new(TimerFacet::new(json!({}), 50))],
@@ -475,7 +469,7 @@ where
 pub async fn spawn_with_facets<B>(
     ctx: &RequestContext,
     service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
-    actor_id: impl Into<ActorId>,
+    actor_name: impl Into<String>,
     namespace: impl AsRef<str>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
@@ -515,7 +509,7 @@ where
 
     // Use ActorBuilder from main crate - core functionality stays in crates/actor
     let mut builder = ActorBuilder::new(Box::new(behavior))
-        .with_id(actor_id.into())
+        .with_name(actor_name.into())
         .with_namespace(namespace_str);
     for facet in facets {
         builder = builder.with_facet(facet);
@@ -556,7 +550,7 @@ where
 /// let actor_ref = spawn_with_behavior_type(
 ///     &ctx,
 ///     service_locator,
-///     "my-actor@node",
+///     "my-actor//my_behavior::default@node-1",
 ///     "default",
 ///     "MyBehavior",
 ///     serde_json::to_vec(&initial_state)?,
@@ -567,19 +561,33 @@ where
 pub async fn spawn_with_behavior_type(
     ctx: &RequestContext,
     service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
-    actor_id: impl Into<ActorId>,
+    actor_name: impl Into<String>,
     _namespace: impl AsRef<str>,
     behavior_type: impl AsRef<str>,
     initial_state: Vec<u8>,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<ActorRef, Box<dyn std::error::Error + Send + Sync>> {
-    let actor_id: ActorId = actor_id.into();
+    let actor_name = actor_name.into();
     let behavior_type = behavior_type.as_ref().to_string();
 
     let actor_factory = service_locator
         .get_actor_factory()
         .await
         .ok_or_else(|| "ActorFactory not available in ServiceLocator".to_string())?;
+
+    let local_node_id = service_locator
+        .actor_registry()
+        .await
+        .ok_or_else(|| "ActorRegistry not available in ServiceLocator".to_string())?
+        .local_node_id()
+        .to_string();
+    let actor_id = ActorId::new(
+        actor_name,
+        behavior_type.clone(),
+        ctx.namespace().to_string(),
+        local_node_id,
+    )
+    .map_err(|e| format!("Failed to construct actor ID: {}", e))?;
 
     let message_sender = actor_factory
         .spawn_actor(
@@ -595,7 +603,7 @@ pub async fn spawn_with_behavior_type(
         .map_err(|e| format!("Failed to spawn actor: {}", e))?;
 
     let actor_ref = actor_ref_from_sender(message_sender)?;
-    debug_assert_eq!(actor_ref.id(), actor_id.as_str());
+    debug_assert_eq!(actor_ref.id(), &actor_id);
     Ok(actor_ref)
 }
 
@@ -628,7 +636,7 @@ fn actor_type_from_behavior(behavior_type: &plexspaces_core::BehaviorType) -> St
 /// ## Example
 /// ```ignore
 /// let facets = create_facets(&["timer", "logging"], &json!({}))?;
-/// let actor_ref = spawn_actor(&ctx, service_locator, actor_id, namespace, actor, facets).await?;
+/// let actor_ref = spawn_actor(&ctx, service_locator, "counter", namespace, actor, facets).await?;
 /// ```
 ///
 /// ## Note
@@ -891,7 +899,7 @@ pub use plexspaces_actor::{EventError, EventRef};
 pub async fn spawn_fsm_actor<B>(
     ctx: &RequestContext,
     service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
-    actor_id: impl Into<ActorId>,
+    actor_name: impl Into<String>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<FsmRef, FsmError>
@@ -901,7 +909,7 @@ where
     let actor_ref = spawn_with_facets(
         ctx,
         service_locator,
-        actor_id,
+        actor_name,
         ctx.namespace(),
         behavior,
         facets,
@@ -931,7 +939,7 @@ where
 pub async fn spawn_event_actor<B>(
     ctx: &RequestContext,
     service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
-    actor_id: impl Into<ActorId>,
+    actor_name: impl Into<String>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<EventRef, EventError>
@@ -941,7 +949,7 @@ where
     let actor_ref = spawn_with_facets(
         ctx,
         service_locator,
-        actor_id,
+        actor_name,
         ctx.namespace(),
         behavior,
         facets,
@@ -971,7 +979,7 @@ where
 pub async fn spawn_gen_server<B>(
     ctx: &RequestContext,
     service_locator: std::sync::Arc<dyn plexspaces_core::ServiceLocator>,
-    actor_id: impl Into<ActorId>,
+    actor_name: impl Into<String>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
 ) -> Result<GenServerRef, GenServerError>
@@ -981,7 +989,7 @@ where
     let actor_ref = spawn_with_facets(
         ctx,
         service_locator,
-        actor_id,
+        actor_name,
         ctx.namespace(),
         behavior,
         facets,

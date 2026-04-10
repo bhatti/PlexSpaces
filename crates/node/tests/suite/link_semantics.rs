@@ -46,12 +46,9 @@ async fn create_test_actor_ref(node: &Node, actor_id: &str) -> plexspaces_actor:
     // Spawn a real actor that processes messages (needed for EXIT message handling)
     use super::test_helpers::spawn_actor_helper;
     use plexspaces_actor::ActorBuilder;
-    use plexspaces_core::ActorId;
-
     let behavior = Box::new(TestBehavior);
-    let actor_id_full = format!("{}@test-node", actor_id);
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from(actor_id_full.clone()))
+        .with_name(actor_id)
         .build()
         .await
         .unwrap();
@@ -116,8 +113,7 @@ async fn wait_for_actor_state(
     should_be_dead: bool,
     timeout_secs: u64,
 ) -> Result<(), String> {
-    let actor_id_full = format!("{}@test-node", actor_id);
-    let actor_id_parsed = plexspaces_core::ActorId::from(actor_id_full);
+    let actor_id_parsed = super::test_helpers::test_runtime_actor_id(actor_id, "test-node");
 
     let max_iterations = (timeout_secs * 1000) / 10; // 10ms per iteration
     let check_complete = async {
@@ -165,8 +161,7 @@ async fn wait_for_actor_state(
 
 /// Helper to terminate an actor with a specific exit reason
 async fn terminate_actor(node: &Node, actor_id: &str, reason: ExitReason) {
-    let actor_id_full = format!("{}@test-node", actor_id);
-    let actor_id_parsed = plexspaces_core::ActorId::from(actor_id_full);
+    let actor_id_parsed = super::test_helpers::test_runtime_actor_id(actor_id, "test-node");
 
     unregister_actor_helper(node, &actor_id_parsed)
         .await

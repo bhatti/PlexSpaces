@@ -23,7 +23,7 @@
 #[cfg(test)]
 mod tests {
     use crate::actor_ref::{ActorRef, ActorRefError};
-    use plexspaces_core::{Message, ServiceLocator};
+    use plexspaces_core::{ActorId, Message, ServiceLocator};
     use plexspaces_mailbox::{mailbox_config_default, Mailbox, MailboxConfig};
     use std::sync::Arc;
     use std::time::Duration;
@@ -81,6 +81,10 @@ mod tests {
         )
     }
 
+    fn test_actor_id(name: &str, node_id: &str) -> ActorId {
+        ActorId::new(name, "worker", "test", node_id).expect("test actor id must be valid")
+    }
+
     /// Test that ActorRef preserves TTL when converting to proto
     #[tokio::test]
     async fn test_actor_ref_ttl_preserved() {
@@ -89,7 +93,7 @@ mod tests {
         let service_locator =
             create_default_service_locator(Some("test-node".to_string()), None).await;
         let _actor_ref = ActorRef::local(
-            "test@node1".to_string(),
+            test_actor_id("test", "node1"),
             "test".to_string(),
             "test".to_string(),
             mailbox,
@@ -113,7 +117,7 @@ mod tests {
         let service_locator =
             create_default_service_locator(Some("test-node".to_string()), None).await;
         let _actor_ref = ActorRef::local(
-            "test@node1".to_string(),
+            test_actor_id("test", "node1"),
             "test".to_string(),
             "test".to_string(),
             mailbox,
@@ -133,8 +137,9 @@ mod tests {
         use plexspaces_node::create_default_service_locator;
         let service_locator =
             create_default_service_locator(Some("test-node".to_string()), None).await;
+        let actor_id = ActorId::new("test", "worker", "test", "node1").unwrap();
         let actor_ref = ActorRef::local(
-            "test@node1".to_string(),
+            actor_id.clone(),
             "test".to_string(),
             "test".to_string(),
             Arc::clone(&mailbox),
@@ -150,7 +155,7 @@ mod tests {
             registry
                 .register_actor(
                     &ctx,
-                    "test@node1".to_string(),
+                    actor_id,
                     sender,
                     "TestActor".to_string(),
                     None,

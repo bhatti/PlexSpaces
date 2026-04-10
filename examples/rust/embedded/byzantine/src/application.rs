@@ -14,7 +14,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use plexspaces_actor::ActorRef;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_core::{ActorId, BehaviorRegistry, RequestContext};
+use plexspaces_core::{BehaviorRegistry, RequestContext};
 use plexspaces_node::CoordinationComputeTracker;
 use plexspaces_sdk::{call_message, cast_message, json, spawn_with_behavior_type};
 use std::collections::HashMap;
@@ -139,7 +139,7 @@ impl Application for ByzantineApplication {
         let mut general_refs: Vec<ActorRef> = Vec::new();
 
         for i in 0..self.config.general_count {
-            let actor_id = ActorId::from(format!("general-{}@{}", i, node.id()));
+            let actor_name = format!("general-{}", i);
             let initial_state = serde_json::json!({
                 "id": i,
                 "source_id": source_id,
@@ -150,7 +150,7 @@ impl Application for ByzantineApplication {
             let general_ref = spawn_with_behavior_type(
                 &ctx,
                 service_locator.clone(),
-                actor_id.clone(),
+                actor_name,
                 "consensus",
                 "ByzantineGeneral",
                 serde_json::to_vec(&initial_state).unwrap(),

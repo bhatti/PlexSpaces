@@ -23,7 +23,7 @@ interface messaging {
     /// # Example (Rust)
     /// ```rust
     /// // Fire-and-forget notification
-    /// messaging::tell("logger@node-1", "log", b"User logged in")?;
+    /// messaging::tell("logger//gen_server::default@node-1", "log", b"User logged in")?;
     /// ```
     tell: func(to: actor-id, msg-type: string, payload: payload) -> result<message-id, actor-error>;
 
@@ -45,7 +45,7 @@ interface messaging {
     /// # Example (Rust)
     /// ```rust
     /// // Request current count from counter actor
-    /// let response = messaging::ask("counter@node-1", "get", &[], 5000)?;
+    /// let response = messaging::ask("counter//gen_server::default@node-1", "get", &[], 5000)?;
     /// let count = i64::from_le_bytes(response.try_into().unwrap());
     /// ```
     ask: func(to: actor-id, msg-type: string, payload: payload, timeout-ms: duration-ms) -> result<payload, actor-error>;

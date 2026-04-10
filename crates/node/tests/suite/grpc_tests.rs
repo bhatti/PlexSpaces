@@ -147,7 +147,7 @@ async fn create_test_node_with_actor(node_name: &str) -> (Arc<Node>, ActorRef) {
 
     let behavior = Box::new(TestBehavior);
     let actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from(format!("test-actor-1@{}", node_name)))
+        .with_name("test-actor-1")
         .build()
         .await
         .unwrap();
@@ -184,7 +184,7 @@ async fn test_client_connection_failure() {
 
 #[tokio::test]
 async fn test_send_message_via_client() {
-    let (node, _actor_ref) = create_test_node_with_actor("test-node-send-msg").await;
+    let (node, actor_ref) = create_test_node_with_actor("test-node-send-msg").await;
     let server_addr = start_test_server(node).await;
 
     let mut client = RemoteActorClient::connect(&server_addr)
@@ -194,7 +194,7 @@ async fn test_send_message_via_client() {
     let proto_msg = create_proto_message_common(
         "msg-1",
         "sender-1",
-        "test-actor-1@test-node-send-msg",
+        &actor_ref.id().to_string(),
         vec![1, 2, 3],
     );
 
@@ -217,7 +217,14 @@ async fn test_send_message_to_nonexistent_actor_via_client() {
     let proto_msg = create_proto_message_common(
         "msg-2",
         "sender-1",
-        "nonexistent-actor@test-node-nonexist",
+        &ActorId::new(
+            "nonexistent-actor",
+            "gen_server",
+            "default",
+            "test-node-nonexist",
+        )
+        .unwrap()
+        .to_string(),
         vec![],
     );
 
@@ -230,7 +237,7 @@ async fn test_send_message_to_nonexistent_actor_via_client() {
 
 #[tokio::test]
 async fn test_send_message_with_headers_via_client() {
-    let (node, _actor_ref) = create_test_node_with_actor("test-node-headers").await;
+    let (node, actor_ref) = create_test_node_with_actor("test-node-headers").await;
     let server_addr = start_test_server(node).await;
 
     let mut client = RemoteActorClient::connect(&server_addr)
@@ -240,7 +247,7 @@ async fn test_send_message_with_headers_via_client() {
     let mut proto_msg = create_proto_message_common(
         "msg-headers",
         "sender-1",
-        "test-actor-1@test-node-headers",
+        &actor_ref.id().to_string(),
         vec![1, 2, 3],
     );
     proto_msg
@@ -260,19 +267,21 @@ async fn test_send_message_with_headers_via_client() {
 
 #[tokio::test]
 async fn test_concurrent_client_messages() {
-    let (node, _actor_ref) = create_test_node_with_actor("test-node-concurrent").await;
+    let (node, actor_ref) = create_test_node_with_actor("test-node-concurrent").await;
     let server_addr = start_test_server(node).await;
+    let receiver_id = actor_ref.id().to_string();
 
     let mut handles = vec![];
     for i in 0..5 {
         let addr = server_addr.clone();
+        let receiver_id = receiver_id.clone();
         let handle = tokio::spawn(async move {
             let mut client = RemoteActorClient::connect(&addr).await.unwrap();
 
             let proto_msg = create_proto_message_common(
                 &format!("msg-{}", i),
                 &format!("sender-{}", i),
-                "test-actor-1@test-node-concurrent",
+                &receiver_id,
                 vec![i as u8],
             );
 
@@ -362,13 +371,13 @@ async fn test_send_message_missing_receiver() {
 
 #[tokio::test]
 async fn test_send_message_to_existing_actor() {
-    let (node, _actor_ref) = create_test_node_with_actor("test-node-existing").await;
+    let (node, actor_ref) = create_test_node_with_actor("test-node-existing").await;
     let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let proto_msg = create_proto_message(
         "msg-3",
         "sender-1",
-        "test-actor-1@test-node-existing",
+        &actor_ref.id().to_string(),
         vec![1, 2, 3],
     );
 
@@ -447,13 +456,13 @@ async fn test_unimplemented_methods_return_unimplemented_status() {
 
 #[tokio::test]
 async fn test_message_with_headers_via_service() {
-    let (node, _actor_ref) = create_test_node_with_actor("test-node-svc-headers").await;
+    let (node, actor_ref) = create_test_node_with_actor("test-node-svc-headers").await;
     let service = ActorServiceImpl::new(node.service_locator(), node.id().as_str().to_string());
 
     let mut proto_msg = create_proto_message(
         "msg-headers",
         "sender-1",
-        "test-actor-1@test-node-svc-headers",
+        &actor_ref.id().to_string(),
         vec![1, 2, 3],
     );
     proto_msg
@@ -474,20 +483,22 @@ async fn test_message_with_headers_via_service() {
 
 #[tokio::test]
 async fn test_concurrent_message_sends_via_service() {
-    let (node, _actor_ref) = create_test_node_with_actor("test-node-svc-conc").await;
+    let (node, actor_ref) = create_test_node_with_actor("test-node-svc-conc").await;
     let service = Arc::new(ActorServiceImpl::new(
         node.service_locator(),
         node.id().as_str().to_string(),
     ));
+    let receiver_id = actor_ref.id().to_string();
 
     let mut handles = vec![];
     for i in 0..5 {
         let service_clone = service.clone();
+        let receiver_id = receiver_id.clone();
         let handle = tokio::spawn(async move {
             let proto_msg = create_proto_message(
                 &format!("msg-{}", i),
                 &format!("sender-{}", i),
-                "test-actor-1@test-node-svc-conc",
+                &receiver_id,
                 vec![i as u8],
             );
 

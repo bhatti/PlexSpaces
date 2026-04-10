@@ -43,7 +43,7 @@ pub trait MessageSender: Send + Sync {
     ///
     /// ## Arguments
     /// * `from` - Sender actor ID
-    /// * `to` - Recipient actor ID (can be "actor@node" format for remote)
+    /// * `to` - Recipient actor ID in canonical format `name//actor_type::namespace@node_id`
     /// * `message_type` - Message type (handler name, e.g. "ping", "cleanup_expired")
     /// * `message` - Message payload bytes
     ///

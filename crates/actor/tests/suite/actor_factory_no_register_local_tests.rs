@@ -35,6 +35,10 @@ use plexspaces_core::{
 use std::sync::Arc;
 use ulid::Ulid;
 
+fn test_actor_id(name: &str) -> ActorId {
+    ActorId::new(name, "GenServer", "default", "test-node").expect("valid test actor id")
+}
+
 /// Helper to create a test message
 fn create_test_message(payload: Vec<u8>) -> Message {
     Message {
@@ -90,7 +94,7 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
     let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
 
     // Spawn actor using spawn_actor
-    let actor_id: ActorId = "test-actor@test-node".to_string();
+    let actor_id = test_actor_id("test-actor");
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
@@ -109,7 +113,6 @@ async fn test_spawn_built_actor_registers_message_sender_only() {
         .unwrap();
 
     // Verify actor is registered (via MessageSender, not mailbox)
-    let actor_id: ActorId = "test-actor@test-node".to_string();
     assert!(
         registry.is_actor_activated(&actor_id).await,
         "Actor should be activated"
@@ -134,7 +137,7 @@ async fn test_spawn_actor_registers_message_sender_only() {
     let registry: Arc<ActorRegistry> = service_locator.actor_registry().await.unwrap();
 
     // Spawn actor
-    let actor_id: ActorId = "test-actor@test-node".to_string();
+    let actor_id = test_actor_id("test-actor");
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
@@ -173,7 +176,8 @@ async fn test_multiple_actors_spawned_via_factory() {
         "system".to_string(),
     );
     for i in 0..5 {
-        let actor_id: ActorId = format!("actor-{}@test-node", i);
+        let actor_id =
+            ActorId::new(format!("actor-{i}"), "GenServer", "default", "test-node").unwrap();
         factory
             .spawn_actor(
                 &ctx,

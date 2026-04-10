@@ -59,7 +59,7 @@ use std::sync::Arc;
 /// ```
 pub async fn spawn_workflow<B>(
     ctx: &RequestContext,
-    workflow_id: impl Into<plexspaces_core::ActorId>,
+    workflow_name: impl Into<String>,
     behavior: B,
     facets: Vec<Box<dyn plexspaces_facet::Facet>>,
     service_locator: Arc<dyn ServiceLocatorTrait>,
@@ -68,7 +68,7 @@ where
     B: plexspaces_core::Actor + Send + 'static,
 {
     let mut builder = ActorBuilder::new(Box::new(behavior))
-        .with_id(workflow_id.into())
+        .with_name(workflow_name.into())
         .with_namespace(ctx.namespace().to_string());
     for facet in facets {
         builder = builder.with_facet(facet);

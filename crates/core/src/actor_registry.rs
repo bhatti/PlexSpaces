@@ -27,9 +27,8 @@ use crate::actor_context::ObjectRegistry;
 use crate::ActorFactory;
 use crate::Service;
 use crate::{
-    actor_id::parse_actor_id, ActorId, ActorMetricsExt, ActorMetricsHandle, ExitReason,
-    MessageSender, ReplyWaiter, ReplyWaiterRegistry, RequestContext, VirtualActorManager,
-    TEMP_SENDER_PREFIX,
+    ActorId, ActorMetricsExt, ActorMetricsHandle, ExitReason, MessageSender, ReplyWaiter,
+    ReplyWaiterRegistry, RequestContext, VirtualActorManager, TEMP_SENDER_ACTOR_TYPE,
 };
 use plexspaces_facet::{ExitReason as FacetExitReason, FacetManager};
 use plexspaces_proto::common::v1::Message;
@@ -139,9 +138,9 @@ pub struct ActorRegistry {
     actor_metrics: ActorMetricsHandle,
     /// Temporary sender mappings: temporary_sender_id -> TemporarySenderEntry
     /// Used for ask() pattern when called from outside actor context
-    /// Key: temporary_sender_id (format: "ask-{correlation_id}@{node_id}")
+    /// Key: structured temporary sender ActorId
     /// Value: ActorRef ID that created it, correlation_id, and expiration time
-    temporary_senders: Arc<RwLock<HashMap<String, TemporarySenderEntry>>>,
+    temporary_senders: Arc<RwLock<HashMap<ActorId, TemporarySenderEntry>>>,
     /// Efficient actor-type lookup: (tenant_id, namespace, actor_type) -> Vec<actor_id>
     /// Used for FaaS-style actor request routing to quickly find actors by type
     /// Maintained in sync with actors map for O(1) lookup
@@ -167,11 +166,11 @@ pub struct ActorRegistry {
 /// The temporary sender itself is registered as an ActorRef in the actors map.
 ///
 /// ## Design
-/// - Temporary sender ID is its own actor_ref_id (format: "ask-{correlation_id}@{node_id}")
+/// - Temporary sender uses its own canonical ActorId as actor_ref_id
 /// - Used for correlation_id lookup and expiration tracking
 #[derive(Clone, Debug)]
 pub struct TemporarySenderEntry {
-    /// Temporary sender ID (same as actor_ref_id, format: "ask-{correlation_id}@{node_id}")
+    /// Temporary sender actor ID.
     pub actor_ref_id: ActorId,
     /// Correlation ID for matching replies
     pub correlation_id: String,
@@ -399,10 +398,8 @@ impl ActorRegistry {
             if let Some(metadata) = manager.get_metadata(actor_id).await {
                 return Some((metadata.tenant_id, metadata.namespace));
             }
-            if let Ok(parsed) = parse_actor_id(actor_id) {
-                if let Some(metadata) = manager.get_virtual_actor_type(&parsed.actor_type).await {
-                    return Some((metadata.tenant_id, metadata.namespace));
-                }
+            if let Some(metadata) = manager.get_virtual_actor_type(actor_id.actor_type()).await {
+                return Some((metadata.tenant_id, metadata.namespace));
             }
         }
 
@@ -428,13 +425,11 @@ impl ActorRegistry {
         let result = if let Some(manager) = manager {
             if let Some(metadata) = manager.get_metadata(actor_id).await {
                 Some(metadata.actor_type)
-            } else if let Ok(parsed) = parse_actor_id(actor_id) {
+            } else {
                 manager
-                    .get_virtual_actor_type(&parsed.actor_type)
+                    .get_virtual_actor_type(actor_id.actor_type())
                     .await
                     .map(|metadata| metadata.actor_type)
-            } else {
-                None
             }
         } else {
             None
@@ -828,10 +823,7 @@ impl ActorRegistry {
     }
 
     fn is_local_actor_id(&self, actor_id: &ActorId) -> bool {
-        match parse_actor_id(actor_id) {
-            Ok(parsed) => parsed.node_id == self.local_node_id,
-            Err(_) => true,
-        }
+        actor_id.node_id() == self.local_node_id
     }
 
     async fn actor_exists_locally(&self, actor_id: &ActorId) -> bool {
@@ -897,12 +889,12 @@ impl ActorRegistry {
         let manager = match self.require_virtual_actor_manager().await {
             Ok(m) => m,
             Err(ActorRegistryError::DependencyUnavailable(_)) => {
-                return Err(ActorRegistryError::ActorNotFound(actor_id.clone()));
+                return Err(ActorRegistryError::ActorNotFound(actor_id.to_string()));
             }
             Err(e) => return Err(e),
         };
         if !manager.is_virtual(actor_id).await {
-            return Err(ActorRegistryError::ActorNotFound(actor_id.clone()));
+            return Err(ActorRegistryError::ActorNotFound(actor_id.to_string()));
         }
 
         let actor_factory = self.require_actor_factory().await?;
@@ -913,7 +905,7 @@ impl ActorRegistry {
 
         self.lookup_actor(actor_id)
             .await
-            .ok_or_else(|| ActorRegistryError::ActorNotFound(actor_id.clone()))
+            .ok_or_else(|| ActorRegistryError::ActorNotFound(actor_id.to_string()))
     }
 
     async fn dispatch_local_message(
@@ -933,12 +925,12 @@ impl ActorRegistry {
         let manager = match self.require_virtual_actor_manager().await {
             Ok(m) => m,
             Err(ActorRegistryError::DependencyUnavailable(_)) => {
-                return Err(ActorRegistryError::ActorNotFound(actor_id.clone()));
+                return Err(ActorRegistryError::ActorNotFound(actor_id.to_string()));
             }
             Err(e) => return Err(e),
         };
         if !manager.is_virtual(actor_id).await {
-            return Err(ActorRegistryError::ActorNotFound(actor_id.clone()));
+            return Err(ActorRegistryError::ActorNotFound(actor_id.to_string()));
         }
 
         if manager.is_active(actor_id).await {
@@ -1000,10 +992,9 @@ impl ActorRegistry {
         let waiter_registry = self.require_reply_waiter_registry().await?;
         let actor_factory = self.require_actor_factory().await?;
         let correlation_id = Ulid::new().to_string();
-        let temp_sender_id = format!(
-            "{}-{}@{}",
-            TEMP_SENDER_PREFIX, correlation_id, self.local_node_id
-        );
+        let temp_sender_id =
+            ActorId::temporary_sender(&correlation_id, ctx.namespace(), &self.local_node_id)
+                .map_err(|e| ActorRegistryError::SendFailed(e.to_string()))?;
         let expires_at = Instant::now() + (timeout * 2);
 
         actor_factory
@@ -1021,10 +1012,10 @@ impl ActorRegistry {
             .register(correlation_id.clone(), waiter.clone())
             .await;
 
-        message.sender_id = temp_sender_id.clone();
+        message.sender_id = temp_sender_id.to_string();
         message.correlation_id = correlation_id.clone();
         if message.receiver_id.is_empty() {
-            message.receiver_id = actor_id.clone();
+            message.receiver_id = actor_id.to_string();
         }
 
         let dispatch_result = self.dispatch_local_message(actor_id, message).await;
@@ -1211,38 +1202,35 @@ impl ActorRegistry {
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext for tenant isolation
-    /// * `temporary_sender_id` - Temporary sender ID (format: "ask-{correlation_id}@{node_id}")
+    /// * `temporary_sender_id` - Temporary sender actor ID
     /// * `temporary_sender_ref` - ActorRef for the temporary sender (implements MessageSender)
     /// * `correlation_id` - Correlation ID for matching replies
     /// * `expires_at` - Expiration time for automatic cleanup
     pub async fn register_temporary_sender(
         &self,
         ctx: &RequestContext,
-        temporary_sender_id: String,
+        temporary_sender_id: ActorId,
         temporary_sender_ref: Arc<dyn MessageSender>,
         correlation_id: String,
         expires_at: Instant,
     ) {
-        // Register temporary sender as an actual ActorRef in the actors map.
-        // This allows lookup_actor() to find it when send_reply() is called.
         let correlation_id_clone = correlation_id.clone();
         self.register_actor(
             ctx,
             temporary_sender_id.clone(),
             temporary_sender_ref,
-            "TemporarySender".to_string(), // Actor type for observability
-            None,                          // No config for temporary senders
-            None, // No instance for temporary senders (they're just ActorRefs)
-            None, // No behavior_kind for temporary senders
+            TEMP_SENDER_ACTOR_TYPE.to_string(),
+            None,
+            None,
+            None,
         )
         .await;
 
-        // Also store in temporary_senders map for correlation_id lookup and cleanup
         let mut temp_senders = self.temporary_senders.write().await;
         temp_senders.insert(
             temporary_sender_id.clone(),
             TemporarySenderEntry {
-                actor_ref_id: temporary_sender_id.clone(), // Temporary sender ID is its own actor_ref_id
+                actor_ref_id: temporary_sender_id.clone(),
                 correlation_id: correlation_id_clone,
                 expires_at,
             },
@@ -1270,7 +1258,7 @@ impl ActorRegistry {
     /// Some(TemporarySenderEntry) if found, None otherwise
     pub async fn lookup_temporary_sender(
         &self,
-        temporary_sender_id: &str,
+        temporary_sender_id: &ActorId,
     ) -> Option<TemporarySenderEntry> {
         let temp_senders = self.temporary_senders.read().await;
         temp_senders.get(temporary_sender_id).cloned()
@@ -1284,17 +1272,13 @@ impl ActorRegistry {
     ///
     /// ## Arguments
     /// * `temporary_sender_id` - Temporary sender ID to remove
-    pub async fn remove_temporary_sender(&self, temporary_sender_id: &str) {
-        // Unregister from the actors map (so lookup_actor() won't find it).
-        let actor_id = ActorId::from(temporary_sender_id.to_string());
-        if let Err(e) = self.unregister_with_cleanup(&actor_id).await {
+    pub async fn remove_temporary_sender(&self, temporary_sender_id: &ActorId) {
+        if let Err(e) = self.unregister_with_cleanup(temporary_sender_id).await {
             tracing::warn!(
                 "ActorRegistry: Failed to unregister temporary sender ActorRef: temporary_sender_id={}, error={}",
                 temporary_sender_id, e
             );
         }
-
-        // Also remove from temporary_senders map
         let mut temp_senders = self.temporary_senders.write().await;
         if temp_senders.remove(temporary_sender_id).is_some() {
             if tracing::enabled!(tracing::Level::TRACE) {
@@ -1317,7 +1301,7 @@ impl ActorRegistry {
     /// `(expired_count, remaining_temporary_senders_after)`.
     pub async fn cleanup_expired_temporary_senders(&self) -> (usize, usize) {
         let now = Instant::now();
-        let expired_ids: Vec<String> = {
+        let expired_ids: Vec<ActorId> = {
             let temp_senders = self.temporary_senders.read().await;
             temp_senders
                 .iter()
@@ -1328,10 +1312,8 @@ impl ActorRegistry {
 
         let expired_count = expired_ids.len();
 
-        // Unregister each expired temporary sender from the actors map
         for temp_sender_id in &expired_ids {
-            let actor_id = ActorId::from(temp_sender_id.clone());
-            if let Err(e) = self.unregister_with_cleanup(&actor_id).await {
+            if let Err(e) = self.unregister_with_cleanup(temp_sender_id).await {
                 tracing::warn!(
                     "ActorRegistry: Failed to unregister expired temporary sender ActorRef: temporary_sender_id={}, error={}",
                     temp_sender_id, e
@@ -1470,7 +1452,7 @@ impl ActorRegistry {
 
         // OBSERVABILITY: Metrics and logging
         metrics::gauge!("plexspaces_actor_children_count",
-            "parent_id" => parent_id.clone()
+            "parent_id" => parent_id.to_string()
         )
         .set({
             let map = self.parent_to_children.read().await;
@@ -1478,8 +1460,8 @@ impl ActorRegistry {
         });
 
         metrics::counter!("plexspaces_actor_parent_child_registered_total",
-            "parent_id" => parent_id.clone(),
-            "child_id" => child_id.clone()
+            "parent_id" => parent_id.to_string(),
+            "child_id" => child_id.to_string()
         )
         .increment(1);
 
@@ -1521,7 +1503,7 @@ impl ActorRegistry {
 
         // OBSERVABILITY: Metrics and logging
         metrics::gauge!("plexspaces_actor_children_count",
-            "parent_id" => parent_id.clone()
+            "parent_id" => parent_id.to_string()
         )
         .set({
             let map = self.parent_to_children.read().await;
@@ -1529,8 +1511,8 @@ impl ActorRegistry {
         });
 
         metrics::counter!("plexspaces_actor_parent_child_unregistered_total",
-            "parent_id" => parent_id.clone(),
-            "child_id" => child_id.clone()
+            "parent_id" => parent_id.to_string(),
+            "child_id" => child_id.to_string()
         )
         .increment(1);
 
@@ -1627,7 +1609,7 @@ impl ActorRegistry {
 
         // OBSERVABILITY: Track subtree size
         metrics::gauge!("plexspaces_actor_subtree_size",
-            "root_id" => root_id.clone()
+            "root_id" => root_id.to_string()
         )
         .set(result.len() as f64);
 
@@ -2013,8 +1995,6 @@ impl ActorRegistry {
             // Note: monitor_ref is a String identifier, not necessarily the actor ID
             // We use FacetManager to call facet.on_down() for all facets on the monitoring actor
             // This avoids circular dependencies (plexspaces-core doesn't depend on plexspaces-facet)
-            let monitoring_actor_id = ActorId::from(monitor_link.monitor_ref.clone());
-
             // Use FacetManager to call facet.on_down() for all facets on the monitoring actor
             // Convert core::ExitReason to facet::ExitReason
             let facet_exit_reason = match &reason {
@@ -2041,10 +2021,11 @@ impl ActorRegistry {
             };
 
             let facet_down_start = std::time::Instant::now();
-            let facet_down_result = self
+            let monitoring_actor_id = monitor_link.monitor_ref.clone();
+            let facet_down_result: Result<Vec<plexspaces_facet::FacetError>, String> = self
                 .facet_manager
                 .call_on_down(
-                    monitoring_actor_id.to_string(),
+                    monitoring_actor_id.clone(),
                     actor_id.to_string(),
                     &facet_exit_reason,
                 )
@@ -2055,7 +2036,7 @@ impl ActorRegistry {
                 Ok(errors) if !errors.is_empty() => {
                     metrics::counter!("plexspaces_facet_down_errors_total",
                         "monitoring_actor_id" => monitor_link.monitor_ref.clone(),
-                        "monitored_actor_id" => actor_id.clone(),
+                        "monitored_actor_id" => actor_id.to_string(),
                         "error_count" => errors.len().to_string()
                     )
                     .increment(errors.len() as u64);
@@ -2092,12 +2073,12 @@ impl ActorRegistry {
 
             metrics::histogram!("plexspaces_facet_down_duration_seconds",
                 "monitoring_actor_id" => monitor_link.monitor_ref.clone(),
-                "monitored_actor_id" => actor_id.clone()
+                "monitored_actor_id" => actor_id.to_string()
             )
             .record(facet_down_duration.as_secs_f64());
             metrics::counter!("plexspaces_facet_down_total",
                 "monitoring_actor_id" => monitor_link.monitor_ref.clone(),
-                "monitored_actor_id" => actor_id.clone()
+                "monitored_actor_id" => actor_id.to_string()
             )
             .increment(1);
 
@@ -2114,7 +2095,7 @@ impl ActorRegistry {
 
         // OBSERVABILITY: Metrics
         metrics::counter!("plexspaces_actor_exit_handled_total",
-            "actor_id" => actor_id.clone(),
+            "actor_id" => actor_id.to_string(),
             "action" => "down_sent"
         )
         .increment(monitors.len() as u64);
@@ -2240,7 +2221,7 @@ impl ActorRegistry {
 
         // OBSERVABILITY: Metrics
         metrics::counter!("plexspaces_actor_exit_propagated_total",
-            "actor_id" => actor_id.clone(),
+            "actor_id" => actor_id.to_string(),
             "linked_count" => linked_count.to_string()
         )
         .increment(linked_count as u64);

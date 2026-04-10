@@ -29,8 +29,7 @@ use super::test_helpers::app_request_with_tenant;
 use async_trait::async_trait;
 use plexspaces_core::JournalStorage as _;
 use plexspaces_core::{
-    actor_id::build_actor_id, ActorStateHandle, ApplicationManager, Message, MessageSender,
-    ServiceLocator,
+    ActorId, ActorStateHandle, ApplicationManager, Message, MessageSender, ServiceLocator,
 };
 use plexspaces_journaling::{virtual_actor_facet_to_lifecycle_facet, VirtualActorFacet};
 use plexspaces_node::{Node, NodeId};
@@ -150,7 +149,7 @@ impl ActorStateHandle for TestActorStateHandle {
 }
 
 struct TestMessageSender {
-    actor_id: String,
+    actor_id: ActorId,
     tenant_id: String,
     namespace: String,
     actor_type: std::sync::RwLock<Option<String>>,
@@ -158,7 +157,7 @@ struct TestMessageSender {
 }
 
 impl TestMessageSender {
-    fn new(actor_id: String, tenant_id: String, namespace: String) -> Self {
+    fn new(actor_id: ActorId, tenant_id: String, namespace: String) -> Self {
         Self {
             actor_id,
             tenant_id,
@@ -179,7 +178,7 @@ impl MessageSender for TestMessageSender {
     }
 
     fn actor_id(&self) -> Option<String> {
-        Some(self.actor_id.clone())
+        Some(self.actor_id.to_string())
     }
 
     fn tenant_id(&self) -> Option<&str> {
@@ -1208,7 +1207,8 @@ async fn test_undeploy_missing_application_still_cleans_namespace_state() {
     let service_locator = node.service_locator();
     let namespace = "abstractions-rust";
     let actor_type = "abstractions";
-    let actor_id = "cart-1//abstractions::abstractions-rust@test-node".to_string();
+    let actor_id = ActorId::new("cart-1", actor_type, namespace, "test-node")
+        .expect("test actor id should be valid");
 
     let virtual_actor_manager = service_locator
         .virtual_actor_manager()
@@ -1262,7 +1262,7 @@ async fn test_undeploy_missing_application_still_cleans_namespace_state() {
         .expect("JournalStorage should be registered");
     journal_storage
         .save_checkpoint(&Checkpoint {
-            actor_id: actor_id.clone(),
+            actor_id: actor_id.to_string(),
             sequence: 2,
             timestamp: Some(prost_types::Timestamp {
                 seconds: 1,
@@ -1302,7 +1302,7 @@ async fn test_undeploy_missing_application_still_cleans_namespace_state() {
     );
     assert!(
         journal_storage
-            .get_latest_checkpoint(&actor_id)
+            .get_latest_checkpoint(&actor_id.to_string())
             .await
             .is_err(),
         "checkpoint should be purged by stateless undeploy cleanup"
@@ -1317,7 +1317,8 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
     let app_id = "abstractions-rust";
     let tenant_id = "test-tenant";
     let actor_type = "abstractions";
-    let actor_id = "cart-1//abstractions::abstractions-rust@test-node".to_string();
+    let actor_id = ActorId::new("cart-1", actor_type, app_id, "test-node")
+        .expect("test actor id should be valid");
     let (wasm_module, mut app_spec) =
         create_wasm_module_from_fixture_with_supervisor("calculator_actor.wasm", actor_type);
     app_spec.namespace = app_id.to_string();
@@ -1389,7 +1390,7 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
         .expect("JournalStorage should be registered");
     journal_storage
         .save_checkpoint(&Checkpoint {
-            actor_id: actor_id.clone(),
+            actor_id: actor_id.to_string(),
             sequence: 2,
             timestamp: Some(prost_types::Timestamp {
                 seconds: 1,
@@ -1415,7 +1416,7 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
 
     assert!(
         journal_storage
-            .get_latest_checkpoint(&actor_id)
+            .get_latest_checkpoint(&actor_id.to_string())
             .await
             .is_err(),
         "checkpoint should be removed after undeploy"
@@ -1455,7 +1456,7 @@ async fn test_redeploy_after_undeploy_starts_with_fresh_namespace_state() {
 
     assert!(
         journal_storage
-            .get_latest_checkpoint(&actor_id)
+            .get_latest_checkpoint(&actor_id.to_string())
             .await
             .is_err(),
         "redeploy should start with fresh namespace state"
@@ -1470,7 +1471,8 @@ async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
     let app_id = "abstractions-rust";
     let tenant_id = "test-tenant";
     let actor_type = "abstractions";
-    let actor_id = build_actor_id("cart-1", actor_type, Some(app_id), "test-node");
+    let actor_id = ActorId::new("cart-1", actor_type, app_id, "test-node")
+        .expect("test actor id should be valid");
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         tenant_id.to_string(),
         app_id.to_string(),
@@ -1547,7 +1549,7 @@ async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
         .expect("JournalStorage should be registered");
     journal_storage
         .save_checkpoint(&Checkpoint {
-            actor_id: actor_id.clone(),
+            actor_id: actor_id.to_string(),
             sequence: 2,
             timestamp: Some(prost_types::Timestamp {
                 seconds: 1,
@@ -1614,7 +1616,7 @@ async fn test_undeploy_stops_live_virtual_actor_and_clears_namespace_state() {
     );
     assert!(
         journal_storage
-            .get_latest_checkpoint(&actor_id)
+            .get_latest_checkpoint(&actor_id.to_string())
             .await
             .is_err(),
         "checkpoint should be removed after undeploy"
@@ -1747,11 +1749,12 @@ async fn test_wasm_supervisor_registers_plain_controller_child_in_scope() {
         1,
         "controller child should be registered once"
     );
-    assert!(
-        controllers[0].contains("//controller::abstractions-go@test-node"),
-        "controller child should use canonical in-scope actor id, got {:?}",
-        controllers
-    );
+    let controller_id =
+        plexspaces_core::ActorId::from_canonical(&controllers[0]).expect("controller id");
+    assert_eq!(controller_id.name(), "controller");
+    assert_eq!(controller_id.actor_type(), "controller");
+    assert_eq!(controller_id.namespace(), app_id);
+    assert_eq!(controller_id.node_id(), node.id().as_str());
 }
 
 #[tokio::test]
@@ -1880,8 +1883,12 @@ async fn test_go_wasm_controller_stop_resets_nondurable_virtual_actor() {
 
     let stop_target = initial_status["self_id"]
         .as_str()
-        .unwrap_or("session-1//ephemeral::abstractions-go-sdk-it@test-node")
-        .to_string();
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            plexspaces_core::ActorId::new("session-1", "ephemeral", app_id, node.id().as_str())
+                .unwrap()
+                .to_string()
+        });
     let stop_result = actor_ask_json(
         &actor_service,
         tenant_id,
@@ -2035,8 +2042,12 @@ async fn test_python_wasm_controller_stop_resets_nondurable_virtual_actor() {
 
     let stop_target = initial_status["self_id"]
         .as_str()
-        .unwrap_or("session-1//ephemeral::abstractions-python-sdk-it@test-node")
-        .to_string();
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            plexspaces_core::ActorId::new("session-1", "ephemeral", app_id, node.id().as_str())
+                .unwrap()
+                .to_string()
+        });
     let stop_result = actor_ask_json(
         &actor_service,
         tenant_id,
@@ -2190,8 +2201,12 @@ async fn test_typescript_wasm_controller_stop_resets_nondurable_virtual_actor() 
 
     let stop_target = initial_status["self_id"]
         .as_str()
-        .unwrap_or("session-1//ephemeral::abstractions-typescript-sdk-it@test-node")
-        .to_string();
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            plexspaces_core::ActorId::new("session-1", "ephemeral", app_id, node.id().as_str())
+                .unwrap()
+                .to_string()
+        });
     let stop_result = actor_ask_json(
         &actor_service,
         tenant_id,

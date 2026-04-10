@@ -105,12 +105,9 @@ pub use secret_masker::{mask_map_secrets, mask_release_spec, SecretMasker, DEFAU
 pub mod actor_factory;
 pub use actor_factory::ActorFactory;
 pub mod constants;
-pub use constants::TEMP_SENDER_PREFIX;
+pub use constants::{TEMP_SENDER_ACTOR_TYPE, TEMP_SENDER_PREFIX};
 pub mod actor_id;
-pub use actor_id::{
-    build_actor_id, extract_actor_type, extract_base_id, extract_namespace, parse_actor_id,
-    ActorIdError, ParsedActorId,
-};
+pub use actor_id::{ActorId, ActorIdError};
 pub mod facet_helpers;
 pub use facet_helpers::{create_facet_from_proto, create_facets_from_proto};
 pub mod facet_factories;
@@ -148,9 +145,6 @@ pub use reply_waiter::{ReplyWaiter, ReplyWaiterError, ReplyWaiterRegistry};
 // Re-export RequestContext from common crate
 pub use plexspaces_common::{RequestContext, RequestContextError};
 
-/// Actor ID type (String for simplicity and flexibility)
-pub type ActorId = String;
-
 // ActorContext is now in actor_context module with full service access
 // See actor_context.rs for the enhanced version with ActorService, ObjectRegistry, etc.
 
@@ -162,85 +156,35 @@ pub type ActorId = String;
 /// - **Erlang/Akka/Orleans Inspired**: Follows proven patterns from industry leaders
 ///
 /// ## Actor ID Format
-/// Format: "actor_name@node_id"
-/// Examples: "counter@node1", "user-session-123@prod-5"
+/// Canonical format: `name//actor_type::namespace@node_id`
+/// Example: `counter//gen_server::default@node-1`
 ///
 /// ## Usage
 /// All messaging goes through ActorService:
 /// ```rust,ignore
-/// let actor_ref = ActorRef::new("counter@node1".to_string())?;
+/// let actor_id = plexspaces_core::ActorId::new("counter", "gen_server", "default", "node-1")?;
+/// let actor_ref = ActorRef::new(actor_id)?;
 /// actor_service.send(&actor_ref, message).await?;
 /// ```
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActorRef {
-    /// Actor ID in format "actor_name@node_id"
+    /// Structured actor identity.
     pub id: ActorId,
-    /// Actor name (parsed from ID, cached for performance)
-    pub actor_name: String,
-    /// Node ID (parsed from ID, cached for performance)
-    pub node_id: String,
 }
 
 impl ActorRef {
     /// Create ActorRef from identity
     ///
     /// # Arguments
-    /// * `id` - Actor ID in format "actor_name@node_id"
+    /// * `id` - Structured actor identity
     ///
     /// # Example
     /// ```ignore
-    /// let actor_ref = ActorRef::new("counter@node1".to_string())?;
+    /// let actor_id = plexspaces_core::ActorId::new("counter", "gen_server", "default", "node-1")?;
+    /// let actor_ref = ActorRef::new(actor_id)?;
     /// ```
     pub fn new(id: ActorId) -> Result<Self, ActorError> {
-        let (actor_name, node_id) = Self::parse_actor_id(&id)?;
-        Ok(ActorRef {
-            id,
-            actor_name,
-            node_id,
-        })
-    }
-
-    /// Check if an actor is remote (different node) - static helper
-    ///
-    /// # Arguments
-    /// * `actor_id` - Actor ID in format "actor@node"
-    /// * `current_node` - Current node ID
-    ///
-    /// # Returns
-    /// True if actor is on a different node
-    ///
-    /// # Example
-    /// ```
-    /// # use plexspaces_core::ActorRef;
-    /// assert!(ActorRef::is_remote_actor("actor@node2", "node1"));
-    /// assert!(!ActorRef::is_remote_actor("actor@node1", "node1"));
-    /// ```
-    pub fn is_remote_actor(actor_id: &str, current_node: &str) -> bool {
-        if let Ok((_, node_id)) = Self::parse_actor_id(actor_id) {
-            node_id != current_node
-        } else {
-            false
-        }
-    }
-
-    /// Parse actor_id format: "actor_name@node_id"
-    ///
-    /// # Examples
-    /// ```ignore
-    /// let (name, node) = ActorRef::parse_actor_id("counter@node1")?;
-    /// assert_eq!(name, "counter");
-    /// assert_eq!(node, "node1");
-    /// ```
-    pub fn parse_actor_id(actor_id: &str) -> Result<(String, String), ActorError> {
-        actor_id
-            .split_once('@')
-            .map(|(name, node)| (name.to_string(), node.to_string()))
-            .ok_or_else(|| {
-                ActorError::InvalidState(format!(
-                    "Invalid actor ID format: '{}' (expected 'actor@node')",
-                    actor_id
-                ))
-            })
+        Ok(ActorRef { id })
     }
 
     /// Check if actor is on remote node
@@ -254,12 +198,13 @@ impl ActorRef {
     /// # Example
     /// ```
     /// # use plexspaces_core::ActorRef;
-    /// let actor_ref = ActorRef::new("actor@node2".to_string()).unwrap();
+    /// let actor_id = plexspaces_core::ActorId::new("actor", "worker", "default", "node-2").unwrap();
+    /// let actor_ref = ActorRef::new(actor_id).unwrap();
     /// assert!(actor_ref.is_remote("node1"));
-    /// assert!(!actor_ref.is_remote("node2"));
+    /// assert!(!actor_ref.is_remote("node-2"));
     /// ```
     pub fn is_remote(&self, current_node_id: &str) -> bool {
-        self.node_id != current_node_id
+        self.id.node_id() != current_node_id
     }
 
     /// Get actor ID
@@ -269,12 +214,22 @@ impl ActorRef {
 
     /// Get actor name (without node ID)
     pub fn actor_name(&self) -> &str {
-        &self.actor_name
+        self.id.name()
     }
 
     /// Get node ID
     pub fn node_id(&self) -> &str {
-        &self.node_id
+        self.id.node_id()
+    }
+
+    /// Get actor type
+    pub fn actor_type(&self) -> &str {
+        self.id.actor_type()
+    }
+
+    /// Get namespace
+    pub fn namespace(&self) -> &str {
+        self.id.namespace()
     }
 }
 
@@ -548,7 +503,7 @@ pub enum ActorError {
     /// The requested actor does not exist (local or remote).
     ///
     /// ## Suggestions
-    /// - Verify the actor ID is correct (format: "name@node_id")
+    /// - Verify the actor ID is correct (format: `name//actor_type::namespace@node_id`)
     /// - Check that the actor has been spawned
     /// - For remote actors, ensure the node is reachable
     #[error("Actor not found: {0}. Hint: Verify the actor ID is correct and the actor has been spawned.")]
@@ -600,35 +555,19 @@ mod tests {
 
     #[test]
     fn test_actor_id_parsing() {
-        // Test valid actor IDs
-        let actor_ref = ActorRef::new("counter@node1".to_string()).unwrap();
-        assert_eq!(actor_ref.id(), "counter@node1");
+        let actor_id = ActorId::new("counter", "worker", "default", "node1").unwrap();
+        let actor_ref = ActorRef::new(actor_id.clone()).unwrap();
+        assert_eq!(actor_ref.id(), &actor_id);
         assert_eq!(actor_ref.actor_name(), "counter");
+        assert_eq!(actor_ref.actor_type(), "worker");
+        assert_eq!(actor_ref.namespace(), "default");
         assert_eq!(actor_ref.node_id(), "node1");
 
-        // Test complex actor ID
-        let actor_ref2 = ActorRef::new("user-session-123@prod-5".to_string()).unwrap();
+        let actor_ref2 =
+            ActorRef::new(ActorId::new("user-session-123", "workflow", "prod", "prod-5").unwrap())
+                .unwrap();
         assert_eq!(actor_ref2.actor_name(), "user-session-123");
         assert_eq!(actor_ref2.node_id(), "prod-5");
-
-        // Test invalid actor ID (missing @)
-        let result = ActorRef::new("invalid_actor_id".to_string());
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_actor_id_static() {
-        // Test static method for parsing actor IDs
-        let (name, node) = ActorRef::parse_actor_id("counter@node1").unwrap();
-        assert_eq!(name, "counter");
-        assert_eq!(node, "node1");
-
-        let (name, node) = ActorRef::parse_actor_id("user-123@prod-5").unwrap();
-        assert_eq!(name, "user-123");
-        assert_eq!(node, "prod-5");
-
-        // Invalid format
-        assert!(ActorRef::parse_actor_id("invalid").is_err());
     }
 
     // test_local_tell moved to plexspaces-mailbox crate tests

@@ -140,7 +140,7 @@ impl ActorFactoryImpl {
 
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
-                actor_id: actor_id.clone(),
+                actor_id: actor_id.to_string(),
                 timestamp: Some(Timestamp {
                     seconds: chrono::Utc::now().timestamp(),
                     nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
@@ -159,26 +159,6 @@ impl ActorFactoryImpl {
         Ok((actor_arc, actor_ref))
     }
 
-    /// Normalize actor ID to include node ID
-    ///
-    /// ## Purpose
-    /// Ensures actor ID has format "actor_name@node_id". If missing node_id,
-    /// appends the local node ID from ActorRegistry.
-    fn normalize_actor_id(&self, actor_id: &ActorId, local_node_id: &str) -> ActorId {
-        if let Ok((actor_name, node_id)) = plexspaces_core::ActorRef::parse_actor_id(actor_id) {
-            // Actor ID already has @ format
-            // If node_id matches current node, keep as is, otherwise reconstruct with current node ID
-            if node_id == local_node_id {
-                actor_id.clone()
-            } else {
-                format!("{}@{}", actor_name, local_node_id)
-            }
-        } else {
-            // Actor ID doesn't have @ format - append node ID
-            format!("{}@{}", actor_id, local_node_id)
-        }
-    }
-
     async fn mark_actor_stopping(&self, actor_id: &ActorId) {
         self.stopping_actors.write().await.insert(actor_id.clone());
     }
@@ -195,7 +175,7 @@ impl ActorFactoryImpl {
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext with proper tenant/namespace (first parameter)
-    /// * `temp_sender_id` - Temporary sender ID (format: "ask-{correlation_id}@{node_id}")
+    /// * `temp_sender_id` - Temporary sender ID in canonical ActorId string form
     /// * `correlation_id` - Correlation ID for matching replies
     /// * `expires_at` - Expiration time for the temporary sender
     ///
@@ -211,13 +191,13 @@ impl ActorFactoryImpl {
     pub async fn create_temporary_sender_impl(
         &self,
         ctx: &RequestContext,
-        temp_sender_id: String,
+        temp_sender_id: ActorId,
         correlation_id: String,
         expires_at: Instant,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
         // Create mailbox (never used - tell() routes to ReplyWaiter before mailbox)
         let dummy_mailbox = Arc::new(
-            Mailbox::new(MailboxConfig::default(), temp_sender_id.clone())
+            Mailbox::new(MailboxConfig::default(), temp_sender_id.to_string())
                 .await
                 .map_err(|e| format!("Failed to create temporary sender mailbox: {}", e))?,
         );
@@ -345,7 +325,7 @@ impl ActorFactoryImpl {
                         };
                         let now = chrono::Utc::now();
                         let event = ActorLifecycleEvent {
-                            actor_id: actor_id_clone.clone(),
+                            actor_id: actor_id_clone.to_string(),
                             timestamp: Some(Timestamp {
                                 seconds: now.timestamp(),
                                 nanos: now.timestamp_subsec_nanos() as i32,
@@ -364,7 +344,7 @@ impl ActorFactoryImpl {
                         let reason = "normal".to_string();
                         let now = chrono::Utc::now();
                         let event = ActorLifecycleEvent {
-                            actor_id: actor_id_clone.clone(),
+                            actor_id: actor_id_clone.to_string(),
                             timestamp: Some(Timestamp {
                                 seconds: now.timestamp(),
                                 nanos: now.timestamp_subsec_nanos() as i32,
@@ -396,7 +376,7 @@ impl ActorFactoryImpl {
 
                     let now = chrono::Utc::now();
                     let event = ActorLifecycleEvent {
-                        actor_id: actor_id_clone.clone(),
+                        actor_id: actor_id_clone.to_string(),
                         timestamp: Some(Timestamp {
                             seconds: now.timestamp(),
                             nanos: now.timestamp_subsec_nanos() as i32,
@@ -417,7 +397,7 @@ impl ActorFactoryImpl {
                     let reason = "killed".to_string();
                     let now = chrono::Utc::now();
                     let event = ActorLifecycleEvent {
-                        actor_id: actor_id_clone.clone(),
+                        actor_id: actor_id_clone.to_string(),
                         timestamp: Some(Timestamp {
                             seconds: now.timestamp(),
                             nanos: now.timestamp_subsec_nanos() as i32,
@@ -437,7 +417,7 @@ impl ActorFactoryImpl {
                     let reason = "unknown error".to_string();
                     let now = chrono::Utc::now();
                     let event = ActorLifecycleEvent {
-                        actor_id: actor_id_clone.clone(),
+                        actor_id: actor_id_clone.to_string(),
                         timestamp: Some(Timestamp {
                             seconds: now.timestamp(),
                             nanos: now.timestamp_subsec_nanos() as i32,
@@ -522,7 +502,7 @@ impl ActorFactoryImpl {
 
             // OBSERVABILITY: Track unregistration completion
             metrics::counter!("plexspaces_actor_unregistered_total",
-                "actor_id" => actor_id_clone.clone(),
+                "actor_id" => actor_id_clone.to_string(),
                 "reason" => reason.clone()
             )
             .increment(1);
@@ -548,9 +528,17 @@ impl ActorFactory for ActorFactoryImpl {
             .await
             .ok_or_else(|| "VirtualActorManager not found in ServiceLocator".to_string())?;
 
-        // Normalize actor ID
         let local_node_id = registry.local_node_id();
-        let actor_id = self.normalize_actor_id(actor_id, local_node_id);
+        if actor_id.node_id() != local_node_id {
+            return Err(format!(
+                "Virtual actor '{}' targets node '{}' but activation only occurs on local node '{}'",
+                actor_id,
+                actor_id.node_id(),
+                local_node_id
+            )
+            .into());
+        }
+        let actor_id = actor_id.clone();
 
         // Check if actor is virtual
         if !manager.is_virtual(&actor_id).await {
@@ -565,18 +553,12 @@ impl ActorFactory for ActorFactoryImpl {
         }
 
         // Get actor_type for LRU eviction check
-        let actor_type = {
-            use plexspaces_core::actor_id::parse_actor_id;
-            if let Ok(parsed) = parse_actor_id(&actor_id) {
-                parsed.actor_type
-            } else {
-                // Fallback: try to get from metadata
-                if let Some(metadata) = manager.get_metadata(&actor_id).await {
-                    metadata.actor_type
-                } else {
-                    return Err("Cannot determine actor_type for LRU eviction".into());
-                }
-            }
+        let actor_type = if !actor_id.actor_type().is_empty() {
+            actor_id.actor_type().to_string()
+        } else if let Some(metadata) = manager.get_metadata(&actor_id).await {
+            metadata.actor_type
+        } else {
+            return Err("Cannot determine actor_type for LRU eviction".into());
         };
 
         // Evict LRU actors if max_pool_per_actor_type is exceeded
@@ -602,12 +584,8 @@ impl ActorFactory for ActorFactoryImpl {
             let metadata = if let Some(instance_metadata) = manager.get_metadata(&actor_id).await {
                 instance_metadata
             } else {
-                // Fall back to type-level metadata (for WASM/Rust applications that register types)
-                // Extract actor_type from actor_id to lookup type-level registration
-                use plexspaces_core::actor_id::parse_actor_id;
-                let parsed = parse_actor_id(&actor_id)
-                    .map_err(|e| format!("Failed to parse actor_id {}: {}", actor_id, e))?;
-                let actor_type = parsed.actor_type;
+                // Fall back to type-level metadata using the structured actor identity.
+                let actor_type = actor_id.actor_type().to_string();
 
                 manager.get_virtual_actor_type(&actor_type).await
                     .ok_or_else(|| format!(
@@ -926,29 +904,28 @@ impl ActorFactory for ActorFactoryImpl {
         let _tenant_id = ctx.tenant_id().to_string();
         let namespace = ctx.namespace().to_string();
 
-        // CRITICAL: Normalize actor ID BEFORE building actor (ensures @node suffix is always present)
-        // Get local node ID from registry for normalization
+        // Actor identities are fully constructed before they reach the factory.
         let registry: Arc<ActorRegistry> = self
             .service_locator
             .actor_registry()
             .await
             .ok_or_else(|| "ActorRegistry not found in ServiceLocator".to_string())?;
         let local_node_id = registry.local_node_id();
-        let normalized_actor_id = self.normalize_actor_id(actor_id, local_node_id);
 
-        // Validate: If actor_id already had @node but wrong node, throw error
-        if let Ok((_actor_name, node_id)) = plexspaces_core::ActorRef::parse_actor_id(actor_id) {
-            if !node_id.is_empty() && node_id != local_node_id {
-                return Err(format!(
-                    "Actor ID '{}' specifies node '{}' but actor must be spawned on local node '{}'. ActorService always creates actors locally.",
-                    actor_id, node_id, local_node_id
-                ).into());
-            }
+        // Validate: actor identities are always local when created through the factory.
+        if actor_id.node_id() != local_node_id {
+            return Err(format!(
+                "Actor ID '{}' specifies node '{}' but actor must be spawned on local node '{}'. ActorService always creates actors locally.",
+                actor_id,
+                actor_id.node_id(),
+                local_node_id
+            )
+            .into());
         }
 
-        // Create Actor using ActorBuilder with normalized ID
+        // Create Actor using ActorBuilder with the already-validated canonical ID.
         let mut builder = ActorBuilder::new(behavior)
-            .with_id(normalized_actor_id.clone())
+            .with_id(actor_id.clone())
             .with_namespace(namespace); // Use namespace from RequestContext
 
         // Apply config if provided
@@ -971,7 +948,7 @@ impl ActorFactory for ActorFactoryImpl {
                 .map_err(|e| format!("Failed to attach facet: {}", e))?;
         }
         if num_facets > 0 {
-            debug_log_attached_facets(&actor, &normalized_actor_id).await;
+            debug_log_attached_facets(&actor, actor_id).await;
         }
 
         // Spawn the built actor with type information
@@ -1000,7 +977,7 @@ impl ActorFactory for ActorFactoryImpl {
     async fn create_temporary_sender(
         &self,
         ctx: &RequestContext,
-        temp_sender_id: String,
+        temp_sender_id: ActorId,
         correlation_id: String,
         expires_at: std::time::Instant,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>> {
@@ -1078,25 +1055,17 @@ impl ActorFactoryImpl {
             .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
         let facet_manager = facet_manager_wrapper.inner_clone();
 
-        // CRITICAL: Actor ID should already be normalized (done before build in spawn_actor)
-        // But verify and update actor's internal ID if needed (defensive check)
+        // Actor IDs should already be canonical and local before build.
         let local_node_id = registry.local_node_id();
-        let mut actor_id = actor.id().clone();
-        let normalized_id = self.normalize_actor_id(&actor_id, local_node_id);
-
-        // If actor's internal ID doesn't match normalized ID, update it
-        // This ensures actor.id() returns the correct ID with @node suffix
-        if actor_id != normalized_id {
-            // Update actor's internal ID (Actor doesn't have set_id, so we need to reconstruct)
-            // Actually, we can't change actor.id() after creation, so we'll use normalized_id for registration
-            // The actor's internal ID will be wrong, but registration will use correct ID
-            // TODO: Consider adding set_id() to Actor or ensuring ActorBuilder normalizes during build
-            actor_id = normalized_id;
-            tracing::warn!(
-                "Actor internal ID '{}' was not normalized, using '{}' for registration",
-                actor.id(),
-                actor_id
-            );
+        let actor_id = actor.id().clone();
+        if actor_id.node_id() != local_node_id {
+            return Err(format!(
+                "Actor '{}' was built for node '{}' but attempted to spawn on local node '{}'",
+                actor_id,
+                actor_id.node_id(),
+                local_node_id
+            )
+            .into());
         }
 
         let actor_namespace = ctx.namespace().to_string();
@@ -1138,7 +1107,7 @@ impl ActorFactoryImpl {
         // Emit Created event
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
-                actor_id: actor_id.clone(),
+                actor_id: actor_id.to_string(),
                 timestamp: Some(Timestamp {
                     seconds: chrono::Utc::now().timestamp(),
                     nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
@@ -1152,7 +1121,7 @@ impl ActorFactoryImpl {
         // Emit Starting event
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
-                actor_id: actor_id.clone(),
+                actor_id: actor_id.to_string(),
                 timestamp: Some(Timestamp {
                     seconds: chrono::Utc::now().timestamp(),
                     nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
@@ -1192,6 +1161,7 @@ impl ActorFactoryImpl {
             should_activate_eagerly = matches!(
                 activation_strategy,
                 plexspaces_journaling::ActivationStrategy::ActivationStrategyEager
+                    | plexspaces_journaling::ActivationStrategy::ActivationStrategyPrewarm
             );
             let activation_strategy_clone = activation_strategy.clone();
             activation_strategy_opt = Some(activation_strategy);
@@ -1469,10 +1439,7 @@ impl ActorFactoryImpl {
             Self::resolve_actor_stop_scope(&registry, actor_id, ctx).await?
         };
 
-        let is_local = match plexspaces_core::actor_id::parse_actor_id(actor_id) {
-            Ok(parsed) => parsed.node_id == local_node_id,
-            Err(_) => true,
-        };
+        let is_local = actor_id.node_id() == local_node_id;
         if !is_local {
             return Err(format!("Actor not found or not local: {}", actor_id).into());
         }
@@ -1523,7 +1490,7 @@ impl ActorFactoryImpl {
         // Emit Deactivating event before unregistration
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
-                actor_id: actor_id.clone(),
+                actor_id: actor_id.to_string(),
                 timestamp: Some(Timestamp {
                     seconds: chrono::Utc::now().timestamp(),
                     nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,
@@ -1588,7 +1555,7 @@ impl ActorFactoryImpl {
         // Emit Deactivated event after unregistration
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
-                actor_id: actor_id.clone(),
+                actor_id: actor_id.to_string(),
                 timestamp: Some(Timestamp {
                     seconds: chrono::Utc::now().timestamp(),
                     nanos: chrono::Utc::now().timestamp_subsec_nanos() as i32,

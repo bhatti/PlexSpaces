@@ -61,6 +61,14 @@ use plexspaces_actor::{
 };
 use plexspaces_core::ActorRef as CoreActorRef;
 
+fn test_actor_id(name: &str) -> ActorId {
+    ActorId::new(name, "GenServer", "test", "local").expect("invalid test actor id")
+}
+
+fn test_actor_id_string(name: &str) -> String {
+    test_actor_id(name).to_string()
+}
+
 // ============================================================================
 // Helper: Create ChildSpec from sync factory
 // ============================================================================
@@ -72,9 +80,10 @@ fn create_child_spec(
     restart: RestartStrategy,
     shutdown_timeout_ms: Option<u64>,
 ) -> ChildSpec {
-    let actor_ref = CoreActorRef::new(id.clone()).expect("Failed to create actor ref");
+    let actor_id = test_actor_id(&id);
+    let actor_ref = CoreActorRef::new(actor_id.clone()).expect("Failed to create actor ref");
 
-    ChildSpec::worker_sync(id.clone(), id.clone(), factory, actor_ref)
+    ChildSpec::worker_sync(id.clone(), actor_id.to_string(), factory, actor_ref)
         .with_restart(restart)
         .with_shutdown(match shutdown_timeout_ms {
             Some(ms) => ShutdownSpec::Timeout(std::time::Duration::from_millis(ms)),
@@ -175,7 +184,7 @@ async fn test_one_for_one_restart() {
     // Create supervisor with ONE_FOR_ONE strategy
     let service_locator = plexspaces_node::create_default_service_locator(None, None).await;
     let (mut supervisor, mut event_rx) = Supervisor::new(
-        "one-for-one-supervisor".to_string(),
+        test_actor_id_string("one-for-one-supervisor"),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -185,22 +194,23 @@ async fn test_one_for_one_restart() {
 
     // Add two workers: one faulty, one stable
     let faulty_spec = create_child_spec(
-        "faulty-worker@localhost".to_string(),
+        "faulty-worker".to_string(),
         Arc::new(|| {
-            let actor_id = "faulty-worker@localhost".to_string();
+            let actor_id = test_actor_id("faulty-worker");
+            let mailbox_id = actor_id.to_string();
             // Create a new runtime on a separate thread to avoid blocking async runtime
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
             })
             .join()
             .expect("Thread panicked")
             .expect("Failed to create mailbox in factory");
             Ok(ActorStruct::new(
-                "faulty-worker@localhost".to_string(),
+                actor_id,
                 Box::new(FaultyWorker::new(2)), // Crash after 2 messages
                 mailbox,
                 "test-tenant".to_string(),
@@ -213,22 +223,23 @@ async fn test_one_for_one_restart() {
     );
 
     let stable_spec = create_child_spec(
-        "stable-worker@localhost".to_string(),
+        "stable-worker".to_string(),
         Arc::new(|| {
-            let actor_id = "stable-worker@localhost".to_string();
+            let actor_id = test_actor_id("stable-worker");
+            let mailbox_id = actor_id.to_string();
             // Create a new runtime on a separate thread to avoid blocking async runtime
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
             })
             .join()
             .expect("Thread panicked")
             .expect("Failed to create mailbox in factory");
             Ok(ActorStruct::new(
-                "stable-worker@localhost".to_string(),
+                actor_id,
                 Box::new(CounterWorker::new()),
                 mailbox,
                 "test-tenant".to_string(),
@@ -269,15 +280,15 @@ async fn test_one_for_one_restart() {
     while let Ok(event) = tokio::time::timeout(Duration::from_millis(100), event_rx.recv()).await {
         if let Some(event) = event {
             match event {
-                SupervisorEvent::ChildFailed(id, _) if id.as_str() == "faulty-worker@localhost" => {
+                SupervisorEvent::ChildFailed(id, _) if id.as_str() == "faulty-worker" => {
                     failed_event_seen = true;
                 }
                 SupervisorEvent::ChildRestarted(id, _)
-                    if id.as_str() == "faulty-worker@localhost" =>
+                    if id.as_str() == "faulty-worker" =>
                 {
                     restarted_event_seen = true;
                 }
-                SupervisorEvent::ChildFailed(id, _) if id.as_str() == "stable-worker@localhost" => {
+                SupervisorEvent::ChildFailed(id, _) if id.as_str() == "stable-worker" => {
                     panic!("Stable worker should not fail in ONE_FOR_ONE");
                 }
                 _ => {}
@@ -299,7 +310,7 @@ async fn test_one_for_all_restart() {
     // Create supervisor with ONE_FOR_ALL strategy
     let service_locator = plexspaces_node::create_default_service_locator(None, None).await;
     let (mut supervisor, mut event_rx) = Supervisor::new(
-        "one-for-all-supervisor".to_string(),
+        test_actor_id_string("one-for-all-supervisor"),
         SupervisionStrategy::OneForAll {
             max_restarts: 3,
             within_seconds: 60,
@@ -309,21 +320,22 @@ async fn test_one_for_all_restart() {
 
     // Add two workers
     let worker1_spec = create_child_spec(
-        "worker1@localhost".to_string(),
+        "worker1".to_string(),
         Arc::new(|| {
-            let actor_id = "worker1@localhost".to_string();
+            let actor_id = test_actor_id("worker1");
+            let mailbox_id = actor_id.to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
             })
             .join()
             .expect("Thread panicked")
             .expect("Failed to create mailbox in factory");
             Ok(ActorStruct::new(
-                "worker1@localhost".to_string(),
+                actor_id,
                 Box::new(FaultyWorker::new(1)), // Crash after 1 message
                 mailbox,
                 "test-tenant".to_string(),
@@ -336,21 +348,22 @@ async fn test_one_for_all_restart() {
     );
 
     let worker2_spec = create_child_spec(
-        "worker2@localhost".to_string(),
+        "worker2".to_string(),
         Arc::new(|| {
-            let actor_id = "worker2@localhost".to_string();
+            let actor_id = test_actor_id("worker2");
+            let mailbox_id = actor_id.to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
             })
             .join()
             .expect("Thread panicked")
             .expect("Failed to create mailbox in factory");
             Ok(ActorStruct::new(
-                "worker2@localhost".to_string(),
+                actor_id,
                 Box::new(CounterWorker::new()),
                 mailbox,
                 "test-tenant".to_string(),
@@ -398,7 +411,7 @@ async fn test_rest_for_one_restart() {
     // Create supervisor with REST_FOR_ONE strategy
     let service_locator = plexspaces_node::create_default_service_locator(None, None).await;
     let (mut supervisor, mut event_rx) = Supervisor::new(
-        "rest-for-one-supervisor".to_string(),
+        test_actor_id_string("rest-for-one-supervisor"),
         SupervisionStrategy::RestForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -409,7 +422,7 @@ async fn test_rest_for_one_restart() {
     // Add three workers in order
     for i in 1..=3 {
         let spec = create_child_spec(
-            format!("worker{}@localhost", i),
+            format!("worker{}", i),
             Arc::new(move || {
                 let behavior: Box<dyn ActorTrait> = if i == 2 {
                     // Worker 2 is faulty
@@ -417,14 +430,14 @@ async fn test_rest_for_one_restart() {
                 } else {
                     Box::new(CounterWorker::new())
                 };
-                let actor_id = format!("worker{}@localhost", i);
-                let actor_id_clone = actor_id.clone();
+                let actor_id = test_actor_id(&format!("worker{}", i));
+                let mailbox_id = actor_id.to_string();
                 let mailbox = std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
                         .expect("Failed to create runtime for mailbox");
-                    rt.block_on(Mailbox::new(Default::default(), actor_id_clone.clone()))
+                    rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
                 })
                 .join()
                 .expect("Thread panicked")
@@ -463,7 +476,7 @@ async fn test_restart_limits() {
     // Create supervisor with low restart limit
     let service_locator = plexspaces_node::create_default_service_locator(None, None).await;
     let (mut supervisor, mut event_rx) = Supervisor::new(
-        "limited-supervisor".to_string(),
+        test_actor_id_string("limited-supervisor"),
         SupervisionStrategy::OneForOne {
             max_restarts: 2, // Only 2 restarts allowed
             within_seconds: 10,
@@ -473,21 +486,22 @@ async fn test_restart_limits() {
 
     // Add worker that always crashes
     let spec = create_child_spec(
-        "crasher@localhost".to_string(),
+        "crasher".to_string(),
         Arc::new(|| {
-            let actor_id = "crasher@localhost".to_string();
+            let actor_id = test_actor_id("crasher");
+            let mailbox_id = actor_id.to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
             })
             .join()
             .expect("Thread panicked")
             .expect("Failed to create mailbox in factory");
             Ok(ActorStruct::new(
-                "crasher@localhost".to_string(),
+                actor_id,
                 Box::new(FaultyWorker::new(0)), // Crash immediately
                 mailbox,
                 "test-tenant".to_string(),
@@ -528,7 +542,7 @@ async fn test_hierarchical_supervision() {
     // Create root supervisor
     let service_locator = plexspaces_node::create_default_service_locator(None, None).await;
     let (mut root_supervisor, _root_events) = Supervisor::new(
-        "root-supervisor".to_string(),
+        test_actor_id_string("root-supervisor"),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -538,7 +552,7 @@ async fn test_hierarchical_supervision() {
 
     // Create child supervisor
     let (mut child_supervisor, mut child_events) = Supervisor::new(
-        "child-supervisor".to_string(),
+        test_actor_id_string("child-supervisor"),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -548,21 +562,22 @@ async fn test_hierarchical_supervision() {
 
     // Add worker to child supervisor
     let worker_spec = create_child_spec(
-        "leaf-worker@localhost".to_string(),
+        "leaf-worker".to_string(),
         Arc::new(|| {
-            let actor_id = "leaf-worker@localhost".to_string();
+            let actor_id = test_actor_id("leaf-worker");
+            let mailbox_id = actor_id.to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
             })
             .join()
             .expect("Thread panicked")
             .expect("Failed to create mailbox in factory");
             Ok(ActorStruct::new(
-                "leaf-worker@localhost".to_string(),
+                actor_id,
                 Box::new(CounterWorker::new()),
                 mailbox,
                 "test-tenant".to_string(),
@@ -592,7 +607,7 @@ async fn test_hierarchical_supervision() {
 async fn test_permanent_restart_policy() {
     let service_locator = plexspaces_node::create_default_service_locator(None, None).await;
     let (mut supervisor, mut event_rx) = Supervisor::new(
-        "policy-supervisor".to_string(),
+        test_actor_id_string("policy-supervisor"),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
             within_seconds: 60,
@@ -602,21 +617,22 @@ async fn test_permanent_restart_policy() {
 
     // PERMANENT: Always restart
     let permanent_spec = create_child_spec(
-        "permanent-worker@localhost".to_string(),
+        "permanent-worker".to_string(),
         Arc::new(|| {
-            let actor_id = "permanent-worker@localhost".to_string();
+            let actor_id = test_actor_id("permanent-worker");
+            let mailbox_id = actor_id.to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
             })
             .join()
             .expect("Thread panicked")
             .expect("Failed to create mailbox in factory");
             Ok(ActorStruct::new(
-                "permanent-worker@localhost".to_string(),
+                actor_id,
                 Box::new(FaultyWorker::new(1)),
                 mailbox,
                 "test-tenant".to_string(),
@@ -641,7 +657,7 @@ async fn test_permanent_restart_policy() {
 async fn test_temporary_restart_policy() {
     let service_locator = plexspaces_node::create_default_service_locator(None, None).await;
     let (mut supervisor, mut event_rx) = Supervisor::new(
-        "temp-supervisor".to_string(),
+        test_actor_id_string("temp-supervisor"),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
             within_seconds: 60,
@@ -651,21 +667,22 @@ async fn test_temporary_restart_policy() {
 
     // TEMPORARY: Never restart
     let temp_spec = create_child_spec(
-        "temp-worker@localhost".to_string(),
+        "temp-worker".to_string(),
         Arc::new(|| {
-            let actor_id = "temp-worker@localhost".to_string();
+            let actor_id = test_actor_id("temp-worker");
+            let mailbox_id = actor_id.to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
             })
             .join()
             .expect("Thread panicked")
             .expect("Failed to create mailbox in factory");
             Ok(ActorStruct::new(
-                "temp-worker@localhost".to_string(),
+                actor_id,
                 Box::new(FaultyWorker::new(1)),
                 mailbox,
                 "test-tenant".to_string(),
@@ -690,7 +707,7 @@ async fn test_temporary_restart_policy() {
 async fn test_transient_restart_policy() {
     let service_locator = plexspaces_node::create_default_service_locator(None, None).await;
     let (mut supervisor, mut event_rx) = Supervisor::new(
-        "transient-supervisor".to_string(),
+        test_actor_id_string("transient-supervisor"),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
             within_seconds: 60,
@@ -700,21 +717,22 @@ async fn test_transient_restart_policy() {
 
     // TRANSIENT: Restart only on abnormal exit
     let transient_spec = create_child_spec(
-        "transient-worker@localhost".to_string(),
+        "transient-worker".to_string(),
         Arc::new(|| {
-            let actor_id = "transient-worker@localhost".to_string();
+            let actor_id = test_actor_id("transient-worker");
+            let mailbox_id = actor_id.to_string();
             let mailbox = std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("Failed to create runtime for mailbox");
-                rt.block_on(Mailbox::new(Default::default(), actor_id.clone()))
+                rt.block_on(Mailbox::new(Default::default(), mailbox_id.clone()))
             })
             .join()
             .expect("Thread panicked")
             .expect("Failed to create mailbox in factory");
             Ok(ActorStruct::new(
-                "transient-worker@localhost".to_string(),
+                actor_id,
                 Box::new(FaultyWorker::new(1)),
                 mailbox,
                 "test-tenant".to_string(),

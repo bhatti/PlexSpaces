@@ -138,6 +138,7 @@ curl -X POST http://localhost:8094/api/v1/deploy \
 ### Actor ID Format
 
 All actors use the standardized format: `{id}//{actor_type}::{namespace}@{node_id}`
+Client code should usually pass only the actor name to builder and SDK spawn helpers; the runtime constructs this canonical ID.
 
 **Components**:
 - `id`: Base actor identifier (can be ULID, client-provided, or empty)
@@ -152,21 +153,21 @@ All actors use the standardized format: `{id}//{actor_type}::{namespace}@{node_i
 
 **Examples**:
 - `user-123//read-state-tracker::orbit-read-state-ts@node-1` (full format)
-- `//read-state-tracker::orbit-read-state-ts@node-1` (no base ID, ULID generated)
-- `account-alice::default@node-abc123` (alternate short format)
+- `account-alice//account::default@node-abc123`
 
-**Factory Methods** (Rust SDK):
+**Internal Structured Form**:
 ```rust
-use plexspaces_core::actor_id::{build_actor_id, parse_actor_id};
+use plexspaces_core::ActorId;
 
-// Build actor ID
-let actor_id = build_actor_id("user-123", "read-state-tracker", Some("orbit-read-state-ts"), "node-1");
-
-// Parse actor ID
-let parsed = parse_actor_id(&actor_id)?;
+let actor_id = ActorId::new(
+    "user-123",
+    "read-state-tracker",
+    "orbit-read-state-ts",
+    "node-1",
+)?;
 ```
 
-When deploying via the HTTP API, the namespace is specified in the deploy request (`-F "namespace=default"`). When sending messages between actors, use the full actor ID format.
+Client code should usually provide only the actor name or logical key and let the framework build the structured actor ID. The canonical string form is primarily for storage, routing boundaries, observability, and inter-node APIs.
 
 ### API Reference
 
@@ -645,7 +646,7 @@ node_ids = list_worker_node_ids("http://localhost:8092", page_size=100)
 # Or use a client (required for spawn_actor_on_node)
 client = LeaderWorkerClient("http://localhost:8092")
 node_ids = client.list_worker_node_ids(cluster=None, page_size=100)
-# Virtual actors: send to actor_id@node_id (lazy); no ensure.
+# Virtual actors: send to the canonical actor ID string (lazy); no ensure.
 # Non-virtual: spawn on a specific node
 actor_ref = client.spawn_actor_on_node(node_ids[0], "worker", "w-1")
 ```
@@ -742,7 +743,7 @@ const nodeIds = await listWorkerNodeIds("http://localhost:8092", null, 100);
 // Or use a client (required for spawnActorOnNode)
 const client = new LeaderWorkerClient("http://localhost:8092");
 const ids = await client.listWorkerNodeIds(undefined, 100);
-// Virtual actors: send to actor_id@node_id (lazy); no ensure.
+// Virtual actors: send to the canonical actor ID string (lazy); no ensure.
 const actorRef = await client.spawnActorOnNode(ids[0], "worker", "w-1");
 ```
 
@@ -1028,7 +1029,7 @@ Multi-node parallelization is **one logical run** with work **split across nodes
 | `list_worker_node_ids(ctx, service_locator, cluster, page_size)` | Returns node IDs from the registry (after ConnectNodes). Leader uses this to distribute work. |
 | `spawn_actor_on_node(ctx, service_locator, node_id, actor_type, actor_id, initial_state, config, labels)` | Calls the target node’s SpawnActor. Use for non-virtual workers only. |
 
-**Virtual actors are lazy**: They are created on first message receive. The leader does not call any “ensure” or pre-create step. Deploy the worker type as virtual on all nodes, then send directly to `worker/chunk-1@node-B`, etc.; the target node creates the actor when it receives the first message. This is consistent across all runtimes (Rust, Python, TypeScript, Go).
+**Virtual actors are lazy**: They are created on first message receive. The leader does not call any “ensure” or pre-create step. Deploy the worker type as virtual on all nodes, then send directly to the canonical actor ID for the shard, such as `chunk-1//worker::default@node-B`; the target node creates the actor when it receives the first message. This is consistent across all runtimes (Rust, Python, TypeScript, Go).
 
 Core lives in main crates: NodeRegistry, ActorService, scheduling/placement, and the node registry. The SDK is a thin wrapper over these framework-owned services.
 
@@ -1137,7 +1138,7 @@ impl SessionActor {
 
 // Spawn with TimerFacet using SDK helper
 let timer_facet = TimerFacet::new(json!({}), 50);
-let actor_ref = spawn_with_facets(&ctx, sl, actor_id, "sessions", SessionActor::new("user-123"), vec![Box::new(timer_facet)]).await?;
+let actor_ref = spawn_with_facets(&ctx, sl, "user-123", "sessions", SessionActor::new("user-123"), vec![Box::new(timer_facet)]).await?;
 
 // Send fire-and-forget message using cast_message()
 let activity_event = cast_message(json!({ "event": "user_activity" }));
@@ -1452,7 +1453,7 @@ import "github.com/plexspaces/plexspaces/sdks/go/plexspaces"
 
 client := plexspaces.NewLeaderWorkerClient("http://localhost:8092")
 ids, err := client.ListWorkerNodeIds("", 100, "")
-// Virtual actors: send to actor_id@node_id (lazy); no ensure.
+// Virtual actors: send to the canonical actor ID string (lazy); no ensure.
 actorRef, err := client.SpawnActorOnNode(ids[0], "worker", "w-1", nil, nil, nil)
 
 // Or one-off list:

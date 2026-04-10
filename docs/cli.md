@@ -77,7 +77,7 @@ plexspaces actor spawn \
 
 ```bash
 plexspaces actor send \
-  --to counter@node1 \
+  --to counter//counter::default@node1 \
   --message '{"type": "increment", "amount": 5}'
 ```
 
@@ -90,7 +90,7 @@ plexspaces actor list --node-id node1
 #### Actor Status
 
 ```bash
-plexspaces actor status --actor-id counter@node1
+plexspaces actor status --actor-id counter//counter::default@node1
 ```
 
 ### Application deployment
@@ -357,10 +357,10 @@ plexspaces node start --node-id node1
 plexspaces actor spawn --name counter --behavior GenServer
 
 # Send message
-plexspaces actor send --to counter@node1 --message '{"type": "increment"}'
+plexspaces actor send --to counter//counter::default@node1 --message '{"type": "increment"}'
 
 # Check status
-plexspaces actor status --actor-id counter@node1
+plexspaces actor status --actor-id counter//counter::default@node1
 ```
 
 ### Deploy Application

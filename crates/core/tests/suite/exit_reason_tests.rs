@@ -18,10 +18,14 @@
 
 //! Comprehensive tests for ExitReason and ExitAction (edge cases and proto conversion)
 
-use plexspaces_core::{ExitAction, ExitReason};
+use plexspaces_core::{ActorId, ExitAction, ExitReason};
 use plexspaces_proto::v1::actor::{
     ExitAction as ProtoExitAction, ExitReason as ProtoExitReason, ExitReasonDetails,
 };
+
+fn test_actor_id(name: &str) -> ActorId {
+    ActorId::new(name, "gen_server", "default", "test-node").unwrap()
+}
 
 #[test]
 fn test_exit_reason_normal() {
@@ -59,7 +63,7 @@ fn test_exit_reason_error() {
 fn test_exit_reason_linked() {
     let linked_reason = ExitReason::Error("nested error".to_string());
     let reason = ExitReason::Linked {
-        actor_id: "linked-actor".to_string(),
+        actor_id: test_actor_id("linked-actor"),
         reason: Box::new(linked_reason),
     };
     assert!(!reason.is_normal());
@@ -71,11 +75,11 @@ fn test_exit_reason_linked() {
 fn test_exit_reason_linked_nested() {
     let nested_reason = ExitReason::Error("deep error".to_string());
     let linked_reason = ExitReason::Linked {
-        actor_id: "nested-actor".to_string(),
+        actor_id: test_actor_id("nested-actor"),
         reason: Box::new(nested_reason),
     };
     let reason = ExitReason::Linked {
-        actor_id: "linked-actor".to_string(),
+        actor_id: test_actor_id("linked-actor"),
         reason: Box::new(linked_reason),
     };
     assert!(!reason.is_normal());
@@ -103,7 +107,7 @@ fn test_exit_reason_to_proto() {
     );
 
     let linked = ExitReason::Linked {
-        actor_id: "actor1".to_string(),
+        actor_id: test_actor_id("actor1"),
         reason: Box::new(ExitReason::Normal),
     };
     assert_eq!(linked.to_proto(), ProtoExitReason::ExitReasonLinked);
@@ -119,7 +123,7 @@ fn test_exit_reason_to_proto_details() {
     assert_eq!(details.linked_actor_id, "");
 
     let linked_reason = ExitReason::Linked {
-        actor_id: "actor1".to_string(),
+        actor_id: test_actor_id("actor1"),
         reason: Box::new(ExitReason::Error("nested".to_string())),
     };
     let details = linked_reason.to_proto_details();
@@ -161,7 +165,7 @@ fn test_exit_reason_from_proto() {
     let reason = ExitReason::from_proto(proto, details.as_ref());
     match reason {
         ExitReason::Linked { actor_id, .. } => {
-            assert_eq!(actor_id, "actor1");
+            assert_eq!(actor_id.name(), "actor1");
         }
         _ => panic!("Expected Linked reason"),
     }

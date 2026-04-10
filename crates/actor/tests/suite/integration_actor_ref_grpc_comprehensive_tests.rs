@@ -6,7 +6,7 @@
 
 use plexspaces_actor::ActorRef;
 use plexspaces_core::{
-    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorRegistry, ServiceLocator,
+    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, ServiceLocator,
 };
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
@@ -20,6 +20,16 @@ fn create_test_message(payload: Vec<u8>) -> Message {
         payload,
         ..Default::default()
     }
+}
+
+fn test_actor_id(name: &str, node_id: &str, namespace: &str) -> ActorId {
+    ActorId::new(
+        name.to_string(),
+        "GenServer".to_string(),
+        namespace.to_string(),
+        node_id.to_string(),
+    )
+    .expect("test actor id should be valid")
 }
 
 // Helper to wrap ObjectRegistry for ActorRegistry
@@ -169,7 +179,7 @@ async fn test_remote_actor_ref_node_not_found() {
 
     // Create remote ActorRef for node that doesn't exist
     let actor_ref = ActorRef::remote(
-        "test-actor@unknown-node",
+        test_actor_id("test-actor", "unknown-node", "default"),
         "test",    // tenant_id
         "default", // namespace
         "unknown-node",
@@ -228,7 +238,7 @@ async fn test_remote_actor_ref_connection_failure() {
 
     // Create remote ActorRef
     let actor_ref = ActorRef::remote(
-        "test-actor@remote-node",
+        test_actor_id("test-actor", "remote-node", "default"),
         "default", // tenant_id
         "default", // namespace
         "remote-node",
@@ -293,7 +303,7 @@ async fn test_remote_actor_ref_ask_timeout() {
 
     // Create remote ActorRef
     let actor_ref = ActorRef::remote(
-        "test-actor@remote-node",
+        test_actor_id("test-actor", "remote-node", "default"),
         "default", // tenant_id
         "default", // namespace
         "remote-node",
@@ -352,14 +362,14 @@ async fn test_remote_actor_ref_service_locator_client_caching() {
 
     // Create multiple ActorRefs to same node
     let actor_ref1 = ActorRef::remote(
-        "actor1@remote-node",
+        test_actor_id("actor1", "remote-node", "default"),
         "test",    // tenant_id
         "default", // namespace
         "remote-node",
         service_locator.clone(),
     );
     let actor_ref2 = ActorRef::remote(
-        "actor2@remote-node",
+        test_actor_id("actor2", "remote-node", "default"),
         "test",    // tenant_id
         "default", // namespace
         "remote-node",

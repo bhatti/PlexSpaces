@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorBuilder};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, ActorRegistry, BehaviorError, BehaviorType, FacetManager,
-    Message, MessageSender, ReplyWaiterRegistry, RequestContext, VirtualActorManager,
+    Actor as ActorTrait, ActorContext, ActorId, ActorRegistry, BehaviorError, BehaviorType,
+    FacetManager, Message, MessageSender, ReplyWaiterRegistry, RequestContext, VirtualActorManager,
 };
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_object_registry::SqliteObjectRegistryRepository;
@@ -66,11 +66,12 @@ impl GenServer for EchoActor {
 }
 
 // Helper to create test registry with actors
-// Note: Actors are registered with the local node ID to ensure local routing works.
-// The "remote" simulation comes from the actor names, not the node IDs.
+// Note: Actors are registered with canonical ActorIds. The "remote" simulation comes
+// from registering an additional canonical ID with a different node_id that points to
+// the same local sender.
 async fn create_test_registry_with_remote_actors(
     local_node_id: &str,
-    _remote_node_id: &str, // Not used - actors are registered locally
+    remote_node_id: &str,
     actor_ids: &[&str],
 ) -> (Arc<ActorRegistry>, Arc<ServiceLocatorImpl>) {
     use plexspaces_core::actor_context::ObjectRegistry as ObjectRegistryTrait;
@@ -237,20 +238,17 @@ async fn create_test_registry_with_remote_actors(
         .register_service(actor_factory.clone())
         .await;
 
-    // Register actors with local node ID to ensure local routing works
-    // Extract actor name from "actor@node" format and register as "actor@local_node_id"
-    // This ensures the routing logic recognizes them as local actors
+    // Register actors with local node ID to ensure local routing works.
     let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
     for actor_id_with_node in actor_ids {
-        // Parse actor name from "actor@node" format
-        let actor_name = if let Some((name, _)) = actor_id_with_node.split_once('@') {
-            name
-        } else {
-            actor_id_with_node
-        };
-
-        // Register with local node ID to ensure local routing
-        let local_actor_id = format!("{}@{}", actor_name, local_node_id);
+        let (actor_name, alias_node_id) = actor_id_with_node
+            .split_once('@')
+            .map(|(name, node)| (name, node))
+            .unwrap_or((actor_id_with_node, remote_node_id));
+        let local_actor_id =
+            ActorId::new(actor_name, "TestActor", "default", local_node_id).expect("valid actor id");
+        let alias_actor_id =
+            ActorId::new(actor_name, "TestActor", "default", alias_node_id).expect("valid actor id");
 
         // Create actor using ActorBuilder
         let echo_actor = EchoActor::new();
@@ -279,16 +277,14 @@ async fn create_test_registry_with_remote_actors(
             )
             .await;
 
-        // Also register with the original "remote-looking" ID for lookup
-        // This allows tests to use "actor@node2" format while the actor is actually local
-        // We create a mapping by registering the same sender under both IDs
-        if actor_id_with_node != &local_actor_id {
+        // Also register a canonical alias with the requested node_id for lookup.
+        if alias_actor_id != local_actor_id {
             actor_registry
                 .register_actor(
                     &ctx,
-                    actor_id_with_node.to_string(),
+                    alias_actor_id,
                     sender_clone,
-                    "".to_string(), // actor_type unknown at this point
+                    "TestActor".to_string(),
                     None,
                     None,
                     None,

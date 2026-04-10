@@ -413,7 +413,6 @@ mod tests {
         let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
         let durability_facet = Box::new(DurabilityFacet::new(storage, serde_json::json!({}), 50));
 
-        let actor_id = "test-workflow@test-node".to_string();
         let ctx = plexspaces_core::RequestContext::new_without_auth(
             "workflows".to_string(),
             "orders".to_string(),
@@ -421,7 +420,7 @@ mod tests {
         let workflow = plexspaces_sdk::spawn_with_facets(
             &ctx,
             node.service_locator(),
-            actor_id.clone(),
+            "test-workflow",
             "orders",
             OrderWorkflow::new(order.clone()),
             vec![durability_facet],

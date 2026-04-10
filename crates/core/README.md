@@ -141,11 +141,12 @@ use plexspaces_core::{ActorContext, ActorId};
 
 async fn handle_message(&mut self, ctx: &ActorContext, msg: Message) -> Result<(), Error> {
     // Spawn a new actor
-    let child_id = "child@node1".to_string();
-    ctx.actor_service().spawn_actor(child_id.clone(), behavior).await?;
+    let child_name = "child".to_string();
+    ctx.actor_service().spawn_actor(child_name.clone(), behavior).await?;
     
     // Send message to another local actor through the registry-owned delivery path
-    ctx.actor_registry().tell(&"target@node1".to_string(), msg).await?;
+    let target_id = ActorId::from_canonical("target//gen_server::default@node1")?;
+    ctx.actor_registry().tell(&target_id, msg).await?;
     
     // Write to TupleSpace
     let tuple = Tuple::new(vec![/* fields */]);
@@ -157,6 +158,8 @@ async fn handle_message(&mut self, ctx: &ActorContext, msg: Message) -> Result<(
     Ok(())
 }
 ```
+
+Client code should choose a unique actor name when creating an actor. The runtime converts that name into the canonical `ActorId` and uses the full ID at routing and storage boundaries.
 
 ### Implementing Application
 

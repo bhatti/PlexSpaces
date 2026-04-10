@@ -27,7 +27,7 @@
 //! - Cleanup on actor termination
 //! - Edge cases (multiple children, nested supervisors, etc.)
 
-use plexspaces_core::{ActorRegistry, RequestContext};
+use plexspaces_core::{ActorId, ActorRegistry, RequestContext};
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use std::sync::Arc;
 
@@ -175,12 +175,16 @@ async fn create_test_registry() -> Arc<ActorRegistry> {
     Arc::new(ActorRegistry::new(object_registry, "test-node".to_string()))
 }
 
+fn test_actor_id(name: &str) -> ActorId {
+    ActorId::new(name, "gen_server", "default", "test-node").unwrap()
+}
+
 #[tokio::test]
 async fn test_register_parent_child() {
     let registry = create_test_registry().await;
 
-    let parent_id = "supervisor1".to_string();
-    let child_id = "worker1".to_string();
+    let parent_id = test_actor_id("supervisor1");
+    let child_id = test_actor_id("worker1");
 
     registry.register_parent_child(&parent_id, &child_id).await;
 
@@ -198,10 +202,10 @@ async fn test_register_parent_child() {
 async fn test_register_multiple_children() {
     let registry = create_test_registry().await;
 
-    let parent_id = "supervisor1".to_string();
-    let child1 = "worker1".to_string();
-    let child2 = "worker2".to_string();
-    let child3 = "worker3".to_string();
+    let parent_id = test_actor_id("supervisor1");
+    let child1 = test_actor_id("worker1");
+    let child2 = test_actor_id("worker2");
+    let child3 = test_actor_id("worker3");
 
     registry.register_parent_child(&parent_id, &child1).await;
     registry.register_parent_child(&parent_id, &child2).await;
@@ -220,8 +224,8 @@ async fn test_register_multiple_children() {
 async fn test_unregister_parent_child() {
     let registry = create_test_registry().await;
 
-    let parent_id = "supervisor1".to_string();
-    let child_id = "worker1".to_string();
+    let parent_id = test_actor_id("supervisor1");
+    let child_id = test_actor_id("worker1");
 
     registry.register_parent_child(&parent_id, &child_id).await;
     assert_eq!(registry.get_children(&parent_id).await.len(), 1);
@@ -243,10 +247,10 @@ async fn test_unregister_parent_child() {
 async fn test_unregister_one_child_of_many() {
     let registry = create_test_registry().await;
 
-    let parent_id = "supervisor1".to_string();
-    let child1 = "worker1".to_string();
-    let child2 = "worker2".to_string();
-    let child3 = "worker3".to_string();
+    let parent_id = test_actor_id("supervisor1");
+    let child1 = test_actor_id("worker1");
+    let child2 = test_actor_id("worker2");
+    let child3 = test_actor_id("worker3");
 
     registry.register_parent_child(&parent_id, &child1).await;
     registry.register_parent_child(&parent_id, &child2).await;
@@ -267,7 +271,7 @@ async fn test_unregister_one_child_of_many() {
 async fn test_get_children_empty() {
     let registry = create_test_registry().await;
 
-    let parent_id = "supervisor1".to_string();
+    let parent_id = test_actor_id("supervisor1");
     let children = registry.get_children(&parent_id).await;
 
     assert_eq!(children.len(), 0);
@@ -277,7 +281,7 @@ async fn test_get_children_empty() {
 async fn test_get_parent_none() {
     let registry = create_test_registry().await;
 
-    let child_id = "worker1".to_string();
+    let child_id = test_actor_id("worker1");
     let parent = registry.get_parent(&child_id).await;
 
     assert_eq!(parent, None);
@@ -287,17 +291,17 @@ async fn test_get_parent_none() {
 async fn test_get_subtree_single_level() {
     let registry = create_test_registry().await;
 
-    let parent_id = "supervisor1".to_string();
-    let child1 = "worker1".to_string();
-    let child2 = "worker2".to_string();
+    let parent_id = test_actor_id("supervisor1");
+    let child1 = test_actor_id("worker1");
+    let child2 = test_actor_id("worker2");
 
     registry.register_parent_child(&parent_id, &child1).await;
     registry.register_parent_child(&parent_id, &child2).await;
 
     let subtree = registry.get_subtree(&parent_id).await;
     assert_eq!(subtree.len(), 2);
-    assert!(subtree.contains(&child1));
-    assert!(subtree.contains(&child2));
+    assert!(subtree.iter().any(|actor_id| actor_id.name() == child1.name()));
+    assert!(subtree.iter().any(|actor_id| actor_id.name() == child2.name()));
 }
 
 #[tokio::test]
@@ -312,12 +316,12 @@ async fn test_get_subtree_nested() {
     //       ├── worker3
     //       └── worker4
 
-    let root = "root-supervisor".to_string();
-    let worker1 = "worker1".to_string();
-    let worker2 = "worker2".to_string();
-    let nested = "nested-supervisor".to_string();
-    let worker3 = "worker3".to_string();
-    let worker4 = "worker4".to_string();
+    let root = test_actor_id("root-supervisor");
+    let worker1 = test_actor_id("worker1");
+    let worker2 = test_actor_id("worker2");
+    let nested = test_actor_id("nested-supervisor");
+    let worker3 = test_actor_id("worker3");
+    let worker4 = test_actor_id("worker4");
 
     registry.register_parent_child(&root, &worker1).await;
     registry.register_parent_child(&root, &worker2).await;
@@ -327,18 +331,18 @@ async fn test_get_subtree_nested() {
 
     let subtree = registry.get_subtree(&root).await;
     assert_eq!(subtree.len(), 5); // worker1, worker2, nested, worker3, worker4
-    assert!(subtree.contains(&worker1));
-    assert!(subtree.contains(&worker2));
-    assert!(subtree.contains(&nested));
-    assert!(subtree.contains(&worker3));
-    assert!(subtree.contains(&worker4));
+    assert!(subtree.iter().any(|actor_id| actor_id.name() == worker1.name()));
+    assert!(subtree.iter().any(|actor_id| actor_id.name() == worker2.name()));
+    assert!(subtree.iter().any(|actor_id| actor_id.name() == nested.name()));
+    assert!(subtree.iter().any(|actor_id| actor_id.name() == worker3.name()));
+    assert!(subtree.iter().any(|actor_id| actor_id.name() == worker4.name()));
 }
 
 #[tokio::test]
 async fn test_get_subtree_empty() {
     let registry = create_test_registry().await;
 
-    let root = "root-supervisor".to_string();
+    let root = test_actor_id("root-supervisor");
     let subtree = registry.get_subtree(&root).await;
 
     assert_eq!(subtree.len(), 0);
@@ -348,8 +352,8 @@ async fn test_get_subtree_empty() {
 async fn test_cleanup_on_unregister() {
     let registry = create_test_registry().await;
 
-    let parent_id = "supervisor1".to_string();
-    let child_id = "worker1".to_string();
+    let parent_id = test_actor_id("supervisor1");
+    let child_id = test_actor_id("worker1");
 
     registry.register_parent_child(&parent_id, &child_id).await;
     assert_eq!(registry.get_children(&parent_id).await.len(), 1);
@@ -370,9 +374,9 @@ async fn test_multiple_parents_not_allowed() {
     // Test that a child can only have one parent
     let registry = create_test_registry().await;
 
-    let parent1 = "supervisor1".to_string();
-    let parent2 = "supervisor2".to_string();
-    let child = "worker1".to_string();
+    let parent1 = test_actor_id("supervisor1");
+    let parent2 = test_actor_id("supervisor2");
+    let child = test_actor_id("worker1");
 
     registry.register_parent_child(&parent1, &child).await;
     assert_eq!(registry.get_parent(&child).await, Some(parent1.clone()));
@@ -394,22 +398,22 @@ async fn test_multiple_parents_not_allowed() {
 async fn test_children_count() {
     let registry = create_test_registry().await;
 
-    let parent_id = "supervisor1".to_string();
+    let parent_id = test_actor_id("supervisor1");
 
     assert_eq!(registry.children_count(&parent_id).await, 0);
 
     registry
-        .register_parent_child(&parent_id, &"worker1".to_string())
+        .register_parent_child(&parent_id, &test_actor_id("worker1"))
         .await;
     assert_eq!(registry.children_count(&parent_id).await, 1);
 
     registry
-        .register_parent_child(&parent_id, &"worker2".to_string())
+        .register_parent_child(&parent_id, &test_actor_id("worker2"))
         .await;
     assert_eq!(registry.children_count(&parent_id).await, 2);
 
     registry
-        .unregister_parent_child(&parent_id, &"worker1".to_string())
+        .unregister_parent_child(&parent_id, &test_actor_id("worker1"))
         .await;
     assert_eq!(registry.children_count(&parent_id).await, 1);
 }
@@ -419,8 +423,8 @@ async fn test_unregister_nonexistent_child() {
     // Test that unregistering a non-existent child is safe
     let registry = create_test_registry().await;
 
-    let parent_id = "supervisor1".to_string();
-    let child_id = "worker1".to_string();
+    let parent_id = test_actor_id("supervisor1");
+    let child_id = test_actor_id("worker1");
 
     // Unregister without registering first (should be safe)
     registry
@@ -440,10 +444,10 @@ async fn test_deeply_nested_subtree() {
     // Test subtree with 3 levels of nesting
     let registry = create_test_registry().await;
 
-    let level1 = "level1".to_string();
-    let level2 = "level2".to_string();
-    let level3 = "level3".to_string();
-    let worker = "worker1".to_string();
+    let level1 = test_actor_id("level1");
+    let level2 = test_actor_id("level2");
+    let level3 = test_actor_id("level3");
+    let worker = test_actor_id("worker1");
 
     registry.register_parent_child(&level1, &level2).await;
     registry.register_parent_child(&level2, &level3).await;
@@ -451,7 +455,7 @@ async fn test_deeply_nested_subtree() {
 
     let subtree = registry.get_subtree(&level1).await;
     assert_eq!(subtree.len(), 3); // level2, level3, worker
-    assert!(subtree.contains(&level2));
-    assert!(subtree.contains(&level3));
-    assert!(subtree.contains(&worker));
+    assert!(subtree.iter().any(|actor_id| actor_id.name() == level2.name()));
+    assert!(subtree.iter().any(|actor_id| actor_id.name() == level3.name()));
+    assert!(subtree.iter().any(|actor_id| actor_id.name() == worker.name()));
 }

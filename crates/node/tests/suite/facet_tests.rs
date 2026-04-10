@@ -9,10 +9,10 @@
 // - facet_storage_test.rs (1 test)
 // Total: 10 tests (+1 feature-gated)
 
-use super::test_helpers::{lookup_actor_ref, spawn_actor_helper};
+use super::test_helpers::{lookup_actor_ref, spawn_actor_helper, test_actor_id};
 
 use plexspaces_actor::ActorBuilder;
-use plexspaces_core::{Actor as ActorTrait, ActorContext, ActorId, Message};
+use plexspaces_core::{Actor as ActorTrait, ActorContext, Message};
 use plexspaces_journaling::TimerFacet;
 use plexspaces_node::{Node, NodeBuilder};
 use std::sync::Arc;
@@ -72,7 +72,7 @@ async fn test_spawn_actor_no_facets() {
 
     let behavior = Box::new(TestBehavior);
     let actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("test-actor@local"))
+        .with_name("test-actor")
         .build()
         .await
         .unwrap();
@@ -97,7 +97,7 @@ async fn test_spawn_actor_no_facets() {
         .await
         .expect("Actor should be registered within 5 seconds");
 
-    assert_eq!(actor_id, ActorId::from("test-actor@test-node"));
+    assert_eq!(actor_id, test_actor_id("test-actor", "test-node"));
 }
 
 /// Test 2: Attach facet WITHOUT spawning - should not hang
@@ -106,7 +106,7 @@ async fn test_attach_facet_no_spawn() {
     let node = Arc::new(create_test_node().await);
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("test-actor@local"))
+        .with_name("test-actor")
         .build()
         .await
         .unwrap();
@@ -127,7 +127,7 @@ async fn test_spawn_actor_with_facet() {
 
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("test-actor@local"))
+        .with_name("test-actor")
         .build()
         .await
         .unwrap();
@@ -155,7 +155,7 @@ async fn test_spawn_actor_with_facet() {
         .await
         .expect("Actor should be registered within 5 seconds");
 
-    assert_eq!(actor_id, ActorId::from("test-actor@test-node"));
+    assert_eq!(actor_id, test_actor_id("test-actor", "test-node"));
 }
 
 /// Test 4: Check facet storage after spawn
@@ -165,7 +165,7 @@ async fn test_facet_storage_after_spawn() {
 
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("test-actor@local"))
+        .with_name("test-actor")
         .build()
         .await
         .unwrap();
@@ -195,7 +195,7 @@ async fn test_facet_service_get_facet_normal_actor() {
 
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("test-actor@local"))
+        .with_name("test-actor")
         .build()
         .await
         .unwrap();
@@ -231,7 +231,7 @@ async fn test_facet_service_get_facet_virtual_actor() {
 
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("virtual-actor@local"))
+        .with_name("virtual-actor")
         .build()
         .await
         .unwrap();
@@ -285,7 +285,7 @@ async fn test_facet_service_get_facet_not_found() {
 
     let behavior = Box::new(TestBehavior);
     let actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("no-facet-actor@local"))
+        .with_name("no-facet-actor")
         .build()
         .await
         .unwrap();
@@ -309,7 +309,7 @@ async fn test_facet_service_facets_cleaned_up_on_unregister() {
 
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("cleanup-actor@local"))
+        .with_name("cleanup-actor")
         .build()
         .await
         .unwrap();
@@ -343,7 +343,7 @@ async fn test_facet_service_with_sqlite_backend() {
 
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("sqlite-actor@local"))
+        .with_name("sqlite-actor")
         .build()
         .await;
 
@@ -380,7 +380,7 @@ async fn test_facet_storage_direct() {
 
     let behavior = Box::new(TestBehavior);
     let mut actor = ActorBuilder::new(behavior)
-        .with_id(ActorId::from("test-actor@local"))
+        .with_name("test-actor")
         .build()
         .await
         .unwrap();

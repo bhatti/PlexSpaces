@@ -23,7 +23,7 @@
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
-use plexspaces_core::ServiceLocator;
+use plexspaces_core::{ActorId, ServiceLocator};
 use plexspaces_node::{default_node_config, Node, NodeId};
 use plexspaces_proto::{
     actor::v1::{ActorConfig as ProtoActorConfig, SpawnActorRequest},
@@ -66,10 +66,11 @@ async fn test_spawn_actor_basic() {
 
     let resp = response.unwrap().into_inner();
 
-    // Should return actor_ref in format "actor_id@node_id"
+    // Should return canonical actor_ref with the target node encoded in the ID
+    let actor_id = ActorId::from_canonical(&resp.actor_ref).expect("spawn should return ActorId");
     assert!(
-        resp.actor_ref.contains("@test-node"),
-        "actor_ref should contain @node_id"
+        actor_id.node_id() == "test-node",
+        "actor_ref should target test-node"
     );
 
     // Should return actor details
@@ -183,7 +184,9 @@ async fn test_spawn_multiple_remote_actors() {
         assert!(response.is_ok(), "spawn {} should succeed", i);
 
         let resp = response.unwrap().into_inner();
-        assert!(resp.actor_ref.contains("@test-node"));
+        let actor_id =
+            ActorId::from_canonical(&resp.actor_ref).expect("spawn should return ActorId");
+        assert_eq!(actor_id.node_id(), "test-node");
     }
 
     // All 3 should be registered with node
@@ -225,7 +228,7 @@ async fn test_spawn_remote_actor_via_grpc() {
     assert!(response.is_ok(), "gRPC spawn should succeed");
 
     let actor_ref = response.unwrap();
-    assert!(actor_ref.id().as_str().contains("@node1"));
+    assert_eq!(actor_ref.id().node_id(), "node1");
 
     // Cleanup
     server_handle.abort();
@@ -241,7 +244,7 @@ use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_services::actor_service::ActorServiceImpl;
 use tonic::transport::Server;
 
-use super::test_helpers::lookup_actor_ref;
+use super::test_helpers::{lookup_actor_ref, test_runtime_actor_id};
 
 /// Helper to create a test message
 fn create_routing_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
@@ -280,16 +283,17 @@ async fn test_node_route_local_message() {
 
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
+    let actor_id = test_runtime_actor_id("test-actor", "node1");
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
     let mailbox = Arc::new(
-        Mailbox::new(mailbox_config, "test-actor@node1".to_string())
+        Mailbox::new(mailbox_config, actor_id.to_string())
             .await
             .unwrap(),
     );
     let service_locator = node.service_locator().clone();
     let actor_ref = ActorRef::local(
-        "test-actor@node1".to_string(),
+        actor_id.clone(),
         "".to_string(),
         "".to_string(),
         mailbox.clone(),
@@ -297,7 +301,7 @@ async fn test_node_route_local_message() {
     );
 
     let wrapper = Arc::new(ActorRef::local(
-        "test-actor@node1".to_string(),
+        actor_id.clone(),
         "".to_string(),
         "".to_string(), // test namespace
         mailbox.clone(),
@@ -318,9 +322,9 @@ async fn test_node_route_local_message() {
     actor_registry
         .register_actor(
             &ctx,
-            "test-actor@node1".to_string(),
+            actor_id.clone(),
             wrapper,
-            "TestActor".to_string(),
+            "gen_server".to_string(),
             None,
             None,
             None,
@@ -342,18 +346,19 @@ async fn test_node_route_remote_message() {
     let node1 = Arc::new(NodeBuilder::new("node1").build().await);
     let node2 = Arc::new(NodeBuilder::new("node2").build().await);
 
+    let actor_id = test_runtime_actor_id("remote-actor", "node2");
     let node2_address = start_test_server(node2.clone()).await;
 
     let mut mailbox_config2 = MailboxConfig::default();
     mailbox_config2.capacity = 1000;
     let mailbox2 = Arc::new(
-        Mailbox::new(mailbox_config2, "remote-actor@node2".to_string())
+        Mailbox::new(mailbox_config2, actor_id.to_string())
             .await
             .unwrap(),
     );
     let service_locator2 = node2.service_locator().clone();
     let actor_ref2 = ActorRef::local(
-        "remote-actor@node2".to_string(),
+        actor_id.clone(),
         "".to_string(),
         "".to_string(),
         mailbox2.clone(),
@@ -361,7 +366,7 @@ async fn test_node_route_remote_message() {
     );
 
     let wrapper2 = Arc::new(ActorRef::local(
-        "remote-actor@node2".to_string(),
+        actor_id.clone(),
         "".to_string(),
         "".to_string(), // test namespace
         mailbox2.clone(),
@@ -382,9 +387,9 @@ async fn test_node_route_remote_message() {
     actor_registry2
         .register_actor(
             &ctx,
-            "remote-actor@node2".to_string(),
+            actor_id.clone(),
             wrapper2,
-            "TestActor".to_string(),
+            "gen_server".to_string(),
             None,
             None,
             None,
@@ -395,12 +400,12 @@ async fn test_node_route_remote_message() {
         "internal".to_string(),
         "system".to_string(),
     );
-    let actor_id = actor_ref2.id().clone();
+    let remote_actor_id = actor_ref2.id().clone();
     let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
     actor_registry2
         .register_actor(
             &ctx,
-            actor_id,
+            remote_actor_id.clone(),
             sender,
             "TestActor".to_string(),
             None,
@@ -438,7 +443,7 @@ async fn test_node_route_remote_message() {
 
     let service_locator1 = node1.service_locator().clone();
     let remote_actor_ref = ActorRef::remote(
-        "remote-actor@node2".to_string(),
+        remote_actor_id,
         "".to_string(),
         "".to_string(),
         "node2".to_string(),
@@ -460,15 +465,16 @@ async fn test_node_route_to_unregistered_remote() {
     use plexspaces_node::NodeBuilder;
 
     let node = Arc::new(NodeBuilder::new("node1").build().await);
+    let missing_actor_id = test_runtime_actor_id("actor", "node999");
 
     let message = create_routing_test_message(vec![7, 8, 9]);
-    let result = match lookup_actor_ref(&node, &"actor@node999".to_string()).await {
+    let result = match lookup_actor_ref(&node, &missing_actor_id).await {
         Ok(Some(actor_ref)) => actor_ref
             .tell(message)
             .await
             .map_err(|e| plexspaces_node::NodeError::DeliveryFailed(format!("{}", e))),
         Ok(None) => Err(plexspaces_node::NodeError::ActorNotFound(
-            "actor@node999".to_string(),
+            missing_actor_id.to_string(),
         )),
         Err(e) => Err(e),
     };
@@ -483,18 +489,19 @@ async fn test_connection_pooling() {
     let node1 = Arc::new(NodeBuilder::new("node1").build().await);
     let node2 = Arc::new(NodeBuilder::new("node2").build().await);
 
+    let actor_id = test_runtime_actor_id("pooled-actor", "node2");
     let node2_address = start_test_server(node2.clone()).await;
 
     let mut mailbox_config2 = MailboxConfig::default();
     mailbox_config2.capacity = 1000;
     let mailbox2 = Arc::new(
-        Mailbox::new(mailbox_config2, "pooled-actor@node2".to_string())
+        Mailbox::new(mailbox_config2, actor_id.to_string())
             .await
             .unwrap(),
     );
     let service_locator2 = node2.service_locator().clone();
     let actor_ref2 = ActorRef::local(
-        "pooled-actor@node2".to_string(),
+        actor_id.clone(),
         "".to_string(),
         "".to_string(),
         mailbox2.clone(),
@@ -502,7 +509,7 @@ async fn test_connection_pooling() {
     );
 
     let wrapper_pooled = Arc::new(ActorRef::local(
-        "pooled-actor@node2".to_string(),
+        actor_id.clone(),
         "".to_string(),
         "".to_string(), // test namespace
         mailbox2.clone(),
@@ -523,9 +530,9 @@ async fn test_connection_pooling() {
     actor_registry2
         .register_actor(
             &ctx,
-            "pooled-actor@node2".to_string(),
+            actor_id.clone(),
             wrapper_pooled,
-            "TestActor".to_string(),
+            "gen_server".to_string(),
             None,
             None,
             None,
@@ -536,12 +543,12 @@ async fn test_connection_pooling() {
         "internal".to_string(),
         "system".to_string(),
     );
-    let actor_id = actor_ref2.id().clone();
+    let remote_actor_id = actor_ref2.id().clone();
     let sender: Arc<dyn plexspaces_core::MessageSender> = Arc::new(actor_ref2.clone());
     actor_registry2
         .register_actor(
             &ctx,
-            actor_id,
+            remote_actor_id.clone(),
             sender,
             "TestActor".to_string(),
             None,
@@ -579,7 +586,7 @@ async fn test_connection_pooling() {
 
     let service_locator1 = node1.service_locator().clone();
     let remote_actor_ref = ActorRef::remote(
-        "pooled-actor@node2".to_string(),
+        remote_actor_id,
         "".to_string(),
         "".to_string(),
         "node2".to_string(),

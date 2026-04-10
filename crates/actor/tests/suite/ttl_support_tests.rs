@@ -22,6 +22,7 @@
 //! from accumulating in mailboxes.
 
 use plexspaces_actor::ActorRef;
+use plexspaces_core::ActorId;
 use plexspaces_core::{Message, ServiceLocator};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
@@ -116,15 +117,22 @@ async fn test_actor_ref_tell_with_ttl_message() {
     // Create actor ref and mailbox with sufficient capacity
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000; // Large capacity to prevent "Mailbox is full" errors
+    let actor_id = ActorId::new(
+        "test".to_string(),
+        "GenServer".to_string(),
+        "test".to_string(),
+        "node1".to_string(),
+    )
+    .expect("ttl test actor id should be valid");
     let mailbox = Arc::new(
-        Mailbox::new(mailbox_config, "test@node1".to_string())
+        Mailbox::new(mailbox_config, actor_id.to_string())
             .await
             .unwrap(),
     );
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
     let actor_ref = ActorRef::local(
-        "test@node1".to_string(),
+        actor_id,
         "test".to_string(),
         "test".to_string(),
         Arc::clone(&mailbox),

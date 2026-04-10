@@ -115,7 +115,13 @@ async fn test_actor_service_wrapper_send_message_remote_not_implemented() {
         "default".to_string(),
     );
     let result = actor_service
-        .send(ctx, "remote-actor@remote-node", message, false, None)
+        .send(
+            ctx,
+            "remote-actor//gen_server::default@remote-node",
+            message,
+            false,
+            None,
+        )
         .await;
 
     // Should fail - either "Actor not found", "Node not found", or "not yet implemented"
@@ -148,7 +154,7 @@ async fn test_object_registry_wrapper() {
     use plexspaces_core::RequestContext;
     let ctx = RequestContext::new_without_auth("default".to_string(), "default".to_string());
     let registration = ObjectRegistration {
-        object_id: "test-actor@node1".to_string(),
+        object_id: "test-actor//gen_server::default@node1".to_string(),
         object_type: ObjectType::ObjectTypeActor as i32,
         object_category: "GenServer".to_string(),
         grpc_address: "http://node1:8000".to_string(),
@@ -160,12 +166,16 @@ async fn test_object_registry_wrapper() {
 
     // Test lookup using trait method signature: lookup(ctx, object_type, object_id)
     let result = registry
-        .lookup(&ctx, ObjectType::ObjectTypeActor, "test-actor@node1")
+        .lookup(
+            &ctx,
+            ObjectType::ObjectTypeActor,
+            "test-actor//gen_server::default@node1",
+        )
         .await;
     assert!(result.is_ok());
     let found = result.unwrap();
     assert!(found.is_some());
     let reg = found.unwrap();
-    assert_eq!(reg.object_id, "test-actor@node1");
+    assert_eq!(reg.object_id, "test-actor//gen_server::default@node1");
     assert_eq!(reg.grpc_address, "http://node1:8000");
 }

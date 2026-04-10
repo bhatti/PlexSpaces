@@ -89,7 +89,8 @@ graph TB
 
 An **Actor** is the fundamental unit of computation in PlexSpaces. Every actor has:
 
-- **Identity**: Unique ID in canonical format `name:namespace@node_id` (e.g., `counter:default@node1`). For actors without a namespace, the shorter format `name@node_id` is also valid. Namespace is always present for WASM actors.
+- **Identity**: Unique structured ID with canonical form `name//actor_type::namespace@node_id` (e.g., `counter//gen_server::default@node1`). The full format is always used internally and at storage boundaries.
+- **Client-supplied name**: Client code supplies the actor `name` only. That name must be unique for the actor within the namespace and node where it is created. The runtime fills in `actor_type`, `namespace`, and `node_id` to construct the canonical `ActorId`.
 - **State**: Private mutable state (no shared state between actors)
 - **Behavior**: Message handling logic (implemented via behaviors)
 - **Delivery Runtime**: Local execution path that serializes incoming messages
@@ -98,7 +99,7 @@ An **Actor** is the fundamental unit of computation in PlexSpaces. Every actor h
 
 ```rust
 pub struct Actor {
-    id: ActorId,                                    // "name:namespace@node_id"
+    id: ActorId,                                    // "name//actor_type::namespace@node_id"
     state: ActorState,                              // Creating, Inactive, Active, Terminated, Failed
     behavior: Box<dyn Actor>,                       // Message handling logic
     mailbox: Arc<Mailbox>,                          // Internal delivery queue
@@ -116,6 +117,13 @@ pub struct Actor {
 - **Cloneable**: Share references safely across threads
 - **Message Passing**: `tell()` (fire-and-forget) and `ask()` (request-reply)
 - **Automatic Routing**: Handles local vs remote communication automatically
+
+### Actor Name vs ActorId
+
+- **Actor name**: The logical identifier that client code provides to builders and SDK helpers such as `with_name("counter")`.
+- **Canonical ActorId**: The runtime-owned identity `name//actor_type::namespace@node_id` used for routing, storage, observability, and APIs that cross process or network boundaries.
+- **Uniqueness rule**: Reusing the same name for different actors in the same namespace/node scope is a bug unless you intentionally mean to address the same actor identity.
+- **Boundary rule**: Inside the runtime we prefer typed `ActorId`. At string boundaries such as gRPC, HTTP, persistence, and logs, we use the canonical string form.
 
 ```rust
 use plexspaces_sdk::{spawn, call_message, cast_message, json, RequestContext};
@@ -227,7 +235,7 @@ let ctx = RequestContext::new_without_auth("my-tenant".into(), "default".into())
 let actor_ref = spawn_with_facets(
     &ctx,
     service_locator.clone(),
-    ActorId::from("counter@node1"),
+    "counter",
     "default",
     Counter { count: 0 },
     vec![],  // facets
@@ -255,7 +263,7 @@ Actors are defined in `ApplicationSpec` and spawned automatically. Applications 
   ```
 - `BehaviorRegistry` is used by the framework (and Node) when spawning by actor type name
 - If behavior is not registered, `spawn_actor` will fail with a clear error message
-- Use SDK helper `spawn_with_behavior_type()` for convenient spawning with BehaviorRegistry-based actors
+- Use SDK helper `spawn_with_behavior_type()` with an actor name; the runtime constructs the canonical `ActorId`
 
 **WASM Applications:**
 - WASM module is deployed at the **application level** via `DeployApplicationRequest.wasm_module`
@@ -317,7 +325,7 @@ struct UserSession { /* ... */ }
 let actor_ref = spawn_with_facets(
     &ctx,
     service_locator,
-    "user-123@node1",
+    "user-123",
     "namespace",
     UserSession::new(),
     vec![Box::new(virtual_facet)],
@@ -815,7 +823,7 @@ let virtual_facet = Box::new(VirtualActorFacet::new(
 let actor_ref = spawn_with_facets(
     &ctx,
     service_locator,
-    "user-123@node1",
+    "user-123",
     "namespace",
     UserSession::new(),
     vec![Box::new(virtual_facet)],
@@ -869,7 +877,7 @@ struct WorkflowActor { /* ... */ }
 let actor_ref = spawn_with_facets(
     &ctx,
     service_locator,
-    "workflow-1@node1",
+    "workflow-1",
     "namespace",
     WorkflowActor::new(),
     vec![Box::new(durability_facet)],
@@ -1172,7 +1180,13 @@ sequenceDiagram
 **Example**:
 ```rust
 // Link two actors
-actor_registry.link(&ctx, &"actor1@node1".to_string(), &"actor2@node1".to_string()).await?;
+actor_registry
+    .link(
+        &ctx,
+        &ActorId::from_canonical("actor1//gen_server::default@node1")?,
+        &ActorId::from_canonical("actor2//gen_server::default@node1")?,
+    )
+    .await?;
 
 // If actor1 dies abnormally, actor2 also dies
 // If actor2 dies abnormally, actor1 also dies
@@ -1254,12 +1268,12 @@ HTTP ask operations (via the REST API) support a configurable timeout through th
 
 ```bash
 # Ask with default 5-second timeout
-curl -X POST http://localhost:8080/v1/actors/counter:default@node1/ask \
+curl -X POST http://localhost:8080/v1/actors/counter//counter::default@node1/ask \
   -H "Content-Type: application/json" \
   -d '{"action": "get_count"}'
 
 # Ask with custom 30-second timeout
-curl -X POST http://localhost:8080/v1/actors/counter:default@node1/ask?timeout=30 \
+curl -X POST http://localhost:8080/v1/actors/counter//counter::default@node1/ask?timeout=30 \
   -H "Content-Type: application/json" \
   -d '{"action": "get_count"}'
 ```
@@ -1310,10 +1324,10 @@ Actors are registered in the `ActorRegistry` during `supervisor.add_child()`. Re
 
 ```rust
 // During supervisor.add_child(), the actor is registered:
-// 1. Actor ID "worker:my-app@node1" is parsed
-// 2. Namespace "my-app" is extracted from the ID
+// 1. Actor ID "worker//worker::my-app@node1" is parsed
+// 2. Namespace "my-app" is read from the structured ID
 // 3. ActorRef is registered in ActorRegistry under scope (tenant, namespace, actor_id)
-// 4. ActorRegistry::tell()/ask() can now route to "worker:my-app@node1"
+// 4. ActorRegistry::tell()/ask() can now route to "worker//worker::my-app@node1"
 
 supervisor.add_child(child_spec).await?;
 // Actor is now registered and routable via ActorRegistry
@@ -1321,11 +1335,11 @@ supervisor.add_child(child_spec).await?;
 
 ### Namespace Isolation
 
-Namespace is a fundamental isolation boundary in the actor system. It is extracted from the canonical actor ID format (`name:namespace@node_id`) and stored as part of the scope key for each registered actor entry.
+Namespace is a fundamental isolation boundary in the actor system. It is extracted from the canonical actor ID format (`name//actor_type::namespace@node_id`) and stored as part of the scope key for each registered actor entry.
 
 **Key behaviors**:
 
-- **WASM actors** always include namespace in their actor ID (e.g., `worker:my-wasm-app@node1`)
+- **WASM actors** always include namespace in their actor ID (e.g., `worker//worker::my-wasm-app@node1`)
 - **Namespace extraction** happens at registration time during `supervisor.add_child()`
 - **Stop operations** validate namespace boundaries -- an actor can only be stopped by operations within the same namespace
 - **Undeploy operations** validate namespace boundaries -- undeploying an application only affects actors within that application's namespace
@@ -1333,13 +1347,14 @@ Namespace is a fundamental isolation boundary in the actor system. It is extract
 
 ```rust
 // Namespace is extracted from actor ID and used in the registry scope key
-// Actor ID: "worker:my-app@node1"
-//   name:      "worker"
-//   namespace: "my-app"
-//   node_id:   "node1"
+// Actor ID: "worker//worker::my-app@node1"
+//   name:       "worker"
+//   actor_type: "worker"
+//   namespace:  "my-app"
+//   node_id:    "node1"
 
 // Stop/undeploy operations enforce namespace boundaries:
-// - stop_actor("worker:my-app@node1") validates the caller's namespace matches "my-app"
+// - stop_actor("worker//worker::my-app@node1") validates the caller's namespace matches "my-app"
 // - undeploy_application("my-app") only stops actors with namespace "my-app"
 ```
 
@@ -1488,7 +1503,7 @@ impl Counter {
 }
 
 // Spawn actor using SDK (recommended)
-let actor_ref = spawn(&ctx, service_locator, "counter@node1", "namespace", Counter::new()).await?;
+let actor_ref = spawn(&ctx, service_locator, "counter", "namespace", Counter::new()).await?;
 
 // Send messages using SDK helpers
 let event = cast_message(json!({ "action": "increment" }));
@@ -1529,7 +1544,7 @@ struct UserSession { /* ... */ }
 let actor_ref = spawn_with_facets(
     &ctx,
     service_locator,
-    "session-123@node1",
+    "session-123",
     "namespace",
     UserSession::new(),
     vec![Box::new(virtual_facet), Box::new(timer_facet)],
@@ -1568,7 +1583,7 @@ struct OrderWorkflow { /* ... */ }
 let actor_ref = spawn_with_facets(
     &ctx,
     service_locator,
-    "workflow-1@node1",
+    "workflow-1",
     "namespace",
     OrderWorkflow::new(),
     vec![Box::new(durability_facet)],

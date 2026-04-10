@@ -28,7 +28,7 @@ plexspaces node list
 plexspaces actor spawn --name counter --behavior GenServer
 
 # Send message to actor
-plexspaces actor send --to counter@node1 --message "increment"
+plexspaces actor send --to counter//counter::default@node1 --message "increment"
 
 # List actors
 plexspaces actor list --node-id node1
@@ -80,4 +80,3 @@ This crate is a standalone binary used by:
 
 - Implementation: `crates/cli/src/`
 - Binary: `plexspaces` (installed via `cargo install`)
-

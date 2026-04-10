@@ -32,14 +32,21 @@
 
 #[cfg(test)]
 mod tests {
+    use plexspaces_core::ActorId;
     use plexspaces_core::journal_storage::{Checkpoint, JournalStorage};
     use plexspaces_journaling::sql::SqliteJournalStorage;
+
+    fn canonical_actor_id(name: &str) -> String {
+        ActorId::new(name, "gen_server", "default", "test-node")
+            .unwrap()
+            .to_string()
+    }
 
     /// Test: Checkpoint struct creation and serialization
     #[test]
     fn test_checkpoint_struct_creation() {
         let checkpoint = Checkpoint {
-            actor_id: "bank-account-alice@test-node".to_string(),
+            actor_id: canonical_actor_id("bank-account-alice"),
             sequence: 1,
             timestamp: None,
             state_data: br#"{"balance":1000,"transactions":[]}"#.to_vec(),
@@ -48,7 +55,7 @@ mod tests {
             metadata: std::collections::HashMap::new(),
         };
 
-        assert_eq!(checkpoint.actor_id, "bank-account-alice@test-node");
+        assert_eq!(checkpoint.actor_id, canonical_actor_id("bank-account-alice"));
         assert_eq!(checkpoint.sequence, 1);
         assert!(!checkpoint.state_data.is_empty());
     }
@@ -61,7 +68,7 @@ mod tests {
             .await
             .expect("Failed to create SQLite journal storage");
 
-        let actor_id = "test-actor-checkpoint@test-node";
+        let actor_id = canonical_actor_id("test-actor-checkpoint");
         let state_json = r#"{"balance":500,"transactions":[{"type":"deposit","amount":500}]}"#;
 
         // Create and save checkpoint
@@ -82,7 +89,7 @@ mod tests {
 
         // Load checkpoint
         let loaded = storage
-            .get_latest_checkpoint(actor_id)
+            .get_latest_checkpoint(&actor_id)
             .await
             .expect("Failed to load checkpoint");
 
@@ -102,7 +109,7 @@ mod tests {
             .await
             .expect("Failed to create storage");
 
-        let actor_id = "test-actor-update@test-node";
+        let actor_id = canonical_actor_id("test-actor-update");
 
         // Save initial checkpoint with balance 100
         let checkpoint1 = Checkpoint {
@@ -129,7 +136,7 @@ mod tests {
         storage.save_checkpoint(&checkpoint2).await.unwrap();
 
         // Load latest should return balance 500
-        let loaded = storage.get_latest_checkpoint(actor_id).await.unwrap();
+        let loaded = storage.get_latest_checkpoint(&actor_id).await.unwrap();
         let state: serde_json::Value = serde_json::from_slice(&loaded.state_data).unwrap();
         assert_eq!(state["balance"], 500);
     }
@@ -142,7 +149,7 @@ mod tests {
             .expect("Failed to create storage");
 
         let result = storage
-            .get_latest_checkpoint("nonexistent-actor@test-node")
+            .get_latest_checkpoint(&canonical_actor_id("nonexistent-actor"))
             .await;
 
         assert!(result.is_err());
@@ -164,7 +171,7 @@ mod tests {
 
         // Save checkpoint for Alice with balance 1000
         let alice_checkpoint = Checkpoint {
-            actor_id: "account-alice@test-node".to_string(),
+            actor_id: canonical_actor_id("account-alice"),
             sequence: 1,
             timestamp: None,
             state_data: br#"{"balance":1000}"#.to_vec(),
@@ -176,7 +183,7 @@ mod tests {
 
         // Save checkpoint for Bob with balance 500
         let bob_checkpoint = Checkpoint {
-            actor_id: "account-bob@test-node".to_string(),
+            actor_id: canonical_actor_id("account-bob"),
             sequence: 1,
             timestamp: None,
             state_data: br#"{"balance":500}"#.to_vec(),
@@ -188,7 +195,7 @@ mod tests {
 
         // Load Alice's checkpoint
         let alice_loaded = storage
-            .get_latest_checkpoint("account-alice@test-node")
+            .get_latest_checkpoint(&canonical_actor_id("account-alice"))
             .await
             .unwrap();
         let alice_state: serde_json::Value =
@@ -197,7 +204,7 @@ mod tests {
 
         // Load Bob's checkpoint
         let bob_loaded = storage
-            .get_latest_checkpoint("account-bob@test-node")
+            .get_latest_checkpoint(&canonical_actor_id("account-bob"))
             .await
             .unwrap();
         let bob_state: serde_json::Value = serde_json::from_slice(&bob_loaded.state_data).unwrap();
@@ -211,7 +218,7 @@ mod tests {
             .await
             .expect("Failed to create storage");
 
-        let actor_id = "test-actor-versioned@test-node";
+        let actor_id = canonical_actor_id("test-actor-versioned");
 
         // Save v1 checkpoint
         let checkpoint_v1 = Checkpoint {
@@ -238,7 +245,7 @@ mod tests {
         storage.save_checkpoint(&checkpoint_v2).await.unwrap();
 
         // Load and verify version 2
-        let loaded = storage.get_latest_checkpoint(actor_id).await.unwrap();
+        let loaded = storage.get_latest_checkpoint(&actor_id).await.unwrap();
         assert_eq!(loaded.state_schema_version, 2);
 
         let state: serde_json::Value = serde_json::from_slice(&loaded.state_data).unwrap();
@@ -253,7 +260,7 @@ mod tests {
             .await
             .expect("Failed to create storage");
 
-        let actor_id = "test-actor-large@test-node";
+        let actor_id = canonical_actor_id("test-actor-large");
 
         // Create state with 100 transactions
         let transactions: Vec<serde_json::Value> = (0..100)
@@ -286,7 +293,7 @@ mod tests {
         storage.save_checkpoint(&checkpoint).await.unwrap();
 
         // Load and verify
-        let loaded = storage.get_latest_checkpoint(actor_id).await.unwrap();
+        let loaded = storage.get_latest_checkpoint(&actor_id).await.unwrap();
         assert_eq!(loaded.state_data.len(), state_bytes.len());
 
         let loaded_state: serde_json::Value = serde_json::from_slice(&loaded.state_data).unwrap();
@@ -298,8 +305,15 @@ mod tests {
 /// Integration tests that simulate WASM actor restart scenarios
 #[cfg(test)]
 mod restart_scenario_tests {
+    use plexspaces_core::ActorId;
     use plexspaces_core::journal_storage::{Checkpoint, JournalStorage};
     use plexspaces_journaling::sql::SqliteJournalStorage;
+
+    fn canonical_actor_id(name: &str) -> String {
+        ActorId::new(name, "gen_server", "default", "test-node")
+            .unwrap()
+            .to_string()
+    }
 
     /// Simulates bank account actor restart scenario
     ///
@@ -315,12 +329,12 @@ mod restart_scenario_tests {
             .await
             .expect("Failed to create storage");
 
-        let actor_id = "bank-account-alice@test-node";
+        let actor_id = canonical_actor_id("bank-account-alice");
 
         // === PHASE 1: First run (fresh start) ===
 
         // Simulate actor init - no checkpoint exists
-        let init_result = storage.get_latest_checkpoint(actor_id).await;
+        let init_result = storage.get_latest_checkpoint(&actor_id).await;
         assert!(
             init_result.is_err(),
             "Should have no checkpoint on first run"
@@ -354,7 +368,7 @@ mod restart_scenario_tests {
 
         // Simulate actor init - checkpoint should exist
         let loaded_checkpoint = storage
-            .get_latest_checkpoint(actor_id)
+            .get_latest_checkpoint(&actor_id)
             .await
             .expect("Should have checkpoint after restart");
 
@@ -398,7 +412,7 @@ mod restart_scenario_tests {
             .expect("Failed to save updated checkpoint");
 
         // Verify final state
-        let final_checkpoint = storage.get_latest_checkpoint(actor_id).await.unwrap();
+        let final_checkpoint = storage.get_latest_checkpoint(&actor_id).await.unwrap();
         let final_state: serde_json::Value =
             serde_json::from_slice(&final_checkpoint.state_data).unwrap();
         assert_eq!(final_state["balance"], 1300);
@@ -413,10 +427,11 @@ mod restart_scenario_tests {
             .expect("Failed to create storage");
 
         // Alice: $1000
+        let alice_actor_id = "account-alice//account::default@node";
         let alice_state = serde_json::json!({"balance": 1000, "name": "alice"});
         storage
             .save_checkpoint(&Checkpoint {
-                actor_id: "account-alice@node".to_string(),
+                actor_id: alice_actor_id.to_string(),
                 sequence: 1,
                 timestamp: None,
                 state_data: serde_json::to_vec(&alice_state).unwrap(),
@@ -428,10 +443,11 @@ mod restart_scenario_tests {
             .unwrap();
 
         // Bob: $500
+        let bob_actor_id = "account-bob//account::default@node";
         let bob_state = serde_json::json!({"balance": 500, "name": "bob"});
         storage
             .save_checkpoint(&Checkpoint {
-                actor_id: "account-bob@node".to_string(),
+                actor_id: bob_actor_id.to_string(),
                 sequence: 1,
                 timestamp: None,
                 state_data: serde_json::to_vec(&bob_state).unwrap(),
@@ -443,10 +459,11 @@ mod restart_scenario_tests {
             .unwrap();
 
         // Charlie: $250
+        let charlie_actor_id = "account-charlie//account::default@node";
         let charlie_state = serde_json::json!({"balance": 250, "name": "charlie"});
         storage
             .save_checkpoint(&Checkpoint {
-                actor_id: "account-charlie@node".to_string(),
+                actor_id: charlie_actor_id.to_string(),
                 sequence: 1,
                 timestamp: None,
                 state_data: serde_json::to_vec(&charlie_state).unwrap(),
@@ -460,7 +477,7 @@ mod restart_scenario_tests {
         // Simulate restart - all accounts should restore independently
         let alice_restored: serde_json::Value = serde_json::from_slice(
             &storage
-                .get_latest_checkpoint("account-alice@node")
+                .get_latest_checkpoint(alice_actor_id)
                 .await
                 .unwrap()
                 .state_data,
@@ -468,7 +485,7 @@ mod restart_scenario_tests {
         .unwrap();
         let bob_restored: serde_json::Value = serde_json::from_slice(
             &storage
-                .get_latest_checkpoint("account-bob@node")
+                .get_latest_checkpoint(bob_actor_id)
                 .await
                 .unwrap()
                 .state_data,
@@ -476,7 +493,7 @@ mod restart_scenario_tests {
         .unwrap();
         let charlie_restored: serde_json::Value = serde_json::from_slice(
             &storage
-                .get_latest_checkpoint("account-charlie@node")
+                .get_latest_checkpoint(charlie_actor_id)
                 .await
                 .unwrap()
                 .state_data,

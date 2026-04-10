@@ -149,7 +149,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for room_idx in 0..num_rooms {
         let room_name = &room_names[room_idx];
         for user_idx in 0..users_per_room {
-            let user_id = ActorId::from(format!("user-{}-{}@chat-server", room_idx, user_idx));
+            let user_id = ActorId::new(
+                format!("user-{}-{}", room_idx, user_idx),
+                "chat_user",
+                "default",
+                "chat-server",
+            )?;
             registry.join_group(&ctx, room_name, &user_id, vec![]).await?;
             
             if (room_idx == 0 && user_idx < 3) || (room_idx == num_rooms - 1 && user_idx == users_per_room - 1) {

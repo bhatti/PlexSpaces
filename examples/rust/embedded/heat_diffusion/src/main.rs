@@ -20,7 +20,7 @@
 use plexspaces_sdk::{gen_server_actor, plexspaces_handlers, handler, json, spawn, GenServerRef, RequestContext};
 use plexspaces_tuplespace::{TupleSpace, Tuple, TupleField, Pattern, PatternField};
 use plexspaces_node::{NodeBuilder, CoordinationComputeTracker, service_wrappers::TupleSpaceProviderWrapper};
-use plexspaces_core::{ActorId, TupleSpaceProvider, BehaviorError, ActorContext, Message};
+use plexspaces_core::{TupleSpaceProvider, BehaviorError, ActorContext, Message};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::info;
@@ -344,9 +344,9 @@ async fn main() -> Result<()> {
         };
 
         let actor = GridRegionActor::new(region_id, width, initial_data, fixed_boundary);
-        let actor_id = ActorId::from(format!("region-{}@heat-node", region_id));
+        let actor_name = format!("region-{}", region_id);
 
-        let actor_ref = spawn(&ctx, service_locator.clone(), actor_id.clone(), namespace, actor).await
+        let actor_ref = spawn(&ctx, service_locator.clone(), actor_name, namespace, actor).await
             .map_err(|e| anyhow::anyhow!("Failed to spawn region {}: {}", region_id, e))?;
 
         let region_ref = GenServerRef::new(actor_ref);

@@ -131,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let actor_ref = spawn_with_facets(
         &ctx,
         service_locator.clone(),
-        ActorId::from("counter@node1"),
+        "counter",
         "default",
         Counter::new(),
         vec![], // facets
@@ -227,8 +227,8 @@ Actors are the fundamental unit of computation in PlexSpaces:
 An `ActorRef` is a lightweight handle to an actor:
 
 ```rust
-// Get actor reference
-let actor_ref = node.get_actor_ref(&"counter@node1".to_string()).await?;
+// Get actor reference by logical actor name
+let actor_ref = node.get_actor_ref("counter").await?;
 
 // Fire-and-forget (tell)
 actor_ref.tell(message).await?;
@@ -276,7 +276,7 @@ Facets add dynamic capabilities to actors:
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers, handler,
     spawn_with_storage, DurabilityFacet, SqliteJournalStorage,
-    RequestContext, ActorId, json,
+    RequestContext, json,
 };
 use std::sync::Arc;
 
@@ -306,7 +306,7 @@ let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string(
 let actor_ref = spawn_with_storage(
     &ctx,
     service_locator.clone(),
-    ActorId::from("durable-counter@node"),
+    "durable-counter",
     "default",
     DurableCounter { count: 0 },
     storage,
@@ -319,7 +319,7 @@ let actor_ref = spawn_with_storage(
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers, handler,
     spawn, VirtualActorFacet,
-    RequestContext, ActorId, json,
+    RequestContext, json,
 };
 
 // Define virtual actor with facets annotation
@@ -348,7 +348,7 @@ let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string(
 let actor_ref = spawn(
     &ctx,
     service_locator.clone(),
-    ActorId::from("virtual-counter@node"),
+    "virtual-counter",
     "default",
     VirtualCounter { count: 0 },
 ).await?;
@@ -360,7 +360,7 @@ let actor_ref = spawn(
 use plexspaces_sdk::{
     workflow_actor, plexspaces_handlers, run_handler, signal_handler, query_handler,
     spawn_workflow_actor, WorkflowRef,
-    RequestContext, ActorId, json,
+    RequestContext, json,
 };
 
 // Define workflow actor with annotations
@@ -435,7 +435,7 @@ let ctx = RequestContext::new_without_auth("tenant".to_string(), "ns".to_string(
 let workflow: WorkflowRef = spawn_workflow_actor(
     &ctx,
     service_locator.clone(),
-    ActorId::from("order-workflow-123"),
+    "order-workflow-123",
     OrderWorkflow { order_id: String::new(), status: "pending".to_string() },
     vec![],
 ).await?;
@@ -456,9 +456,11 @@ workflow.signal("cancel", &json!({})).await?;
 
 If you get an "actor not found" error:
 
-1. Check the actor ID format: `name@node_id`
-2. Ensure the actor was spawned before sending messages
-3. For virtual actors, the first message will auto-activate
+1. Check the actor ID format: `name//actor_type::namespace@node_id`
+2. Verify the actor was spawned with the intended unique `name`
+3. If you are writing client code, do not construct the full actor ID when spawning; use the unique actor name and let the runtime create the canonical ID
+4. Ensure the actor was spawned before sending messages
+5. For virtual actors, the first message will auto-activate
 
 ### Connection Errors
 

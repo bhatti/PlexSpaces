@@ -72,9 +72,10 @@ This example showcases:
 
 This example uses the **Rust SDK spawn helper** with concrete actor instances:
 
-- `plexspaces_sdk::spawn_actor(ctx, service_locator, actor_id, namespace, behavior_instance, facets)`
+- `plexspaces_sdk::spawn_actor(ctx, service_locator, actor_name, namespace, behavior_instance, facets)`
 - Node creation and lifecycle stay in `NodeBuilder` / `Node`
 - The SDK helper delegates to the framework-owned spawn path without exposing mailbox or actor-factory internals
+- Client code provides a unique actor name; the runtime constructs the canonical actor ID
 
 ## Usage
 

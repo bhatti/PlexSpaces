@@ -16,8 +16,8 @@ use plexspaces_behavior::GenServer;
 use plexspaces_common::ActivationStrategy;
 use plexspaces_core::behavior_factory::{BehaviorFactoryError, BehaviorRegistry};
 use plexspaces_core::{
-    Actor as ActorTrait, ActorContext, BehaviorError, BehaviorType, Message, RequestContext,
-    ServiceLocator,
+    Actor as ActorTrait, ActorContext, ActorId, BehaviorError, BehaviorType, Message,
+    RequestContext, ServiceLocator,
 };
 use plexspaces_journaling::{ReminderFacet, TimerFacet, VirtualActorFacet};
 use plexspaces_node::NodeBuilder;
@@ -35,6 +35,15 @@ use tonic::Request;
 #[derive(Debug, Clone)]
 struct CounterActor {
     count: i32,
+}
+
+fn canonical_actor_id(
+    name: impl Into<String>,
+    actor_type: &str,
+    namespace: &str,
+    node_id: &str,
+) -> ActorId {
+    ActorId::new(name, actor_type, namespace, node_id).expect("valid test actor id")
 }
 
 impl CounterActor {
@@ -209,7 +218,7 @@ impl GenServer for CounterActor {
                     ctx.send_reply(
                         correlation_id,
                         &msg.sender_id,
-                        msg.receiver_id.clone(),
+                        ctx.actor_id().clone(),
                         Message {
                             id: ulid::Ulid::new().to_string(),
                             payload: serde_json::to_vec(&reply).unwrap(),
@@ -234,7 +243,7 @@ impl GenServer for CounterActor {
                     ctx.send_reply(
                         correlation_id,
                         &msg.sender_id,
-                        msg.receiver_id.clone(),
+                        ctx.actor_id().clone(),
                         Message {
                             id: ulid::Ulid::new().to_string(),
                             payload: serde_json::to_vec(&reply).unwrap(),
@@ -275,7 +284,7 @@ impl GenServer for WorkflowProbeActor {
                     ctx.send_reply(
                         correlation_id,
                         &msg.sender_id,
-                        msg.receiver_id.clone(),
+                        ctx.actor_id().clone(),
                         Message {
                             id: ulid::Ulid::new().to_string(),
                             payload: serde_json::to_vec(&reply).unwrap(),
@@ -300,7 +309,7 @@ impl GenServer for WorkflowProbeActor {
                     ctx.send_reply(
                         correlation_id,
                         &msg.sender_id,
-                        msg.receiver_id.clone(),
+                        ctx.actor_id().clone(),
                         Message {
                             id: ulid::Ulid::new().to_string(),
                             payload: serde_json::to_vec(&reply).unwrap(),
@@ -341,7 +350,7 @@ impl GenServer for DurableCounterActor {
                     ctx.send_reply(
                         correlation_id,
                         &msg.sender_id,
-                        msg.receiver_id.clone(),
+                        ctx.actor_id().clone(),
                         Message {
                             id: ulid::Ulid::new().to_string(),
                             payload: serde_json::to_vec(&reply).unwrap(),
@@ -366,7 +375,7 @@ impl GenServer for DurableCounterActor {
                     ctx.send_reply(
                         correlation_id,
                         &msg.sender_id,
-                        msg.receiver_id.clone(),
+                        ctx.actor_id().clone(),
                         Message {
                             id: ulid::Ulid::new().to_string(),
                             payload: serde_json::to_vec(&reply).unwrap(),
@@ -407,7 +416,7 @@ impl GenServer for DurableWorkflowProbeActor {
                     ctx.send_reply(
                         correlation_id,
                         &msg.sender_id,
-                        msg.receiver_id.clone(),
+                        ctx.actor_id().clone(),
                         Message {
                             id: ulid::Ulid::new().to_string(),
                             payload: serde_json::to_vec(&reply).unwrap(),
@@ -432,7 +441,7 @@ impl GenServer for DurableWorkflowProbeActor {
                     ctx.send_reply(
                         correlation_id,
                         &msg.sender_id,
-                        msg.receiver_id.clone(),
+                        ctx.actor_id().clone(),
                         Message {
                             id: ulid::Ulid::new().to_string(),
                             payload: serde_json::to_vec(&reply).unwrap(),
@@ -717,7 +726,7 @@ struct LocalInvokeResponse {
 
 async fn wait_for_actor_registration(
     actor_registry: &Arc<plexspaces_core::ActorRegistry>,
-    actor_id: &String,
+    actor_id: &ActorId,
 ) {
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
@@ -733,7 +742,7 @@ async fn wait_for_actor_registration(
 
 async fn wait_for_virtual_registration(
     virtual_actor_manager: &Arc<plexspaces_core::VirtualActorManager>,
-    actor_id: &String,
+    actor_id: &ActorId,
 ) {
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
@@ -847,8 +856,7 @@ async fn test_virtual_actor_type_registration_and_lazy_activation() {
     );
 
     // Create actor ID using proper format
-    use plexspaces_core::actor_id::build_actor_id;
-    let actor_id = build_actor_id("user-1", actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id("user-1", actor_type, namespace, "test-node");
 
     // Try to get or activate actor (should activate lazily)
     let actor_service = Arc::new(ActorServiceImpl::new(
@@ -931,9 +939,8 @@ async fn test_virtual_actor_suspension_and_reactivation_instance_metadata() {
     let actor_type = "counter";
     register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
 
-    use plexspaces_core::actor_id::build_actor_id;
     let namespace = "test-ns";
-    let actor_id = build_actor_id("user-1", actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id("user-1", actor_type, namespace, "test-node");
 
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
     let virtual_facet = VirtualActorFacet::new(
@@ -1049,8 +1056,7 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
         .unwrap();
 
     // Create actor ID
-    use plexspaces_core::actor_id::build_actor_id;
-    let actor_id = build_actor_id("user-1", actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id("user-1", actor_type, namespace, "test-node");
 
     // Spawn actor (this registers it at the instance level in VirtualActorManager)
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
@@ -1108,7 +1114,7 @@ async fn test_virtual_actor_reactivation_type_level_fallback() {
         .unwrap();
 
     // Create a new actor ID that matches the type but was never instance-registered
-    let new_actor_id = build_actor_id("user-2", actor_type, Some(namespace), "test-node");
+    let new_actor_id = canonical_actor_id("user-2", actor_type, namespace, "test-node");
 
     // Verify type-level registration exists
     assert!(
@@ -1206,21 +1212,20 @@ async fn test_virtual_actor_actor_id_format() {
         .unwrap();
 
     // Test proper actor ID format: {id}//{actor_type}::{namespace}@{node_id}
-    use plexspaces_core::actor_id::{build_actor_id, parse_actor_id};
-    let actor_id = build_actor_id("user-1", actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id("user-1", actor_type, namespace, "test-node");
 
     // Verify format
     assert_eq!(
-        actor_id,
+        actor_id.to_string(),
         "user-1//read-state-tracker::orbit-read-state-ts@test-node"
     );
 
     // Parse and verify components
-    let parsed = parse_actor_id(&actor_id).unwrap();
-    assert_eq!(parsed.id, "user-1");
-    assert_eq!(parsed.actor_type, "read-state-tracker");
-    assert_eq!(parsed.namespace, Some("orbit-read-state-ts".to_string()));
-    assert_eq!(parsed.node_id, "test-node");
+    let parsed = ActorId::from_canonical(actor_id.as_str()).unwrap();
+    assert_eq!(parsed.name(), "user-1");
+    assert_eq!(parsed.actor_type(), "read-state-tracker");
+    assert_eq!(parsed.namespace(), "orbit-read-state-ts");
+    assert_eq!(parsed.node_id(), "test-node");
 
     // Verify type-level registration works with this format
     assert!(
@@ -1280,13 +1285,7 @@ async fn test_virtual_actor_activation_with_http_format() {
     };
 
     // Build proper actor ID format
-    use plexspaces_core::actor_id::build_actor_id;
-    let actor_id = build_actor_id(
-        &instance_id,
-        base_actor_type,
-        Some(namespace),
-        "test-node-http-fmt",
-    );
+    let actor_id = canonical_actor_id(&instance_id, base_actor_type, namespace, "test-node-http-fmt");
 
     // Verify format is correct (not //orbit-tracker::...)
     assert!(
@@ -1298,7 +1297,7 @@ async fn test_virtual_actor_activation_with_http_format() {
         "Actor ID should contain instance ID"
     );
     assert_eq!(
-        actor_id,
+        actor_id.to_string(),
         format!(
             "{}//{}::{}@test-node-http-fmt",
             instance_id, base_actor_type, namespace
@@ -1366,9 +1365,8 @@ async fn test_virtual_actor_reactivation_type_registered_only() {
         .unwrap();
 
     // Build actor ID (simulating HTTP request format: "read-state-tracker:user-1")
-    use plexspaces_core::actor_id::build_actor_id;
     let instance_id = "user-1";
-    let actor_id = build_actor_id(instance_id, actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id(instance_id, actor_type, namespace, "test-node");
 
     // Verify actor is NOT instance-registered (only type-registered)
     let instance_metadata = virtual_actor_manager.get_metadata(&actor_id).await;
@@ -1434,12 +1432,7 @@ async fn test_virtual_actor_type_registration_reinstantiates_behavior_from_templ
     let virtual_actor_manager = service_locator.virtual_actor_manager().await.unwrap();
     let actor_type = "counter-from-template";
     let namespace = "test-ns";
-    let actor_id = plexspaces_core::actor_id::build_actor_id(
-        "user-template",
-        actor_type,
-        Some(namespace),
-        "test-node",
-    );
+    let actor_id = canonical_actor_id("user-template", actor_type, namespace, "test-node");
 
     virtual_actor_manager
         .register_virtual_actor_type(
@@ -1557,9 +1550,8 @@ async fn test_virtual_actor_state_preservation() {
     let actor_type = "counter";
     register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
 
-    use plexspaces_core::actor_id::build_actor_id;
     let namespace = "test-ns";
-    let actor_id = build_actor_id("user-1", actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id("user-1", actor_type, namespace, "test-node");
 
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
     let virtual_facet = VirtualActorFacet::new(
@@ -1638,8 +1630,7 @@ async fn test_virtual_actor_reactivation_recreates_timer_and_reminder_facets() {
     let namespace = "test-ns";
     register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
 
-    use plexspaces_core::actor_id::build_actor_id;
-    let actor_id = build_actor_id("user-facets", actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id("user-facets", actor_type, namespace, "test-node");
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     // Type-level registration stores facet_config so activate_virtual_actor can recreate
@@ -1783,8 +1774,7 @@ async fn test_virtual_actor_reactivation_restores_durable_state() {
     let namespace = "test-ns";
     register_durable_counter_behavior_with_initial_count(&service_locator, actor_type).await;
 
-    use plexspaces_core::actor_id::build_actor_id;
-    let actor_id = build_actor_id("cart-1", actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id("cart-1", actor_type, namespace, "test-node");
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
@@ -1942,8 +1932,7 @@ async fn test_virtual_actor_reactivation_recreates_process_group_facet() {
     let namespace = "test-ns";
     register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
 
-    use plexspaces_core::actor_id::build_actor_id;
-    let actor_id = build_actor_id("alerts", actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id("alerts", actor_type, namespace, "test-node");
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     let sl_dyn: Arc<dyn plexspaces_core::ServiceLocator> =
@@ -2097,12 +2086,7 @@ async fn test_virtual_workflow_behavior_reactivates_from_type_metadata() {
         "workflow-style virtual actor should activate"
     );
 
-    let actor_id = plexspaces_core::actor_id::build_actor_id(
-        "execution-1",
-        actor_type,
-        Some(namespace),
-        "test-node",
-    );
+    let actor_id = canonical_actor_id("execution-1", actor_type, namespace, "test-node");
     let actor_registry = service_locator.actor_registry().await.unwrap();
     wait_for_actor_registration(&actor_registry, &actor_id).await;
 
@@ -2184,12 +2168,7 @@ async fn test_virtual_durable_workflow_behavior_restores_checkpoint() {
     ));
     let actor_registry = service_locator.actor_registry().await.unwrap();
     let actor_name = format!("{}:execution-1", actor_type);
-    let actor_id = plexspaces_core::actor_id::build_actor_id(
-        "execution-1",
-        actor_type,
-        Some(namespace),
-        "test-node",
-    );
+    let actor_id = canonical_actor_id("execution-1", actor_type, namespace, "test-node");
     let stop_ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     let response = invoke_virtual_actor(
@@ -2300,8 +2279,7 @@ async fn test_virtual_actor_type_not_evicted_on_vacation() {
         .await
         .unwrap();
 
-    use plexspaces_core::actor_id::build_actor_id;
-    let actor_id = build_actor_id("vacation-test", actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id("vacation-test", actor_type, namespace, "test-node");
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     // Activate the first instance via HTTP invoke (correct way to start a lazy virtual actor).
@@ -2411,8 +2389,7 @@ async fn test_virtual_actor_stop_respawn_all_facets_preserved() {
     let actor_type = "counter-respawn";
     register_counter_behavior_with_initial_count(&service_locator, actor_type).await;
 
-    use plexspaces_core::actor_id::build_actor_id;
-    let actor_id = build_actor_id("respawn-test", actor_type, Some(namespace), "test-node");
+    let actor_id = canonical_actor_id("respawn-test", actor_type, namespace, "test-node");
     let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
 
     // Register the actor type with ALL three facet configs at the type level.

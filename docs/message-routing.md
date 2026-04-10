@@ -87,7 +87,7 @@ Caller → ActorRef::tell() → ServiceLocator::get_node_client() → gRPC → R
 
 `ask()` provides request-reply semantics:
 1. `ask()` always creates temporary sender ActorRef and `ReplyWaiter`
-2. Temporary sender ID format: `"ask-{correlation_id}@{node_id}"`
+2. Temporary sender uses a canonical `ActorId` with the temporary-sender actor type
 3. Temporary sender is always local (created on node where `ask()` is called)
 4. Receiver can be local or remote (extracted from `message.receiver`)
 5. `ask()` sends request message with `correlation_id` and temporary sender ID
@@ -111,7 +111,7 @@ Temporary Sender ActorRef::tell() → ReplyWaiterRegistry::notify() → ReplyWai
 1. Actor A calls `actor_ref.ask(request_message, timeout)`
 2. `ask()` generates `correlation_id` (ULID)
 3. `ask()` creates `ReplyWaiter` and registers in `ReplyWaiterRegistry` with `correlation_id`
-4. `ask()` always creates temporary sender ActorRef with ID `ask-{correlation_id}@{node_id}`
+4. `ask()` always creates a temporary sender ActorRef with a canonical `ActorId`
 5. Temporary sender ActorRef is registered in `ActorRegistry`
 6. `ask()` sets `message.sender = temporary_sender_id`
 7. `ask()` sets `message.correlation_id = correlation_id`
@@ -149,14 +149,14 @@ Node1 → ActorRegistry lookup → Temporary Sender ActorRef::tell(reply) → Re
 2. `ask()` always creates temporary sender ActorRef on Node1 (local node, where ask() is called)
 3. `ask()` registers temporary sender ActorRef in Node1's `ActorRegistry`
 4. `ask()` registers `ReplyWaiter` in `ReplyWaiterRegistry`
-5. `ask()` sets `message.sender = temporary_sender_id@node1`
-6. `ask()` extracts target node_id from `message.receiver` (e.g., `server@node2`)
+5. `ask()` sets `message.sender` to the canonical temporary sender actor ID
+6. `ask()` extracts target node_id from the parsed canonical target actor ID
 7. `ask()` gets gRPC client for Node2
 8. `ask()` sends request via gRPC `AskReply` on actor-runtime HTTP-style paths, or direct remote ask routing for actor refs
 9. Node2 receives request, looks up Actor B in `ActorRegistry`, and routes through the local actor runtime
 10. Actor B processes request, calls `ctx.send_reply()`
 11. `ActorContext::send_reply()` uses `ActorService::send()` to route the reply
-12. `ActorService::send()` detects remote target (`temporary_sender_id@node1`)
+12. `ActorService::send()` detects a remote temporary sender target
 13. `ActorService::send()` gets gRPC client for Node1 and sends reply via gRPC
 14. Node1 receives reply, looks up temporary sender ActorRef in `ActorRegistry`
 15. Node1 calls `temporary_sender_ref.tell(reply_message)` with `correlation_id`
@@ -180,7 +180,7 @@ Node1 → ActorRegistry lookup → Temporary Sender ActorRef::tell(reply) → Re
 
 The temporary sender ActorRef:
 1. Is always created on the local node (where `ask()` is called)
-2. Has ID format: `"ask-{correlation_id}@{node_id}"` (never matches actor IDs)
+2. Uses a canonical temporary-sender `ActorId`, so it follows the same identity model as every other actor
 3. Is registered in `ActorRegistry` as an actual ActorRef (so it can be looked up)
 4. When `tell()` is called on it, routes messages directly to `ReplyWaiter` (bypasses normal actor runtime delivery)
 5. Is cleaned up after `ask()` completes (success or timeout)
@@ -207,7 +207,7 @@ Temporary ActorRef::tell() → ReplyWaiterRegistry::notify() → ReplyWaiter::no
 1. Non-actor code calls `actor_ref.ask(request_message, timeout)`
 2. `ask()` generates `correlation_id` (ULID)
 3. `ask()` creates `ReplyWaiter` and registers in `ReplyWaiterRegistry` with `correlation_id`
-4. `ask()` creates temporary ActorRef with ID `ask-{correlation_id}@{node_id}`
+4. `ask()` creates a temporary ActorRef with a canonical temporary-sender `ActorId`
 5. Temporary ActorRef is registered in `ActorRegistry` (so it can be looked up)
 6. `ask()` sets `message.sender = temporary_actor_id`
 7. `ask()` sets `message.correlation_id = correlation_id`
@@ -244,14 +244,14 @@ Node1 → ActorRegistry lookup → Temporary ActorRef::tell(reply) → ReplyWait
 2. `ask()` creates temporary ActorRef on Node1 (local node, where ask() is called)
 3. `ask()` registers temporary ActorRef in Node1's `ActorRegistry`
 4. `ask()` registers `ReplyWaiter` in `ReplyWaiterRegistry`
-5. `ask()` sets `message.sender = temporary_actor_id@node1`
+5. `ask()` sets `message.sender` to the canonical temporary sender actor ID
 6. `ask()` extracts target node_id from `message.receiver` (Node2)
 7. `ask()` gets gRPC client for Node2
 8. `ask()` sends request via gRPC `send_message` RPC
 9. Node2 receives request, looks up target actor, and routes through the local actor runtime
 10. Target actor processes request, calls `ctx.send_reply()`
 11. `ActorContext::send_reply()` uses `ActorService::send()` to route the reply
-12. `ActorService::send()` detects remote target (`temporary_actor_id@node1`)
+12. `ActorService::send()` detects a remote temporary sender target
 13. `ActorService::send()` gets gRPC client for Node1 and sends reply via gRPC
 14. Node1 receives reply, looks up temporary ActorRef in `ActorRegistry`
 15. Node1 calls `temporary_actor_ref.tell(reply_message)` with `correlation_id`
@@ -430,12 +430,12 @@ if Self::is_temporary_sender_id(&actor_id) {
 
 ```rust
 // In ActorRef::ask() for non-actor callers
-let temporary_actor_id = format!("ask-{}@{}", correlation_id, node_id);
+let temporary_actor_id = ActorId::temporary_sender(&correlation_id, node_id)?.to_string();
 
 // Create temporary ActorRef (the local runtime path is never exercised for reply delivery)
 let dummy_mailbox = Arc::new(Mailbox::new(MailboxConfig::default(), temporary_actor_id.clone()).await?);
 let temporary_actor_ref: Arc<dyn MessageSender> = Arc::new(ActorRef::local(
-    temporary_actor_id.clone(),
+    ActorId::from_canonical(&temporary_actor_id)?,
     dummy_mailbox,
     service_locator.clone(),
 ));

@@ -447,7 +447,7 @@ impl Node {
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext for tenant/namespace isolation (REQUIRED, explicit)
-    /// * `actor_id` - Actor ID (format: "name@node_id")
+    /// * `actor_id` - Canonical actor ID (`name//actor_type::namespace@node_id`)
     /// * `actor_type` - Type of actor (e.g., "GenServer")
     /// * `initial_state` - Initial state bytes
     /// * `config` - Optional actor configuration
@@ -460,7 +460,7 @@ impl Node {
     /// ## Example
     /// ```rust,ignore
     /// let ctx = RequestContext::new_without_auth("tenant".to_string(), "namespace".to_string());
-    /// let actor_id = ActorId::from("counter@my-node");
+    /// let actor_id = ActorId::from_canonical("counter//gen_server::default@my-node")?;
     /// let actor = node.spawn(&ctx, &actor_id, "GenServer", vec![], None, HashMap::new(), vec![]).await?;
     /// ```
     pub async fn spawn(
@@ -531,7 +531,7 @@ impl Node {
             .virtual_actor_manager()
             .await
             .ok_or_else(|| {
-                NodeError::ActorNotFound(
+                NodeError::ConfigError(
                     "VirtualActorManager not registered in ServiceLocator".to_string(),
                 )
             })
@@ -3126,7 +3126,7 @@ impl Node {
     /// in the same node or a different node.
     ///
     /// ## Arguments
-    /// * `actor_id` - The actor to monitor (can be "actor@node" for remote)
+    /// * `actor_id` - The canonical actor ID of the actor to monitor
     /// * `supervisor_id` - The supervisor that wants notifications
     /// * `notification_tx` - Channel to send (actor_id, reason) when actor terminates
     ///
@@ -3137,7 +3137,11 @@ impl Node {
     /// ## Example
     /// ```ignore
     /// let (tx, mut rx) = mpsc::channel(1);
-    /// let monitor_ref = node.monitor("worker@node2", "supervisor@node1", tx).await?;
+    /// let monitor_ref = node.monitor(
+    ///     &ActorId::from_canonical("worker//gen_server::default@node2")?,
+    ///     &ActorId::from_canonical("supervisor//gen_server::default@node1")?,
+    ///     tx,
+    /// ).await?;
     ///
     /// // Later, when actor terminates:
     /// let (actor_id, reason) = rx.recv().await.unwrap();
@@ -3148,18 +3152,14 @@ impl Node {
         supervisor_id: &ActorId,
         notification_tx: TerminationSender,
     ) -> Result<MonitorRef, NodeError> {
-        // Parse actor ID to determine if local or remote
-        let (_, node_part) = plexspaces_core::ActorRef::parse_actor_id(actor_id)
-            .unwrap_or((actor_id.clone(), self.id.as_str().to_string()));
-
-        let is_local = node_part == self.id.as_str();
+        let is_local = actor_id.node_id() == self.id.as_str();
 
         if is_local {
             // LOCAL MONITORING: Actor on this node
             // Verify actor exists in ActorRegistry by checking if it's activated
             let actor_registry = self.actor_registry().await?;
             if !actor_registry.is_actor_activated(actor_id).await {
-                return Err(NodeError::ActorNotFound(actor_id.clone()));
+                return Err(NodeError::ActorNotFound(actor_id.to_string()));
             }
 
             // Generate unique monitor reference (ULID for sortability)
@@ -3174,13 +3174,13 @@ impl Node {
                     notification_tx,
                 )
                 .await
-                .map_err(|e| NodeError::ActorNotFound(format!("Monitor failed: {}", e)))?;
+                .map_err(|e| NodeError::InvalidArgument(format!("Monitor failed: {}", e)))?;
 
             Ok(monitor_ref)
         } else {
             // REMOTE MONITORING: Actor on different node
             // Get remote node's address from NodeRegistry
-            let remote_node_id = crate::NodeId::new(node_part);
+            let remote_node_id = crate::NodeId::new(actor_id.node_id().to_string());
             let node_address = self.lookup_node_address(&remote_node_id).await?;
 
             // Generate unique monitor reference
@@ -3201,8 +3201,8 @@ impl Node {
             let supervisor_callback = format!("http://{}", self.config.listen_addr);
 
             let request = tonic::Request::new(MonitorActorRequest {
-                actor_id: actor_id.clone(),
-                supervisor_id: supervisor_id.clone(),
+                actor_id: actor_id.to_string(),
+                supervisor_id: supervisor_id.to_string(),
                 supervisor_callback,
             });
 
@@ -3223,7 +3223,7 @@ impl Node {
                     notification_tx,
                 )
                 .await
-                .map_err(|e| NodeError::ActorNotFound(format!("Monitor failed: {}", e)))?;
+                .map_err(|e| NodeError::InvalidArgument(format!("Monitor failed: {}", e)))?;
 
             Ok(monitor_ref)
         }
@@ -3279,14 +3279,8 @@ impl Node {
             ));
         }
 
-        // Parse actor IDs to determine if local or remote
-        let (_, node_part1) = plexspaces_core::ActorRef::parse_actor_id(actor_id)
-            .unwrap_or((actor_id.clone(), self.id.as_str().to_string()));
-        let (_, node_part2) = plexspaces_core::ActorRef::parse_actor_id(linked_actor_id)
-            .unwrap_or((linked_actor_id.clone(), self.id.as_str().to_string()));
-
-        let is_local1 = node_part1 == self.id.as_str();
-        let is_local2 = node_part2 == self.id.as_str();
+        let is_local1 = actor_id.node_id() == self.id.as_str();
+        let is_local2 = linked_actor_id.node_id() == self.id.as_str();
 
         if is_local1 && is_local2 {
             let actor_registry = self.actor_registry().await?;
@@ -3324,14 +3318,8 @@ impl Node {
         actor_id: &ActorId,
         linked_actor_id: &ActorId,
     ) -> Result<(), NodeError> {
-        // Parse actor IDs to determine if local or remote
-        let (_, node_part1) = plexspaces_core::ActorRef::parse_actor_id(actor_id)
-            .unwrap_or((actor_id.clone(), self.id.as_str().to_string()));
-        let (_, node_part2) = plexspaces_core::ActorRef::parse_actor_id(linked_actor_id)
-            .unwrap_or((linked_actor_id.clone(), self.id.as_str().to_string()));
-
-        let is_local1 = node_part1 == self.id.as_str();
-        let is_local2 = node_part2 == self.id.as_str();
+        let is_local1 = actor_id.node_id() == self.id.as_str();
+        let is_local2 = linked_actor_id.node_id() == self.id.as_str();
 
         if is_local1 && is_local2 {
             let actor_registry = self.actor_registry().await?;
@@ -3504,9 +3492,11 @@ impl Node {
                 // Actor terminated normally - handle termination comprehensively
                 if let Ok(actor_registry) = self.actor_registry().await {
                     let exit_reason = ExitReason::from_str(&terminated.reason);
-                    actor_registry
-                        .handle_actor_termination(&event.actor_id, exit_reason)
-                        .await;
+                    if let Ok(actor_id) = ActorId::from_canonical(&event.actor_id) {
+                        actor_registry
+                            .handle_actor_termination(&actor_id, exit_reason)
+                            .await;
+                    }
                 }
             }
             Some(EventType::Failed(ref failed)) => {
@@ -3524,9 +3514,11 @@ impl Node {
                 // Actor failed (panic/error) - handle termination comprehensively
                 if let Ok(actor_registry) = self.actor_registry().await {
                     let exit_reason = ExitReason::Error(failed.error.clone());
-                    actor_registry
-                        .handle_actor_termination(&event.actor_id, exit_reason)
-                        .await;
+                    if let Ok(actor_id) = ActorId::from_canonical(&event.actor_id) {
+                        actor_registry
+                            .handle_actor_termination(&actor_id, exit_reason)
+                            .await;
+                    }
                 }
             }
             _ => {
@@ -3897,32 +3889,6 @@ impl Node {
     // Phase 8.5: Virtual Actor Lifecycle (Orleans-inspired)
     // ============================================================================
 
-    /// Normalize actor ID to include node ID if missing
-    ///
-    /// ## Purpose
-    /// Ensures actor ID has the format "actor@node". If the actor ID doesn't have @,
-    /// appends the current node ID. If it already has @, returns it as is.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Actor ID (may or may not include @node)
-    ///
-    /// ## Returns
-    /// Normalized actor ID in format "actor@node"
-    fn normalize_actor_id(&self, actor_id: &ActorId) -> ActorId {
-        if let Ok((actor_name, node_id)) = plexspaces_core::ActorRef::parse_actor_id(actor_id) {
-            // Actor ID already has @ format
-            // If node_id matches current node, return as is, otherwise reconstruct with current node ID
-            if node_id == self.id().as_str() {
-                actor_id.clone()
-            } else {
-                format!("{}@{}", actor_name, self.id().as_str())
-            }
-        } else {
-            // Actor ID doesn't have @ format - append node ID
-            format!("{}@{}", actor_id, self.id().as_str())
-        }
-    }
-
     /// Check if virtual actor exists (without activating)
     ///
     /// ## Purpose
@@ -3930,19 +3896,16 @@ impl Node {
     /// Useful for existence checks, health monitoring, and discovery.
     ///
     /// ## Arguments
-    /// * `actor_id` - The actor ID to check (will be normalized to include node ID if missing)
+    /// * `actor_id` - Canonical actor ID to check
     ///
     /// ## Returns
     /// (exists, is_active, is_virtual) tuple
     pub async fn check_virtual_actor_exists(&self, actor_id: &ActorId) -> (bool, bool, bool) {
-        // Normalize actor ID to include node ID if missing
-        let actor_id = self.normalize_actor_id(actor_id);
-
         // Use VirtualActorManager
         if let Ok(manager) = self.get_virtual_actor_manager().await {
-            let is_virtual = manager.is_virtual(&actor_id).await;
+            let is_virtual = manager.is_virtual(actor_id).await;
             let is_active = if is_virtual {
-                manager.is_active(&actor_id).await
+                manager.is_active(actor_id).await
             } else {
                 false
             };
@@ -4136,8 +4099,8 @@ pub enum NodeError {
     ActorAlreadyRegistered(ActorId),
 
     /// Actor not found on this node
-    #[error("Actor not found: {0:?}")]
-    ActorNotFound(ActorId),
+    #[error("Actor not found: {0}")]
+    ActorNotFound(String),
 
     /// Remote node not found in registry
     #[error("Node not found: {0:?}")]
@@ -4295,6 +4258,11 @@ mod tests {
     use plexspaces_core::ActorId;
     use std::time::Duration;
 
+    fn test_runtime_actor_id(name: &str, node_id: &str) -> ActorId {
+        ActorId::new(name, "gen_server", "default", node_id)
+            .expect("test actor IDs must be valid")
+    }
+
     // Helper functions for tests (defined inline since we can't import from tests/ directory)
     async fn lookup_actor_ref_helper(
         node: &Node,
@@ -4302,9 +4270,6 @@ mod tests {
     ) -> Result<Option<ActorRef>, NodeError> {
         use plexspaces_core::ActorRegistry;
         use std::sync::Arc;
-
-        // Normalize actor ID
-        let actor_id = normalize_actor_id_helper(node, actor_id);
 
         // Get ActorRegistry
         use plexspaces_core::service_names;
@@ -4315,7 +4280,7 @@ mod tests {
             .ok_or_else(|| NodeError::ConfigError("ActorRegistry not found".to_string()))?;
 
         // Check if actor exists
-        if let Some(_actor_trait) = actor_registry.lookup_actor(&actor_id).await {
+        if let Some(_actor_trait) = actor_registry.lookup_actor(actor_id).await {
             Ok(Some(ActorRef::remote(
                 actor_id.clone(),
                 "".to_string(), // tenant_id
@@ -4324,33 +4289,17 @@ mod tests {
                 node.service_locator().clone(),
             )))
         } else {
-            if let Ok((_, node_id)) = plexspaces_core::ActorRef::parse_actor_id(&actor_id) {
-                if node_id != node.id().as_str() {
-                    Ok(Some(ActorRef::remote(
-                        actor_id.clone(),
-                        "".to_string(),
-                        "".to_string(),
-                        node_id,
-                        node.service_locator().clone(),
-                    )))
-                } else {
-                    Ok(None)
-                }
+            if actor_id.node_id() != node.id().as_str() {
+                Ok(Some(ActorRef::remote(
+                    actor_id.clone(),
+                    "".to_string(),
+                    "".to_string(),
+                    actor_id.node_id().to_string(),
+                    node.service_locator().clone(),
+                )))
             } else {
                 Ok(None)
             }
-        }
-    }
-
-    fn normalize_actor_id_helper(node: &Node, actor_id: &ActorId) -> ActorId {
-        if let Ok((actor_name, node_id)) = plexspaces_core::ActorRef::parse_actor_id(actor_id) {
-            if node_id == node.id().as_str() {
-                actor_id.clone()
-            } else {
-                format!("{}@{}", actor_name, node.id().as_str())
-            }
-        } else {
-            format!("{}@{}", actor_id, node.id().as_str())
         }
     }
 
@@ -4375,9 +4324,9 @@ mod tests {
     // Helper to register actor with MessageSender (replaces register_local)
     // Test helper function - registering test actors
     // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-    async fn register_actor_for_test(node: &Node, actor_id: &str, mailbox: Arc<Mailbox>) {
+    async fn register_actor_for_test(node: &Node, actor_id: &ActorId, mailbox: Arc<Mailbox>) {
         let wrapper = Arc::new(ActorRef::local(
-            actor_id.to_string(),
+            actor_id.clone(),
             "".to_string(), // test tenant
             "".to_string(), // test namespace
             mailbox,
@@ -4391,9 +4340,9 @@ mod tests {
         actor_registry
             .register_actor(
                 &internal_ctx,
-                actor_id.to_string(),
+                actor_id.clone(),
                 wrapper,
-                "TestActor".to_string(),
+                actor_id.actor_type().to_string(),
                 None,
                 None,
                 None,
@@ -4423,7 +4372,7 @@ mod tests {
             .unwrap(),
         );
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            test_runtime_actor_id("test-actor", "test-node"),
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -4462,10 +4411,7 @@ mod tests {
             .await;
 
         // Should find local actor via ActorRegistry
-        assert!(actor_registry
-            .lookup_actor(&"test-actor@test-node".to_string())
-            .await
-            .is_some());
+        assert!(actor_registry.lookup_actor(actor_ref.id()).await.is_some());
     }
 
     #[tokio::test]
@@ -4491,8 +4437,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor_id = test_runtime_actor_id("test-actor", "test-node");
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            actor_id,
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -4548,20 +4495,15 @@ mod tests {
         }
         // Test code - looking up test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        assert!(actor_registry
-            .lookup_actor(&"test-actor@test-node".to_string())
-            .await
-            .is_some());
+        assert!(actor_registry.lookup_actor(actor_ref.id()).await.is_some());
 
         // Unregister
         actor_registry
-            .unregister_with_cleanup(&"test-actor@test-node".to_string())
+            .unregister_with_cleanup(actor_ref.id())
             .await
             .unwrap();
         // After unregistering, the local sender should no longer be discoverable.
-        let lookup_result = actor_registry
-            .lookup_actor(&"test-actor@test-node".to_string())
-            .await;
+        let lookup_result = actor_registry.lookup_actor(actor_ref.id()).await;
         assert!(
             lookup_result.is_none(),
             "Actor should not be found after unregistering"
@@ -4583,8 +4525,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor_id = test_runtime_actor_id("test-actor", "test-node");
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            actor_id,
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -4592,7 +4535,7 @@ mod tests {
         );
 
         // Register with ActorRegistry first (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
+        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
 
         // First registration should succeed
         let actor_registry = get_actor_registry(&node).await;
@@ -4659,8 +4602,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor_id = test_runtime_actor_id("test-actor", "test-node");
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            actor_id,
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -4668,7 +4612,7 @@ mod tests {
         );
 
         // Register with ActorRegistry (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
+        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
         let ctx = node
@@ -4735,7 +4679,7 @@ mod tests {
 
         // Try to send to non-existent actor
         // lookup_actor_ref returns Ok(None) for local actors that don't exist
-        let result = lookup_actor_ref(&node, &"nonexistent@test-node".to_string()).await;
+        let result = lookup_actor_ref(&node, &test_runtime_actor_id("nonexistent", "test-node")).await;
         let result = match result {
             Ok(Some(actor_ref)) => actor_ref
                 .tell(message)
@@ -4854,7 +4798,7 @@ mod tests {
             .service_locator()
             .request_context_for_system_operations()
             .await;
-        let actor_id = "test-actor@test-node".to_string();
+        let actor_id = test_runtime_actor_id("test-actor", "test-node");
         let _message_sender = actor_factory
             .spawn_actor(
                 &internal_ctx,
@@ -4877,7 +4821,7 @@ mod tests {
             .unwrap(),
         );
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            actor_id.clone(),
             "".to_string(),
             "".to_string(),
             mailbox_for_ref,
@@ -4885,16 +4829,13 @@ mod tests {
         );
 
         // Verify ActorRef returned
-        assert_eq!(actor_ref.id(), "test-actor@test-node");
+        assert_eq!(actor_ref.id(), &actor_id);
 
         // Verify actor registered in ActorRegistry
         let actor_registry = get_actor_registry(&node).await;
         // Test code - looking up test actors
         // This is test code, so node.service_locator().request_context_for_system_operations().await is acceptable for test operations
-        assert!(actor_registry
-            .lookup_actor(&"test-actor@test-node".to_string())
-            .await
-            .is_some());
+        assert!(actor_registry.lookup_actor(&actor_id).await.is_some());
     }
 
     // NOTE: test_spawn_actor_monitors_termination removed
@@ -4962,7 +4903,7 @@ mod tests {
             .service_locator()
             .request_context_for_system_operations()
             .await;
-        let actor_id = "test-actor@test-node".to_string();
+        let actor_id = test_runtime_actor_id("test-actor", "test-node");
         let _message_sender = actor_factory
             .spawn_actor(
                 &internal_ctx,
@@ -4985,7 +4926,7 @@ mod tests {
             .unwrap(),
         );
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            actor_id.clone(),
             "".to_string(),
             "".to_string(),
             mailbox_for_ref,
@@ -4993,9 +4934,10 @@ mod tests {
         );
 
         // Establish monitoring link
+        let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
         node.monitor(
-            &"test-actor@test-node".to_string(),
-            &"supervisor@test-node".to_string(),
+            &actor_id,
+            &supervisor_id,
             tx,
         )
         .await
@@ -5045,8 +4987,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let remote_actor_id = test_runtime_actor_id("test-actor", "node2");
         let actor_ref = ActorRef::remote(
-            "test-actor@node2",
+            remote_actor_id.clone(),
             "".to_string(),
             "".to_string(),
             "node2",
@@ -5054,7 +4997,7 @@ mod tests {
         );
 
         // Register actor with ActorRegistry on node2
-        register_actor_for_test(&node2, actor_ref.id().as_str(), mailbox.clone()).await;
+        register_actor_for_test(&node2, actor_ref.id(), mailbox.clone()).await;
         let actor_registry2 = get_actor_registry(&node2).await;
         let ctx = node2
             .service_locator()
@@ -5067,7 +5010,7 @@ mod tests {
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                "gen_server".to_string(),
                 None,
                 None,
                 None,
@@ -5099,13 +5042,13 @@ mod tests {
         // But it exercises the remote routing code path via ActorRef::tell()
         // Initialize services on node1
         node1.initialize_services().await.unwrap();
-        let actor_ref = lookup_actor_ref(&node1, &"test-actor@node2".to_string()).await;
+        let actor_ref = lookup_actor_ref(&node1, &remote_actor_id).await;
         let result = match actor_ref {
             Ok(Some(actor_ref)) => actor_ref
                 .tell(message)
                 .await
                 .map_err(|e| NodeError::DeliveryFailed(format!("{}", e))),
-            Ok(None) => Err(NodeError::ActorNotFound("test-actor@node2".to_string())),
+            Ok(None) => Err(NodeError::ActorNotFound(remote_actor_id.to_string())),
             Err(e) => Err(e),
         };
 
@@ -5184,8 +5127,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let remote_actor_id = test_runtime_actor_id("test-actor", "node2");
         let actor_ref = ActorRef::remote(
-            "test-actor@node2",
+            remote_actor_id.clone(),
             "".to_string(),
             "".to_string(),
             "node2",
@@ -5193,7 +5137,7 @@ mod tests {
         );
 
         // Register actor with ActorRegistry on node2
-        register_actor_for_test(&node2, actor_ref.id().as_str(), mailbox.clone()).await;
+        register_actor_for_test(&node2, actor_ref.id(), mailbox.clone()).await;
         let actor_registry2 = get_actor_registry(&node2).await;
         let ctx = node2
             .service_locator()
@@ -5206,7 +5150,7 @@ mod tests {
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                "gen_server".to_string(),
                 None,
                 None,
                 None,
@@ -5255,7 +5199,7 @@ mod tests {
 
         // Try to send to node that's not in connections registry
         // This will fail when trying to lookup the actor (node not found)
-        let result = lookup_actor_ref(&node, &"test-actor@unknown-node".to_string()).await;
+        let result = lookup_actor_ref(&node, &test_runtime_actor_id("test-actor", "unknown-node")).await;
 
         // Should fail with ActorNotFound or similar (node not registered)
         assert!(result.is_err() || result.unwrap().is_none());
@@ -5281,8 +5225,10 @@ mod tests {
             .await
             .unwrap(),
         );
+        let monitored_actor_id = test_runtime_actor_id("monitored-actor", "test-node");
+        let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
         let actor_ref = ActorRef::local(
-            "monitored-actor@test-node",
+            monitored_actor_id.clone(),
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -5290,7 +5236,7 @@ mod tests {
         );
 
         // Register with ActorRegistry first (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
+        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
         let ctx = node
@@ -5304,7 +5250,7 @@ mod tests {
                 &ctx,
                 actor_id,
                 sender,
-                "TestActor".to_string(),
+                "gen_server".to_string(),
                 None,
                 None,
                 None,
@@ -5316,11 +5262,7 @@ mod tests {
 
         // Monitor the actor
         let monitor_ref = node
-            .monitor(
-                &"monitored-actor@test-node".to_string(),
-                &"supervisor@test-node".to_string(),
-                tx,
-            )
+            .monitor(&monitored_actor_id, &supervisor_id, tx)
             .await
             .unwrap();
 
@@ -5331,7 +5273,7 @@ mod tests {
         let actor_registry = get_actor_registry(&node).await;
         actor_registry
             .handle_actor_termination(
-                &"monitored-actor@test-node".to_string(),
+                &monitored_actor_id,
                 ExitReason::Error("test reason".to_string()),
             )
             .await;
@@ -5343,7 +5285,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
 
-        assert_eq!(actor_id, "monitored-actor@test-node");
+        assert_eq!(actor_id, monitored_actor_id);
         assert_eq!(reason, "test reason");
     }
 
@@ -5362,8 +5304,8 @@ mod tests {
         // Try to monitor non-existent actor
         let result = node
             .monitor(
-                &"nonexistent@test-node".to_string(),
-                &"supervisor@test-node".to_string(),
+                &test_runtime_actor_id("nonexistent", "test-node"),
+                &test_runtime_actor_id("supervisor", "test-node"),
                 tx,
             )
             .await;
@@ -5385,8 +5327,8 @@ mod tests {
         // Try to monitor actor on unregistered remote node
         let result = node
             .monitor(
-                &"test-actor@node2".to_string(),
-                &"supervisor@node1".to_string(),
+                &test_runtime_actor_id("test-actor", "node2"),
+                &test_runtime_actor_id("supervisor", "node1"),
                 tx,
             )
             .await;
@@ -5407,7 +5349,7 @@ mod tests {
         let actor_registry = node.actor_registry().await.unwrap();
         actor_registry
             .handle_actor_termination(
-                &"unmonitored-actor@test-node".to_string(),
+                &test_runtime_actor_id("unmonitored-actor", "test-node"),
                 ExitReason::Error("reason".to_string()),
             )
             .await;
@@ -5431,8 +5373,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let watched_actor_id = test_runtime_actor_id("watched-actor", "test-node");
         let actor_ref = ActorRef::local(
-            "watched-actor@test-node",
+            watched_actor_id.clone(),
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -5440,7 +5383,7 @@ mod tests {
         );
 
         // Register with ActorRegistry first (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
+        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
         let ctx = node
@@ -5466,23 +5409,26 @@ mod tests {
         let (tx2, mut rx2) = mpsc::channel(1);
         let (tx3, mut rx3) = mpsc::channel(1);
 
+        let sup1_id = test_runtime_actor_id("sup1", "test-node");
+        let sup2_id = test_runtime_actor_id("sup2", "test-node");
+        let sup3_id = test_runtime_actor_id("sup3", "test-node");
         node.monitor(
-            &"watched-actor@test-node".to_string(),
-            &"sup1@test-node".to_string(),
+            &watched_actor_id,
+            &sup1_id,
             tx1,
         )
         .await
         .unwrap();
         node.monitor(
-            &"watched-actor@test-node".to_string(),
-            &"sup2@test-node".to_string(),
+            &watched_actor_id,
+            &sup2_id,
             tx2,
         )
         .await
         .unwrap();
         node.monitor(
-            &"watched-actor@test-node".to_string(),
-            &"sup3@test-node".to_string(),
+            &watched_actor_id,
+            &sup3_id,
             tx3,
         )
         .await
@@ -5492,7 +5438,7 @@ mod tests {
         let actor_registry = node.actor_registry().await.unwrap();
         actor_registry
             .handle_actor_termination(
-                &"watched-actor@test-node".to_string(),
+                &watched_actor_id,
                 ExitReason::Error("crashed".to_string()),
             )
             .await;
@@ -5502,11 +5448,11 @@ mod tests {
         let (id2, reason2) = rx2.recv().await.unwrap();
         let (id3, reason3) = rx3.recv().await.unwrap();
 
-        assert_eq!(id1, "watched-actor@test-node");
+        assert_eq!(id1, watched_actor_id);
         assert_eq!(reason1, "crashed");
-        assert_eq!(id2, "watched-actor@test-node");
+        assert_eq!(id2, watched_actor_id);
         assert_eq!(reason2, "crashed");
-        assert_eq!(id3, "watched-actor@test-node");
+        assert_eq!(id3, watched_actor_id);
         assert_eq!(reason3, "crashed");
     }
 
@@ -5613,8 +5559,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let monitored_actor_id = test_runtime_actor_id("test-actor", "test-node");
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            monitored_actor_id.clone(),
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -5650,7 +5597,7 @@ mod tests {
             .await;
 
         // Register with ActorRegistry first (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
+        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
         let ctx = node
@@ -5672,9 +5619,10 @@ mod tests {
             .await;
 
         let (tx, mut rx) = mpsc::channel(1);
+        let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
         node.monitor(
-            &"test-actor@test-node".to_string(),
-            &"supervisor@test-node".to_string(),
+            &monitored_actor_id,
+            &supervisor_id,
             tx,
         )
         .await
@@ -5701,7 +5649,7 @@ mod tests {
 
         // Monitor should receive notification
         let (actor_id, reason) = rx.recv().await.unwrap();
-        assert_eq!(actor_id, "test-actor@test-node");
+        assert_eq!(actor_id, monitored_actor_id);
         assert_eq!(reason, "normal");
     }
 
@@ -5729,8 +5677,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let monitored_actor_id = test_runtime_actor_id("test-actor", "test-node");
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            monitored_actor_id.clone(),
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -5766,7 +5715,7 @@ mod tests {
             .await;
 
         // Register with ActorRegistry first (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
+        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
         let ctx = node
@@ -5788,9 +5737,10 @@ mod tests {
             .await;
 
         let (tx, mut rx) = mpsc::channel(1);
+        let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
         node.monitor(
-            &"test-actor@test-node".to_string(),
-            &"supervisor@test-node".to_string(),
+            &monitored_actor_id,
+            &supervisor_id,
             tx,
         )
         .await
@@ -5816,7 +5766,7 @@ mod tests {
 
         // Monitor should receive notification
         let (actor_id, reason) = rx.recv().await.unwrap();
-        assert_eq!(actor_id, "test-actor@test-node");
+        assert_eq!(actor_id, monitored_actor_id);
         assert_eq!(reason, "panic: index out of bounds");
     }
 
@@ -5876,8 +5826,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor_id = test_runtime_actor_id("test-actor", "test-node");
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            actor_id,
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -5885,7 +5836,7 @@ mod tests {
         );
 
         // Register with ActorRegistry (using MessageSender)
-        register_actor_for_test(&node, actor_ref.id().as_str(), mailbox.clone()).await;
+        register_actor_for_test(&node, actor_ref.id(), mailbox.clone()).await;
 
         let actor_registry = get_actor_registry(&node).await;
         let ctx = node
@@ -5909,9 +5860,7 @@ mod tests {
         // active_actors is only updated when actors are spawned via ActorFactory, not when registered
         // So we check that the actor is registered instead
         let actor_registry = get_actor_registry(&node).await;
-        let lookup_result = actor_registry
-            .lookup_actor(&"test-actor@test-node".to_string())
-            .await;
+        let lookup_result = actor_registry.lookup_actor(actor_ref.id()).await;
         assert!(lookup_result.is_some(), "Actor should be registered");
 
         // Reset metrics before sending message
@@ -5937,7 +5886,7 @@ mod tests {
         // Unregister actor
         let actor_registry = get_actor_registry(&node).await;
         actor_registry
-            .unregister_with_cleanup(&"test-actor@test-node".to_string())
+            .unregister_with_cleanup(actor_ref.id())
             .await
             .unwrap();
 
@@ -6014,8 +5963,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor_id = test_runtime_actor_id("test-actor", "test-node");
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            actor_id,
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -6106,8 +6056,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor_id = test_runtime_actor_id("test-actor", "test-node");
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            actor_id,
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -6165,8 +6116,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor_id = test_runtime_actor_id("test-actor", "test-node");
         let actor_ref = ActorRef::local(
-            "test-actor@test-node",
+            actor_id,
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -6257,8 +6209,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor1_id = test_runtime_actor_id("actor-1", "test-node");
         let actor1_ref = ActorRef::local(
-            "actor-1@test-node",
+            actor1_id,
             "".to_string(),
             "".to_string(),
             mailbox1.clone(),
@@ -6318,8 +6271,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor2_id = test_runtime_actor_id("actor-2", "test-node");
         let actor2_ref = ActorRef::local(
-            "actor-2@test-node",
+            actor2_id,
             "".to_string(),
             "".to_string(),
             mailbox2.clone(),
@@ -6425,8 +6379,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor_id = test_runtime_actor_id("actor-1", "test-node");
         let actor_ref = ActorRef::local(
-            "actor-1@test-node",
+            actor_id,
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -6504,8 +6459,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor_id = test_runtime_actor_id("actor-1", "test-node");
         let actor_ref = ActorRef::local(
-            "actor-1@test-node",
+            actor_id,
             "".to_string(),
             "".to_string(),
             mailbox.clone(),
@@ -6594,8 +6550,9 @@ mod tests {
             .await
             .unwrap(),
         );
+        let actor_id = test_runtime_actor_id("actor-1", "test-node");
         let actor_ref = ActorRef::local(
-            "actor-1@test-node",
+            actor_id,
             "".to_string(),
             "".to_string(),
             mailbox.clone(),

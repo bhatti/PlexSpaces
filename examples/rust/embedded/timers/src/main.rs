@@ -194,24 +194,24 @@ async fn main() -> Result<()> {
     
     for i in 0..num_sessions {
         let user_id = format!("user-{}", i);
-        let actor_id = ActorId::from(format!("session-{}@timers-node", user_id));
+        let actor_name = format!("session-{}", user_id);
         
         // Create TimerFacet for this session
         let timer_facet = Box::new(TimerFacet::new(json!({}), 50, service_locator.clone()));
         
         // Spawn actor with TimerFacet attached
-        let _actor_ref = spawn_with_facets(
+        let actor_ref = spawn_with_facets(
             &ctx,
             service_locator.clone(),
-            &actor_id,
+            actor_name,
             "sessions",
             SessionActor::new(&user_id),
             vec![timer_facet],
         )
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to spawn actor {}: {}", actor_id, e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to spawn session actor for {}: {}", user_id, e))?;
         
-        session_ids.push(actor_id);
+        session_ids.push(actor_ref.id().clone());
         
         if i < 3 || i == num_sessions - 1 {
             info!("  Spawned session actor: {}", session_ids[i]);

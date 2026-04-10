@@ -34,7 +34,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use plexspaces_core::{
-    ReplyWaiter, ReplyWaiterError, RequestContext, ServiceLocator as ServiceLocatorTrait,
+    ActorId, ReplyWaiter, ReplyWaiterError, RequestContext, ServiceLocator as ServiceLocatorTrait,
 };
 use plexspaces_proto::actor::v1::{
     actor_service_client::ActorServiceClient, AskReplyRequest, SendMessageRequest,
@@ -43,18 +43,6 @@ use plexspaces_proto::common::v1::Message;
 use prost_types;
 
 use crate::ActorRefError;
-
-/// Extract node_id from actor ID (format: "actor_name@node_id" or just "actor_name")
-///
-/// ## Returns
-/// Tuple of (actor_name, node_id). If no @node_id is present, returns (actor_id, None).
-pub fn extract_node_id(actor_id: &str) -> (String, Option<String>) {
-    if let Some((name, node)) = actor_id.split_once('@') {
-        (name.to_string(), Some(node.to_string()))
-    } else {
-        (actor_id.to_string(), None)
-    }
-}
 
 /// Determine if an actor is local by comparing node_id from actor_id with local_node_id.
 ///
@@ -72,18 +60,15 @@ pub fn extract_node_id(actor_id: &str) -> (String, Option<String>) {
 /// arbitrary actor, so locality detection fails closed in ambiguous cases.
 ///
 /// ## Arguments
-/// * `actor_id` - Actor ID to check (format: "actor_name@node_id" or just "actor_name")
+/// * `actor_id` - Canonical target actor ID
 /// * `service_locator` - ServiceLocator to access NodeConfig and ActorRegistry
 ///
 /// ## Returns
 /// `true` if actor is local, `false` if remote
 pub async fn is_actor_local(
-    actor_id: &str,
+    actor_id: &ActorId,
     service_locator: &Arc<dyn ServiceLocatorTrait>,
 ) -> bool {
-    // Extract node_id from actor_id
-    let (_, node_id_opt) = extract_node_id(actor_id);
-
     // Get local_node_id from NodeConfig (primary source, always available in production)
     let local_node_id = if let Some(node_config) = service_locator.get_node_config().await {
         Some(node_config.id)
@@ -96,22 +81,26 @@ pub async fn is_actor_local(
 
     if let Some(local_id) = local_node_id {
         // Check if node_id matches local_node_id
-        if let Some(node_id) = node_id_opt {
-            if node_id == local_id {
-                return true;
-            }
+        if actor_id.node_id() == local_id {
+            return true;
         }
 
         // Also check if actor exists locally (for actors registered with "remote-looking" IDs).
         // This remains a conservative fallback: ambiguous cross-scope ids fail closed.
         if let Some(registry) = service_locator.actor_registry().await {
-            if registry.lookup_actor(&actor_id.to_string()).await.is_some() {
+            if registry.lookup_actor(actor_id).await.is_some() {
                 return true;
             }
         }
     }
 
     false
+}
+
+fn parse_target_actor_id(actor_id: &str) -> Result<ActorId, ActorRefError> {
+    ActorId::from_canonical(actor_id).map_err(|e| {
+        ActorRefError::SendFailed(format!("Invalid canonical ActorId '{}': {}", actor_id, e))
+    })
 }
 
 /// Generic ask helper for shared temporary-sender fanout operations.
@@ -130,7 +119,7 @@ pub async fn is_actor_local(
 /// * `service_locator` - ServiceLocator for accessing registries
 /// * `target_actor_id` - Target actor ID
 /// * `message` - Message to send (will be modified with sender_id and correlation_id)
-/// * `temp_sender_id` - Temporary sender ID (format: "ask-{correlation_id}@{node_id}")
+/// * `temp_sender_id` - Temporary sender ID in canonical ActorId string form
 /// * `correlation_id` - Correlation ID for reply matching
 /// * `timeout` - Timeout for waiting for reply
 ///
@@ -178,43 +167,37 @@ pub fn ask_helper(
             .actor_registry()
             .await
             .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry not available".to_string()))?;
+        let target_actor_id = parse_target_actor_id(&target_actor_id)?;
         let is_local = match registry
             .lookup_actor_in_scope(ctx.tenant_id(), ctx.namespace(), &target_actor_id)
             .await
         {
             Some(_) => true,
             None => {
-                let (_, node_id_opt) = extract_node_id(&target_actor_id);
-                match node_id_opt {
-                    Some(node_id) => node_id == registry.local_node_id(),
-                    None => true,
-                }
+                target_actor_id.node_id() == registry.local_node_id()
             }
         };
 
         if !is_local {
-            let (_, node_id_opt) = extract_node_id(&target_actor_id);
-            if let Some(node_id) = node_id_opt {
-                waiter_registry.remove(&correlation_id).await;
-                match route_remote(
-                    ctx,
-                    service_locator,
-                    node_id,
-                    target_actor_id.clone(),
-                    message,
-                    true,
-                    Some(timeout),
-                )
-                .await
-                {
-                    Ok((_, Some(reply))) => return Ok(reply),
-                    Ok((_, None)) => {
-                        return Err(ActorRefError::SendFailed(
-                            "Remote ask returned no reply".to_string(),
-                        ))
-                    }
-                    Err(e) => return Err(e),
+            waiter_registry.remove(&correlation_id).await;
+            match route_remote(
+                ctx,
+                service_locator,
+                target_actor_id.node_id().to_string(),
+                target_actor_id.to_string(),
+                message,
+                true,
+                Some(timeout),
+            )
+            .await
+            {
+                Ok((_, Some(reply))) => return Ok(reply),
+                Ok((_, None)) => {
+                    return Err(ActorRefError::SendFailed(
+                        "Remote ask returned no reply".to_string(),
+                    ))
                 }
+                Err(e) => return Err(e),
             }
         }
 
@@ -222,7 +205,7 @@ pub fn ask_helper(
             waiter_registry.remove(&correlation_id).await;
             return Err(match e {
                 plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
-                    ActorRefError::ActorNotFound(id)
+                    ActorRefError::ActorNotFound(id.into())
                 }
                 plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
                 other => ActorRefError::SendFailed(other.to_string()),
@@ -268,7 +251,7 @@ pub fn ask_helper(
 /// ## Arguments
 /// * `ctx` - RequestContext with tenant_id and namespace (required for proper isolation) - FIRST PARAMETER
 /// * `service_locator` - ServiceLocator for accessing registries
-/// * `actor_id` - Target actor ID (format: "actor_name@node_id" or just "actor_name")
+/// * `actor_id` - Target actor ID in canonical format `name//actor_type::namespace@node_id`
 /// * `message` - Message to send
 /// * `wait_for_response` - Whether to wait for reply (ask vs tell)
 /// * `timeout` - Optional timeout for request-reply
@@ -286,6 +269,7 @@ pub fn route_local(
     Box::pin(async move {
         let start = std::time::Instant::now();
         let message_id = message.id.clone();
+        let actor_id = parse_target_actor_id(&actor_id)?;
 
         let actor_registry = service_locator
             .actor_registry()
@@ -304,7 +288,7 @@ pub fn route_local(
                 .await
                 .map_err(|e| match e {
                     plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
-                        ActorRefError::ActorNotFound(id)
+                        ActorRefError::ActorNotFound(id.into())
                     }
                     plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
                     other => ActorRefError::SendFailed(other.to_string()),
@@ -347,7 +331,7 @@ pub fn route_local(
                 .await
                 .map_err(|e| match e {
                     plexspaces_core::ActorRegistryError::ActorNotFound(id) => {
-                        ActorRefError::ActorNotFound(id)
+                        ActorRefError::ActorNotFound(id.into())
                     }
                     plexspaces_core::ActorRegistryError::Timeout => ActorRefError::Timeout,
                     other => ActorRefError::SendFailed(other.to_string()),
@@ -553,7 +537,7 @@ pub fn route_remote(
 /// ## Arguments
 /// * `ctx` - RequestContext with tenant_id and namespace (required for proper isolation) - FIRST PARAMETER
 /// * `service_locator` - ServiceLocator for accessing registries and gRPC clients
-/// * `actor_id` - Target actor ID (format: "actor_name@node_id" or just "actor_name")
+/// * `actor_id` - Target actor ID in canonical format `name//actor_type::namespace@node_id`
 /// * `message` - Message to send
 /// * `wait_for_response` - Whether to wait for reply (ask vs tell)
 /// * `timeout` - Optional timeout for request-reply
@@ -569,8 +553,7 @@ pub fn route_message(
     timeout: Option<Duration>,
 ) -> Pin<Box<dyn Future<Output = Result<(String, Option<Message>), ActorRefError>> + Send>> {
     Box::pin(async move {
-        // Parse actor@node ID (or just actor name, defaults to local node)
-        let (actor_name, node_id) = extract_node_id(&actor_id);
+        let target_actor_id = parse_target_actor_id(&actor_id)?;
 
         // Get local node ID
         let local_node_id = if let Some(node_config) = service_locator.get_node_config().await {
@@ -584,28 +567,21 @@ pub fn route_message(
         };
 
         // Determine routing: local if node_id matches OR actor exists locally
-        let is_local = is_actor_local(&actor_id, &service_locator).await;
+        let is_local = is_actor_local(&target_actor_id, &service_locator).await;
 
         // OBSERVABILITY: Track routing decision
         metrics::counter!("plexspaces_routing_route_total",
-            "actor_id" => actor_id.clone(),
-            "node_id" => node_id.clone().unwrap_or_else(|| local_node_id.clone()),
+            "actor_id" => target_actor_id.to_string(),
+            "node_id" => target_actor_id.node_id().to_string(),
             "local" => if is_local { "true" } else { "false" }
         )
         .increment(1);
 
-        if node_id.is_none() || is_local {
-            // LOCAL ROUTING: Use route_local
-            let target_actor_id = if let Some(node_id) = node_id {
-                format!("{}@{}", actor_name, node_id)
-            } else {
-                format!("{}@{}", actor_name, local_node_id)
-            };
-
+        if is_local {
             route_local(
                 ctx,
                 service_locator,
-                target_actor_id,
+                target_actor_id.to_string(),
                 message,
                 wait_for_response,
                 timeout,
@@ -613,12 +589,11 @@ pub fn route_message(
             .await
         } else {
             // REMOTE ROUTING: Use route_remote
-            let target_node_id = node_id.unwrap_or_else(|| local_node_id);
             route_remote(
                 ctx,
                 service_locator,
-                target_node_id,
-                actor_id,
+                target_actor_id.node_id().to_string(),
+                target_actor_id.to_string(),
                 message,
                 wait_for_response,
                 timeout,

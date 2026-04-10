@@ -118,25 +118,43 @@ impl ActorBehavior for CounterActor {
 }
 
 // Create actor using builder
-let actor = ActorBuilder::new("counter@node1".to_string())
-    .with_behavior(CounterActor { count: 0 })
-    .build()?;
+let actor = ActorBuilder::new(Box::new(CounterActor { count: 0 }))
+    .with_name("counter")
+    .with_namespace("default")
+    .build()
+    .await?;
 ```
+
+`with_name(...)` is the client-facing identity input. The name should be unique for the actor in its namespace/node scope. The runtime combines that name with the behavior type, namespace, and node ID to construct the canonical `ActorId`.
 
 ### Actor Reference (ActorRef)
 
 ```rust
 use plexspaces_actor::ActorRef;
-use plexspaces_core::ServiceLocator;
+use plexspaces_core::{ActorId, ServiceLocator};
 use std::sync::Arc;
 
 // Create local actor reference
-let actor_ref = ActorRef::local("counter@node1", mailbox);
+let actor_id = ActorId::new("counter", "gen_server", "default", "node1")?;
+let actor_ref = ActorRef::local(
+    actor_id.clone(),
+    String::new(),
+    "default",
+    mailbox,
+    service_locator.clone(),
+);
 
 // Create remote actor reference (uses ServiceLocator for gRPC client caching)
 let service_locator = Arc::new(ServiceLocator::new());
 // ... register services in service_locator ...
-let remote_ref = ActorRef::remote("counter@node2", "node2", service_locator);
+let remote_actor_id = ActorId::new("counter", "gen_server", "default", "node2")?;
+let remote_ref = ActorRef::remote(
+    remote_actor_id,
+    String::new(),
+    "default",
+    "node2",
+    service_locator,
+);
 
 // Send message (fire-and-forget) - same API for local and remote
 let message = new_message("increment");
@@ -154,8 +172,8 @@ let reply = remote_ref.ask(message, Duration::from_secs(5)).await?;
 ```rust
 use plexspaces_actor::{ActorBuilder, ResourceProfile, ResourceContract};
 
-let actor = ActorBuilder::new("cpu-intensive-task@node1".to_string())
-    .with_behavior(MyBehavior {})
+let actor = ActorBuilder::new(MyBehavior {})
+    .with_name("cpu-intensive-task")
     .with_resource_profile(ResourceProfile::CpuIntensive)
     .with_resource_contract(ResourceContract {
         max_cpu_percent: 80,

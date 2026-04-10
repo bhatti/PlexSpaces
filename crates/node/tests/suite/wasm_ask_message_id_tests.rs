@@ -171,16 +171,13 @@ async fn test_wasm_ask_single_message_id_flow() {
         .await
         .expect("ActorRegistry should be available");
 
-    // Actor ID follows name:namespace@node_id — find it from the registry
-    let all_actor_ids: Vec<String> = {
-        let ids = registry.registered_actor_ids().await;
-        ids.iter().map(|id| id.to_string()).collect()
-    };
+    // Actor IDs use the canonical structured form; find the calculator actor in the registry.
+    let all_actor_ids = registry.registered_actor_ids().await;
     eprintln!("Registered actors: {:?}", all_actor_ids);
 
     let calc_actor_id = all_actor_ids
         .iter()
-        .find(|id| id.contains("calculator"))
+        .find(|id| id.name() == "calculator")
         .expect("calculator actor should be registered");
     eprintln!("Found calculator actor: {}", calc_actor_id);
 
@@ -201,7 +198,7 @@ async fn test_wasm_ask_single_message_id_flow() {
         id: request_id.clone(),
         payload: payload_bytes,
         sender_id: String::new(), // Outside caller — ActorRef.ask() creates temp sender
-        receiver_id: calc_actor_id.clone(),
+        receiver_id: calc_actor_id.to_string(),
         message_type: "add".to_string(),
         ..Default::default()
     };

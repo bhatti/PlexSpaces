@@ -25,8 +25,8 @@
 //! 4. is_actor_activated() checks MessageSender, not mailbox
 
 use plexspaces_core::{
-    actor_context::ObjectRegistry, actor_id::build_actor_id, ActorId, ActorRegistry, Message,
-    MessageSender, RequestContext, VirtualActorManager,
+    actor_context::ObjectRegistry, ActorId, ActorRegistry, Message, MessageSender,
+    RequestContext, VirtualActorManager,
 };
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -82,7 +82,7 @@ impl MessageSender for TestMessageSender {
     }
 
     fn actor_id(&self) -> Option<String> {
-        Some(self.actor_id.clone())
+        Some(self.actor_id.to_string())
     }
 
     fn tenant_id(&self) -> Option<&str> {
@@ -291,10 +291,18 @@ fn create_test_context() -> RequestContext {
     )
 }
 
+fn test_actor_id(name: &str) -> ActorId {
+    ActorId::new(name, "gen_server", "default", "test-node").unwrap()
+}
+
+fn scoped_actor_id(name: &str, actor_type: &str, namespace: &str) -> ActorId {
+    ActorId::new(name, actor_type, namespace, "test-node").unwrap()
+}
+
 #[tokio::test]
 async fn test_register_actor_with_message_sender() {
     let registry = create_test_registry().await;
-    let actor_id: ActorId = "test-actor@test-node".to_string();
+    let actor_id = test_actor_id("test-actor");
 
     // Create MessageSender
     let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
@@ -327,7 +335,7 @@ async fn test_register_actor_with_message_sender() {
 #[tokio::test]
 async fn test_register_actor_mailbox_not_exposed() {
     let registry = create_test_registry().await;
-    let actor_id: ActorId = "test-actor@test-node".to_string();
+    let actor_id = test_actor_id("test-actor");
 
     // Create MessageSender with internal message storage
     let test_sender = Arc::new(TestMessageSender::new(actor_id.clone()));
@@ -369,7 +377,7 @@ async fn test_register_actor_mailbox_not_exposed() {
 #[tokio::test]
 async fn test_unregister_actor_removes_message_sender() {
     let registry = create_test_registry().await;
-    let actor_id: ActorId = "test-actor@test-node".to_string();
+    let actor_id = test_actor_id("test-actor");
 
     // Register actor
     let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
@@ -400,7 +408,7 @@ async fn test_unregister_actor_removes_message_sender() {
 #[tokio::test]
 async fn test_is_actor_activated_checks_message_sender() {
     let registry = create_test_registry().await;
-    let actor_id: ActorId = "test-actor@test-node".to_string();
+    let actor_id = test_actor_id("test-actor");
 
     // Initially not activated
     assert!(!registry.is_actor_activated(&actor_id).await);
@@ -427,7 +435,7 @@ async fn test_is_actor_activated_checks_message_sender() {
 #[tokio::test]
 async fn test_registry_reads_scope_from_registered_sender() {
     let registry = create_test_registry().await;
-    let actor_id: ActorId = "scoped-actor@test-node".to_string();
+    let actor_id = test_actor_id("scoped-actor");
     let ctx = RequestContext::new_without_auth("tenant-a".to_string(), "ns-a".to_string());
 
     let sender: Arc<dyn MessageSender> =
@@ -481,7 +489,7 @@ async fn test_registry_reads_virtual_actor_scope_and_type_from_manager_metadata(
         .await
         .expect("virtual actor type registration should succeed");
 
-    let actor_id = build_actor_id("cart-1", "shopping-cart", Some("shop-ns"), "test-node");
+    let actor_id = scoped_actor_id("cart-1", "shopping-cart", "shop-ns");
 
     let metadata = registry
         .get_actor_metadata(&actor_id)
@@ -498,7 +506,7 @@ async fn test_registry_reads_virtual_actor_scope_and_type_from_manager_metadata(
 #[tokio::test]
 async fn test_lookup_actor_in_scope_isolates_same_actor_id_across_scopes() {
     let registry = create_test_registry().await;
-    let actor_id: ActorId = "shared-actor@test-node".to_string();
+    let actor_id = test_actor_id("shared-actor");
 
     let ctx_a = RequestContext::new_without_auth("tenant-a".to_string(), "ns-a".to_string());
     let sender_a: Arc<dyn MessageSender> =
@@ -553,7 +561,7 @@ async fn test_lookup_actor_in_scope_isolates_same_actor_id_across_scopes() {
 #[tokio::test]
 async fn test_live_actor_helpers_preserve_scope_isolation() {
     let registry = create_test_registry().await;
-    let shared_actor_id: ActorId = "shared-actor@test-node".to_string();
+    let shared_actor_id = test_actor_id("shared-actor");
 
     let ctx_a = RequestContext::new_without_auth("tenant-a".to_string(), "ns-a".to_string());
     let sender_a: Arc<dyn MessageSender> =
@@ -609,7 +617,7 @@ async fn test_live_actor_helpers_preserve_scope_isolation() {
 #[tokio::test]
 async fn test_registered_inventory_helpers_include_passivated_virtual_entries() {
     let registry = create_test_registry().await;
-    let actor_id = build_actor_id("cart-1", "shopping-cart", Some("shop-ns"), "test-node");
+    let actor_id = scoped_actor_id("cart-1", "shopping-cart", "shop-ns");
     let ctx = RequestContext::new_without_auth("tenant-shop".to_string(), "shop-ns".to_string());
 
     registry
@@ -636,7 +644,7 @@ async fn test_multiple_actors_registration() {
 
     // Register multiple actors
     for i in 0..10 {
-        let actor_id: ActorId = format!("actor-{}@test-node", i);
+        let actor_id = test_actor_id(&format!("actor-{i}"));
         let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
         let ctx = create_test_context();
         registry
@@ -654,7 +662,7 @@ async fn test_multiple_actors_registration() {
 
     // Verify all are registered
     for i in 0..10 {
-        let actor_id: ActorId = format!("actor-{}@test-node", i);
+        let actor_id = test_actor_id(&format!("actor-{i}"));
         assert!(
             registry.is_actor_activated(&actor_id).await,
             "Actor {} should be activated",
@@ -675,8 +683,16 @@ async fn test_leader_election_discover_actors_by_namespace() {
     let ns2 = "leader-election-term2".to_string();
     let actor_type = "LeaderElection".to_string();
 
-    let actor_id1: ActorId = "LeaderElection:leader-election-term1@test-node".to_string();
-    let actor_id2: ActorId = "LeaderElection:leader-election-term2@test-node".to_string();
+    let actor_id1 = scoped_actor_id(
+        "LeaderElection:leader-election-term1",
+        "LeaderElection",
+        &ns1,
+    );
+    let actor_id2 = scoped_actor_id(
+        "LeaderElection:leader-election-term2",
+        "LeaderElection",
+        &ns2,
+    );
 
     let ctx1 = RequestContext::new_without_auth(tenant.clone(), ns1.clone());
     let ctx2 = RequestContext::new_without_auth(tenant.clone(), ns2.clone());
@@ -730,7 +746,7 @@ async fn test_register_actor_deduplicates_actor_type_index_entries() {
     let registry = create_test_registry().await;
     let ctx = create_test_context();
     let actor_type = "leader".to_string();
-    let actor_id: ActorId = "01TEST//leader::test@test-node".to_string();
+    let actor_id = scoped_actor_id("01TEST", "leader", "test");
     let sender: Arc<dyn MessageSender> = Arc::new(TestMessageSender::new(actor_id.clone()));
 
     registry
@@ -764,7 +780,7 @@ async fn test_register_actor_deduplicates_actor_type_index_entries() {
 async fn test_register_actor_preserves_existing_local_state_handle() {
     let registry = create_test_registry().await;
     let ctx = create_test_context();
-    let actor_id: ActorId = "preserve-handle@test-node".to_string();
+    let actor_id = test_actor_id("preserve-handle");
     let state_handle: Arc<dyn plexspaces_core::ActorStateHandle> = Arc::new(TestActorStateHandle);
 
     registry

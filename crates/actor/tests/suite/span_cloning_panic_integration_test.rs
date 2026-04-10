@@ -77,10 +77,15 @@ impl GenServer for TestActor {
 async fn test_span_cloning_panic_reproduction() {
     // Set up tracing to ensure spans are created
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter("warn")
         .try_init();
 
-    let node = Arc::new(NodeBuilder::new("test-node").build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node")
+            .with_in_memory_backends()
+            .build()
+            .await,
+    );
     node.initialize_services().await.unwrap();
 
     let processed = Arc::new(AtomicBool::new(false));
@@ -103,7 +108,7 @@ async fn test_span_cloning_panic_reproduction() {
         .unwrap();
 
     let mut actor = actor_with_default_service_locator(
-        format!("test-actor-{}@test-node", Ulid::new()),
+        format!("test-actor-{}", Ulid::new()),
         Box::new(actor_impl),
         mailbox,
         "test-tenant".to_string(),
@@ -170,10 +175,15 @@ async fn test_span_cloning_panic_reproduction() {
 #[tokio::test]
 async fn test_span_cloning_panic_reproduction_concurrent() {
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter("warn")
         .try_init();
 
-    let node = Arc::new(NodeBuilder::new("test-node").build().await);
+    let node = Arc::new(
+        NodeBuilder::new("test-node")
+            .with_in_memory_backends()
+            .build()
+            .await,
+    );
     node.initialize_services().await.unwrap();
 
     let num_actors = 10;
@@ -200,7 +210,7 @@ async fn test_span_cloning_panic_reproduction_concurrent() {
         .unwrap();
 
         let mut actor = actor_with_default_service_locator(
-            format!("test-actor-{}-{}@test-node", i, Ulid::new()),
+            format!("test-actor-{}-{}", i, Ulid::new()),
             Box::new(actor_impl),
             mailbox,
             "test-tenant".to_string(),

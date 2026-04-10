@@ -16,10 +16,9 @@
 //! Tests validate Node.monitor() functionality for local and remote actors,
 //! following Erlang's location-transparent monitoring philosophy.
 
-use plexspaces_actor::ActorRef;
-use plexspaces_core::{service_names, ExitReason, ServiceLocator};
+use plexspaces_core::{ExitReason, ServiceLocator};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
-use plexspaces_node::{Node, NodeBuilder, NodeConfig, NodeId};
+use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::ActorServiceServer;
 use plexspaces_services::actor_service::ActorServiceImpl;
 use std::sync::Arc;
@@ -27,7 +26,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tonic::transport::Server;
 
-use super::test_helpers::register_actor_with_message_sender;
+use super::test_helpers::{register_actor_with_message_sender, test_runtime_actor_id};
 
 /// Helper to start a gRPC server for testing
 async fn start_test_server(node: Arc<Node>) -> String {
@@ -62,22 +61,16 @@ async fn test_monitor_local_actor() {
     use plexspaces_node::NodeBuilder;
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
+    let worker_id = test_runtime_actor_id("worker", "node1");
+    let supervisor_id = test_runtime_actor_id("supervisor", "node1");
     let mailbox = Arc::new(
-        Mailbox::new(MailboxConfig::default(), "worker@node1".to_string())
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
-    let service_locator = node.service_locator();
-    let actor_ref = ActorRef::local(
-        "worker@node1".to_string(),
-        "".to_string(),
-        "".to_string(),
-        mailbox.clone(),
-        service_locator,
-    );
 
     // Register actor with MessageSender (mailbox is internal)
-    register_actor_with_message_sender(&node, "worker@node1", mailbox.clone()).await;
+    register_actor_with_message_sender(&node, &worker_id, mailbox.clone()).await;
 
     // Actor already registered - no need to update config
     // Note: Metrics are updated internally by Node methods
@@ -87,11 +80,7 @@ async fn test_monitor_local_actor() {
 
     // Act: Monitor the local actor
     let monitor_ref = node
-        .monitor(
-            &"worker@node1".to_string(),
-            &"supervisor@node1".to_string(),
-            tx,
-        )
+        .monitor(&worker_id, &supervisor_id, tx)
         .await;
 
     // Assert: Monitor established successfully
@@ -121,22 +110,16 @@ async fn test_monitor_remote_actor() {
     let node2_address = start_test_server(node2.clone()).await;
 
     // Register actor on node2
+    let worker_id = test_runtime_actor_id("worker", "node2");
+    let supervisor_id = test_runtime_actor_id("supervisor", "node1");
     let mailbox2 = Arc::new(
-        Mailbox::new(MailboxConfig::default(), "worker@node2".to_string())
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
-    let service_locator2 = node2.service_locator();
-    let actor_ref2 = ActorRef::local(
-        "worker@node2".to_string(),
-        "".to_string(),
-        "".to_string(),
-        mailbox2.clone(),
-        service_locator2,
-    );
 
     // Register actor's mailbox in ActorRegistry first (required for monitoring)
-    register_actor_with_message_sender(&node2, "worker@node2", mailbox2.clone()).await;
+    register_actor_with_message_sender(&node2, &worker_id, mailbox2.clone()).await;
 
     // Actor already registered - no need to update config
 
@@ -153,7 +136,7 @@ async fn test_monitor_remote_actor() {
         object_category: "Node".to_string(),
         ..Default::default()
     };
-    if let Some(object_registry) = node1.service_locator().get_object_registry().await {
+    if let Some(object_registry) = node1.service_locator().object_registry().await {
         let _ = object_registry.register(&ctx, registration).await;
     }
 
@@ -162,11 +145,7 @@ async fn test_monitor_remote_actor() {
 
     // Act: Monitor remote actor from node1 (supervisor on node1, actor on node2)
     let monitor_ref: Result<plexspaces_node::MonitorRef, plexspaces_node::NodeError> = node1
-        .monitor(
-            &"worker@node2".to_string(),
-            &"supervisor@node1".to_string(),
-            tx,
-        )
+        .monitor(&worker_id, &supervisor_id, tx)
         .await;
 
     // Assert: Remote monitoring established successfully
@@ -194,22 +173,16 @@ async fn test_local_actor_termination_notification() {
     use plexspaces_node::NodeBuilder;
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
+    let worker_id = test_runtime_actor_id("worker", "node1");
+    let supervisor_id = test_runtime_actor_id("supervisor", "node1");
     let mailbox = Arc::new(
-        Mailbox::new(MailboxConfig::default(), "worker@node1".to_string())
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
-    let service_locator = node.service_locator();
-    let actor_ref = ActorRef::local(
-        "worker@node1".to_string(),
-        "".to_string(),
-        "".to_string(),
-        mailbox.clone(),
-        service_locator,
-    );
 
     // Register actor with MessageSender (mailbox is internal)
-    register_actor_with_message_sender(&node, "worker@node1", mailbox.clone()).await;
+    register_actor_with_message_sender(&node, &worker_id, mailbox.clone()).await;
 
     // Actor already registered - no need to update config
     // Note: Metrics are updated internally by Node methods
@@ -218,18 +191,12 @@ async fn test_local_actor_termination_notification() {
     let (tx, mut rx) = mpsc::channel(1);
 
     // Monitor the actor
-    node.monitor(
-        &"worker@node1".to_string(),
-        &"supervisor@node1".to_string(),
-        tx,
-    )
-    .await
-    .unwrap();
+    node.monitor(&worker_id, &supervisor_id, tx).await.unwrap();
 
     // Act: Terminate the actor (unregister simulates termination)
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry
-        .handle_actor_termination(&"worker@node1".to_string(), ExitReason::Normal)
+        .handle_actor_termination(&worker_id, ExitReason::Normal)
         .await;
 
     // Assert: Supervisor receives termination notification
@@ -240,7 +207,7 @@ async fn test_local_actor_termination_notification() {
     );
 
     let (actor_id, reason) = notification.unwrap().unwrap();
-    assert_eq!(actor_id, "worker@node1");
+    assert_eq!(actor_id, worker_id);
     assert_eq!(reason, "normal");
 }
 
@@ -262,8 +229,8 @@ async fn test_monitor_nonexistent_actor() {
     // Act: Try to monitor non-existent actor
     let result = node
         .monitor(
-            &"nonexistent@node1".to_string(),
-            &"supervisor@node1".to_string(),
+            &test_runtime_actor_id("nonexistent", "node1"),
+            &test_runtime_actor_id("supervisor", "node1"),
             tx,
         )
         .await;
@@ -279,22 +246,17 @@ async fn test_multiple_monitors_same_actor() {
     use plexspaces_node::NodeBuilder;
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
+    let worker_id = test_runtime_actor_id("worker", "node1");
+    let supervisor1_id = test_runtime_actor_id("supervisor1", "node1");
+    let supervisor2_id = test_runtime_actor_id("supervisor2", "node1");
     let mailbox = Arc::new(
-        Mailbox::new(MailboxConfig::default(), "worker@node1".to_string())
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
-    let service_locator = node.service_locator();
-    let actor_ref = ActorRef::local(
-        "worker@node1".to_string(),
-        "".to_string(),
-        "".to_string(),
-        mailbox.clone(),
-        service_locator,
-    );
 
     // Register actor with MessageSender (mailbox is internal)
-    register_actor_with_message_sender(&node, "worker@node1", mailbox.clone()).await;
+    register_actor_with_message_sender(&node, &worker_id, mailbox.clone()).await;
 
     // Actor already registered - no need to update config
     // Note: Metrics are updated internally by Node methods
@@ -304,21 +266,9 @@ async fn test_multiple_monitors_same_actor() {
     let (tx2, mut rx2) = mpsc::channel(1);
 
     // Act: Both supervisors monitor same actor
-    let mon1 = node
-        .monitor(
-            &"worker@node1".to_string(),
-            &"supervisor1@node1".to_string(),
-            tx1,
-        )
-        .await;
+    let mon1 = node.monitor(&worker_id, &supervisor1_id, tx1).await;
 
-    let mon2 = node
-        .monitor(
-            &"worker@node1".to_string(),
-            &"supervisor2@node1".to_string(),
-            tx2,
-        )
-        .await;
+    let mon2 = node.monitor(&worker_id, &supervisor2_id, tx2).await;
 
     assert!(mon1.is_ok(), "First monitor should succeed");
     assert!(mon2.is_ok(), "Second monitor should succeed");
@@ -326,10 +276,7 @@ async fn test_multiple_monitors_same_actor() {
     // Terminate actor
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry
-        .handle_actor_termination(
-            &"worker@node1".to_string(),
-            ExitReason::Error("crash".to_string()),
-        )
+        .handle_actor_termination(&worker_id, ExitReason::Error("crash".to_string()))
         .await;
 
     // Assert: BOTH supervisors receive notification
@@ -350,22 +297,17 @@ async fn test_monitor_ref_uniqueness() {
     use plexspaces_node::NodeBuilder;
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
+    let worker_id = test_runtime_actor_id("worker", "node1");
+    let supervisor1_id = test_runtime_actor_id("supervisor1", "node1");
+    let supervisor2_id = test_runtime_actor_id("supervisor2", "node1");
     let mailbox = Arc::new(
-        Mailbox::new(MailboxConfig::default(), "worker@node1".to_string())
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
-    let service_locator = node.service_locator();
-    let actor_ref = ActorRef::local(
-        "worker@node1".to_string(),
-        "".to_string(),
-        "".to_string(),
-        mailbox.clone(),
-        service_locator,
-    );
 
     // Register actor with MessageSender (mailbox is internal)
-    register_actor_with_message_sender(&node, "worker@node1", mailbox.clone()).await;
+    register_actor_with_message_sender(&node, &worker_id, mailbox.clone()).await;
 
     // Actor already registered - no need to update config
     // Note: Metrics are updated internally by Node methods
@@ -374,23 +316,9 @@ async fn test_monitor_ref_uniqueness() {
     let (tx2, _rx2) = mpsc::channel(1);
 
     // Act: Create two monitors
-    let mon1 = node
-        .monitor(
-            &"worker@node1".to_string(),
-            &"supervisor1@node1".to_string(),
-            tx1,
-        )
-        .await
-        .unwrap();
+    let mon1 = node.monitor(&worker_id, &supervisor1_id, tx1).await.unwrap();
 
-    let mon2 = node
-        .monitor(
-            &"worker@node1".to_string(),
-            &"supervisor2@node1".to_string(),
-            tx2,
-        )
-        .await
-        .unwrap();
+    let mon2 = node.monitor(&worker_id, &supervisor2_id, tx2).await.unwrap();
 
     // Assert: Monitor refs are different (unique)
     assert_ne!(mon1, mon2, "Monitor refs should be unique");
@@ -403,44 +331,29 @@ async fn test_actor_crash_reason_propagation() {
     use plexspaces_node::NodeBuilder;
     let node = Arc::new(NodeBuilder::new("node1").build().await);
 
+    let worker_id = test_runtime_actor_id("worker", "node1");
+    let supervisor_id = test_runtime_actor_id("supervisor", "node1");
     let mailbox = Arc::new(
-        Mailbox::new(MailboxConfig::default(), "worker@node1".to_string())
+        Mailbox::new(MailboxConfig::default(), worker_id.to_string())
             .await
             .unwrap(),
     );
-    let service_locator = node.service_locator();
-    let actor_ref = ActorRef::local(
-        "worker@node1".to_string(),
-        "".to_string(),
-        "".to_string(),
-        mailbox.clone(),
-        service_locator,
-    );
 
     // Register actor with MessageSender (mailbox is internal)
-    register_actor_with_message_sender(&node, "worker@node1", mailbox.clone()).await;
+    register_actor_with_message_sender(&node, &worker_id, mailbox.clone()).await;
 
     // Actor already registered - no need to update config
     // Note: Metrics are updated internally by Node methods
 
     let (tx, mut rx) = mpsc::channel(1);
 
-    node.monitor(
-        &"worker@node1".to_string(),
-        &"supervisor@node1".to_string(),
-        tx,
-    )
-    .await
-    .unwrap();
+    node.monitor(&worker_id, &supervisor_id, tx).await.unwrap();
 
     // Act: Terminate with specific error reason
     let crash_reason = "panic: index out of bounds at line 42";
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     actor_registry
-        .handle_actor_termination(
-            &"worker@node1".to_string(),
-            ExitReason::Error(crash_reason.to_string()),
-        )
+        .handle_actor_termination(&worker_id, ExitReason::Error(crash_reason.to_string()))
         .await;
 
     // Assert: Exact crash reason received

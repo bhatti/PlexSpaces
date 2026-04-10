@@ -202,7 +202,18 @@ impl SpecApplication {
 
             // Use child.id as actor_type (start_module removed - was confusing)
             let actor_type = child.id.clone();
-            let actor_id = format!("{}@{}", child.id, node.id());
+            let actor_id = plexspaces_core::ActorId::new(
+                &child.id,
+                &actor_type,
+                &self.spec.namespace,
+                node.id().as_str(),
+            )
+            .map_err(|e| {
+                ApplicationError::StartupFailed(format!(
+                    "Invalid actor identity for child '{}': {}",
+                    child.id, e
+                ))
+            })?;
             
             // Phase 1: Unified Lifecycle - Attach facets from ChildSpec before spawning
             // Use ActorFactory::spawn_actor() which supports facets directly.
@@ -257,9 +268,6 @@ impl SpecApplication {
             };
             
             // Spawn actor with facets using ActorFactory
-            let actor_id_parsed = actor_id.parse()
-                .map_err(|e| ApplicationError::StartupFailed(format!("Invalid actor ID '{}': {}", actor_id, e)))?;
-            
             // Check if this child is a supervisor - if so, recursively spawn its children
             use plexspaces_proto::application::v1::ChildType as ProtoChildType;
             let child_type = ProtoChildType::try_from(child.r#type())
@@ -269,7 +277,7 @@ impl SpecApplication {
                 // Spawn the supervisor actor first
                 match actor_factory.spawn_actor(
                     &ctx,
-                    &actor_id_parsed,
+                    &actor_id,
                     &actor_type, // Use child.id as actor_type
                     vec![], // initial_state
                     None, // config
@@ -322,7 +330,7 @@ impl SpecApplication {
                 // Regular worker - spawn normally
                 match actor_factory.spawn_actor(
                     &ctx,
-                    &actor_id_parsed,
+                    &actor_id,
                     &actor_type, // Use child.id as actor_type
                     vec![], // initial_state
                     None, // config
@@ -1054,4 +1062,3 @@ mod tests {
 
     // Note: start_module validation removed - actor_type is derived from child.id
 }
-

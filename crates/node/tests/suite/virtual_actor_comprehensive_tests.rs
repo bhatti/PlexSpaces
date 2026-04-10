@@ -21,8 +21,13 @@ use tokio::time::sleep;
 
 use super::test_helpers::{
     activate_virtual_actor, find_actor_helper, get_or_activate_actor_helper, lookup_actor_ref,
-    spawn_actor_helper, unregister_actor_helper, wait_for_virtual_actor_activation,
+    spawn_actor_helper, test_runtime_actor_id, unregister_actor_helper,
+    wait_for_virtual_actor_activation,
 };
+
+fn runtime_actor_id(name: &str) -> ActorId {
+    test_runtime_actor_id(name, "test-node")
+}
 
 /// Helper to create a test message
 fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
@@ -135,7 +140,12 @@ impl GenServer for CounterActor {
                 .send_reply(
                     correlation_id,
                     &msg.sender_id,
-                    msg.receiver_id.clone(),
+                    ActorId::from_canonical(&msg.receiver_id).map_err(|e| {
+                        BehaviorError::ProcessingError(format!(
+                            "Failed to parse sender actor id for reply: {}",
+                            e
+                        ))
+                    })?,
                     reply_msg,
                 )
                 .await;
@@ -165,7 +175,7 @@ impl GenServer for CounterActor {
 async fn test_lazy_activation_concurrent_requests() {
     // Test: Multiple concurrent activation requests should only activate once
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-concurrent@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-concurrent");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -257,7 +267,7 @@ async fn test_lazy_activation_concurrent_requests() {
 async fn test_lazy_activation_pending_messages_processed() {
     // Test: Messages sent during activation should be queued and processed after activation
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-pending@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-pending");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -321,7 +331,7 @@ async fn test_lazy_activation_activation_failure_handling() {
     // Test: If activation fails, subsequent messages should retry activation
     // Note: This is a simplified test - actual activation failures are rare
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-fail@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-fail");
 
     // Create actor but don't register it yet
     let behavior = Box::new(CounterActor::new());
@@ -366,7 +376,7 @@ async fn test_lazy_activation_activation_failure_handling() {
 async fn test_regular_actor_tell_then_ask() {
     // Test: Regular actor tell() followed by ask() - baseline test
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-regular@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-regular");
 
     // Spawn regular actor (no virtual facet)
     let behavior = Box::new(CounterActor::new());
@@ -405,7 +415,7 @@ async fn test_lazy_activation_tell_then_ask() {
     // Test: tell() followed by ask() - both should work
     // Virtual actor behavior should be same as regular actor except for lazy activation
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-tell-ask@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-tell-ask");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -496,7 +506,7 @@ async fn test_lazy_activation_tell_then_ask() {
 async fn test_eager_activation_immediate_availability() {
     // Test: Eager actor should be immediately available after creation
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-eager-immediate@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-eager-immediate");
 
     let actor_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -547,7 +557,7 @@ async fn test_eager_activation_multiple_actors() {
     let mut handles = Vec::new();
     for i in 0..5 {
         let node_clone = node.clone();
-        let actor_id: ActorId = format!("counter-eager-{}@test-node", i);
+        let actor_id = runtime_actor_id(&format!("counter-eager-{}", i));
         let handle = tokio::spawn(async move {
             get_or_activate_actor_helper(&node_clone, actor_id.clone(), || async {
                 let behavior = Box::new(CounterActor::new());
@@ -612,7 +622,7 @@ async fn test_eager_activation_multiple_actors() {
 async fn test_passivation_idle_timeout_expiration() {
     // Test: Actor should be deactivated after idle timeout
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-idle@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-idle");
 
     // Start idle timeout monitor
     node.start_idle_timeout_monitor();
@@ -676,7 +686,7 @@ async fn test_passivation_idle_timeout_expiration() {
 async fn test_passivation_reactivation_after_timeout() {
     // Test: Actor should reactivate after passivation when message arrives
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-reactivate@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-reactivate");
 
     node.start_idle_timeout_monitor();
 
@@ -764,7 +774,7 @@ async fn test_passivation_reactivation_after_timeout() {
 async fn test_passivation_message_resets_idle_timer() {
     // Test: Messages should reset idle timer, preventing passivation
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-reset@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-reset");
 
     node.start_idle_timeout_monitor();
 
@@ -834,7 +844,7 @@ async fn test_mixed_lazy_eager_actors() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
     // Create lazy actor
-    let lazy_id: ActorId = "counter-lazy-mixed@test-node".to_string();
+    let lazy_id = runtime_actor_id("counter-lazy-mixed");
     let _lazy_ref = get_or_activate_actor_helper(&node, lazy_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
         let mut actor = ActorBuilder::new(behavior)
@@ -866,7 +876,7 @@ async fn test_mixed_lazy_eager_actors() {
     .unwrap();
 
     // Create eager actor
-    let eager_id: ActorId = "counter-eager-mixed@test-node".to_string();
+    let eager_id = runtime_actor_id("counter-eager-mixed");
     let _eager_ref = get_or_activate_actor_helper(&node, eager_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
         let mut actor = ActorBuilder::new(behavior)
@@ -924,7 +934,7 @@ async fn test_mixed_lazy_eager_actors() {
 async fn test_virtual_actor_state_preservation() {
     // Test: Actor state should be preserved across activation/deactivation cycles
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-state@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-state");
 
     node.start_idle_timeout_monitor();
 
@@ -1011,7 +1021,7 @@ async fn test_virtual_actor_state_preservation() {
 async fn test_virtual_actor_not_found_error() {
     // Test: Accessing non-existent virtual actor should return appropriate error
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "nonexistent@test-node".to_string();
+    let actor_id = runtime_actor_id("nonexistent");
 
     // Check that actor doesn't exist
     let (exists, _, _) = node.check_virtual_actor_exists(&actor_id).await;
@@ -1033,7 +1043,7 @@ async fn test_virtual_actor_not_found_error() {
 async fn test_virtual_actor_manual_deactivation() {
     // Test: Manual deactivation should work
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-manual-deact@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-manual-deact");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -1106,7 +1116,7 @@ async fn test_virtual_actor_manual_deactivation() {
 async fn test_virtual_actor_full_lifecycle() {
     // Test: Complete lifecycle - create, activate, use, passivate, reactivate
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-lifecycle@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-lifecycle");
 
     node.start_idle_timeout_monitor();
 
@@ -1201,7 +1211,7 @@ async fn test_virtual_actor_full_lifecycle() {
 async fn test_virtual_actor_high_throughput() {
     // Test: High throughput scenario with many messages
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-throughput@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-throughput");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -1386,7 +1396,12 @@ impl GenServer for DurableCounterActor {
                     Some(msg.correlation_id.as_str())
                 },
                 &msg.sender_id, // Where reply goes TO (temporary sender for ask pattern)
-                msg.receiver_id.clone(), // Where reply comes FROM (current actor)
+                ActorId::from_canonical(&msg.receiver_id).map_err(|e| {
+                    BehaviorError::ProcessingError(format!(
+                        "Failed to parse sender actor id for reply: {}",
+                        e
+                    ))
+                })?, // Where reply comes FROM (current actor)
                 reply_msg,
             )
             .await
@@ -1473,7 +1488,7 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
         .register_behavior_registry(Arc::new(registry))
         .await;
 
-    let actor_id: ActorId = "durable-counter-eager@test-node".to_string();
+    let actor_id = runtime_actor_id("durable-counter-eager");
 
     // Create shared state for StateLoader
     let shared_state = Arc::new(tokio::sync::RwLock::new(None));
@@ -1587,7 +1602,7 @@ async fn test_eager_virtual_actor_with_durability_state_preservation() {
     let state_data = count_value.to_le_bytes().to_vec();
 
     let checkpoint = Checkpoint {
-        actor_id: actor_id.clone(),
+        actor_id: actor_id.to_string(),
         sequence: 6, // After processing 3 increment messages (2 entries per message)
         timestamp: Some(Timestamp::from(SystemTime::now())),
         state_data,
@@ -1693,7 +1708,7 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
         .register_behavior_registry(Arc::new(registry))
         .await;
 
-    let actor_id: ActorId = "durable-counter-lazy@test-node".to_string();
+    let actor_id = runtime_actor_id("durable-counter-lazy");
 
     // Create shared state for StateLoader
     let shared_state = Arc::new(tokio::sync::RwLock::new(None));
@@ -1810,7 +1825,7 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
     let state_data = count_value.to_le_bytes().to_vec();
 
     let checkpoint = Checkpoint {
-        actor_id: actor_id.clone(),
+        actor_id: actor_id.to_string(),
         sequence: 10, // After processing 5 increment messages
         timestamp: Some(Timestamp::from(SystemTime::now())),
         state_data,
@@ -1888,7 +1903,7 @@ async fn test_lazy_virtual_actor_with_durability_state_preservation() {
 async fn test_eager_activation_tell_then_ask() {
     // Test: tell() followed by ask() - both should work immediately
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-eager-tell-ask@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-eager-tell-ask");
 
     // Register eager virtual actor
     let _actor_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
@@ -1948,7 +1963,7 @@ async fn test_eager_activation_tell_then_ask() {
 async fn test_lazy_activation_ask_directly() {
     // Test: ask() directly on lazy actor - should activate and respond
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-lazy-ask@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-lazy-ask");
 
     // Register lazy virtual actor
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
@@ -1999,7 +2014,7 @@ async fn test_lazy_activation_ask_directly() {
 async fn test_lazy_activation_multiple_messages() {
     // Test: Multiple messages to lazy actor - should activate once
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-lazy-multi@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-lazy-multi");
 
     // Register lazy virtual actor
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
@@ -2074,12 +2089,13 @@ async fn test_virtual_actor_implicit_activation() {
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
-    let mailbox = Mailbox::new(mailbox_config, "virtual-actor-implicit-1".to_string())
+    let actor_id = runtime_actor_id("virtual-actor-implicit-1");
+    let mailbox = Mailbox::new(mailbox_config, actor_id.to_string())
         .await
         .unwrap();
 
     let actor = plexspaces_actor::Actor::new(
-        "virtual-actor-implicit-1".to_string(),
+        actor_id.clone(),
         Box::new(behavior),
         mailbox,
         "test".to_string(),
@@ -2100,7 +2116,6 @@ async fn test_virtual_actor_implicit_activation() {
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Check that actor is registered as virtual but not yet active
-    let actor_id = plexspaces_core::ActorId::from("virtual-actor-implicit-1");
     let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&actor_id).await;
     assert!(exists, "Virtual actor should exist");
     assert!(is_virtual, "Actor should be registered as virtual");
@@ -2134,12 +2149,13 @@ async fn test_virtual_actor_idle_deactivation() {
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
-    let mailbox = Mailbox::new(mailbox_config, "virtual-actor-idle-2".to_string())
+    let actor_id2 = runtime_actor_id("virtual-actor-idle-2");
+    let mailbox = Mailbox::new(mailbox_config, actor_id2.to_string())
         .await
         .unwrap();
 
     let actor = plexspaces_actor::Actor::new(
-        "virtual-actor-idle-2".to_string(),
+        actor_id2.clone(),
         Box::new(behavior),
         mailbox,
         "test".to_string(),
@@ -2160,7 +2176,6 @@ async fn test_virtual_actor_idle_deactivation() {
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Send message to activate
-    let actor_id2 = plexspaces_core::ActorId::from("virtual-actor-idle-2");
     let message = create_test_message(b"test".to_vec());
     let actor_ref = lookup_actor_ref(&node, &actor_id2).await.unwrap().unwrap();
     actor_ref.tell(message).await.unwrap();
@@ -2194,12 +2209,13 @@ async fn test_virtual_actor_pending_messages() {
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
-    let mailbox = Mailbox::new(mailbox_config, "virtual-actor-pending-3".to_string())
+    let actor_id3 = runtime_actor_id("virtual-actor-pending-3");
+    let mailbox = Mailbox::new(mailbox_config, actor_id3.to_string())
         .await
         .unwrap();
 
     let actor = plexspaces_actor::Actor::new(
-        "virtual-actor-pending-3".to_string(),
+        actor_id3.clone(),
         Box::new(behavior),
         mailbox,
         "test".to_string(),
@@ -2220,7 +2236,6 @@ async fn test_virtual_actor_pending_messages() {
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Send multiple messages before activation completes
-    let actor_id3 = plexspaces_core::ActorId::from("virtual-actor-pending-3");
     let actor_ref = lookup_actor_ref(&node, &actor_id3).await.unwrap().unwrap();
     for i in 0..5 {
         let message = create_test_message(format!("msg-{}", i).into_bytes());
@@ -2246,12 +2261,13 @@ async fn test_activate_actor_manual() {
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
-    let mailbox = Mailbox::new(mailbox_config, "virtual-actor-manual-4".to_string())
+    let actor_id4 = runtime_actor_id("virtual-actor-manual-4");
+    let mailbox = Mailbox::new(mailbox_config, actor_id4.to_string())
         .await
         .unwrap();
 
     let actor = plexspaces_actor::Actor::new(
-        "virtual-actor-manual-4".to_string(),
+        actor_id4.clone(),
         Box::new(behavior),
         mailbox,
         "test".to_string(),
@@ -2270,7 +2286,6 @@ async fn test_activate_actor_manual() {
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Manually activate
-    let actor_id4 = plexspaces_core::ActorId::from("virtual-actor-manual-4");
     let _activated_ref = activate_virtual_actor(&node, &actor_id4).await.unwrap();
 
     // Verify actor is active
@@ -2290,12 +2305,13 @@ async fn test_deactivate_actor_manual() {
     mailbox_config.capacity = 1000;
     mailbox_config.backpressure_strategy =
         plexspaces_mailbox::BackpressureStrategy::DropOldest as i32;
-    let mailbox = Mailbox::new(mailbox_config, "virtual-actor-deact-5".to_string())
+    let actor_id5 = runtime_actor_id("virtual-actor-deact-5");
+    let mailbox = Mailbox::new(mailbox_config, actor_id5.to_string())
         .await
         .unwrap();
 
     let actor = plexspaces_actor::Actor::new(
-        "virtual-actor-deact-5".to_string(),
+        actor_id5.clone(),
         Box::new(behavior),
         mailbox,
         "test".to_string(),
@@ -2314,7 +2330,6 @@ async fn test_deactivate_actor_manual() {
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Activate first
-    let actor_id5 = plexspaces_core::ActorId::from("virtual-actor-deact-5");
     activate_virtual_actor(&node, &actor_id5).await.unwrap();
 
     // Verify active
@@ -2345,7 +2360,7 @@ async fn test_check_actor_exists() {
     let node = NodeBuilder::new("test-node").build().await;
 
     // Check non-existent actor
-    let nonexistent_id = plexspaces_core::ActorId::from("nonexistent");
+    let nonexistent_id = runtime_actor_id("nonexistent");
     let (exists, is_active, is_virtual) = node.check_virtual_actor_exists(&nonexistent_id).await;
     assert!(!exists, "Non-existent actor should not exist");
     assert!(!is_active, "Non-existent actor should not be active");
@@ -2355,12 +2370,13 @@ async fn test_check_actor_exists() {
     let behavior = CounterActor::new();
 
     let mailbox_config = MailboxConfig::default();
-    let mailbox = Mailbox::new(mailbox_config, "virtual-actor-check-6".to_string())
+    let actor_id6 = runtime_actor_id("virtual-actor-check-6");
+    let mailbox = Mailbox::new(mailbox_config, actor_id6.to_string())
         .await
         .unwrap();
 
     let actor = plexspaces_actor::Actor::new(
-        "virtual-actor-check-6".to_string(),
+        actor_id6.clone(),
         Box::new(behavior),
         mailbox,
         "test".to_string(),
@@ -2379,7 +2395,6 @@ async fn test_check_actor_exists() {
     let _actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Check virtual actor
-    let actor_id6 = plexspaces_core::ActorId::from("virtual-actor-check-6");
     let (exists_va, is_active_va, is_virtual_va) =
         node.check_virtual_actor_exists(&actor_id6).await;
     assert!(exists_va, "Virtual actor should exist");
@@ -2404,7 +2419,7 @@ async fn test_check_actor_exists() {
 #[tokio::test]
 async fn test_tell_with_virtual_actor_eager() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-tell-eager@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-tell-eager");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -2460,7 +2475,7 @@ async fn test_tell_with_virtual_actor_eager() {
 #[tokio::test]
 async fn test_ask_with_virtual_actor_eager() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-ask-eager@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-ask-eager");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -2511,7 +2526,7 @@ async fn test_ask_with_virtual_actor_eager() {
 #[tokio::test]
 async fn test_tell_with_virtual_actor_lazy() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-tell-lazy@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-tell-lazy");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -2569,7 +2584,7 @@ async fn test_tell_with_virtual_actor_lazy() {
 #[tokio::test]
 async fn test_ask_with_virtual_actor_lazy() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-ask-lazy@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-ask-lazy");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -2618,7 +2633,7 @@ async fn test_ask_with_virtual_actor_lazy() {
 #[tokio::test]
 async fn test_multiple_ask_with_virtual_actor_lazy() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-multi-ask-lazy@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-multi-ask-lazy");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());
@@ -2678,7 +2693,7 @@ async fn test_multiple_ask_with_virtual_actor_lazy() {
 #[tokio::test]
 async fn test_ask_with_virtual_actor_lazy_reproduce_issue() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "counter-reproduce-issue@test-node".to_string();
+    let actor_id = runtime_actor_id("counter-reproduce-issue");
 
     let _core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
         let behavior = Box::new(CounterActor::new());

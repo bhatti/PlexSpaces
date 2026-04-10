@@ -24,6 +24,12 @@ use std::sync::Arc;
 /// Create a ServiceLocator with all default services registered
 /// Create default ServiceLocator with all essential services initialized
 ///
+/// ## Test/Example storage defaults
+/// When callers do not provide `release_config.runtime.db`, this helper
+/// configures an isolated in-memory SQLite database. Tests should not share a
+/// file-backed default database in `/tmp`, because repeated initialization can
+/// race on migrations and leak state across runs.
+///
 /// ## Returns
 /// `Arc<ServiceLocatorImpl>` - the concrete type for accessing inherent methods like `get_actor_factory()`
 ///
@@ -36,8 +42,7 @@ pub async fn create_default_service_locator(
     node_id: Option<String>,
     release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
 ) -> Arc<plexspaces_services::ServiceLocatorImpl> {
-    use plexspaces_actor::actor_factory_impl::ActorFactoryImpl;
-    use plexspaces_core::service_names;
+    use plexspaces_proto::storage::v1::SharedDbConfig;
     use plexspaces_services::ServiceLocatorImpl;
 
     let service_locator_impl = Arc::new(ServiceLocatorImpl::new());
@@ -67,6 +72,17 @@ pub async fn create_default_service_locator(
         .map(|node| node.clustering_enabled)
         .unwrap_or(true);
     effective_release.node = Some(effective_node);
+    let original_runtime = effective_release.runtime.clone();
+    let mut effective_runtime = original_runtime.clone().unwrap_or_default();
+    if effective_runtime.db.is_none() {
+        effective_runtime.db = Some(SharedDbConfig {
+            connection_string: "sqlite::memory:".to_string(),
+            pool_size: 1,
+            auto_migrate: true,
+            ..Default::default()
+        });
+    }
+    effective_release.runtime = Some(effective_runtime);
 
     // Initialize services using ServiceLocator trait
     // ServiceLocator now creates all default services including facet factories, ActorFactoryImpl, ActorServiceImpl, and TupleSpaceProvider

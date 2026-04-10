@@ -40,6 +40,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::Duration;
 
+fn test_actor_id(name: &str) -> ActorId {
+    ActorId::new(name, "GenServer", "default", "test-node").expect("valid test actor id")
+}
+
 /// Test behavior for actor factory tests
 struct TestBehavior {
     received: Arc<tokio::sync::Mutex<Vec<Message>>>,
@@ -224,7 +228,7 @@ async fn test_activate_virtual_actor_success() {
     use std::sync::atomic::{AtomicU64, Ordering};
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
     let test_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let actor_id = format!("test-actor-{}@test-node", test_id);
+    let actor_id = test_actor_id(&format!("test-actor-{test_id}"));
 
     let service_locator = create_test_service_locator().await;
     let factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
@@ -292,7 +296,7 @@ async fn test_activate_virtual_actor_already_active() {
     };
     manager
         .register(
-            "test-actor@test-node".to_string(),
+            test_actor_id("test-actor"),
             facet_box,
             "GenServer".to_string(),          // actor_type
             None,                             // config
@@ -309,7 +313,7 @@ async fn test_activate_virtual_actor_already_active() {
     // This is needed for is_active() to return true
     let behavior = Box::new(TestBehavior::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id("test-actor@test-node".to_string())
+        .with_id(test_actor_id("test-actor"))
         .build()
         .await
         .unwrap();
@@ -330,7 +334,7 @@ async fn test_activate_virtual_actor_already_active() {
 
     // Register the actor instance in the registry
     use plexspaces_core::MessageSender;
-    let actor_id = "test-actor@test-node".to_string();
+    let actor_id = test_actor_id("test-actor");
     let actor_ref = ActorRef::local(
         actor_id.clone(),
         "default".to_string(),
@@ -344,7 +348,7 @@ async fn test_activate_virtual_actor_already_active() {
     registry
         .register_actor(
             &ctx,
-            "test-actor@test-node".to_string(),
+            actor_id.clone(),
             wrapper,
             "TestActor".to_string(),
             None,
@@ -353,13 +357,13 @@ async fn test_activate_virtual_actor_already_active() {
         )
         .await;
     manager
-        .mark_activated(&"test-actor@test-node".to_string())
+        .mark_activated(&actor_id)
         .await
         .unwrap();
 
     // Try to activate - should return Ok immediately (actor is already active)
     let result = factory
-        .activate_virtual_actor(&"test-actor@test-node".to_string())
+        .activate_virtual_actor(&actor_id)
         .await;
     assert!(result.is_ok(), "Activation should succeed (already active)");
 }
@@ -371,7 +375,7 @@ async fn test_activate_virtual_actor_not_virtual() {
 
     // Try to activate non-virtual actor
     let result = factory
-        .activate_virtual_actor(&"regular-actor@test-node".to_string())
+        .activate_virtual_actor(&test_actor_id("regular-actor"))
         .await;
     assert!(result.is_err(), "Should fail for non-virtual actor");
     assert!(result
@@ -387,7 +391,7 @@ async fn test_activate_virtual_actor_not_found() {
 
     // Try to activate actor that was never registered - should fail because no metadata
     let result = factory
-        .activate_virtual_actor(&"test-actor@test-node".to_string())
+        .activate_virtual_actor(&test_actor_id("test-actor"))
         .await;
     assert!(
         result.is_err(),
@@ -408,7 +412,7 @@ async fn test_activate_virtual_actor_service_not_found() {
 
     // Try to activate without services registered
     let result = factory
-        .activate_virtual_actor(&"test-actor@test-node".to_string())
+        .activate_virtual_actor(&test_actor_id("test-actor"))
         .await;
     assert!(result.is_err(), "Should fail when ActorRegistry not found");
 }
@@ -418,7 +422,7 @@ async fn test_spawn_actor_success() {
     let service_locator = create_test_service_locator().await;
     let factory = ActorFactoryImpl::new_arc(service_locator).await;
 
-    let actor_id = "spawned-actor@test-node".to_string();
+    let actor_id = test_actor_id("spawned-actor");
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let result = factory
         .spawn_actor(
@@ -441,7 +445,7 @@ async fn test_spawn_actor_with_config() {
     let service_locator = create_test_service_locator().await;
     let factory = ActorFactoryImpl::new_arc(service_locator).await;
 
-    let actor_id = "spawned-actor-config@test-node".to_string();
+    let actor_id = test_actor_id("spawned-actor-config");
     let config = Some(plexspaces_proto::v1::actor::ActorConfig {
         max_mailbox_size: 1000,
         enable_persistence: false,
@@ -469,7 +473,7 @@ async fn test_spawn_actor_with_labels() {
     let service_locator = create_test_service_locator().await;
     let factory = ActorFactoryImpl::new_arc(service_locator).await;
 
-    let actor_id = "spawned-actor-labels@test-node".to_string();
+    let actor_id = test_actor_id("spawned-actor-labels");
     let mut labels = HashMap::new();
     labels.insert("namespace".to_string(), "production".to_string());
     labels.insert("env".to_string(), "prod".to_string());
@@ -496,7 +500,7 @@ async fn test_spawn_actor_normalize_id() {
     let factory = ActorFactoryImpl::new_arc(service_locator).await;
 
     // Test with actor ID without @ format
-    let actor_id = "spawned-actor".to_string();
+    let actor_id = test_actor_id("spawned-actor");
     let ctx = RequestContext::new_without_auth("internal".to_string(), "system".to_string());
     let result = factory
         .spawn_actor(
@@ -519,7 +523,7 @@ async fn test_spawn_built_actor_regular() {
     let factory = ActorFactoryImpl::new_arc(service_locator).await;
 
     // Spawn regular actor using spawn_actor
-    let actor_id = "regular-actor@test-node".to_string();
+    let actor_id = test_actor_id("regular-actor");
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
@@ -550,7 +554,7 @@ async fn test_spawn_built_actor_virtual_eager() {
     // Create virtual actor with eager activation
     let behavior = Box::new(TestBehavior::new());
     let mut actor = ActorBuilder::new(behavior)
-        .with_id("virtual-eager@test-node".to_string())
+        .with_id(test_actor_id("virtual-eager"))
         .build()
         .await
         .unwrap();
@@ -579,7 +583,7 @@ async fn test_spawn_built_actor_virtual_eager() {
     );
     assert!(
         registry
-            .get_actor_instance(&"virtual-eager@test-node".to_string())
+            .get_actor_instance(&test_actor_id("virtual-eager"))
             .await
             .is_some(),
         "eager virtual actor should use the same live runtime registration path as regular actors"
@@ -594,7 +598,7 @@ async fn test_spawn_built_actor_virtual_lazy() {
     use std::sync::atomic::{AtomicU64, Ordering};
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
     let test_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let actor_id = format!("virtual-lazy-{}@test-node", test_id);
+    let actor_id = test_actor_id(&format!("virtual-lazy-{test_id}"));
 
     let service_locator = create_test_service_locator().await;
     let registry = service_locator.actor_registry().await.unwrap();
@@ -642,7 +646,7 @@ async fn test_spawn_built_actor_virtual_prewarm() {
     use std::sync::atomic::{AtomicU64, Ordering};
     static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
     let test_id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let actor_id = format!("virtual-prewarm-{}@test-node", test_id);
+    let actor_id = test_actor_id(&format!("virtual-prewarm-{test_id}"));
 
     let service_locator = create_test_service_locator().await;
     let registry = service_locator.actor_registry().await.unwrap();
@@ -698,7 +702,7 @@ async fn test_spawn_built_actor_multiple_references() {
     let factory = ActorFactoryImpl::new_arc(service_locator).await;
 
     // Use spawn_actor instead - it doesn't have the multiple references issue
-    let actor_id = "multi-ref-actor@test-node".to_string();
+    let actor_id = test_actor_id("multi-ref-actor");
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
@@ -728,7 +732,7 @@ async fn test_spawn_built_actor_service_not_found() {
     let factory = ActorFactoryImpl::new_arc(service_locator).await;
 
     // Use spawn_actor - should fail when ActorRegistry not found
-    let actor_id = "test-actor@test-node".to_string();
+    let actor_id = test_actor_id("test-actor");
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
@@ -753,7 +757,7 @@ async fn test_spawn_built_actor_virtual_facet_not_found() {
     let factory = ActorFactoryImpl::new_arc(service_locator).await;
 
     // Use spawn_actor for regular actor (no virtual facet)
-    let actor_id = "no-facet-actor@test-node".to_string();
+    let actor_id = test_actor_id("no-facet-actor");
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "internal".to_string(),
         "system".to_string(),
@@ -787,7 +791,7 @@ async fn test_rebuild_virtual_actor_preserves_idle_timeout() {
     let factory = ActorFactoryImpl::new_arc(service_locator.clone()).await;
     let manager: Arc<VirtualActorManager> = service_locator.virtual_actor_manager().await.unwrap();
 
-    let actor_id = "idle-timeout-test@test-node".to_string();
+    let actor_id = test_actor_id("idle-timeout-test");
     let actor_type = "GenServer";
 
     // Step 1: Register type-level metadata with idle_timeout="10m" (non-default).

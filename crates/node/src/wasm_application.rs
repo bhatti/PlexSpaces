@@ -703,8 +703,20 @@ impl WasmApplication {
         // TODO(instance-pool): When config.use_instance_pool is true, checkout from per-module InstancePool
         // instead of runtime.instantiate() for faster spawn. Fits lightweight actors and worker pools.
         // See PROJECT_TRACKER.md.
-        // Actor IDs always use name:namespace@node_id format (namespace required for WASM apps).
-        let actor_id = format!("{}:{}@{}", child_spec.id, namespace, node.id());
+        // Actor identity is structured in memory and serialized canonically for the WASM host.
+        let actor_id = plexspaces_core::ActorId::new(
+            &child_spec.id,
+            &child_spec.id,
+            namespace,
+            node.id().as_str(),
+        )
+        .map_err(|e| {
+            ApplicationError::ActorSpawnFailed(
+                child_spec.id.clone(),
+                format!("Invalid WASM actor identity: {}", e),
+            )
+        })?
+        .to_string();
         let wasm_instance = runtime
             .instantiate(
                 module,

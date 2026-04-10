@@ -4,13 +4,19 @@
 // Tests for ActorServiceImpl::spawn_actor - local-only design (TDD)
 
 use plexspaces_core::{
-    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorRegistry, RequestContext,
+    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, RequestContext,
 };
 use plexspaces_object_registry::ObjectRegistry;
 use plexspaces_services::actor_service::ActorServiceImpl;
 use std::sync::Arc;
 
 // Helper to wrap ObjectRegistry for ActorRegistry
+fn canonical_actor_id(name: &str, actor_type: &str, namespace: &str, node_id: &str) -> String {
+    ActorId::new(name, actor_type, namespace, node_id)
+        .expect("valid actor id")
+        .to_string()
+}
+
 struct ObjectRegistryAdapter {
     inner: Arc<ObjectRegistry>,
 }
@@ -189,19 +195,19 @@ async fn test_spawn_actor_always_uses_local_node_id() {
         )
         .await;
     // With ActorFactory registered, spawn_actor should succeed or fail with a different error
-    // The key is that client input is treated as a base actor id and normalized
-    // through build_actor_id() with the request namespace and local node id.
+    // The key is that client input is treated as a logical actor name and normalized
+    // into a canonical ActorId with the request namespace and local node id.
     if let Ok(actor_ref) = result {
         assert!(
             actor_ref
                 .id()
-                .contains(&plexspaces_core::actor_id::build_actor_id(
+                .contains(&canonical_actor_id(
                     "test-actor",
                     "test-type",
-                    Some("test-namespace"),
+                    "test-namespace",
                     "local-node"
                 )),
-            "spawn should normalize a base actor id with build_actor_id"
+            "spawn should normalize a base actor id into a canonical actor id"
         );
     } else {
         // If it fails, the error should mention local node_id, not a different node
@@ -241,12 +247,8 @@ async fn test_spawn_actor_always_uses_local_node_id() {
     }
 
     // Test 3: canonical actor ids should remain canonical after normalization
-    let canonical_actor_id = plexspaces_core::actor_id::build_actor_id(
-        "explicit-id",
-        "test-type",
-        Some("test-namespace"),
-        "local-node",
-    );
+    let canonical_actor_id =
+        canonical_actor_id("explicit-id", "test-type", "test-namespace", "local-node");
     let result = actor_service
         .spawn_actor(
             &ctx,

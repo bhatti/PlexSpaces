@@ -381,7 +381,17 @@ impl ReminderFacet {
                     };
 
                     let actor_id_str = reg.actor_id.clone();
-                    let actor_id = ActorId::from(actor_id_str.clone());
+                    let actor_id = match ActorId::from_canonical(&actor_id_str) {
+                        Ok(actor_id) => actor_id,
+                        Err(error) => {
+                            tracing::warn!(
+                                actor_id = %actor_id_str,
+                                error = %error,
+                                "Skipping reminder with invalid canonical actor ID"
+                            );
+                            continue;
+                        }
+                    };
 
                     if let Some(actor_registry) = service_locator.actor_registry().await {
                         let is_active = actor_registry.is_actor_state_active(&actor_id).await;

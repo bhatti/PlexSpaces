@@ -3,7 +3,7 @@
 
 use super::test_helpers::{
     activate_virtual_actor, get_or_activate_actor_helper, lookup_actor_ref,
-    spawn_actor_builder_helper,
+    spawn_actor_builder_helper, test_runtime_actor_id,
 };
 use async_trait::async_trait;
 use plexspaces_actor::{Actor, ActorBuilder};
@@ -100,7 +100,12 @@ impl GenServer for TestActor {
             ctx.send_reply(
                 correlation_id,
                 &msg.sender_id,
-                msg.receiver_id.clone(),
+                ActorId::from_canonical(&msg.receiver_id).map_err(|e| {
+                    BehaviorError::ProcessingError(format!(
+                        "Failed to parse sender actor id for reply: {}",
+                        e
+                    ))
+                })?,
                 reply_msg,
             )
             .await
@@ -114,7 +119,7 @@ impl GenServer for TestActor {
 async fn test_get_or_activate_with_virtual_facet_eager() {
     // Test: get_or_activate_actor with VirtualActorFacet (eager activation) should work with ask()
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "test-actor@test-node".to_string();
+    let actor_id = test_runtime_actor_id("test-actor", "test-node");
 
     // Get or activate actor with VirtualActorFacet (eager)
     let core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
@@ -176,7 +181,7 @@ async fn test_get_or_activate_with_virtual_facet_eager() {
 async fn test_get_or_activate_with_virtual_facet_lazy() {
     // Test: get_or_activate_actor with VirtualActorFacet (lazy activation) should activate on first message
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
-    let actor_id: ActorId = "test-actor-lazy@test-node".to_string();
+    let actor_id = test_runtime_actor_id("test-actor-lazy", "test-node");
 
     // Get or activate actor with VirtualActorFacet (lazy)
     let core_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {

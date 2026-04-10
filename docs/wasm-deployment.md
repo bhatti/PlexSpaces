@@ -36,9 +36,9 @@ avoids any shared-database assumption and keeps per-node accounting aligned with
 Namespace is now **required** for all WASM deployments. It scopes all actors within an application and is used to construct actor IDs.
 
 - If not explicitly specified in the TOML config or API request, the namespace **defaults to the application name**.
-- Actor IDs use the format: **`name:namespace@node_id`**
+- Actor IDs use the canonical format: **`name//actor_type::namespace@node_id`**
 
-**Example**: An application named `my-app` deployed to node `node-1` without an explicit namespace will have actors with IDs like `my-app:my-app@node-1`.
+**Example**: An application named `my-app` deployed to node `node-1` without an explicit namespace will have actors with IDs like `my-app//my-app::my-app@node-1`.
 
 **Specifying in TOML config**:
 ```toml
@@ -1258,7 +1258,7 @@ WASM actors can communicate with each other using the **ask** pattern (request-r
 
 1. Caller actor invokes `host.ask(target_id, msg_type, payload, timeout_ms)`
 2. The SDK serializes the payload and calls the WIT `host.ask` function
-3. The Rust runtime creates a **temporary sender** actor (`ask-{correlation_id}@{node_id}`) with a `ReplyWaiter`
+3. The Rust runtime creates a **temporary sender** actor with a canonical temporary-sender `ActorId` and a `ReplyWaiter`
 4. A request message is created with `id = req-{ULID}` and routed to the target actor
 5. Target actor's `handle()` method processes the message and returns a result
 6. The runtime wraps the result in a reply message with `id = res-{ULID}` and sends it back to the temporary sender
@@ -1278,7 +1278,7 @@ class Coordinator:
     @handler("run")
     def run(self) -> dict:
         # Ask a worker to compute something (request-reply)
-        result = host.ask("worker-0:my-app@node-1", "compute", {"x": 42}, timeout_ms=5000)
+        result = host.ask("worker-0//worker::my-app@node-1", "compute", {"x": 42}, timeout_ms=5000)
         return {"status": "ok", "worker_result": result}
 
 @actor
@@ -1295,9 +1295,9 @@ RUST_LOG=plexspaces_application=debug,plexspaces_actor::routing=debug
 
 This will show:
 ```
-WASM ask: sending request via ActorRef  message_id=req-01JMX...  sender_id=coordinator:app@node  recipient_id=worker-0:app@node
-ask_helper: routing request to target  message_id=req-01JMX...  sender_id=ask-CORR@node  correlation_id=CORR
-WasmActor handle_message: sending reply  request_id=req-01JMX...  reply_id=res-01JMX...  reply_to=ask-CORR@node
+WASM ask: sending request via ActorRef  message_id=req-01JMX...  sender_id=coordinator//worker::app@node  recipient_id=worker-0//worker::app@node
+ask_helper: routing request to target  message_id=req-01JMX...  sender_id=ask_CORR//temp_sender::app@node  correlation_id=CORR
+WasmActor handle_message: sending reply  request_id=req-01JMX...  reply_id=res-01JMX...  reply_to=ask_CORR//temp_sender::app@node
 ask_helper: reply received  request_id=req-01JMX...  reply_id=res-01JMX...
 WASM ask: reply received  request_id=req-01JMX...  reply_id=res-01JMX...
 ```
@@ -1379,12 +1379,12 @@ WasmApplication
 
 Applications with supervisor trees create actors whose IDs incorporate the child spec ID, namespace, and node ID. The format is:
 
-**`child_spec_id:namespace@node_id`**
+**`child_spec_id//actor_type::namespace@node_id`**
 
 For example, given an application with namespace `my-app` deployed to `node-1` with a child spec ID of `worker-1`, the actor ID will be:
 
 ```
-worker-1:my-app@node-1
+worker-1//worker::my-app@node-1
 ```
 
 This format ensures that all actors within a supervisor tree are uniquely identifiable and properly scoped to their namespace, even when multiple applications share the same node.

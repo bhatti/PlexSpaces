@@ -8,13 +8,18 @@
 use plexspaces_actor::ActorBuilder;
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{
-    Actor, ActorContext, BehaviorError, BehaviorType, Message, RequestContext, ServiceLocator,
+    Actor, ActorContext, ActorId, BehaviorError, BehaviorType, Message, RequestContext,
+    ServiceLocator,
 };
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
+
+fn actor_id_from_message_receiver(receiver_id: &str) -> ActorId {
+    ActorId::from_canonical(receiver_id).expect("request receiver_id should be canonical")
+}
 
 /// Helper to create a proto Message
 fn create_message(payload: Vec<u8>) -> Message {
@@ -36,9 +41,24 @@ fn create_request_message(payload: Vec<u8>, receiver: &str) -> Message {
     }
 }
 
+fn test_actor_id(name: &str, node_id: &str, namespace: &str) -> ActorId {
+    ActorId::new(
+        name.to_string(),
+        "GenServer".to_string(),
+        namespace.to_string(),
+        node_id.to_string(),
+    )
+    .expect("test actor id should be valid")
+}
+
 /// Helper to set up a test node
 async fn setup_test_node(node_id: &str) -> (Arc<plexspaces_node::Node>, Arc<dyn ServiceLocator>) {
-    let node = Arc::new(NodeBuilder::new(node_id).build().await);
+    let node = Arc::new(
+        NodeBuilder::new(node_id)
+            .with_in_memory_backends()
+            .build()
+            .await,
+    );
     let service_locator = node.service_locator();
     (node, service_locator)
 }
@@ -110,7 +130,7 @@ impl GenServer for InputWorkerActor {
                             Some(msg.correlation_id.as_str())
                         },
                         sender_id,
-                        msg.receiver_id.clone(),
+                        actor_id_from_message_receiver(&msg.receiver_id),
                         reply_msg,
                     )
                     .await
@@ -189,7 +209,7 @@ impl GenServer for ProcessorWorkerActor {
                             Some(msg.correlation_id.as_str())
                         },
                         sender_id,
-                        msg.receiver_id.clone(),
+                        actor_id_from_message_receiver(&msg.receiver_id),
                         reply_msg,
                     )
                     .await
@@ -265,7 +285,7 @@ impl GenServer for OutputWorkerActor {
                             Some(msg.correlation_id.as_str())
                         },
                         sender_id,
-                        msg.receiver_id.clone(),
+                        actor_id_from_message_receiver(&msg.receiver_id),
                         reply_msg,
                     )
                     .await
@@ -293,8 +313,9 @@ async fn test_input_actor_processes_messages() {
 
     // Create input actor
     let input_actor = InputWorkerActor::new();
+    let input_actor_id = test_actor_id("input", "test-node", ctx.namespace());
     let input_ref = ActorBuilder::new(Box::new(input_actor))
-        .with_id("input@test-node".to_string())
+        .with_id(input_actor_id.to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -335,8 +356,9 @@ async fn test_processor_actor_filters_events() {
 
     // Create processor actor
     let processor_actor = ProcessorWorkerActor::new();
+    let processor_actor_id = test_actor_id("processor", "test-node", ctx.namespace());
     let processor_ref = ActorBuilder::new(Box::new(processor_actor))
-        .with_id("processor@test-node".to_string())
+        .with_id(processor_actor_id.to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -377,8 +399,9 @@ async fn test_output_actor_sends_events() {
 
     // Create output actor
     let output_actor = OutputWorkerActor::new();
+    let output_actor_id = test_actor_id("output", "test-node", ctx.namespace());
     let output_ref = ActorBuilder::new(Box::new(output_actor))
-        .with_id("output@test-node".to_string())
+        .with_id(output_actor_id.to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -421,24 +444,27 @@ async fn test_full_pipeline() {
 
     // Create all actors
     let input_actor = InputWorkerActor::new();
+    let input_actor_id = test_actor_id("input", "test-node", ctx.namespace());
     let input_ref = ActorBuilder::new(Box::new(input_actor))
-        .with_id("input@test-node".to_string())
+        .with_id(input_actor_id.to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
         .unwrap();
 
     let processor_actor = ProcessorWorkerActor::new();
+    let processor_actor_id = test_actor_id("processor", "test-node", ctx.namespace());
     let processor_ref = ActorBuilder::new(Box::new(processor_actor))
-        .with_id("processor@test-node".to_string())
+        .with_id(processor_actor_id.to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
         .unwrap();
 
     let output_actor = OutputWorkerActor::new();
+    let output_actor_id = test_actor_id("output", "test-node", ctx.namespace());
     let output_ref = ActorBuilder::new(Box::new(output_actor))
-        .with_id("output@test-node".to_string())
+        .with_id(output_actor_id.to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
@@ -516,24 +542,27 @@ async fn test_concurrent_pipeline_processing() {
 
     // Create actors
     let input_actor = InputWorkerActor::new();
+    let input_actor_id = test_actor_id("input", "test-node", ctx.namespace());
     let input_ref = ActorBuilder::new(Box::new(input_actor))
-        .with_id("input@test-node".to_string())
+        .with_id(input_actor_id.to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
         .unwrap();
 
     let processor_actor = ProcessorWorkerActor::new();
+    let processor_actor_id = test_actor_id("processor", "test-node", ctx.namespace());
     let processor_ref = ActorBuilder::new(Box::new(processor_actor))
-        .with_id("processor@test-node".to_string())
+        .with_id(processor_actor_id.to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await
         .unwrap();
 
     let output_actor = OutputWorkerActor::new();
+    let output_actor_id = test_actor_id("output", "test-node", ctx.namespace());
     let output_ref = ActorBuilder::new(Box::new(output_actor))
-        .with_id("output@test-node".to_string())
+        .with_id(output_actor_id.to_string())
         .with_namespace(ctx.namespace().to_string())
         .spawn(&ctx, service_locator.clone())
         .await

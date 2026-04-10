@@ -123,7 +123,7 @@ impl ExecutionContext {
         // Load cached effects from journal
         let entries = self
             .journal
-            .replay_from(&self.actor_id, from_sequence)
+            .replay_from(&self.actor_id.to_string(), from_sequence)
             .await?;
         let mut effects = self.cached_effects.write().await;
 
@@ -208,7 +208,7 @@ impl ExecutionContext {
                     })?;
                     self.journal
                         .record_side_effect(
-                            &self.actor_id,
+                            &self.actor_id.to_string(),
                             SideEffect::ExternalCall {
                                 service: "ctx".to_string(),
                                 method: name.to_string(),
@@ -255,7 +255,7 @@ impl ExecutionContext {
 
         // Journal the sleep
         self.journal
-            .record_side_effect(&self.actor_id, SideEffect::Sleep { duration_ms })
+            .record_side_effect(&self.actor_id.to_string(), SideEffect::Sleep { duration_ms })
             .await
             .map_err(|e| {
                 BehaviorError::ProcessingError(format!("Failed to journal sleep: {}", e))
@@ -286,7 +286,10 @@ impl ExecutionContext {
 
         // Journal the time access
         self.journal
-            .record_side_effect(&self.actor_id, SideEffect::TimeAccessed { timestamp: now })
+            .record_side_effect(
+                &self.actor_id.to_string(),
+                SideEffect::TimeAccessed { timestamp: now },
+            )
             .await
             .map_err(|e| {
                 BehaviorError::ProcessingError(format!("Failed to journal time: {}", e))
@@ -305,7 +308,7 @@ impl ExecutionContext {
             .record_promise_created(
                 promise_id,
                 PromiseMetadata {
-                    creator_id: self.actor_id.clone(),
+                    creator_id: self.actor_id.to_string(),
                     timeout_ms,
                     idempotency_key: None,
                 },
@@ -344,9 +347,13 @@ mod tests {
     use super::*;
     use plexspaces_persistence::MemoryJournal;
 
+    fn test_actor_id(name: &str) -> ActorId {
+        ActorId::new(name, "workflow", "default", "test-node").expect("valid actor id")
+    }
+
     #[tokio::test]
     async fn test_workflow_execution_context() {
-        let actor_id = "test-workflow".to_string();
+        let actor_id = test_actor_id("test-workflow");
         let journal = Arc::new(MemoryJournal::new());
         let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
@@ -367,7 +374,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_deterministic_replay() {
-        let actor_id = "test-workflow".to_string();
+        let actor_id = test_actor_id("test-workflow");
         let journal = Arc::new(MemoryJournal::new());
 
         // First execution
@@ -395,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_promise() {
-        let actor_id = "test-workflow".to_string();
+        let actor_id = test_actor_id("test-workflow");
         let journal = Arc::new(MemoryJournal::new());
         let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
@@ -414,7 +421,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ctx_sleep() {
-        let actor_id = "test-workflow".to_string();
+        let actor_id = test_actor_id("test-workflow");
         let journal = Arc::new(MemoryJournal::new());
         let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
@@ -434,7 +441,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ctx_now() {
-        let actor_id = "test-workflow".to_string();
+        let actor_id = test_actor_id("test-workflow");
         let journal = Arc::new(MemoryJournal::new());
         let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
@@ -449,7 +456,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_with_retry_success_first_try() {
-        let actor_id = "test-retry".to_string();
+        let actor_id = test_actor_id("test-retry");
         let journal = Arc::new(MemoryJournal::new());
         let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
@@ -474,7 +481,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_with_retry_success_after_retry() {
-        let actor_id = "test-retry".to_string();
+        let actor_id = test_actor_id("test-retry");
         let journal = Arc::new(MemoryJournal::new());
         let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
@@ -503,7 +510,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_with_retry_fails_after_max_attempts() {
-        let actor_id = "test-retry".to_string();
+        let actor_id = test_actor_id("test-retry");
         let journal = Arc::new(MemoryJournal::new());
         let ctx = ExecutionContext::new(actor_id.clone(), journal.clone());
 
@@ -529,7 +536,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_with_retry_replay_returns_cached() {
-        let actor_id = "test-retry-replay".to_string();
+        let actor_id = test_actor_id("test-retry-replay");
         let journal = Arc::new(MemoryJournal::new());
 
         {

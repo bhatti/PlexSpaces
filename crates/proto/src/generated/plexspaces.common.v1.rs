@@ -33,6 +33,28 @@ pub struct Metadata {
     #[prost(map="string, message", tag="6")]
     pub annotations: ::std::collections::HashMap<::prost::alloc::string::String, ::prost_types::Any>,
 }
+/// Structured actor identity.
+///
+/// The canonical string form is `{name}//{actor_type}::{namespace}@{node_id}`.
+/// Construct actor IDs from fields, and only derive the canonical string for
+/// storage or display.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ActorId {
+    /// User-specified actor name. Must be unique within the actor type,
+    /// namespace, and node scope.
+    #[prost(string, tag="1")]
+    pub name: ::prost::alloc::string::String,
+    /// Actor type from behavior registration.
+    #[prost(string, tag="2")]
+    pub actor_type: ::prost::alloc::string::String,
+    /// Namespace for tenancy and application isolation.
+    #[prost(string, tag="3")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Node where the actor currently resides.
+    #[prost(string, tag="4")]
+    pub node_id: ::prost::alloc::string::String,
+}
 /// Standard error details
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -464,12 +486,11 @@ pub struct Message {
     /// Example: "01HN9QV1W6EZGQC0P9XYZMR4M1"
     #[prost(string, tag="1")]
     pub id: ::prost::alloc::string::String,
-    /// Sender actor/producer ID (optional for anonymous messages)
-    /// Example: "user-service@node-1", "kafka-producer-123"
+    /// Canonical ActorId string or temporary sender routing ID.
+    /// Temporary senders use canonical ActorId strings; there is no separate temp syntax.
     #[prost(string, tag="2")]
     pub sender_id: ::prost::alloc::string::String,
-    /// Receiver actor ID (for point-to-point messaging)
-    /// Example: "payment-processor@node-2"
+    /// Canonical ActorId string or temporary sender routing ID for replies.
     /// Note: For pub/sub, use 'channel' field instead
     #[prost(string, tag="3")]
     pub receiver_id: ::prost::alloc::string::String,
@@ -530,7 +551,7 @@ pub struct Message {
     pub correlation_id: ::prost::alloc::string::String,
     /// Reply-to address (channel or actor ID for responses)
     /// Tells receiver where to send the response
-    /// Example: "response-queue-42", "callback-actor@node-1"
+    /// Example: "response-queue-42", "callback-actor"
     #[prost(string, tag="14")]
     pub reply_to: ::prost::alloc::string::String,
     // ==================== PARTITIONING ====================

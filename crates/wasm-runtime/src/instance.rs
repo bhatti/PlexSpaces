@@ -7,6 +7,7 @@
 
 use crate::{HostFunctions, WasmCapabilities, WasmError, WasmModule, WasmResult};
 use hex;
+use plexspaces_core::ActorId;
 use plexspaces_core::ChannelService;
 use std::sync::Arc;
 #[cfg(feature = "component-model")]
@@ -277,6 +278,11 @@ impl WasmInstance {
 
         // Store host_functions in Arc for sharing between traditional and component contexts
         let host_functions_arc = Arc::new(host_functions);
+        let parsed_actor_id = ActorId::from_canonical(&actor_id).map_err(|err| {
+            WasmError::ActorFunctionError(format!(
+                "invalid canonical actor id for wasm instance '{actor_id}': {err}"
+            ))
+        })?;
 
         // Create context
         let context = InstanceContext {
@@ -365,7 +371,7 @@ impl WasmInstance {
                             .build();
 
                         let plexspaces_host = crate::component_host::PlexspacesHost::new(
-                            actor_id.clone(),
+                            parsed_actor_id.clone(),
                             context_clone.host_functions.clone(),
                         );
                         // Use provided TupleSpaceProvider or None
@@ -377,46 +383,46 @@ impl WasmInstance {
                             resource_table: wasmtime_wasi::ResourceTable::new(),
                             plexspaces_host,
                             logging_impl: crate::component_host::LoggingImpl {
-                                actor_id: actor_id.clone(),
+                                actor_id: parsed_actor_id.clone(),
                             },
                             messaging_impl: crate::component_host::MessagingImpl::new(
-                                actor_id.clone(),
+                                parsed_actor_id.clone(),
                                 context_clone.host_functions.clone(),
                             ),
                             tuplespace_impl: crate::component_host::TuplespaceImpl::new(
                                 tuplespace_provider.clone(),
-                                actor_id.clone(),
+                                parsed_actor_id.clone(),
                             ),
                             channels_impl: crate::component_host::ChannelsImpl::new(
                                 context_clone.host_functions.clone(),
                             ),
                             durability_impl: crate::component_host::DurabilityImpl::new(
-                                actor_id.clone(),
+                                parsed_actor_id.clone(),
                                 context_clone.host_functions.clone(),
                             ),
                             workflow_impl: crate::component_host::WorkflowImpl,
                             blob_impl: crate::component_host::BlobImpl {
-                                actor_id: actor_id.clone(),
+                                actor_id: parsed_actor_id.clone(),
                                 host_functions: context_clone.host_functions.clone(),
                             },
                             keyvalue_impl: crate::component_host::KeyValueImpl {
-                                actor_id: actor_id.clone(),
+                                actor_id: parsed_actor_id.clone(),
                                 host_functions: context_clone.host_functions.clone(),
                             },
                             process_groups_impl: crate::component_host::ProcessGroupsImpl {
-                                actor_id: actor_id.clone(),
+                                actor_id: parsed_actor_id.clone(),
                                 host_functions: context_clone.host_functions.clone(),
                             },
                             locks_impl: crate::component_host::LocksImpl {
-                                actor_id: actor_id.clone(),
+                                actor_id: parsed_actor_id.clone(),
                                 host_functions: context_clone.host_functions.clone(),
                             },
                             registry_impl: crate::component_host::RegistryImpl {
-                                actor_id: actor_id.clone(),
+                                actor_id: parsed_actor_id.clone(),
                                 host_functions: context_clone.host_functions.clone(),
                             },
                             simple_host_impl: crate::simple_component_host::SimpleHostImpl::new(
-                                actor_id.clone(),
+                                parsed_actor_id.clone(),
                                 context_clone.host_functions.clone(),
                                 tuplespace_provider.clone(),
                             ),
@@ -1651,55 +1657,61 @@ impl WasmInstance {
             .env("PATH", "/")
             .build();
         let tuplespace_provider = self.tuplespace_provider.clone();
+        let parsed_actor_id = ActorId::from_canonical(&self.actor_id).map_err(|err| {
+            WasmError::ActorFunctionError(format!(
+                "invalid canonical actor id for wasm component '{}': {err}",
+                self.actor_id
+            ))
+        })?;
         let component_ctx = ComponentContext {
             instance_ctx: instance_ctx.clone(),
             wasi_ctx,
             resource_table: wasmtime_wasi::ResourceTable::new(),
             plexspaces_host: crate::component_host::PlexspacesHost::new(
-                self.actor_id.clone(),
+                parsed_actor_id.clone(),
                 instance_ctx.host_functions.clone(),
             ),
             logging_impl: crate::component_host::LoggingImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
             },
             messaging_impl: crate::component_host::MessagingImpl::new(
-                self.actor_id.clone(),
+                parsed_actor_id.clone(),
                 instance_ctx.host_functions.clone(),
             ),
             tuplespace_impl: crate::component_host::TuplespaceImpl::new(
                 tuplespace_provider.clone(),
-                self.actor_id.clone(),
+                parsed_actor_id.clone(),
             ),
             channels_impl: crate::component_host::ChannelsImpl::new(
                 instance_ctx.host_functions.clone(),
             ),
             durability_impl: crate::component_host::DurabilityImpl::new(
-                self.actor_id.clone(),
+                parsed_actor_id.clone(),
                 instance_ctx.host_functions.clone(),
             ),
             workflow_impl: crate::component_host::WorkflowImpl,
             blob_impl: crate::component_host::BlobImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
             keyvalue_impl: crate::component_host::KeyValueImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
             process_groups_impl: crate::component_host::ProcessGroupsImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
             locks_impl: crate::component_host::LocksImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
             registry_impl: crate::component_host::RegistryImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
             simple_host_impl: crate::simple_component_host::SimpleHostImpl::new(
-                self.actor_id.clone(),
+                parsed_actor_id.clone(),
                 instance_ctx.host_functions.clone(),
                 tuplespace_provider.clone(),
             ),
@@ -1793,55 +1805,61 @@ impl WasmInstance {
             .env("PATH", "/")
             .build();
         let tuplespace_provider = self.tuplespace_provider.clone();
+        let parsed_actor_id = ActorId::from_canonical(&self.actor_id).map_err(|err| {
+            WasmError::ActorFunctionError(format!(
+                "invalid canonical actor id for wasm component '{}': {err}",
+                self.actor_id
+            ))
+        })?;
         let component_ctx = ComponentContext {
             instance_ctx: instance_ctx.clone(),
             wasi_ctx,
             resource_table: wasmtime_wasi::ResourceTable::new(),
             plexspaces_host: crate::component_host::PlexspacesHost::new(
-                self.actor_id.clone(),
+                parsed_actor_id.clone(),
                 instance_ctx.host_functions.clone(),
             ),
             logging_impl: crate::component_host::LoggingImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
             },
             messaging_impl: crate::component_host::MessagingImpl::new(
-                self.actor_id.clone(),
+                parsed_actor_id.clone(),
                 instance_ctx.host_functions.clone(),
             ),
             tuplespace_impl: crate::component_host::TuplespaceImpl::new(
                 tuplespace_provider.clone(),
-                self.actor_id.clone(),
+                parsed_actor_id.clone(),
             ),
             channels_impl: crate::component_host::ChannelsImpl::new(
                 instance_ctx.host_functions.clone(),
             ),
             durability_impl: crate::component_host::DurabilityImpl::new(
-                self.actor_id.clone(),
+                parsed_actor_id.clone(),
                 instance_ctx.host_functions.clone(),
             ),
             workflow_impl: crate::component_host::WorkflowImpl,
             blob_impl: crate::component_host::BlobImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
             keyvalue_impl: crate::component_host::KeyValueImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
             process_groups_impl: crate::component_host::ProcessGroupsImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
             locks_impl: crate::component_host::LocksImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
             registry_impl: crate::component_host::RegistryImpl {
-                actor_id: self.actor_id.clone(),
+                actor_id: parsed_actor_id.clone(),
                 host_functions: instance_ctx.host_functions.clone(),
             },
             simple_host_impl: crate::simple_component_host::SimpleHostImpl::new(
-                self.actor_id.clone(),
+                parsed_actor_id.clone(),
                 instance_ctx.host_functions.clone(),
                 tuplespace_provider.clone(),
             ),

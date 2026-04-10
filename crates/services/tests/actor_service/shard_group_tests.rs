@@ -28,7 +28,7 @@ use plexspaces_proto::actor::v1::{
     MapShardGroupRequest, PartitionStrategy, RebalancePolicy, ScatterGatherRequest,
     SendToShardRequest, ShardGroupAggregationStrategy, ShardGroupState, SpawnActorRequest,
 };
-use plexspaces_proto::common::v1::{Empty, Message as ProtoMessage};
+use plexspaces_proto::common::v1::Message as ProtoMessage;
 use plexspaces_proto::node::v1::{NodeCapacity, NodeRegistration};
 use plexspaces_services::actor_service::{ActorServiceImpl, ActorServiceWrapper};
 use std::collections::HashMap;
@@ -972,7 +972,7 @@ impl GenServer for InitAwareMetricsActor {
                     Some(msg.correlation_id.as_str())
                 },
                 &msg.sender_id,
-                msg.receiver_id.clone(),
+                ctx.actor_id().clone(),
                 reply_msg,
             )
             .await

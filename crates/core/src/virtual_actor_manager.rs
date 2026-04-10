@@ -40,7 +40,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::actor_id::parse_actor_id;
 use crate::virtual_actor_lifecycle_facet::VirtualActorLifecycleFacet;
 use crate::virtual_actor_registration::VirtualActorDefinitionRegistration;
 use crate::Service;
@@ -364,7 +363,7 @@ impl VirtualActorManager {
             }
             Ok(())
         } else {
-            Err(VirtualActorError::ActorNotFound(actor_id.clone()))
+            Err(VirtualActorError::ActorNotFound(actor_id.to_string()))
         }
     }
 
@@ -383,13 +382,9 @@ impl VirtualActorManager {
         }
         drop(virtual_actors);
 
-        // Check if actor type is virtual (for WASM and Rust applications)
-        // Use actor_id factory to parse actor_id and extract actor_type
-        if let Ok(parsed) = parse_actor_id(actor_id) {
-            let virtual_types = self.registry.virtual_actor_types().read().await;
-            if virtual_types.contains_key(&parsed.actor_type) {
-                return true;
-            }
+        let virtual_types = self.registry.virtual_actor_types().read().await;
+        if virtual_types.contains_key(actor_id.actor_type()) {
+            return true;
         }
 
         false
@@ -600,7 +595,7 @@ impl VirtualActorManager {
         let virtual_actors = self.registry.virtual_actors().read().await;
         let virtual_meta = virtual_actors
             .get(actor_id)
-            .ok_or_else(|| VirtualActorError::ActorNotFound(actor_id.clone()))?;
+            .ok_or_else(|| VirtualActorError::ActorNotFound(actor_id.to_string()))?;
 
         virtual_meta.facet.clone().ok_or_else(|| {
             VirtualActorError::ActivationFailed(format!(
@@ -674,12 +669,7 @@ impl VirtualActorManager {
                 metadata.actor_type.clone()
             } else {
                 // Try type-level registration
-                use crate::actor_id::parse_actor_id;
-                if let Ok(parsed) = parse_actor_id(actor_id) {
-                    parsed.actor_type
-                } else {
-                    return Ok(()); // Can't track if we can't determine type
-                }
+                actor_id.actor_type().to_string()
             }
         };
 
@@ -815,12 +805,7 @@ impl VirtualActorManager {
             if let Some(metadata) = virtual_actors.get(actor_id) {
                 metadata.actor_type.clone()
             } else {
-                use crate::actor_id::parse_actor_id;
-                if let Ok(parsed) = parse_actor_id(actor_id) {
-                    parsed.actor_type
-                } else {
-                    return; // Can't track if we can't determine type
-                }
+                actor_id.actor_type().to_string()
             }
         };
 
@@ -849,12 +834,7 @@ impl VirtualActorManager {
             if let Some(metadata) = virtual_actors.get(actor_id) {
                 metadata.actor_type.clone()
             } else {
-                use crate::actor_id::parse_actor_id;
-                if let Ok(parsed) = parse_actor_id(actor_id) {
-                    parsed.actor_type
-                } else {
-                    return; // Can't track if we can't determine type
-                }
+                actor_id.actor_type().to_string()
             }
         };
 
@@ -1184,7 +1164,7 @@ mod tests {
     #[tokio::test]
     async fn test_unregister_namespace_removes_virtual_types_and_instances() {
         let manager = create_test_manager().await;
-        let actor_id = "cart-1//abstractions::demo@test-node".to_string();
+        let actor_id = ActorId::new("cart-1", "abstractions", "demo", "test-node").unwrap();
 
         manager
             .register(
@@ -1291,11 +1271,15 @@ mod tests {
         ))
     }
 
+    fn test_actor_id(name: &str) -> ActorId {
+        ActorId::new(name, "GenServer", "namespace", "node-1").unwrap()
+    }
+
     #[tokio::test]
     async fn test_register_virtual_actor_with_required_actor_type() {
         let manager = create_test_manager().await;
 
-        let actor_id = "test-actor@node-1".to_string();
+        let actor_id = test_actor_id("test-actor");
         let actor_type = "GenServer".to_string();
         let facet = create_test_virtual_actor_facet();
 
@@ -1324,7 +1308,7 @@ mod tests {
     async fn test_register_virtual_actor_with_config() {
         let manager = create_test_manager().await;
 
-        let actor_id = "configured-actor@node-1".to_string();
+        let actor_id = test_actor_id("configured-actor");
         let actor_type = "GenServer".to_string();
         let facet = create_test_virtual_actor_facet();
         let config = Some(ActorConfig {
@@ -1363,7 +1347,7 @@ mod tests {
     async fn test_register_virtual_actor_preserves_reactivation_metadata() {
         let manager = create_test_manager().await;
 
-        let actor_id = "configured-actor@node-1".to_string();
+        let actor_id = test_actor_id("configured-actor");
         let actor_type = "GenServer".to_string();
         let facet = create_test_virtual_actor_facet();
         let mut labels = HashMap::new();
@@ -1399,7 +1383,7 @@ mod tests {
     async fn test_register_virtual_actor_empty_actor_type() {
         let manager = create_test_manager().await;
 
-        let actor_id = "test-actor@node-1".to_string();
+        let actor_id = test_actor_id("test-actor");
         let facet = create_test_virtual_actor_facet();
 
         // Try to register with empty actor_type - should fail
@@ -1448,13 +1432,8 @@ mod tests {
 
         // Check if actor ID matching the type is virtual
         // Format: {id}//{actor_type}::{namespace}@{node_id}
-        use crate::actor_id::build_actor_id;
-        let actor_id = build_actor_id(
-            "user-123",
-            "read-state-tracker",
-            Some("namespace"),
-            "node-1",
-        );
+        let actor_id = ActorId::new("user-123", "read-state-tracker", "namespace", "node-1")
+            .unwrap();
 
         assert!(manager.is_virtual(&actor_id).await);
     }
@@ -1463,7 +1442,7 @@ mod tests {
     async fn test_is_virtual_with_individual_registration() {
         let manager = create_test_manager().await;
 
-        let actor_id = "individual-actor@node-1".to_string();
+        let actor_id = test_actor_id("individual-actor");
         let actor_type = "GenServer".to_string();
         let facet = create_test_virtual_actor_facet();
 
@@ -1489,7 +1468,7 @@ mod tests {
     async fn test_is_virtual_not_registered() {
         let manager = create_test_manager().await;
 
-        let actor_id = "not-virtual@node-1".to_string();
+        let actor_id = test_actor_id("not-virtual");
 
         assert!(!manager.is_virtual(&actor_id).await);
     }
@@ -1533,7 +1512,7 @@ mod tests {
     async fn test_update_metadata() {
         let manager = create_test_manager().await;
 
-        let actor_id = "test-actor@node-1".to_string();
+        let actor_id = test_actor_id("test-actor");
         let actor_type = "GenServer".to_string();
         let facet = create_test_virtual_actor_facet();
 
@@ -1629,7 +1608,7 @@ mod tests {
 
         manager
             .register(
-                "cart-1//durable-counter::test-ns@test-node".to_string(),
+                ActorId::new("cart-1", "durable-counter", "test-ns", "test-node").unwrap(),
                 create_test_virtual_actor_facet(),
                 actor_type.clone(),
                 None,
@@ -1643,7 +1622,7 @@ mod tests {
             .unwrap();
 
         let metadata = manager
-            .get_metadata(&"cart-1//durable-counter::test-ns@test-node".to_string())
+            .get_metadata(&ActorId::new("cart-1", "durable-counter", "test-ns", "test-node").unwrap())
             .await
             .expect("instance metadata should exist");
         assert_eq!(metadata.facet_config, Some(facet_config));
@@ -1661,7 +1640,7 @@ mod tests {
 
         let result = manager
             .update_metadata(
-                &"nonexistent@node-1".to_string(),
+                &test_actor_id("nonexistent"),
                 "NewType".to_string(),
                 None,
             )
@@ -1678,7 +1657,7 @@ mod tests {
     async fn test_take_pending_messages() {
         let manager = create_test_manager().await;
 
-        let actor_id = "test-actor@node-1".to_string();
+        let actor_id = test_actor_id("test-actor");
 
         // Initially no pending messages
         let messages = manager.take_pending_messages(&actor_id).await;
@@ -1714,7 +1693,7 @@ mod tests {
     async fn test_queue_message() {
         let manager = create_test_manager().await;
 
-        let actor_id = "test-actor@node-1".to_string();
+        let actor_id = test_actor_id("test-actor");
         let message = Message {
             id: "msg1".to_string(),
             ..Default::default()
@@ -1733,7 +1712,7 @@ mod tests {
     async fn test_get_facet() {
         let manager = create_test_manager().await;
 
-        let actor_id = "test-actor@node-1".to_string();
+        let actor_id = test_actor_id("test-actor");
         let actor_type = "GenServer".to_string();
         let facet = create_test_virtual_actor_facet();
 
@@ -1761,7 +1740,7 @@ mod tests {
     async fn test_get_facet_not_found() {
         let manager = create_test_manager().await;
 
-        let result = manager.get_facet(&"nonexistent@node-1".to_string()).await;
+        let result = manager.get_facet(&test_actor_id("nonexistent")).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             VirtualActorError::ActorNotFound(_) => {}
@@ -1793,8 +1772,8 @@ mod tests {
 
         // Try to get facet for type-level registration - should fail
         // (type-level registrations don't have facet instances, only config)
-        use crate::actor_id::build_actor_id;
-        let actor_id = build_actor_id("instance-1", "test-type", Some("namespace"), "node-1");
+        let actor_id = ActorId::new("instance-1", "test-type", "namespace", "node-1")
+            .unwrap();
 
         // This actor_id is virtual (type-level) but has no facet instance
         assert!(manager.is_virtual(&actor_id).await);
@@ -1813,7 +1792,7 @@ mod tests {
     async fn test_mark_activated() {
         let manager = create_test_manager().await;
 
-        let actor_id = "test-actor@node-1".to_string();
+        let actor_id = test_actor_id("test-actor");
         let actor_type = "GenServer".to_string();
         let facet = create_test_virtual_actor_facet();
 
@@ -1869,7 +1848,7 @@ mod tests {
     async fn test_mark_activated_not_virtual() {
         let manager = create_test_manager().await;
 
-        let actor_id = "not-virtual@node-1".to_string();
+        let actor_id = ActorId::new("not-virtual", "GenServer", "namespace", "node-1").unwrap();
 
         let result = manager.mark_activated(&actor_id).await;
         assert!(result.is_err());
@@ -1883,7 +1862,7 @@ mod tests {
     async fn test_is_active() {
         let manager = create_test_manager().await;
 
-        let actor_id = "test-actor@node-1".to_string();
+        let actor_id = ActorId::new("test-actor", "GenServer", "namespace", "node-1").unwrap();
 
         // Not registered, should return false
         assert!(!manager.is_active(&actor_id).await);

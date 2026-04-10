@@ -45,6 +45,18 @@ use plexspaces_core::{ActorError, ActorId, ActorRef as CoreActorRef, ServiceLoca
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_persistence::MemoryJournal;
 
+fn test_actor_id(name: &str) -> ActorId {
+    ActorId::new(name, "GenServer", "test", "localhost").expect("valid test actor id")
+}
+
+fn actor_id_from_legacy_test_id(id: &str) -> ActorId {
+    if let Ok(actor_id) = ActorId::from_canonical(id) {
+        return actor_id;
+    }
+    let name = id.split('@').next().unwrap_or(id);
+    test_actor_id(name)
+}
+
 /// Helper function to create a supervisor with a fully-initialized ServiceLocator.
 /// Uses create_default_service_locator so ActorRegistry is available for register_in_registry.
 async fn create_supervisor_with_locator(
@@ -53,7 +65,7 @@ async fn create_supervisor_with_locator(
 ) -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(None, None).await;
-    Supervisor::new(id, strategy, service_locator)
+    Supervisor::new(actor_id_from_legacy_test_id(&id).to_string(), strategy, service_locator)
 }
 
 /// Helper function to create a ChildSpec with sync factory
@@ -89,7 +101,8 @@ fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
         });
 
     // Create core ActorRef (now accepted by ChildSpec::worker_sync)
-    let actor_ref = CoreActorRef::new(id.clone()).expect("Failed to create actor ref");
+    let actor_ref =
+        CoreActorRef::new(actor_id_from_legacy_test_id(&id)).expect("Failed to create actor ref");
 
     // Convert RestartPolicy to RestartStrategy
     let restart_strategy = match restart {
@@ -99,7 +112,13 @@ fn create_child_spec(id: String, restart: RestartPolicy) -> ChildSpec {
         RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
     };
 
-    ChildSpec::worker_sync(id.clone(), id, sync_factory, actor_ref).with_restart(restart_strategy)
+    ChildSpec::worker_sync(
+        id.clone(),
+        actor_id_from_legacy_test_id(&id).to_string(),
+        sync_factory,
+        actor_ref,
+    )
+    .with_restart(restart_strategy)
 }
 
 // ============================================================================
@@ -126,7 +145,7 @@ async fn test_two_level_supervision_tree() {
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(None, None).await;
     let (mut root_supervisor, mut root_events) = Supervisor::new(
-        "root-supervisor".to_string(),
+        test_actor_id("root-supervisor").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -138,7 +157,7 @@ async fn test_two_level_supervision_tree() {
 
     // Create child supervisor (OneForAll)
     let (mut child_supervisor, mut child_events) = Supervisor::new(
-        "child-supervisor".to_string(),
+        test_actor_id("child-supervisor").to_string(),
         SupervisionStrategy::OneForAll {
             max_restarts: 3,
             within_seconds: 60,
@@ -152,7 +171,7 @@ async fn test_two_level_supervision_tree() {
     let journal = Arc::new(MemoryJournal::new());
 
     for i in 1..=2 {
-        let actor_id = format!("actor-{}@localhost", i);
+        let actor_id = test_actor_id(&format!("actor-{}", i)).to_string();
         let spec = create_child_spec(actor_id.clone(), RestartPolicy::Permanent);
 
         child_supervisor.add_child(spec).await.unwrap();
@@ -199,7 +218,7 @@ async fn test_two_level_supervision_tree() {
 async fn test_three_level_supervision_tree() {
     // Create root supervisor
     let (root_supervisor, mut root_events) = create_supervisor_with_locator(
-        "root-supervisor".to_string(),
+        test_actor_id("root-supervisor").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -230,7 +249,7 @@ async fn test_three_level_supervision_tree() {
 
     // Add actors to mid-level supervisor 1
     for i in 1..=2 {
-        let actor_id = format!("actor-{}@localhost", i);
+        let actor_id = test_actor_id(&format!("actor-{}", i)).to_string();
         let spec = create_child_spec(actor_id.clone(), RestartPolicy::Permanent);
         mid1_supervisor.add_child(spec).await.unwrap();
         println!("✅ Added actor-{} to mid-supervisor-1", i);
@@ -238,7 +257,7 @@ async fn test_three_level_supervision_tree() {
 
     // Add actors to mid-level supervisor 2
     for i in 3..=4 {
-        let actor_id = format!("actor-{}@localhost", i);
+        let actor_id = test_actor_id(&format!("actor-{}", i)).to_string();
         let spec = create_child_spec(actor_id.clone(), RestartPolicy::Permanent);
 
         mid2_supervisor.add_child(spec).await.unwrap();
@@ -274,7 +293,7 @@ async fn test_three_level_supervision_tree() {
     let event1 = root_events.recv().await.unwrap();
     match event1 {
         SupervisorEvent::ChildStarted(id) => {
-            assert_eq!(id, "mid-supervisor-1");
+            assert_eq!(id.name(), "mid-supervisor-1");
             println!("✅ Received ChildStarted event for mid-supervisor-1");
         }
         _ => panic!("Expected ChildStarted for mid-supervisor-1"),
@@ -283,7 +302,7 @@ async fn test_three_level_supervision_tree() {
     let event2 = root_events.recv().await.unwrap();
     match event2 {
         SupervisorEvent::ChildStarted(id) => {
-            assert_eq!(id, "mid-supervisor-2");
+            assert_eq!(id.name(), "mid-supervisor-2");
             println!("✅ Received ChildStarted event for mid-supervisor-2");
         }
         _ => panic!("Expected ChildStarted for mid-supervisor-2"),
@@ -317,7 +336,7 @@ async fn test_three_level_supervision_tree() {
 async fn test_failure_isolation_across_branches() {
     // Create root supervisor with OneForOne strategy (isolates branches)
     let (root_supervisor, mut root_events) = create_supervisor_with_locator(
-        "root-supervisor".to_string(),
+        test_actor_id("root-supervisor").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 5,
             within_seconds: 60,
@@ -349,7 +368,7 @@ async fn test_failure_isolation_across_branches() {
 
     // Add 2 actors to Branch1
     for i in 1..=2 {
-        let actor_id = format!("branch1-actor-{}@localhost", i);
+        let actor_id = test_actor_id(&format!("branch1-actor-{}", i)).to_string();
         let spec = create_child_spec(actor_id.clone(), RestartPolicy::Permanent);
         branch1_supervisor.add_child(spec).await.unwrap();
         println!("✅ Added {} to branch1", actor_id);
@@ -357,7 +376,7 @@ async fn test_failure_isolation_across_branches() {
 
     // Add 2 actors to Branch2
     for i in 3..=4 {
-        let actor_id = format!("branch2-actor-{}@localhost", i);
+        let actor_id = test_actor_id(&format!("branch2-actor-{}", i)).to_string();
         let spec = create_child_spec(actor_id.clone(), RestartPolicy::Permanent);
 
         branch2_supervisor.add_child(spec).await.unwrap();
@@ -437,7 +456,7 @@ async fn test_failure_isolation_across_branches() {
 async fn test_cascading_shutdown() {
     // Create root supervisor
     let (mut root_supervisor, mut root_events) = create_supervisor_with_locator(
-        "root-supervisor".to_string(),
+        test_actor_id("root-supervisor").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -468,14 +487,14 @@ async fn test_cascading_shutdown() {
 
     // Add actors to mid-level supervisors
     for i in 1..=2 {
-        let actor_id = format!("actor-{}@localhost", i);
+        let actor_id = test_actor_id(&format!("actor-{}", i)).to_string();
         let j = journal.clone();
         let spec = create_test_actor(actor_id.clone());
         mid1_supervisor.add_child(spec).await.unwrap();
     }
 
     for i in 3..=4 {
-        let actor_id = format!("actor-{}@localhost", i);
+        let actor_id = test_actor_id(&format!("actor-{}", i)).to_string();
         let spec = create_test_actor(actor_id.clone());
         mid2_supervisor.add_child(spec).await.unwrap();
     }
@@ -640,7 +659,7 @@ async fn test_dynamic_tree_modification() {
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(None, None).await;
     let (root_supervisor, mut root_events) = Supervisor::new(
-        "root-supervisor".to_string(),
+        test_actor_id("root-supervisor").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -652,7 +671,7 @@ async fn test_dynamic_tree_modification() {
 
     // Create and add first mid-level supervisor
     let (mid1_supervisor, mid1_events) = Supervisor::new(
-        "mid-supervisor-1".to_string(),
+        test_actor_id("mid-supervisor-1").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -675,7 +694,7 @@ async fn test_dynamic_tree_modification() {
     let event = root_events.recv().await.unwrap();
     match event {
         SupervisorEvent::ChildStarted(id) => {
-            assert_eq!(id, "mid-supervisor-1");
+            assert_eq!(id.name(), "mid-supervisor-1");
             println!("✅ Added mid-supervisor-1 dynamically");
         }
         _ => panic!("Expected ChildStarted for mid-supervisor-1"),
@@ -683,7 +702,7 @@ async fn test_dynamic_tree_modification() {
 
     // Create and add second mid-level supervisor dynamically
     let (mid2_supervisor, mid2_events) = Supervisor::new(
-        "mid-supervisor-2".to_string(),
+        test_actor_id("mid-supervisor-2").to_string(),
         SupervisionStrategy::OneForAll {
             max_restarts: 3,
             within_seconds: 60,
@@ -706,7 +725,7 @@ async fn test_dynamic_tree_modification() {
     let event = root_events.recv().await.unwrap();
     match event {
         SupervisorEvent::ChildStarted(id) => {
-            assert_eq!(id, "mid-supervisor-2");
+            assert_eq!(id.name(), "mid-supervisor-2");
             println!("✅ Added mid-supervisor-2 dynamically");
         }
         _ => panic!("Expected ChildStarted for mid-supervisor-2"),
@@ -716,7 +735,7 @@ async fn test_dynamic_tree_modification() {
     println!("\n📝 Adding third supervisor dynamically to running tree...");
 
     let (mid3_supervisor, mid3_events) = Supervisor::new(
-        "mid-supervisor-3".to_string(),
+        test_actor_id("mid-supervisor-3").to_string(),
         SupervisionStrategy::RestForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -739,7 +758,7 @@ async fn test_dynamic_tree_modification() {
     let event = root_events.recv().await.unwrap();
     match event {
         SupervisorEvent::ChildStarted(id) => {
-            assert_eq!(id, "mid-supervisor-3");
+            assert_eq!(id.name(), "mid-supervisor-3");
             println!("✅ Added mid-supervisor-3 dynamically to running tree");
         }
         _ => panic!("Expected ChildStarted for mid-supervisor-3"),

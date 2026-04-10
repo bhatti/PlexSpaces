@@ -35,8 +35,7 @@
 
 use crate::{Application, ApplicationError, ApplicationNode};
 use async_trait::async_trait;
-use plexspaces_core::actor_id::{build_actor_id, parse_actor_id};
-use plexspaces_core::{Actor, ActorError, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor, ActorError, ActorId, BehaviorError, BehaviorType};
 use plexspaces_proto::application::v1::{ApplicationSpec, SupervisorSpec};
 use plexspaces_proto::common::v1::Message;
 use plexspaces_proto::v1::application::HealthStatus;
@@ -112,7 +111,9 @@ fn actor_id_from_initial_state(
                 .map(str::to_string)
         })
         .unwrap_or_else(|| {
-            plexspaces_core::actor_id::build_actor_id(child_id, child_id, Some(namespace), node_id)
+            ActorId::new(child_id, child_id, namespace, node_id)
+                .expect("framework-generated wasm actor id should be valid")
+                .to_string()
         })
 }
 
@@ -271,7 +272,13 @@ impl Actor for WasmActorBehavior {
                     let current_actor_id = ctx
                         .self_ref()
                         .map(|r| r.id().clone())
-                        .unwrap_or_else(|| message.receiver_id.clone());
+                        .or_else(|| ActorId::from_canonical(&message.receiver_id).ok())
+                        .ok_or_else(|| {
+                            BehaviorError::ProcessingError(format!(
+                                "reply path requires canonical receiver actor id, got '{}'",
+                                message.receiver_id
+                            ))
+                        })?;
 
                     let correlation_id_opt = if message.correlation_id.is_empty() {
                         None
@@ -458,7 +465,7 @@ impl WasmApplication {
     /// Set tenant_id and namespace from API request.
     ///
     /// Called by ApplicationManager before start() to set tenant_id/namespace from API request.
-    /// These values are used when spawning actors (actor IDs use name:namespace@node_id format).
+    /// These values are used when spawning actors, which always receive canonical ActorIds.
     ///
     /// ## Panics
     /// Debug-asserts that namespace is non-empty (required for WASM deployment).
@@ -687,7 +694,7 @@ impl WasmApplication {
         let module_hash = self.module_hash.clone();
         let runtime = self.runtime.clone();
         let node_id = node.id().to_string();
-        // Namespace is required for consistent actor ID format (name:namespace@node_id)
+        // Namespace is required so spawned actors get canonical ActorIds scoped to the app.
         let namespace = self.namespace.read().await.clone();
 
         for child_spec in &child_specs {
@@ -811,8 +818,14 @@ impl WasmApplication {
         // Precompute expected actor_id for error logging using factory method
         let actor_id = ulid::Ulid::new().to_string();
         let actor_type = format!("{}Supervisor", self.name);
-        let expected_actor_id =
-            build_actor_id(&actor_id, &actor_type, Some(&final_namespace), node.id());
+        let expected_actor_id = ActorId::new(&actor_id, &actor_type, &final_namespace, node.id())
+            .map_err(|e| {
+                ApplicationError::Other(format!(
+                    "Failed to construct expected WASM actor ID for '{}': {}",
+                    self.name, e
+                ))
+            })?
+            .to_string();
 
         // Create a simple ChildSpec for the actor
         use plexspaces_proto::application::v1::{ChildSpec, ChildType, RestartPolicy};
@@ -986,11 +999,24 @@ impl WasmApplication {
 
         // Convert proto supervision strategy to Rust enum
         let strategy = Self::convert_supervision_strategy(supervisor_spec)?;
+        let supervisor_namespace = self.namespace.read().await.clone();
 
         // Create root supervisor using factory method
         let supervisor_id_ulid = ulid::Ulid::new().to_string();
         let supervisor_type = format!("{}Supervisor", self.name);
-        let supervisor_id = build_actor_id(&supervisor_id_ulid, &supervisor_type, None, node.id());
+        let supervisor_id = ActorId::new(
+            &supervisor_id_ulid,
+            &supervisor_type,
+            &supervisor_namespace,
+            node.id(),
+        )
+                .map_err(|e| {
+                    ApplicationError::Other(format!(
+                        "Failed to construct supervisor actor ID for '{}': {}",
+                        self.name, e
+                    ))
+                })?
+                .to_string();
         let (supervisor, mut event_rx) =
             Supervisor::new(supervisor_id.clone(), strategy, service_locator.clone());
 
@@ -1273,7 +1299,9 @@ impl WasmApplication {
     /// - All services from ServiceLocator
     fn build_supervised_actor_id(child_id: &str, namespace: &str, node_id: &str) -> String {
         let actor_id_ulid = ulid::Ulid::new().to_string();
-        build_actor_id(&actor_id_ulid, child_id, Some(namespace), node_id)
+        ActorId::new(&actor_id_ulid, child_id, namespace, node_id)
+            .expect("generated supervised actor id should be valid")
+            .to_string()
     }
 
     async fn build_wasm_actor(
@@ -1312,9 +1340,12 @@ impl WasmApplication {
 
         // Build unstarted Actor using ActorBuilder
         use plexspaces_actor::ActorBuilder;
+        let canonical_actor_id = ActorId::from_canonical(actor_id).map_err(|e| {
+            ApplicationError::Other(format!("Invalid actor ID format '{}': {}", actor_id, e))
+        })?;
 
         let mut actor = ActorBuilder::new(behavior)
-            .with_id(actor_id.to_string())
+            .with_id(canonical_actor_id.clone())
             .build()
             .await
             .map_err(|e| ApplicationError::ActorSpawnFailed(actor_id.to_string(), e.to_string()))?;
@@ -1326,21 +1357,10 @@ impl WasmApplication {
             .ok_or_else(|| ApplicationError::Other("ActorRegistry not found".to_string()))?;
         let local_node_id = registry.local_node_id();
 
-        // Parse actor ID and rebuild with local node_id
-        let actor_id = if let Ok(parsed) = parse_actor_id(actor_id) {
-            build_actor_id(
-                &parsed.id,
-                &parsed.actor_type,
-                parsed.namespace.as_deref(),
-                &local_node_id,
-            )
-        } else {
-            // Invalid format - return error
-            return Err(ApplicationError::Other(format!(
-                "Invalid actor ID format: {}",
-                actor_id
-            )));
-        };
+        let actor_id = canonical_actor_id
+            .with_node_id(local_node_id)
+            .map_err(|e| ApplicationError::Other(format!("Invalid actor ID format: {}", e)))?
+            .to_string();
 
         // Update context with proper node ID and tenant_id/namespace from API request
         // Use tenant_id/namespace from API request (passed as parameters), not "internal"
@@ -1543,14 +1563,14 @@ impl WasmApplication {
         // Get ServiceLocator for registration
         let service_locator = node.service_locator().ok_or_else(|| {
             ApplicationError::ActorSpawnFailed(
-                actor_id.clone(),
+                actor_id.to_string(),
                 "ServiceLocator not available".to_string(),
             )
         })?;
 
         // Start the actor
         let _handle = actor.start().await.map_err(|e| {
-            ApplicationError::ActorSpawnFailed(actor_id.clone(), format!("Start failed: {}", e))
+            ApplicationError::ActorSpawnFailed(actor_id.to_string(), format!("Start failed: {}", e))
         })?;
 
         // Register in ActorRegistry
@@ -1558,7 +1578,7 @@ impl WasmApplication {
             actor.register_started(&registry).await;
         }
 
-        Ok(actor_id)
+        Ok(actor_id.to_string())
     }
 
     /// Call get_supervisor_tree() function from WASM module
@@ -1714,11 +1734,13 @@ impl WasmApplication {
             let ctx = RequestContext::new_without_auth(tenant_id, namespace.clone());
 
             let actor_id_string = actor_id.to_string();
-            match timeout(
-                timeout_duration,
-                actor_factory.stop_actor(&ctx, &actor_id_string),
-            )
-            .await
+            let actor_id_typed = ActorId::from_canonical(&actor_id_string).map_err(|e| {
+                ApplicationError::ActorStopFailed(
+                    actor_id_string.clone(),
+                    format!("Invalid canonical actor ID for shutdown: {}", e),
+                )
+            })?;
+            match timeout(timeout_duration, actor_factory.stop_actor(&ctx, &actor_id_typed)).await
             {
                 Ok(Ok(())) => {
                     if tracing::enabled!(tracing::Level::INFO) {
@@ -2104,14 +2126,19 @@ impl Application for WasmApplication {
                 }
             }
         }
-        actor_ids.extend(live_actor_ids);
+        actor_ids.extend(live_actor_ids.into_iter().map(|actor_id| actor_id.to_string()));
 
         let virtual_cleanup = if let Some(manager) = service_locator.virtual_actor_manager().await {
             manager.unregister_namespace(&namespace).await
         } else {
             plexspaces_core::virtual_actor_manager::VirtualActorNamespaceCleanup::default()
         };
-        actor_ids.extend(virtual_cleanup.actor_ids.clone());
+        actor_ids.extend(
+            virtual_cleanup
+                .actor_ids
+                .iter()
+                .map(|actor_id| actor_id.to_string()),
+        );
         actor_ids.sort();
         actor_ids.dedup();
 
@@ -2247,11 +2274,11 @@ mod tests {
     fn test_build_supervised_actor_id_includes_type_namespace_and_node() {
         let actor_id =
             WasmApplication::build_supervised_actor_id("leader", "heat-diffusion-rust", "test-1");
-        let parsed = plexspaces_core::parse_actor_id(&actor_id).expect("actor id should parse");
+        let parsed = ActorId::from_canonical(&actor_id).expect("actor id should parse");
 
-        assert_eq!(parsed.actor_type, "leader");
-        assert_eq!(parsed.namespace.as_deref(), Some("heat-diffusion-rust"));
-        assert_eq!(parsed.node_id, "test-1");
+        assert_eq!(parsed.actor_type(), "leader");
+        assert_eq!(parsed.namespace(), "heat-diffusion-rust");
+        assert_eq!(parsed.node_id(), "test-1");
     }
 
     #[tokio::test]

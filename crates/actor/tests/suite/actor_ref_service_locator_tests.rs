@@ -5,7 +5,8 @@
 
 use plexspaces_actor::ActorRef;
 use plexspaces_core::{
-    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorRegistry, Message, ServiceLocator,
+    actor_context::ObjectRegistry as ObjectRegistryTrait, ActorId, ActorRegistry, Message,
+    ServiceLocator,
 };
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_proto::object_registry::v1::{ObjectRegistration, ObjectType};
@@ -20,6 +21,16 @@ fn create_test_message(payload: Vec<u8>) -> Message {
         payload,
         ..Default::default()
     }
+}
+
+fn test_actor_id(name: &str, node_id: &str, namespace: &str) -> ActorId {
+    ActorId::new(
+        name.to_string(),
+        "GenServer".to_string(),
+        namespace.to_string(),
+        node_id.to_string(),
+    )
+    .expect("test actor id should be valid")
 }
 
 // Helper to wrap ObjectRegistry for ActorRegistry
@@ -169,8 +180,9 @@ async fn test_actor_ref_remote_uses_service_locator() {
         .await;
 
     // Create remote ActorRef with ServiceLocator
+    let actor_id = test_actor_id("test-actor", "remote-node", "default");
     let actor_ref = ActorRef::remote(
-        "test-actor@remote-node",
+        actor_id.clone(),
         "test",    // tenant_id
         "default", // namespace
         "remote-node",
@@ -178,7 +190,7 @@ async fn test_actor_ref_remote_uses_service_locator() {
     );
 
     assert!(actor_ref.is_remote());
-    assert_eq!(actor_ref.id(), "test-actor@remote-node");
+    assert_eq!(actor_ref.id(), &actor_id);
 }
 
 #[tokio::test]
@@ -227,7 +239,7 @@ async fn test_actor_ref_remote_tell_uses_service_locator() {
 
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
-        "test-actor@remote-node",
+        test_actor_id("test-actor", "remote-node", "default"),
         "test",    // tenant_id
         "default", // namespace
         "remote-node",
@@ -306,7 +318,7 @@ async fn test_actor_ref_remote_ask_uses_service_locator() {
 
     // Create remote ActorRef with ServiceLocator
     let actor_ref = ActorRef::remote(
-        "test-actor@remote-node",
+        test_actor_id("test-actor", "remote-node", "default"),
         "test",    // tenant_id
         "default", // namespace
         "remote-node",
@@ -357,8 +369,9 @@ async fn test_actor_ref_local_unchanged() {
     );
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(Some("test-node".to_string()), None).await;
+    let actor_id = test_actor_id("test-actor", "test-node", "test");
     let actor_ref = ActorRef::local(
-        "test-actor",
+        actor_id.clone(),
         "test",
         "test",
         mailbox.clone(),
@@ -366,7 +379,7 @@ async fn test_actor_ref_local_unchanged() {
     );
 
     assert!(actor_ref.is_local());
-    assert_eq!(actor_ref.id(), "test-actor");
+    assert_eq!(actor_ref.id(), &actor_id);
 
     // Register actor before calling tell()
     use plexspaces_core::{ActorRegistry, RequestContext};

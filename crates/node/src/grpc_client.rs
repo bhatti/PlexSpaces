@@ -44,8 +44,8 @@ use tonic::{transport::Channel, Request};
 ///
 /// let message = ProtoMessage {
 ///     id: "msg-1".to_string(),
-///     sender: Some(ProtoActorId { id: "sender@node1".to_string() }),
-///     receiver: Some(ProtoActorId { id: "actor@node2".to_string() }),
+///     sender: Some(ProtoActorId { id: "sender//gen_server::default@node1".to_string() }),
+///     receiver: Some(ProtoActorId { id: "actor//gen_server::default@node2".to_string() }),
 ///     message_type: "call".to_string(),
 ///     payload: vec![1, 2, 3],
 ///     timestamp: None,
@@ -219,7 +219,7 @@ impl RemoteActorClient {
             .map_err(|e| format!("spawn_actor failed: {}", e.message()))?;
 
         let resp: SpawnActorResponse = response.into_inner();
-        let actor_ref = plexspaces_core::ActorRef::new(resp.actor_ref)
+        let actor_ref = plexspaces_core::ActorRef::new(resp.actor_ref.into())
             .map_err(|e| format!("Failed to create ActorRef: {}", e))?;
 
         Ok(actor_ref)

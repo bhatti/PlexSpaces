@@ -91,23 +91,26 @@ Actor IDs follow a standardized format for consistency and proto-first design:
 - `@`: Separates namespace from node_id (standard format)
 
 **Examples**:
-- `user-123//read-state-tracker::orbit-read-state-ts@node-1` (full format)
-- `//read-state-tracker::orbit-read-state-ts@node-1` (no base ID, ULID generated)
-- `//GenServer::default@node-1` (no namespace)
+- `user-123//read-state-tracker::orbit-read-state-ts@node-1` (full canonical format)
+- `ask_01HXYZ...//temp_sender::default@node-1` (temporary sender actor)
+- `counter//gen_server::default@node-1` (regular actor)
 
 **Factory Methods**:
 ```rust
-use plexspaces_core::actor_id::{build_actor_id, parse_actor_id};
+use plexspaces_core::ActorId;
 
-// Build actor ID
-let actor_id = build_actor_id("user-123", "read-state-tracker", Some("orbit-read-state-ts"), "node-1");
+let actor_id = ActorId::new(
+    "user-123",
+    "read-state-tracker",
+    "orbit-read-state-ts",
+    "node-1",
+)?;
 
-// Parse actor ID
-let parsed = parse_actor_id(&actor_id)?;
-assert_eq!(parsed.id, "user-123");
-assert_eq!(parsed.actor_type, "read-state-tracker");
-assert_eq!(parsed.namespace, Some("orbit-read-state-ts".to_string()));
-assert_eq!(parsed.node_id, "node-1");
+let parsed = ActorId::from_canonical(actor_id.as_str())?;
+assert_eq!(parsed.name(), "user-123");
+assert_eq!(parsed.actor_type(), "read-state-tracker");
+assert_eq!(parsed.namespace(), "orbit-read-state-ts");
+assert_eq!(parsed.node_id(), "node-1");
 ```
 
 **Features**:
@@ -158,12 +161,9 @@ All message routing logic is centralized in `crates/actor/src/routing.rs` to ens
 
 **Key Functions**:
 
-- **`build_actor_id(id, actor_type, namespace, node_id)`**: Factory method to build standardized actor IDs
-- **`parse_actor_id(actor_id)`**: Parses actor ID into components (id, actor_type, namespace, node_id)
-- **`extract_actor_type(actor_id)`**: Extracts actor_type from actor ID
-- **`extract_namespace(actor_id)`**: Extracts namespace from actor ID
-- **`extract_base_id(actor_id)`**: Extracts base ID from actor ID
-- **`is_actor_local(actor_id, service_locator)`**: Dynamically determines if actor is local by comparing node_id with local_node_id from NodeConfig
+- **`ActorId::new(name, actor_type, namespace, node_id)`**: Constructs validated actor IDs
+- **`ActorId::from_canonical(actor_id)`**: Restores a structured ID at string boundaries
+- **`is_actor_local(actor_id, service_locator)`**: Determines locality from the structured `ActorId`
 - **`ask_helper(ctx, service_locator, ...)`**: Generic ask helper that returns `Pin<Box<dyn Future>>` for parallel operations
 - **`route_local(ctx, service_locator, ...)`**: Routes message to local actor (returns Future)
 - **`route_remote(ctx, service_locator, ...)`**: Routes message to remote actor via gRPC (returns Future)
@@ -692,7 +692,7 @@ impl UserSession {
 
 // Spawn using SDK - facets auto-created from annotation
 let ctx = RequestContext::new_without_auth("tenant".into(), "ns".into());
-let actor_ref = spawn(&ctx, service_locator.clone(), ActorId::from("session@node"), "default", 
+let actor_ref = spawn(&ctx, service_locator.clone(), "session", "default", 
     UserSession { user_id: "user-123".into(), last_activity: 0 }).await?;
 ```
 
@@ -729,7 +729,7 @@ pub struct DurabilityFacet {
 use plexspaces_sdk::{
     gen_server_actor, plexspaces_handlers, handler,
     spawn_with_storage, SqliteJournalStorage,
-    RequestContext, ActorId, json,
+    RequestContext, json,
 };
 use std::sync::Arc;
 
@@ -753,7 +753,7 @@ impl DurableCounter {
 let storage = Arc::new(SqliteJournalStorage::new(":memory:").await?);
 let ctx = RequestContext::new_without_auth("tenant".into(), "ns".into());
 let actor_ref = spawn_with_storage(&ctx, service_locator.clone(), 
-    ActorId::from("counter@node"), "default", DurableCounter { count: 0 }, storage).await?;
+    "counter", "default", DurableCounter { count: 0 }, storage).await?;
 ```
 
 #### MobilityFacet
@@ -1076,7 +1076,7 @@ impl CleanupActor {
 let timer_facet = TimerFacet::new(json!({}), 75);
 let ctx = RequestContext::new_without_auth("tenant".into(), "ns".into());
 let actor_ref = spawn_with_facets(&ctx, service_locator.clone(), 
-    ActorId::from("cleanup@node"), "default", CleanupActor { last_cleanup: 0 }, 
+    "cleanup", "default", CleanupActor { last_cleanup: 0 }, 
     vec![Box::new(timer_facet)]).await?;
 ```
 
@@ -1330,7 +1330,7 @@ impl MyActor {
 let storage = Arc::new(SqliteJournalStorage::new(":memory:").await?);
 let ctx = RequestContext::new_without_auth("tenant".into(), "ns".into());
 let actor_ref = spawn_with_storage(&ctx, service_locator.clone(), 
-    ActorId::from("myactor@node"), "default", MyActor { data: "test".into() }, storage).await?;
+    "myactor", "default", MyActor { data: "test".into() }, storage).await?;
 ```
 
 #### Detaching Facets
@@ -1831,7 +1831,7 @@ Leader-worker patterns use **existing building blocks** only; no dedicated sessi
 
 **Building blocks** (see [Purdue CS525 leader-worker design](https://www.cs.purdue.edu/homes/ayg/CS525_SPR17/chap3_slides.pdf): centralized dynamic mapping, chunk scheduling):
 
-- **Obtain workers**: (A) CreateShardGroup with `NodePlacement` (from_registry or node_ids), then ScatterGather/MapShardGroup; (B) virtual actors via `list_worker_node_ids` + tell/ask to `actor_id@node_id`; (D) elastic pool + TupleSpace (e.g. migrating_merlin).
+- **Obtain workers**: (A) CreateShardGroup with `NodePlacement` (from_registry or node_ids), then ScatterGather/MapShardGroup; (B) virtual actors via `list_worker_node_ids` + tell/ask to canonical actor IDs; (D) elastic pool + TupleSpace (e.g. migrating_merlin).
 - **Distribute work**: Short payload → messages (ScatterGather or ask); large payload → TupleSpace write/take/read_all.
 - **Collect and iterate**: Leader aggregates in application code; session state in leader or TupleSpace/KV.
 
@@ -2661,7 +2661,7 @@ impl MyActor {
     async fn process(&mut self, ctx: &plexspaces_sdk::ActorContext, msg: &plexspaces_sdk::Message) 
         -> Result<serde_json::Value, plexspaces_sdk::BehaviorError> {
         // Send message to another actor via ActorRef
-        let target_ref = ctx.get_actor_ref("target@node1").await?;
+        let target_ref = ctx.get_actor_ref("target").await?;
         let event = cast_message(json!({ "event": "processed" }));
         target_ref.tell(event).await?;
         

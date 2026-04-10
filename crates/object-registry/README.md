@@ -92,7 +92,7 @@ let ctx = RequestContext::new_without_auth("tenant-1".to_string(), "production".
 
 // Register actor
 let registration = ObjectRegistration {
-    object_id: "counter@node1".to_string(),
+    object_id: "counter//gen_server::production@node1".to_string(),
     object_type: ObjectType::ObjectTypeActor as i32,
     object_category: "GenServer".to_string(),
     grpc_address: "http://node1:8000".to_string(),
@@ -143,10 +143,22 @@ let stale = registry.find_stale(&ctx, 60, None, 100).await?;
 
 ```rust
 // Efficient heartbeat - single column UPDATE, no blob read/write
-registry.heartbeat(&ctx, ObjectType::ObjectTypeActor, "counter@node1").await?;
+registry
+    .heartbeat(
+        &ctx,
+        ObjectType::ObjectTypeActor,
+        "counter//gen_server::production@node1",
+    )
+    .await?;
 
 // Update health status
-registry.update_health_status(&ctx, "counter@node1", HealthStatus::HealthStatusUnhealthy).await?;
+registry
+    .update_health_status(
+        &ctx,
+        "counter//gen_server::production@node1",
+        HealthStatus::HealthStatusUnhealthy,
+    )
+    .await?;
 ```
 
 ## Migrations

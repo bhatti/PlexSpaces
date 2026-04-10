@@ -131,21 +131,22 @@ node.start().await?;
 use plexspaces_node::ActorBuilder;
 
 // Spawn actor on node
-let actor_ref = node.spawn_actor(
-    ActorBuilder::new("counter@node1")
-        .with_behavior(MyBehavior {})
-        .build()
-).await?;
+let actor_ref = ActorBuilder::new(MyBehavior {})
+    .with_name("counter")
+    .spawn(&ctx, node.service_locator().clone())
+    .await?;
 
 // Send message to actor
 actor_ref.tell(message).await?;
 ```
 
+Use a unique actor name when spawning. The node/runtime constructs the canonical actor ID; client code should not prebuild full actor IDs for local spawns.
+
 ### Remote Actor Communication
 
 ```rust
 // Send message to remote actor (location transparent)
-let remote_actor = "counter@node2".to_string();
+let remote_actor = "counter//counter::default@node2".to_string();
 node.send_message(remote_actor, message).await?;
 ```
 
@@ -226,8 +227,8 @@ Actors can communicate transparently across nodes:
 
 ```rust
 // Same API for local and remote actors
-node.send_message("actor@node1", msg).await?;  // Local
-node.send_message("actor@node2", msg).await?;  // Remote (via gRPC)
+node.send_message("actor//gen_server::default@node1", msg).await?;  // Local
+node.send_message("actor//gen_server::default@node2", msg).await?;  // Remote (via gRPC)
 ```
 
 ### Actor Monitoring
@@ -236,7 +237,7 @@ Erlang-style monitoring (one-way notifications):
 
 ```rust
 // Monitor actor for termination
-node.monitor_actor("actor@node1", supervisor_id).await?;
+node.monitor_actor("actor//gen_server::default@node1", supervisor_id).await?;
 ```
 
 ### Actor Linking
@@ -245,7 +246,10 @@ Erlang-style linking (bidirectional death propagation):
 
 ```rust
 // Link two actors (if one dies, the other dies too)
-node.link_actors("actor1@node1", "actor2@node1").await?;
+node.link_actors(
+    "actor1//gen_server::default@node1",
+    "actor2//gen_server::default@node1",
+).await?;
 ```
 
 ### Virtual Actors and Automatic Activation
@@ -259,7 +263,7 @@ use plexspaces_node::Node;
 // If actor exists, returns existing ActorRef
 // If not, creates and activates actor
 let actor_ref = node.get_or_activate_actor(
-    "virtual-actor@node1".to_string(),
+    "virtual-actor".to_string(),
     || async {
         // Actor factory - only called if actor doesn't exist
         Ok(Actor::new(/* ... */))
@@ -268,7 +272,7 @@ let actor_ref = node.get_or_activate_actor(
 
 // Virtual actor is automatically activated on first message
 // or via explicit get_or_activate_actor() call
-node.send_message("virtual-actor@node1", msg).await?;
+node.send_message("virtual-actor//virtual-actor::default@node1", msg).await?;
 ```
 
 **Design**: `get_or_activate_actor()` provides a convenient pattern for virtual actors. It checks if the actor exists (locally or remotely) and returns its `ActorRef`, or creates and spawns a new actor if it doesn't exist. This eliminates the need for explicit existence checks before messaging.
@@ -282,8 +286,8 @@ Group communication for actor sets:
 node.create_process_group("my-group").await?;
 
 // Add actors to group
-node.add_to_process_group("my-group", "actor1@node1").await?;
-node.add_to_process_group("my-group", "actor2@node1").await?;
+node.add_to_process_group("my-group", "actor1//gen_server::default@node1").await?;
+node.add_to_process_group("my-group", "actor2//gen_server::default@node1").await?;
 
 // Send message to all actors in group
 node.send_to_process_group("my-group", msg).await?;
@@ -348,4 +352,3 @@ This crate is used by:
 - Tests: `crates/node/tests/`
 - Proto definitions: `proto/plexspaces/v1/node.proto`
 - Inspiration: Erlang/OTP node system
-

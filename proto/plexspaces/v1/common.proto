@@ -231,6 +231,52 @@ message Metadata {
   map<string, google.protobuf.Any> annotations = 6;
 }
 
+// Structured actor identity.
+//
+// The canonical string form is `{name}//{actor_type}::{namespace}@{node_id}`.
+// Construct actor IDs from fields, and only derive the canonical string for
+// storage or display.
+message ActorId {
+  // User-specified actor name. Must be unique within the actor type,
+  // namespace, and node scope.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+    }
+  ];
+
+  // Actor type from behavior registration.
+  string actor_type = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+      pattern: "^[a-z][a-z0-9_-]*$"
+    }
+  ];
+
+  // Namespace for tenancy and application isolation.
+  string namespace = 3 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 128
+    }
+  ];
+
+  // Node where the actor currently resides.
+  string node_id = 4 [
+    (google.api.field_behavior) = REQUIRED,
+    (buf.validate.field).string = {
+      min_len: 1
+      max_len: 255
+    }
+  ];
+}
+
 // Standard error details
 message ErrorDetail {
   string code = 1 [(buf.validate.field).string = {
@@ -767,12 +813,11 @@ message Message {
     }
   ];
 
-  // Sender actor/producer ID (optional for anonymous messages)
-  // Example: "user-service@node-1", "kafka-producer-123"
+  // Canonical ActorId string or temporary sender routing ID.
+  // Temporary senders use canonical ActorId strings; there is no separate temp syntax.
   string sender_id = 2 [(buf.validate.field).string.max_len = 255];
 
-  // Receiver actor ID (for point-to-point messaging)
-  // Example: "payment-processor@node-2"
+  // Canonical ActorId string or temporary sender routing ID for replies.
   // Note: For pub/sub, use 'channel' field instead
   string receiver_id = 3 [(buf.validate.field).string.max_len = 255];
 
@@ -847,7 +892,7 @@ message Message {
 
   // Reply-to address (channel or actor ID for responses)
   // Tells receiver where to send the response
-  // Example: "response-queue-42", "callback-actor@node-1"
+  // Example: "response-queue-42", "callback-actor"
   string reply_to = 14 [(buf.validate.field).string.max_len = 255];
 
   // ==================== PARTITIONING ====================

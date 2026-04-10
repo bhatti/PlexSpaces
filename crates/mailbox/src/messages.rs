@@ -24,7 +24,7 @@
 //!
 //! ## Design
 //! - Enum-based messages (type-safe, pattern matching)
-//! - Backward compatible with existing Message struct
+//! - Compatible with the canonical Message struct used across the runtime
 //! - Conversion helpers for easy migration
 
 use serde::{Deserialize, Serialize};

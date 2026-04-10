@@ -230,7 +230,9 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 50,
             );
             let actor_name = format!("lock-tbl-ar-{}", ulid::Ulid::new());
-            let actor_id = ActorId::from(format!("{actor_name}@{node_id}"));
+            let actor_id =
+                ActorId::new(&actor_name, "GenServer", "test-namespace", node_id.as_str())
+                    .expect("test actor id should be valid");
 
             node.spawn(
                 &ctx,
@@ -316,7 +318,9 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
             );
 
             let actor_name1 = format!("lock-tbl-1-{}", ulid::Ulid::new());
-            let actor_id1 = ActorId::from(format!("{actor_name1}@{node_id}"));
+            let actor_id1 =
+                ActorId::new(&actor_name1, "GenServer", "test-namespace", node_id.as_str())
+                    .expect("test actor id should be valid");
             let ctx1 = plexspaces_core::RequestContext::new_without_auth(
                 "test-tenant".to_string(),
                 "test-namespace".to_string(),
@@ -375,7 +379,9 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
             );
 
             let actor_name2 = format!("lock-tbl-2-{}", ulid::Ulid::new());
-            let actor_id2 = ActorId::from(format!("{actor_name2}@{node_id}"));
+            let actor_id2 =
+                ActorId::new(&actor_name2, "GenServer", "test-namespace", node_id.as_str())
+                    .expect("test actor id should be valid");
             let ctx2 = plexspaces_core::RequestContext::new_without_auth(
                 "test-tenant".to_string(),
                 "test-namespace".to_string(),
@@ -438,7 +444,9 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
                 50,
             );
             let actor_name = format!("lock-tbl-get-{}", ulid::Ulid::new());
-            let actor_id = ActorId::from(format!("{actor_name}@{node_id}"));
+            let actor_id =
+                ActorId::new(&actor_name, "GenServer", "test-namespace", node_id.as_str())
+                    .expect("test actor id should be valid");
 
             node.spawn(
                 &ctx,
@@ -523,7 +531,9 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
 
             let lock_key = format!("tbl-{run_id}-proto");
             let actor_name = format!("lock-tbl-proto-{}", ulid::Ulid::new());
-            let actor_id = ActorId::from(format!("{actor_name}@{node_id}"));
+            let actor_id =
+                ActorId::new(&actor_name, "GenServer", "test-namespace", node_id.as_str())
+                    .expect("test actor id should be valid");
             let actor_id_str = actor_id.to_string();
 
             node.spawn(

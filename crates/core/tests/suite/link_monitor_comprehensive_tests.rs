@@ -38,6 +38,10 @@ use plexspaces_core::{
     ExitAction, ExitReason, Message, RequestContext, ServiceLocator,
 };
 // Note: Message is now unified proto Message from plexspaces_proto::common::v1
+
+fn test_actor_id(name: &str) -> ActorId {
+    ActorId::new(name, "gen_server", "default", "test-node").unwrap()
+}
 use async_trait::async_trait;
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use std::sync::Arc;
@@ -294,8 +298,8 @@ impl Actor for TestActor {
 async fn test_link_normal_exit_no_propagation() {
     let registry = create_test_registry().await;
 
-    let actor1_id = ActorId::from("actor1@test-node".to_string());
-    let actor2_id = ActorId::from("actor2@test-node".to_string());
+    let actor1_id = test_actor_id("actor1");
+    let actor2_id = test_actor_id("actor2");
 
     // Link actor1 and actor2
     registry.link(&actor1_id, &actor2_id).await.unwrap();
@@ -326,8 +330,8 @@ async fn test_link_normal_exit_no_propagation() {
 async fn test_link_error_exit_propagates() {
     let registry = create_test_registry().await;
 
-    let actor1_id = ActorId::from("actor1@test-node".to_string());
-    let actor2_id = ActorId::from("actor2@test-node".to_string());
+    let actor1_id = test_actor_id("actor1");
+    let actor2_id = test_actor_id("actor2");
 
     // Link actor1 and actor2
     registry.link(&actor1_id, &actor2_id).await.unwrap();
@@ -374,8 +378,8 @@ async fn test_link_no_trap_exit_terminates() {
 async fn test_monitor_receives_down_message() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
-    let monitor_id = ActorId::from("monitor1@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
+    let monitor_id = test_actor_id("monitor1");
 
     // Create monitor channel
     let (tx, mut rx) = mpsc::channel(10);
@@ -405,9 +409,9 @@ async fn test_monitor_receives_down_message() {
 async fn test_multiple_monitors_receive_down() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
-    let monitor1_id = ActorId::from("monitor1@test-node".to_string());
-    let monitor2_id = ActorId::from("monitor2@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
+    let monitor1_id = test_actor_id("monitor1");
+    let monitor2_id = test_actor_id("monitor2");
 
     // Create monitor channels
     let (tx1, mut rx1) = mpsc::channel(10);
@@ -447,8 +451,8 @@ async fn test_cascading_failure_multiple_links() {
 async fn test_unlink_removes_link() {
     let registry = create_test_registry().await;
 
-    let actor1_id = ActorId::from("actor1@test-node".to_string());
-    let actor2_id = ActorId::from("actor2@test-node".to_string());
+    let actor1_id = test_actor_id("actor1");
+    let actor2_id = test_actor_id("actor2");
 
     // Link actors
     registry.link(&actor1_id, &actor2_id).await.unwrap();
@@ -465,8 +469,8 @@ async fn test_unlink_removes_link() {
 async fn test_demonitor_removes_monitor() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
-    let monitor_id = ActorId::from("monitor1@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
+    let monitor_id = test_actor_id("monitor1");
 
     let (tx, _rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
@@ -513,8 +517,8 @@ async fn test_normal_exit_no_link_propagation() {
 async fn test_shutdown_exit_no_link_propagation() {
     let registry = create_test_registry().await;
 
-    let actor1_id = ActorId::from("actor1@test-node".to_string());
-    let actor2_id = ActorId::from("actor2@test-node".to_string());
+    let actor1_id = test_actor_id("actor1");
+    let actor2_id = test_actor_id("actor2");
 
     registry.link(&actor1_id, &actor2_id).await.unwrap();
 
@@ -543,9 +547,9 @@ async fn test_killed_exit_propagates() {
 async fn test_linked_exit_reason_nesting() {
     let registry = create_test_registry().await;
 
-    let actor_a = ActorId::from("actor-a@test-node".to_string());
-    let actor_b = ActorId::from("actor-b@test-node".to_string());
-    let actor_c = ActorId::from("actor-c@test-node".to_string());
+    let actor_a = test_actor_id("actor-a");
+    let actor_b = test_actor_id("actor-b");
+    let actor_c = test_actor_id("actor-c");
 
     // Link A -> B -> C
     registry.link(&actor_a, &actor_b).await.unwrap();
@@ -585,8 +589,8 @@ async fn test_linked_exit_reason_nesting() {
 async fn test_link_to_nonexistent_actor() {
     let registry = create_test_registry().await;
 
-    let actor1_id = ActorId::from("actor1@test-node".to_string());
-    let actor2_id = ActorId::from("actor2@test-node".to_string());
+    let actor1_id = test_actor_id("actor1");
+    let actor2_id = test_actor_id("actor2");
 
     // Link to non-existent actor should still work
     registry.link(&actor1_id, &actor2_id).await.unwrap();
@@ -601,8 +605,8 @@ async fn test_link_to_nonexistent_actor() {
 async fn test_monitor_nonexistent_actor() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
-    let monitor_id = ActorId::from("monitor1@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
+    let monitor_id = test_actor_id("monitor1");
 
     let (tx, _rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
@@ -625,7 +629,7 @@ async fn test_monitor_nonexistent_actor() {
 async fn test_self_link_prevention() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
 
     // Attempting to link actor to itself should fail
     let result = registry.link(&actor_id, &actor_id).await;
@@ -638,9 +642,9 @@ async fn test_self_link_prevention() {
 async fn test_multiple_links_same_actor() {
     let registry = create_test_registry().await;
 
-    let actor1_id = ActorId::from("actor1@test-node".to_string());
-    let actor2_id = ActorId::from("actor2@test-node".to_string());
-    let actor3_id = ActorId::from("actor3@test-node".to_string());
+    let actor1_id = test_actor_id("actor1");
+    let actor2_id = test_actor_id("actor2");
+    let actor3_id = test_actor_id("actor3");
 
     // Link actor1 to both actor2 and actor3
     registry.link(&actor1_id, &actor2_id).await.unwrap();
@@ -666,8 +670,8 @@ async fn test_multiple_links_same_actor() {
 async fn test_unlink_nonexistent_link() {
     let registry = create_test_registry().await;
 
-    let actor1_id = ActorId::from("actor1@test-node".to_string());
-    let actor2_id = ActorId::from("actor2@test-node".to_string());
+    let actor1_id = test_actor_id("actor1");
+    let actor2_id = test_actor_id("actor2");
 
     // Unlink non-existent link should succeed (idempotent)
     let result = registry.unlink(&actor1_id, &actor2_id).await;
@@ -679,8 +683,8 @@ async fn test_unlink_nonexistent_link() {
 async fn test_demonitor_nonexistent_monitor() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
-    let monitor_id = ActorId::from("monitor1@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
+    let monitor_id = test_actor_id("monitor1");
     let monitor_ref = "monitor-ref-1".to_string();
 
     // Demonitor non-existent monitor should succeed (idempotent)
@@ -695,8 +699,8 @@ async fn test_demonitor_nonexistent_monitor() {
 async fn test_monitor_receives_down_normal_exit() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
-    let monitor_id = ActorId::from("monitor1@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
+    let monitor_id = test_actor_id("monitor1");
 
     let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
@@ -724,8 +728,8 @@ async fn test_monitor_receives_down_normal_exit() {
 async fn test_monitor_receives_down_shutdown_exit() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
-    let monitor_id = ActorId::from("monitor1@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
+    let monitor_id = test_actor_id("monitor1");
 
     let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
@@ -753,8 +757,8 @@ async fn test_monitor_receives_down_shutdown_exit() {
 async fn test_monitor_receives_down_killed_exit() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
-    let monitor_id = ActorId::from("monitor1@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
+    let monitor_id = test_actor_id("monitor1");
 
     let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
@@ -782,8 +786,8 @@ async fn test_monitor_receives_down_killed_exit() {
 async fn test_monitor_receives_down_linked_exit() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
-    let monitor_id = ActorId::from("monitor1@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
+    let monitor_id = test_actor_id("monitor1");
 
     let (tx, mut rx) = mpsc::channel(10);
     let monitor_ref = "monitor-ref-1".to_string();
@@ -795,7 +799,7 @@ async fn test_monitor_receives_down_linked_exit() {
 
     // Terminate actor with linked exit
     let linked_reason = ExitReason::Linked {
-        actor_id: ActorId::from("linked-actor@test-node".to_string()),
+        actor_id: test_actor_id("linked-actor"),
         reason: Box::new(ExitReason::Error("linked error".to_string())),
     };
     registry
@@ -815,9 +819,9 @@ async fn test_monitor_receives_down_linked_exit() {
 async fn test_link_cleanup_removes_all_references() {
     let registry = create_test_registry().await;
 
-    let actor1_id = ActorId::from("actor1@test-node".to_string());
-    let actor2_id = ActorId::from("actor2@test-node".to_string());
-    let actor3_id = ActorId::from("actor3@test-node".to_string());
+    let actor1_id = test_actor_id("actor1");
+    let actor2_id = test_actor_id("actor2");
+    let actor3_id = test_actor_id("actor3");
 
     // Create links: actor1 <-> actor2, actor1 <-> actor3
     registry.link(&actor1_id, &actor2_id).await.unwrap();
@@ -853,9 +857,9 @@ async fn test_link_cleanup_removes_all_references() {
 async fn test_monitor_cleanup_on_termination() {
     let registry = create_test_registry().await;
 
-    let actor_id = ActorId::from("actor1@test-node".to_string());
-    let monitor1_id = ActorId::from("monitor1@test-node".to_string());
-    let monitor2_id = ActorId::from("monitor2@test-node".to_string());
+    let actor_id = test_actor_id("actor1");
+    let monitor1_id = test_actor_id("monitor1");
+    let monitor2_id = test_actor_id("monitor2");
 
     let (tx1, mut rx1) = mpsc::channel(10);
     let (tx2, mut rx2) = mpsc::channel(10);

@@ -43,12 +43,12 @@
 //!
 //! ## Expected Output
 //! ```
-//! [Prometheus Exporter] Actor spawned: worker-1@node1
-//! [Prometheus Exporter] Actor spawned: worker-2@node1
-//! [Prometheus Exporter] Actor spawned: worker-3@node1
-//! [Prometheus Exporter] Actor terminated: worker-1@node1 (reason: normal)
-//! [Prometheus Exporter] Actor terminated: worker-2@node1 (reason: normal)
-//! [Prometheus Exporter] Actor terminated: worker-3@node1 (reason: normal)
+//! [Prometheus Exporter] Actor spawned: worker-1//worker::default@node1
+//! [Prometheus Exporter] Actor spawned: worker-2//worker::default@node1
+//! [Prometheus Exporter] Actor spawned: worker-3//worker::default@node1
+//! [Prometheus Exporter] Actor terminated: worker-1//worker::default@node1 (reason: normal)
+//! [Prometheus Exporter] Actor terminated: worker-2//worker::default@node1 (reason: normal)
+//! [Prometheus Exporter] Actor terminated: worker-3//worker::default@node1 (reason: normal)
 //!
 //! Final Metrics:
 //! - Actors spawned: 3
@@ -183,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .with_internal(true)
         .with_admin(true);
         let actor_ref = ActorBuilder::new(Box::new(MockBehavior::new()))
-            .with_id(format!("worker-{}@{}", i, node.id().as_str()))
+            .with_name(format!("worker-{}", i))
             .spawn(&ctx, node.service_locator().clone())
             .await
             .map_err(|e| format!("Failed to spawn actor: {}", e))?;

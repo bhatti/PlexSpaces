@@ -33,7 +33,6 @@
 #[cfg(feature = "component-model")]
 use crate::HostFunctions;
 use plexspaces_blob::BlobService;
-use plexspaces_core::actor_id::parse_actor_id;
 use plexspaces_core::{ActorId, LockManager, RequestContext, TupleSpaceProvider};
 use plexspaces_locks::{AcquireLockOptions, RenewLockOptions};
 use plexspaces_proto::actor::v1::{
@@ -131,15 +130,9 @@ impl SimpleHostImpl {
     }
 
     /// Build a RequestContext for process group operations.
-    /// Expects `self.actor_id` in canonical format `{id}//{actor_type}::{namespace}@{node_id}`;
-    /// namespace is taken from parsed result, or empty if parsing fails.
+    /// The namespace comes directly from the validated structured actor ID.
     fn pg_context(&self) -> RequestContext {
-        let actor_str = self.actor_id.to_string();
-        let namespace = parse_actor_id(&actor_str)
-            .ok()
-            .and_then(|p| p.namespace)
-            .unwrap_or_default();
-        RequestContext::new_without_auth(String::new(), namespace)
+        RequestContext::new_without_auth(String::new(), self.actor_id.namespace().to_string())
     }
 
     fn decode_proto<M>(payload: &[u8], type_name: &str) -> Result<M, String>

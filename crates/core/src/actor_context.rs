@@ -277,7 +277,7 @@ pub trait ProcessGroupService: Send + Sync {
 ///
 /// ## Purpose
 /// Provides unified interface for actor operations, whether local or remote.
-/// Supports `actor@node1` syntax for location-transparent operations.
+/// Supports canonical ActorId strings for location-transparent operations.
 #[async_trait]
 pub trait ActorService: Send + Sync {
     /// Spawn a new actor (local or remote)
@@ -857,6 +857,22 @@ impl ActorContext {
         self.self_ref.as_ref()
     }
 
+    /// Get this actor's canonical typed ID.
+    ///
+    /// ## Purpose
+    /// Keeps runtime code and generated SDK handlers on structured `ActorId`
+    /// instead of reparsing `receiver_id` strings from individual messages.
+    ///
+    /// ## Panics
+    /// Panics if called before the actor's self reference has been set during spawn.
+    /// That indicates a runtime initialization bug.
+    pub fn actor_id(&self) -> &ActorId {
+        self.self_ref
+            .as_ref()
+            .expect("ActorContext self_ref must be set before message handling")
+            .id()
+    }
+
     /// Get parent ActorRef (supervisor)
     pub fn parent_ref(&self) -> Option<&ActorRef> {
         self.parent_ref.as_ref()
@@ -872,7 +888,7 @@ impl ActorContext {
     /// ## Arguments
     /// * `correlation_id` - Correlation ID from the original message (optional)
     /// * `sender_id` - ID of the actor that sent the original message (or temporary sender ID)
-    /// * `target_actor_id` - ID of the actor sending the reply (usually `msg.receiver`)
+    /// * `target_actor_id` - Typed ID of the actor sending the reply (usually `ctx.actor_id().clone()`)
     /// * `reply_message` - The reply message to send
     ///
     /// ## Returns
@@ -886,7 +902,7 @@ impl ActorContext {
     ///     ctx.send_reply(
     ///         Some(&msg.correlation_id),
     ///         &msg.sender_id,
-    ///         msg.receiver_id.clone(),
+    ///         ctx.actor_id().clone(),
     ///         reply,
     ///     ).await?;
     /// }
@@ -894,7 +910,7 @@ impl ActorContext {
     pub async fn send_reply(
         &self,
         correlation_id: Option<&str>,
-        sender_id: &ActorId,
+        sender_id: &str,
         target_actor_id: ActorId,
         mut reply_message: Message,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -908,8 +924,8 @@ impl ActorContext {
 
         // SIMPLIFIED: Use send() method - temporary sender behaves like normal actor
         // Set message fields: receiver_id=sender_id (where reply goes TO), sender_id=target_actor_id (where reply comes FROM), correlation_id
-        reply_message.receiver_id = sender_id.clone(); // Reply goes TO the sender (temporary sender for ask pattern)
-        reply_message.sender_id = target_actor_id.clone(); // Reply comes FROM the current actor
+        reply_message.receiver_id = sender_id.to_string(); // Reply goes TO the sender (temporary sender for ask pattern)
+        reply_message.sender_id = target_actor_id.to_string(); // Reply comes FROM the current actor
         if let Some(corr_id) = correlation_id {
             reply_message.correlation_id = corr_id.to_string();
         }

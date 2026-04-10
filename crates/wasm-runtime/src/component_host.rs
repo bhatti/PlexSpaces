@@ -841,7 +841,12 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
                 // Store mapping: monitor_ref_u64 -> target_id
                 // The actual monitor_ref_string is stored in wasm_message_sender.rs
                 // We just need to track the target_id here for validation
-                let target_id = actor_id.clone();
+                let target_id = ActorId::from_canonical(&actor_id).map_err(|err| {
+                    make_actor_error(
+                        "invalid-message",
+                        format!("invalid monitor target actor id '{actor_id}': {err}"),
+                    )
+                })?;
                 {
                     let mut monitor_refs = self.monitor_refs.write().await;
                     // Store with placeholder string - actual string is in wasm_message_sender
@@ -948,7 +953,7 @@ impl plexspaces::actor::messaging::Host for MessagingImpl {
 
     async fn self_id(&mut self) -> plexspaces::actor::types::ActorId {
         metrics::counter!("plexspaces_wasm_messaging_self_id_total").increment(1);
-        self.actor_id.clone()
+        self.actor_id.to_string()
     }
 
     async fn parent_id(&mut self) -> Option<plexspaces::actor::types::ActorId> {
@@ -4461,7 +4466,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             })?;
 
         let request_ctx = context_to_request_context(&ctx);
-        let actor_id = plexspaces_core::ActorId::from(self.actor_id.clone());
+        let actor_id = self.actor_id.clone();
 
         // Drop span before await to ensure Send
         drop(_span);
@@ -4523,7 +4528,7 @@ impl plexspaces::actor::process_groups::Host for ProcessGroupsImpl {
             })?;
 
         let request_ctx = context_to_request_context(&ctx);
-        let actor_id = plexspaces_core::ActorId::from(self.actor_id.clone());
+        let actor_id = self.actor_id.clone();
 
         // Drop span before await to ensure Send
         drop(_span);

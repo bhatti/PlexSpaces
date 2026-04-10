@@ -21,7 +21,7 @@ async fn test_get_or_activate_actor_new_actor() {
     let node = NodeBuilder::new("test-node").build().await;
     let node_id = node.id().clone();
 
-    let actor_id: ActorId = format!("test-actor@{}", node_id.as_str()).into();
+    let actor_id = ActorId::new("test-actor", "gen_server", "default", node_id.as_str()).unwrap();
 
     // Get or activate actor (should create new one)
     let actor_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {
@@ -69,10 +69,7 @@ async fn test_get_or_activate_actor_new_actor() {
     use plexspaces_core::ActorRegistry;
     let actor_registry = node.service_locator().actor_registry().await.unwrap();
     assert!(
-        actor_registry
-            .lookup_actor(&actor_id.to_string())
-            .await
-            .is_some(),
+        actor_registry.lookup_actor(&actor_id).await.is_some(),
         "Actor should be registered in ActorRegistry"
     );
 }
@@ -83,7 +80,7 @@ async fn test_get_or_activate_actor_existing_actor() {
     let node = NodeBuilder::new("test-node").build().await;
     let node_id = node.id().clone();
 
-    let actor_id: ActorId = format!("test-actor@{}", node_id.as_str()).into();
+    let actor_id = ActorId::new("test-actor", "gen_server", "default", node_id.as_str()).unwrap();
 
     // First, spawn an actor
     let behavior1 = Box::new(MockBehavior::new());
@@ -131,7 +128,7 @@ async fn test_get_or_activate_actor_concurrent_activation() {
     let node = Arc::new(NodeBuilder::new("test-node").build().await);
     let node_id = node.id().clone();
 
-    let actor_id: ActorId = format!("test-actor@{}", node_id.as_str()).into();
+    let actor_id = ActorId::new("test-actor", "gen_server", "default", node_id.as_str()).unwrap();
 
     // Spawn multiple concurrent get_or_activate calls
     let mut handles = Vec::new();

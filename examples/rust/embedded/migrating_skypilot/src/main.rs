@@ -2,7 +2,7 @@
 // Comparison: SkyPilot (AI Workload Orchestration with Multi-Cloud Resource Scheduling)
 
 use plexspaces_behavior::GenServer;
-use plexspaces_core::{Actor, ActorContext, ActorId, BehaviorError, BehaviorType};
+use plexspaces_core::{Actor, ActorContext, BehaviorError, BehaviorType};
 use plexspaces_mailbox::Message;
 use plexspaces_node::NodeBuilder;
 use serde::{Deserialize, Serialize};
@@ -264,8 +264,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node = NodeBuilder::new("comparison-node-1").build().await;
 
     // SkyPilot schedules AI workloads across multiple clouds
-    let actor_id: ActorId = "skypilot-scheduler/scheduler-1@comparison-node-1".to_string();
-
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("Creating SkyPilot scheduler (multi-cloud resource scheduling)");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -277,7 +275,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scheduler = plexspaces_sdk::spawn_with_facets(
         &ctx,
         node.service_locator(),
-        actor_id.clone(),
+        "skypilot-scheduler-scheduler-1",
         "scheduling",
         SkyPilotSchedulerActor::new(),
         vec![],
@@ -386,7 +384,6 @@ mod tests {
     async fn test_skypilot_scheduler() {
         let node = NodeBuilder::new("test-node").build().await;
 
-        let actor_id: ActorId = "skypilot-scheduler/test-1@test-node".to_string();
         let ctx = plexspaces_core::RequestContext::new_without_auth(
             "skypilot".to_string(),
             "scheduling".to_string(),
@@ -394,7 +391,7 @@ mod tests {
         let scheduler = plexspaces_sdk::spawn_with_facets(
             &ctx,
             node.service_locator(),
-            actor_id.clone(),
+            "skypilot-scheduler-test-1",
             "scheduling",
             SkyPilotSchedulerActor::new(),
             vec![],

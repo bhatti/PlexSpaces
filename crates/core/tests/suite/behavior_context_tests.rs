@@ -66,7 +66,10 @@ async fn test_behavior_context_with_sender() {
     );
     let ctx_arc = Arc::new(ctx);
 
-    let sender = ActorRef::new("sender@node1".to_string()).unwrap();
+    let sender = ActorRef::new(
+        plexspaces_core::ActorId::new("sender", "worker", "default", "node1").unwrap(),
+    )
+    .unwrap();
 
     let message = create_test_message(vec![1, 2, 3]);
     let behavior_ctx = BehaviorContext {
@@ -79,7 +82,10 @@ async fn test_behavior_context_with_sender() {
     };
 
     assert!(behavior_ctx.sender.is_some());
-    assert_eq!(behavior_ctx.sender.as_ref().unwrap().id(), "sender@node1");
+    assert_eq!(
+        behavior_ctx.sender.as_ref().unwrap().id().as_str(),
+        "sender//worker::default@node1"
+    );
     assert_eq!(behavior_ctx.correlation_id, Some("corr-123".to_string()));
 }
 

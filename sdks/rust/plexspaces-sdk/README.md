@@ -337,7 +337,7 @@ let ctx = RequestContext::new_without_auth("tenant".into(), "namespace".into());
 let actor_ref1 = spawn(
     &ctx,
     service_locator,
-    "user-123@node",
+    "user-123",
     "ns",
     UserProfile::new("user-123"),
 ).await?;
@@ -347,12 +347,12 @@ let actor_ref1 = spawn(
 let actor_ref2 = spawn(
     &ctx,
     service_locator,
-    "user-456@node",  // Different ID, same type
+    "user-456",  // Different name, same type
     "ns",
     UserProfile::new("user-456"),
 ).await?;
 
-// Any message to "user-789@node" (same type, different ID) will automatically
+// Any message to "user-789" (same type, different name) will automatically
 // activate a new UserProfile actor for that user ID
 ```
 

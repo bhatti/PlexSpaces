@@ -86,7 +86,7 @@ impl AnalyticsShard {
 let shard = spawn_gen_server(
     &ctx,
     service_locator,
-    "analytics-shard-0@node",
+    "analytics-shard-0",
     AnalyticsShard::new(0),
     vec![],
 ).await?;

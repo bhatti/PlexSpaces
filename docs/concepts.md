@@ -23,12 +23,20 @@ This document explains the fundamental concepts you need to understand to use Pl
 
 **Actors** are the fundamental unit of computation in PlexSpaces. Each actor:
 
-- Has a **unique ID** in format `name@node_id` (e.g., `counter@node1`)
+- Has a **unique ID** in canonical format `name//actor_type::namespace@node_id` (e.g., `counter//counter::default@node1`)
+- Is created by client code using a **unique actor name** such as `counter`; the runtime derives the canonical `ActorId`
 - Processes **messages sequentially** (single-threaded execution)
 - Maintains **private state** (no shared state between actors)
 - Communicates via **message passing** (tell/ask patterns)
 - Is **location-transparent** (works the same locally or remotely)
 - Is **fault-tolerant** (automatic recovery via supervision)
+
+The key distinction is:
+
+- **Name**: what client code chooses and passes to builders/SDKs
+- **ActorId**: the full structured identity the runtime constructs and uses internally
+
+Client code should not build full actor IDs just to spawn actors. Use a unique name and let the framework create the `ActorId`.
 
 ### Actor Lifecycle
 
@@ -352,18 +360,18 @@ supervisor.add_child(ChildSpec::new("worker")
 
 - **Same API**: `tell()` and `ask()` work identically for local and remote actors
 - **Automatic Routing**: System handles local vs remote communication
-- **Actor IDs**: Format `name@node_id` enables location transparency
+- **Actor IDs**: Canonical format `name//actor_type::namespace@node_id` enables location transparency without reparsing ambiguous legacy strings
 - **Service Discovery**: Automatic actor location via ObjectRegistry
 
 ### Example
 
 ```rust
 // Local actor
-let local_ref = node.get_actor_ref(&"counter@node1".to_string()).await?;
+let local_ref = node.get_actor_ref("counter").await?;
 local_ref.tell(message).await?;
 
 // Remote actor (same API!)
-let remote_ref = node.get_actor_ref(&"counter@node2".to_string()).await?;
+let remote_ref = node.get_actor_ref("counter-remote").await?;
 remote_ref.tell(message).await?;
 ```
 
@@ -663,7 +671,7 @@ When multiple actors of the same type exist, the system uses:
 // Multiple counter actors registered
 // GET /api/v1/actors/default/counter
 // → ActorService discovers all actors with type="counter"
-// → Randomly selects one (e.g., "counter-1@node1")
+// → Randomly selects one (e.g., "counter-1//counter::default@node1")
 // → Routes message to selected actor
 ```
 

@@ -137,7 +137,7 @@ pub trait ActorFactory: Send + Sync {
     ///
     /// ## Arguments
     /// * `ctx` - RequestContext with proper tenant/namespace
-    /// * `temp_sender_id` - Temporary sender ID (format: "ask-{correlation_id}@{node_id}")
+    /// * `temp_sender_id` - Temporary sender actor ID
     /// * `correlation_id` - Correlation ID for matching replies
     /// * `expires_at` - Expiration time for the temporary sender
     ///
@@ -146,7 +146,7 @@ pub trait ActorFactory: Send + Sync {
     async fn create_temporary_sender(
         &self,
         ctx: &RequestContext,
-        temp_sender_id: String,
+        temp_sender_id: ActorId,
         correlation_id: String,
         expires_at: std::time::Instant,
     ) -> Result<Arc<dyn MessageSender>, Box<dyn std::error::Error + Send + Sync>>;

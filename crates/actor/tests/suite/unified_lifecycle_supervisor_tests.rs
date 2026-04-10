@@ -35,6 +35,19 @@ use plexspaces_core::{
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use std::sync::Arc;
 
+fn test_actor_id(name: &str) -> plexspaces_core::ActorId {
+    plexspaces_core::ActorId::new(name, "GenServer", "namespace", "test-node")
+        .expect("valid test actor id")
+}
+
+fn actor_id_from_legacy(id: &str) -> plexspaces_core::ActorId {
+    if let Ok(actor_id) = plexspaces_core::ActorId::from_canonical(id) {
+        return actor_id;
+    }
+    let name = id.split('@').next().unwrap_or(id);
+    test_actor_id(name)
+}
+
 /// Test actor for supervisor tests
 struct TestActor {
     id: String,
@@ -69,7 +82,7 @@ async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<Su
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(None, None).await;
     Supervisor::new(
-        "test-supervisor".to_string(),
+        test_actor_id("test-supervisor").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -84,7 +97,7 @@ async fn test_supervisor_start_child_with_facets() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
 
     let child_id = "worker1".to_string();
-    let actor_id = format!("{}@test-node", child_id);
+    let actor_id = test_actor_id(&child_id).to_string();
 
     let actor_id_for_closure = actor_id.clone();
     let spec = ChildSpec::worker(
@@ -107,7 +120,7 @@ async fn test_supervisor_start_child_with_facets() {
                     "namespace".to_string(),
                 )
                 .await;
-                let actor_ref = CoreActorRef::new(actor_id.clone())
+                let actor_ref = CoreActorRef::new(actor_id_from_legacy(&actor_id))
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                 Ok(StartedChild::Worker { actor, actor_ref })
             })
@@ -153,7 +166,7 @@ async fn test_supervisor_restart_preserves_facets() {
 
     // Create ChildSpec with facets
     let child_id = "faceted-worker".to_string();
-    let actor_id = format!("{}@test-node", child_id);
+    let actor_id = test_actor_id(&child_id).to_string();
 
     let spec = ChildSpec::worker(
         child_id.clone(),
@@ -177,7 +190,7 @@ async fn test_supervisor_restart_preserves_facets() {
                         "namespace".to_string(),
                     )
                     .await;
-                    let actor_ref = CoreActorRef::new(actor_id.clone())
+                    let actor_ref = CoreActorRef::new(actor_id_from_legacy(&actor_id))
                         .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                     Ok(StartedChild::Worker { actor, actor_ref })
                 })
@@ -223,7 +236,7 @@ async fn test_supervisor_restart_preserves_facets() {
     // Trigger restart via handle_failure
     let result = supervisor
         .handle_failure(
-            &actor_id,
+            &actor_id_from_legacy(&actor_id),
             "simulated crash".to_string(),
             Some(plexspaces_core::ExitReason::Error("test error".to_string())),
         )

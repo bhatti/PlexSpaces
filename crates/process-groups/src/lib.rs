@@ -378,7 +378,7 @@ impl ProcessGroupRegistry {
                 GroupMembership {
                     group_name: group_name.to_string(),
                     tenant_id: tenant_id.to_string(),
-                    actor_id: actor_id.clone(),
+                    actor_id: actor_id.to_string(),
                     node_id: self.node_id.clone(),
                     join_count: 0,
                     topics: topics.clone(),
@@ -545,7 +545,17 @@ impl ProcessGroupRegistry {
         for key in keys {
             if let Some(bytes) = self.storage.get(&ctx, &key).await? {
                 if let Ok(membership) = GroupMembership::decode(&bytes[..]) {
-                    members.push(membership.actor_id);
+                    match ActorId::from_canonical(&membership.actor_id) {
+                        Ok(actor_id) => members.push(actor_id),
+                        Err(error) => {
+                            warn!(
+                                actor_id = %membership.actor_id,
+                                group_name = %group_name,
+                                error = %error,
+                                "Skipping process-group membership with invalid canonical actor id"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -592,7 +602,17 @@ impl ProcessGroupRegistry {
             if let Some(bytes) = self.storage.get(&ctx, &key).await? {
                 if let Ok(membership) = GroupMembership::decode(&bytes[..]) {
                     if membership.node_id == self.node_id {
-                        local_members.push(membership.actor_id);
+                        match ActorId::from_canonical(&membership.actor_id) {
+                            Ok(actor_id) => local_members.push(actor_id),
+                            Err(error) => {
+                                warn!(
+                                    actor_id = %membership.actor_id,
+                                    group_name = %group_name,
+                                    error = %error,
+                                    "Skipping local process-group membership with invalid canonical actor id"
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -699,7 +719,17 @@ impl ProcessGroupRegistry {
                     };
 
                     if should_receive {
-                        recipients.push(membership.actor_id);
+                        match ActorId::from_canonical(&membership.actor_id) {
+                            Ok(actor_id) => recipients.push(actor_id),
+                            Err(error) => {
+                                warn!(
+                                    actor_id = %membership.actor_id,
+                                    group_name = %group_name,
+                                    error = %error,
+                                    "Skipping publish recipient with invalid canonical actor id"
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -730,7 +760,7 @@ impl ProcessGroupRegistry {
             group_name: group_name.to_string(),
             tenant_id: tenant_id.to_string(),
             topic: topic.map(|t| t.to_string()),
-            recipients: recipients.clone(),
+            recipients: recipients.iter().map(ToString::to_string).collect(),
             payload: message,
             published_at: chrono::Utc::now().timestamp(),
         };
@@ -846,6 +876,7 @@ impl ProcessGroupRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plexspaces_core::ActorId;
     use plexspaces_keyvalue::SqliteKVStore;
 
     // Test constants
@@ -856,6 +887,11 @@ mod tests {
     /// Helper function to create test RequestContext
     fn test_ctx() -> RequestContext {
         RequestContext::new_without_auth(TEST_TENANT.to_string(), TEST_NAMESPACE.to_string())
+    }
+
+    fn test_actor_id(name: &str) -> ActorId {
+        ActorId::new(name, "gen_server", TEST_NAMESPACE, TEST_NODE_ID)
+            .expect("test actor IDs must be valid")
     }
 
     /// Helper function to create test registry (async because SqliteKVStore::new is async)
@@ -943,7 +979,7 @@ mod tests {
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
 
@@ -951,7 +987,7 @@ mod tests {
             RequestContext::new_without_auth(TEST_TENANT.to_string(), TEST_NAMESPACE.to_string());
         let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 1);
-        assert_eq!(members[0], "actor-1");
+        assert_eq!(members[0], test_actor_id("actor-1"));
     }
 
     /// TEST 6: Cannot join non-existent group
@@ -960,7 +996,7 @@ mod tests {
         let registry = create_test_registry().await;
 
         let result = registry
-            .join_group(&test_ctx(), "nonexistent", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "nonexistent", &test_actor_id("actor-1"), vec![])
             .await;
         assert!(matches!(result, Err(ProcessGroupError::GroupNotFound(_))));
     }
@@ -977,15 +1013,15 @@ mod tests {
 
         // Join 3 times
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
 
@@ -993,7 +1029,7 @@ mod tests {
         let ctx = test_ctx();
         let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 1);
-        assert_eq!(members[0], "actor-1");
+        assert_eq!(members[0], test_actor_id("actor-1"));
     }
 
     /// TEST 8: Can leave group
@@ -1006,13 +1042,13 @@ mod tests {
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         let ctx =
             RequestContext::new_without_auth(TEST_TENANT.to_string(), TEST_NAMESPACE.to_string());
         registry
-            .leave_group(&ctx, "test-group", &ActorId::from("actor-1".to_string()))
+            .leave_group(&ctx, "test-group", &test_actor_id("actor-1"))
             .await
             .unwrap();
 
@@ -1033,27 +1069,26 @@ mod tests {
 
         // Join 3 times
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
 
         let ctx = test_ctx();
-        use plexspaces_core::ActorId;
         // Leave twice - should still be member
         registry
-            .leave_group(&ctx, "test-group", &ActorId::from("actor-1".to_string()))
+            .leave_group(&ctx, "test-group", &test_actor_id("actor-1"))
             .await
             .unwrap();
         registry
-            .leave_group(&ctx, "test-group", &ActorId::from("actor-1".to_string()))
+            .leave_group(&ctx, "test-group", &test_actor_id("actor-1"))
             .await
             .unwrap();
 
@@ -1063,7 +1098,7 @@ mod tests {
 
         // Leave third time - now fully removed
         registry
-            .leave_group(&ctx, "test-group", &ActorId::from("actor-1".to_string()))
+            .leave_group(&ctx, "test-group", &test_actor_id("actor-1"))
             .await
             .unwrap();
 
@@ -1084,7 +1119,7 @@ mod tests {
 
         let ctx = test_ctx();
         let result = registry
-            .leave_group(&ctx, "test-group", &ActorId::from("actor-1".to_string()))
+            .leave_group(&ctx, "test-group", &test_actor_id("actor-1"))
             .await;
         assert!(matches!(
             result,
@@ -1102,24 +1137,24 @@ mod tests {
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-2".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-2"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-3".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-3"), vec![])
             .await
             .unwrap();
 
         let ctx = test_ctx();
         let members = registry.get_members(&ctx, "test-group").await.unwrap();
         assert_eq!(members.len(), 3);
-        assert!(members.contains(&"actor-1".to_string()));
-        assert!(members.contains(&"actor-2".to_string()));
-        assert!(members.contains(&"actor-3".to_string()));
+        assert!(members.contains(&test_actor_id("actor-1")));
+        assert!(members.contains(&test_actor_id("actor-2")));
+        assert!(members.contains(&test_actor_id("actor-3")));
     }
 
     /// TEST 12: Can get local members only
@@ -1133,11 +1168,11 @@ mod tests {
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-2".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-2"), vec![])
             .await
             .unwrap();
 
@@ -1176,11 +1211,11 @@ mod tests {
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-2".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-2"), vec![])
             .await
             .unwrap();
 
@@ -1208,11 +1243,11 @@ mod tests {
 
         // Join actors
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-2".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-2"), vec![])
             .await
             .unwrap();
 
@@ -1222,7 +1257,7 @@ mod tests {
 
         // Leave one actor
         registry
-            .leave_group(&ctx, "test-group", &ActorId::from("actor-1".to_string()))
+            .leave_group(&ctx, "test-group", &test_actor_id("actor-1"))
             .await
             .unwrap();
 
@@ -1242,15 +1277,15 @@ mod tests {
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-1".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-2".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-2"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&test_ctx(), "test-group", &"actor-3".to_string(), vec![])
+            .join_group(&test_ctx(), "test-group", &test_actor_id("actor-3"), vec![])
             .await
             .unwrap();
 
@@ -1263,9 +1298,9 @@ mod tests {
 
         // Should have published to all 3 members
         assert_eq!(recipients.len(), 3);
-        assert!(recipients.contains(&"actor-1".to_string()));
-        assert!(recipients.contains(&"actor-2".to_string()));
-        assert!(recipients.contains(&"actor-3".to_string()));
+        assert!(recipients.contains(&test_actor_id("actor-1")));
+        assert!(recipients.contains(&test_actor_id("actor-2")));
+        assert!(recipients.contains(&test_actor_id("actor-3")));
     }
 
     /// TEST 17: Cannot publish to non-existent group
@@ -1315,7 +1350,7 @@ mod tests {
             .join_group(
                 &test_ctx(),
                 "events",
-                &"actor-1".to_string(),
+                &test_actor_id("actor-1"),
                 vec!["user.login".to_string()],
             )
             .await
@@ -1326,7 +1361,7 @@ mod tests {
             .join_group(
                 &test_ctx(),
                 "events",
-                &"actor-2".to_string(),
+                &test_actor_id("actor-2"),
                 vec!["user.logout".to_string()],
             )
             .await
@@ -1337,7 +1372,7 @@ mod tests {
             .join_group(
                 &test_ctx(),
                 "events",
-                &"actor-3".to_string(),
+                &test_actor_id("actor-3"),
                 vec!["user.login".to_string(), "user.logout".to_string()],
             )
             .await
@@ -1345,7 +1380,7 @@ mod tests {
 
         // Actor 4 subscribes to all topics (empty list)
         registry
-            .join_group(&test_ctx(), "events", &"actor-4".to_string(), vec![])
+            .join_group(&test_ctx(), "events", &test_actor_id("actor-4"), vec![])
             .await
             .unwrap();
 
@@ -1357,10 +1392,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(recipients.len(), 3);
-        assert!(recipients.contains(&"actor-1".to_string()));
-        assert!(recipients.contains(&"actor-3".to_string()));
-        assert!(recipients.contains(&"actor-4".to_string()));
-        assert!(!recipients.contains(&"actor-2".to_string()));
+        assert!(recipients.contains(&test_actor_id("actor-1")));
+        assert!(recipients.contains(&test_actor_id("actor-3")));
+        assert!(recipients.contains(&test_actor_id("actor-4")));
+        assert!(!recipients.contains(&test_actor_id("actor-2")));
 
         // Publish to "user.logout" topic - should reach actor-2, actor-3, and actor-4
         let message = b"User logged out".to_vec();
@@ -1370,10 +1405,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(recipients.len(), 3);
-        assert!(recipients.contains(&"actor-2".to_string()));
-        assert!(recipients.contains(&"actor-3".to_string()));
-        assert!(recipients.contains(&"actor-4".to_string()));
-        assert!(!recipients.contains(&"actor-1".to_string()));
+        assert!(recipients.contains(&test_actor_id("actor-2")));
+        assert!(recipients.contains(&test_actor_id("actor-3")));
+        assert!(recipients.contains(&test_actor_id("actor-4")));
+        assert!(!recipients.contains(&test_actor_id("actor-1")));
 
         // Publish without topic (broadcast to all) - should reach all actors
         let message = b"System message".to_vec();
@@ -1398,7 +1433,7 @@ mod tests {
             .join_group(
                 &test_ctx(),
                 "events",
-                &"actor-1".to_string(),
+                &test_actor_id("actor-1"),
                 vec!["user.login".to_string()],
             )
             .await
@@ -1409,7 +1444,7 @@ mod tests {
             .join_group(
                 &test_ctx(),
                 "events",
-                &"actor-1".to_string(),
+                &test_actor_id("actor-1"),
                 vec!["user.logout".to_string()],
             )
             .await
@@ -1421,14 +1456,14 @@ mod tests {
             .publish_to_group(&ctx, "events", Some("user.login"), message1)
             .await
             .unwrap();
-        assert!(recipients1.contains(&"actor-1".to_string()));
+        assert!(recipients1.contains(&test_actor_id("actor-1")));
 
         let message2 = b"Logout event".to_vec();
         let recipients2 = registry
             .publish_to_group(&ctx, "events", Some("user.logout"), message2)
             .await
             .unwrap();
-        assert!(recipients2.contains(&"actor-1".to_string()));
+        assert!(recipients2.contains(&test_actor_id("actor-1")));
     }
 
     /// TEST 21: Large cluster performance - many members
@@ -1445,7 +1480,12 @@ mod tests {
         // Add 100 actors
         for i in 0..100 {
             registry
-                .join_group(&test_ctx(), "large-group", &format!("actor-{}", i), vec![])
+                .join_group(
+                    &test_ctx(),
+                    "large-group",
+                    &test_actor_id(&format!("actor-{}", i)),
+                    vec![],
+                )
                 .await
                 .unwrap();
         }
@@ -1479,7 +1519,7 @@ mod tests {
                 .join_group(
                     &test_ctx(),
                     "sequential-group",
-                    &format!("actor-{}", i),
+                    &test_actor_id(&format!("actor-{}", i)),
                     vec![],
                 )
                 .await
@@ -1500,7 +1540,7 @@ mod tests {
                 .leave_group(
                     &ctx,
                     "sequential-group",
-                    &ActorId::from(format!("actor-{}", i)),
+                    &test_actor_id(&format!("actor-{}", i)),
                 )
                 .await
                 .unwrap();
@@ -1529,22 +1569,22 @@ mod tests {
 
         // Join different tenants (use same namespace as create)
         registry
-            .join_group(&ctx1, "shared-group", &"actor-1".to_string(), vec![])
+            .join_group(&ctx1, "shared-group", &test_actor_id("actor-1"), vec![])
             .await
             .unwrap();
         registry
-            .join_group(&ctx2, "shared-group", &"actor-2".to_string(), vec![])
+            .join_group(&ctx2, "shared-group", &test_actor_id("actor-2"), vec![])
             .await
             .unwrap();
 
         // Verify isolation
         let members_1 = registry.get_members(&ctx1, "shared-group").await.unwrap();
         assert_eq!(members_1.len(), 1);
-        assert_eq!(members_1[0], "actor-1");
+        assert_eq!(members_1[0], test_actor_id("actor-1"));
 
         let members_2 = registry.get_members(&ctx2, "shared-group").await.unwrap();
         assert_eq!(members_2.len(), 1);
-        assert_eq!(members_2[0], "actor-2");
+        assert_eq!(members_2[0], test_actor_id("actor-2"));
     }
 
     /// TEST 24: Topic filtering edge cases
@@ -1557,7 +1597,7 @@ mod tests {
 
         // Actor with empty topics (receives all)
         registry
-            .join_group(&test_ctx(), "topics", &"actor-all".to_string(), vec![])
+            .join_group(&test_ctx(), "topics", &test_actor_id("actor-all"), vec![])
             .await
             .unwrap();
 
@@ -1566,7 +1606,7 @@ mod tests {
             .join_group(
                 &test_ctx(),
                 "topics",
-                &"actor-specific".to_string(),
+                &test_actor_id("actor-specific"),
                 vec!["topic1".to_string()],
             )
             .await
@@ -1579,7 +1619,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(recipients.len(), 1);
-        assert_eq!(recipients[0], "actor-all");
+        assert_eq!(recipients[0], test_actor_id("actor-all"));
 
         // Publish to topic1 - both receive
         let message = b"Message".to_vec();
@@ -1588,8 +1628,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(recipients.len(), 2);
-        assert!(recipients.contains(&"actor-all".to_string()));
-        assert!(recipients.contains(&"actor-specific".to_string()));
+        assert!(recipients.contains(&test_actor_id("actor-all")));
+        assert!(recipients.contains(&test_actor_id("actor-specific")));
     }
 
     /// TEST 25: Error paths - get_members on non-existent group
@@ -1627,7 +1667,7 @@ mod tests {
             .leave_group(
                 &ctx,
                 "test-group",
-                &ActorId::from("nonexistent-actor".to_string()),
+                &test_actor_id("nonexistent-actor"),
             )
             .await;
         assert!(matches!(
@@ -1641,8 +1681,6 @@ mod tests {
     async fn test_member_count_accuracy() {
         let registry = create_test_registry().await;
         let ctx = test_ctx();
-        use plexspaces_core::ActorId;
-
         registry
             .create_group(&test_ctx(), "count-test")
             .await
@@ -1651,7 +1689,12 @@ mod tests {
         // Join 3 actors
         for i in 1..=3 {
             registry
-                .join_group(&test_ctx(), "count-test", &format!("actor-{}", i), vec![])
+                .join_group(
+                    &test_ctx(),
+                    "count-test",
+                    &test_actor_id(&format!("actor-{}", i)),
+                    vec![],
+                )
                 .await
                 .unwrap();
         }
@@ -1662,7 +1705,7 @@ mod tests {
 
         // Leave one
         registry
-            .leave_group(&ctx, "count-test", &ActorId::from("actor-1".to_string()))
+            .leave_group(&ctx, "count-test", &test_actor_id("actor-1"))
             .await
             .unwrap();
 

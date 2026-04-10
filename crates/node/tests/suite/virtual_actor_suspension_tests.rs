@@ -20,7 +20,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
-use super::test_helpers::{get_or_activate_actor_helper, lookup_actor_ref};
+use super::test_helpers::{get_or_activate_actor_helper, lookup_actor_ref, test_runtime_actor_id};
 
 /// Helper to create a test message
 fn create_test_message(payload: Vec<u8>) -> plexspaces_core::Message {
@@ -129,7 +129,6 @@ impl ActorTrait for CounterActor {
         ctx: &ActorContext,
         msg: Message,
     ) -> Result<(), BehaviorError> {
-        // CRITICAL DEBUG: This MUST print - if it doesn't, the code isn't being executed
         let message_id = msg.id.clone();
         let sender_clone = msg.sender_id.clone();
         let receiver_clone = msg.receiver_id.clone();
@@ -139,9 +138,10 @@ impl ActorTrait for CounterActor {
         eprintln!("\n\n🔴🔴🔴 [COUNTER_ACTOR::handle_message] START: message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}\n\n", 
             message_id, sender_clone, receiver_clone, correlation_id_clone, message_type_str);
 
-        // Check if sender is temporary sender
         if !sender_clone.is_empty() {
-            let is_temp = sender_clone.starts_with("ask-") && sender_clone.contains('@');
+            let is_temp = ActorId::from_canonical(&sender_clone)
+                .map(|actor_id| actor_id.is_temporary_sender())
+                .unwrap_or(false);
             eprintln!("🔴🔴🔴 [COUNTER_ACTOR::handle_message] Sender check: sender_id={}, is_temporary_sender={}\n", sender_clone, is_temp);
         } else {
             eprintln!("🔴🔴🔴 [COUNTER_ACTOR::handle_message] NO SENDER IN MESSAGE!\n");
@@ -171,10 +171,11 @@ impl GenServer for CounterActor {
         eprintln!("🔵 [COUNTER_ACTOR::handle_request] START: message_id={}, sender={:?}, receiver={}, correlation_id={:?}, message_type={}", 
             msg.id, msg.sender_id, msg.receiver_id, msg.correlation_id, msg.message_type);
 
-        // DEBUG: Check if sender is temporary sender
         if !msg.sender_id.is_empty() {
             let sender_id = &msg.sender_id;
-            let is_temp = sender_id.starts_with("ask-") && sender_id.contains('@');
+            let is_temp = ActorId::from_canonical(sender_id)
+                .map(|actor_id| actor_id.is_temporary_sender())
+                .unwrap_or(false);
             eprintln!("🔵 [COUNTER_ACTOR::handle_request] Sender check: sender_id={}, is_temporary_sender={}", sender_id, is_temp);
         }
 
@@ -207,11 +208,11 @@ impl GenServer for CounterActor {
             }
         };
 
-        // Send reply using ActorContext
-        // CRITICAL: sender_id should be current actor (msg.receiver_id), target_actor_id should be ask caller (msg.sender)
         if !msg.sender_id.is_empty() {
             let target_actor_id = &msg.sender_id;
-            let is_temp = target_actor_id.starts_with("ask-") && target_actor_id.contains('@');
+            let is_temp = ActorId::from_canonical(target_actor_id)
+                .map(|actor_id| actor_id.is_temporary_sender())
+                .unwrap_or(false);
             let current_actor_id = &msg.receiver_id; // Current actor is the receiver of the message
             eprintln!("🔵 [COUNTER_ACTOR::handle_request] Sending reply: current_actor={}, target_actor_id={}, is_temporary_sender={}, correlation_id={:?}", 
                 current_actor_id, target_actor_id, is_temp, msg.correlation_id);
@@ -221,8 +222,13 @@ impl GenServer for CounterActor {
                 } else {
                     Some(msg.correlation_id.as_str())
                 },
-                current_actor_id, // Current actor (who is sending the reply) - msg.receiver_id
-                target_actor_id.clone(), // Target actor (ask caller/temporary sender) - msg.sender
+                current_actor_id, // Current actor is the receiver of the request
+                ActorId::from_canonical(target_actor_id).map_err(|e| {
+                    BehaviorError::ProcessingError(format!(
+                        "Failed to parse reply target actor id: {}",
+                        e
+                    ))
+                })?,
                 reply_msg,
             )
             .await
@@ -271,7 +277,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
         .register_behavior_registry(Arc::new(registry))
         .await;
 
-    let actor_id: ActorId = "counter-suspend-ask@test-node".to_string();
+    let actor_id = test_runtime_actor_id("counter-suspend-ask", "test-node");
 
     // Create shared storage for DurabilityFacet (needed to create checkpoint manually)
     let storage = Arc::new(SqliteJournalStorage::new(":memory:").await.unwrap());
@@ -362,7 +368,7 @@ async fn test_suspend_active_virtual_actor_then_ask() {
     let state_data = count_value.to_le_bytes().to_vec();
 
     let checkpoint = Checkpoint {
-        actor_id: actor_id.clone(),
+        actor_id: actor_id.to_string(),
         sequence: 2, // After processing increment message
         timestamp: Some(Timestamp::from(SystemTime::now())),
         state_data,
@@ -446,7 +452,7 @@ async fn test_suspend_active_virtual_actor_then_tell() {
         .await;
     eprintln!("🟢 [TEST] Registered CounterActor in BehaviorRegistry as 'GenServer'");
 
-    let actor_id: ActorId = "counter-suspend-tell@test-node".to_string();
+    let actor_id = test_runtime_actor_id("counter-suspend-tell", "test-node");
 
     // Register eager virtual actor
     let actor_ref = get_or_activate_actor_helper(&node, actor_id.clone(), || async {

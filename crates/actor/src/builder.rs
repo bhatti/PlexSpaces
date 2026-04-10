@@ -75,6 +75,7 @@ use std::sync::Arc;
 pub struct ActorBuilder {
     behavior: Box<dyn Actor>,
     actor_id: Option<ActorId>,
+    actor_name: Option<String>,
     tenant_id: String,
     namespace: String,
     mailbox_config: Option<MailboxConfig>,
@@ -98,6 +99,7 @@ impl ActorBuilder {
         Self {
             behavior,
             actor_id: None,
+            actor_name: None,
             tenant_id: String::new(), // Empty if auth disabled
             namespace: String::new(), // Must be set via with_namespace()
             mailbox_config: None,
@@ -108,10 +110,10 @@ impl ActorBuilder {
         }
     }
 
-    /// Set the actor name (generates timestamp-based ID if not provided)
+    /// Set the actor name used by runtime-owned ActorId construction.
     ///
     /// ## Arguments
-    /// * `name` - Actor name (will be used to generate ID)
+    /// * `name` - Stable actor name component
     ///
     /// ## Example
     /// ```rust,ignore
@@ -119,26 +121,26 @@ impl ActorBuilder {
     ///     .with_name("counter-actor");
     /// ```
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        // Generate timestamp-based ID from name
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis();
-        let id = format!("{}@{}", name.into(), timestamp);
-        self.actor_id = Some(id);
+        self.actor_name = Some(name.into());
         self
     }
 
-    /// Set the actor ID directly
+    /// Set a fully constructed actor ID.
+    ///
+    /// ## Design
+    /// Client-facing code should prefer [`Self::with_name`], letting the runtime assemble the
+    /// full [`ActorId`] from actor name, behavior type, namespace, and node placement. This
+    /// method exists for advanced runtime and test scenarios that already hold a validated
+    /// structured actor identity.
     ///
     /// ## Arguments
-    /// * `id` - Actor ID (format: "name@node_id" or just "name")
+    /// * `id` - Fully constructed canonical actor ID
     ///
     /// ## Example
     /// ```rust,ignore
+    /// let actor_id = plexspaces_core::ActorId::new("my-actor", "worker", "prod", "node1")?;
     /// let builder = ActorBuilder::new(MyBehavior::new())
-    ///     .with_id("my-actor@node1");
+    ///     .with_id(actor_id);
     /// ```
     pub fn with_id(mut self, id: impl Into<ActorId>) -> Self {
         self.actor_id = Some(id.into());
@@ -265,7 +267,7 @@ impl ActorBuilder {
     /// ));
     ///
     /// let actor = ActorBuilder::new(MyBehavior::new())
-    ///     .with_id("my-actor@node1")
+    ///     .with_name("my-actor")
     ///     .with_facet(durability_facet)
     ///     .build()
     ///     .await?;
@@ -590,43 +592,53 @@ impl ActorBuilder {
     ///     .await?;
     /// ```
     pub async fn build(self) -> Result<ActorStruct, std::io::Error> {
-        // Generate actor ID if not provided
-        let mut actor_id = self.actor_id.unwrap_or_else(|| {
+        let behavior_type = self.behavior.behavior_type();
+        let actor_type = match &behavior_type {
+            plexspaces_core::BehaviorType::GenServer => "gen_server",
+            plexspaces_core::BehaviorType::GenEvent => "gen_event",
+            plexspaces_core::BehaviorType::GenStateMachine => "gen_state_machine",
+            plexspaces_core::BehaviorType::Workflow => "workflow",
+            plexspaces_core::BehaviorType::Custom(s) => s.as_str(),
+        };
+
+        let actor_id = if let Some(actor_id) = self.actor_id.clone() {
+            if let Some(ref node_id) = self.node_id {
+                if actor_id.node_id() != node_id {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "Actor ID '{}' specifies node '{}' but builder has node_id '{}'.",
+                            actor_id,
+                            actor_id.node_id(),
+                            node_id
+                        ),
+                    ));
+                }
+            }
+            actor_id
+        } else {
             use std::time::{SystemTime, UNIX_EPOCH};
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
-            format!("actor@{}", timestamp)
-        });
-
-        // CRITICAL: Normalize actor ID to include @node suffix if node_id is available
-        // If actor_id already has @node, validate it matches node_id (or error if mismatch)
-        if let Some(ref node_id) = self.node_id {
-            if let Ok((actor_name, existing_node_id)) =
-                plexspaces_core::ActorRef::parse_actor_id(&actor_id)
-            {
-                // Actor ID already has @node format
-                if !existing_node_id.is_empty() && existing_node_id != *node_id {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        format!(
-                            "Actor ID '{}' specifies node '{}' but builder has node_id '{}'. Actor IDs must match the node they're created on.",
-                            actor_id, existing_node_id, node_id
-                        )
-                    ));
-                }
-                // If node_id matches or is empty, keep as is (will be normalized during spawn)
-                // For now, ensure it has the correct node_id
-                if existing_node_id != *node_id {
-                    actor_id = format!("{}@{}", actor_name, node_id);
-                }
+            let generated_name = self
+                .actor_name
+                .clone()
+                .unwrap_or_else(|| format!("actor_{timestamp}"));
+            let node_id = self.node_id.clone().unwrap_or_else(|| "local".to_string());
+            let namespace = if self.namespace.is_empty() {
+                "default".to_string()
             } else {
-                // Actor ID doesn't have @node format - append node_id
-                actor_id = format!("{}@{}", actor_id, node_id);
-            }
-        }
-        // Note: If node_id is None, actor_id will be normalized during spawn_actor() or spawn()
+                self.namespace.clone()
+            };
+            ActorId::new(generated_name, actor_type, namespace, node_id).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("failed to construct actor id: {e}"),
+                )
+            })?
+        };
 
         // Namespace is required - must be set via with_namespace()
         // Namespace can be empty - no validation needed
@@ -719,7 +731,7 @@ impl ActorBuilder {
     /// ```rust,ignore
     /// let ctx = RequestContext::new_without_auth("tenant-123".to_string(), "production".to_string());
     /// let actor_ref = ActorBuilder::new(Box::new(MyBehavior))
-    ///     .with_id("my-actor@node1".to_string())
+    ///     .with_name("my-actor")
     ///     .spawn(&ctx, node.service_locator().clone())
     ///     .await?;
     /// ```
@@ -737,13 +749,12 @@ impl ActorBuilder {
         let tenant_id_for_ref = self.tenant_id.clone();
         let namespace_for_ref = ctx.namespace().to_string();
 
-        // Extract actor_type from behavior before building
         let behavior_type = self.behavior.behavior_type();
         let actor_type = match behavior_type {
-            plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
-            plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
-            plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
-            plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
+            plexspaces_core::BehaviorType::GenServer => "gen_server".to_string(),
+            plexspaces_core::BehaviorType::GenEvent => "gen_event".to_string(),
+            plexspaces_core::BehaviorType::GenStateMachine => "gen_state_machine".to_string(),
+            plexspaces_core::BehaviorType::Workflow => "workflow".to_string(),
             plexspaces_core::BehaviorType::Custom(s) => s,
         };
 
@@ -768,11 +779,12 @@ impl ActorBuilder {
         // Get local node ID for actor ID normalization
         let local_node_id = registry.local_node_id();
 
-        // Normalize actor ID to include node ID
-        let actor_id = if actor_id.contains('@') {
+        let actor_id = if actor_id.node_id() == local_node_id {
             actor_id
         } else {
-            format!("{}@{}", actor_id, local_node_id)
+            actor_id.with_node_id(local_node_id).map_err(|e| {
+                format!("failed to normalize actor id {} to local node: {}", actor_id, e)
+            })?
         };
 
         // Create ActorContext with proper node ID
@@ -971,7 +983,7 @@ mod tests {
     async fn test_builder_with_resource_requirements() {
         use std::collections::HashMap;
         let actor = ActorBuilder::new(Box::new(TestBehavior))
-            .with_id("resource-actor@test-node".to_string())
+            .with_id(ActorId::new("resource-actor", "test", "test", "test-node").unwrap())
             .with_resource_requirements(
                 2.0,                    // CPU cores
                 8 * 1024 * 1024 * 1024, // 8GB memory
@@ -985,7 +997,7 @@ mod tests {
             .await
             .expect("build should succeed");
 
-        assert_eq!(actor.id(), "resource-actor@test-node");
+        assert_eq!(actor.id(), "resource-actor//test::test@test-node");
         // Verify resource profile is set
         // Verify resource profile is set (check via actor's resource_profile field access)
         // Note: resource_profile field is private, so we verify via build() success
@@ -995,13 +1007,13 @@ mod tests {
     #[tokio::test]
     async fn test_builder_with_id() {
         let actor = ActorBuilder::new(Box::new(TestBehavior))
-            .with_id("custom-id@test-node".to_string())
+            .with_id(ActorId::new("custom-id", "test", "test", "test-node").unwrap())
             .with_namespace("test".to_string())
             .build()
             .await
             .expect("build should succeed");
 
-        assert_eq!(actor.id(), "custom-id@test-node");
+        assert_eq!(actor.id(), "custom-id//test::test@test-node");
     }
 
     #[tokio::test]
@@ -1022,13 +1034,15 @@ mod tests {
         use plexspaces_core::RequestContext;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
-            .with_id("spawned-actor@test-node-spawn".to_string())
+            .with_name("spawned-actor")
             .with_namespace("test".to_string())
             .spawn(&ctx, node.service_locator().clone())
             .await
             .expect("Failed to spawn actor");
 
-        assert_eq!(actor_ref.id(), "spawned-actor@test-node-spawn");
+        let expected_actor_id =
+            ActorId::new("spawned-actor", "test", "test", "test-node-spawn").unwrap();
+        assert_eq!(actor_ref.id(), &expected_actor_id);
 
         // Verify actor is registered in the node's registry (with retry for async registration)
         use plexspaces_core::service_names;
@@ -1041,9 +1055,7 @@ mod tests {
         // Retry lookup with timeout (actor registration is async)
         let mut found = None;
         for _ in 0..10 {
-            found = actor_registry
-                .lookup_actor(&"spawned-actor@test-node-spawn".to_string())
-                .await;
+            found = actor_registry.lookup_actor(&expected_actor_id).await;
             if found.is_some() {
                 break;
             }
@@ -1074,7 +1086,7 @@ mod tests {
         use plexspaces_core::RequestContext;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
-            .with_id("resource-spawned-actor@test-node-resource-spawn".to_string())
+            .with_name("resource-spawned-actor")
             .with_resource_requirements(
                 1.5,                    // CPU cores
                 4 * 1024 * 1024 * 1024, // 4GB memory
@@ -1088,10 +1100,14 @@ mod tests {
             .await
             .expect("Failed to spawn actor with resources");
 
-        assert_eq!(
-            actor_ref.id(),
-            "resource-spawned-actor@test-node-resource-spawn"
-        );
+        let expected_actor_id = ActorId::new(
+            "resource-spawned-actor",
+            "test",
+            "test",
+            "test-node-resource-spawn",
+        )
+        .unwrap();
+        assert_eq!(actor_ref.id(), &expected_actor_id);
 
         // Verify actor is registered (with retry for async registration)
         use plexspaces_core::service_names;
@@ -1104,9 +1120,7 @@ mod tests {
         // Retry lookup with timeout (actor registration is async)
         let mut found = None;
         for _ in 0..10 {
-            found = actor_registry
-                .lookup_actor(&"resource-spawned-actor@test-node-resource-spawn".to_string())
-                .await;
+            found = actor_registry.lookup_actor(&expected_actor_id).await;
             if found.is_some() {
                 break;
             }
@@ -1138,14 +1152,16 @@ mod tests {
         use plexspaces_core::RequestContext;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
-            .with_id("mailbox-actor@test-node-mailbox-spawn".to_string())
+            .with_name("mailbox-actor")
             .with_mailbox_config(mailbox_config)
             .with_namespace("test".to_string())
             .spawn(&ctx, node.service_locator().clone())
             .await
             .expect("Failed to spawn actor with mailbox config");
 
-        assert_eq!(actor_ref.id(), "mailbox-actor@test-node-mailbox-spawn");
+        let expected_actor_id =
+            ActorId::new("mailbox-actor", "test", "test", "test-node-mailbox-spawn").unwrap();
+        assert_eq!(actor_ref.id(), &expected_actor_id);
 
         // Verify actor is registered (with retry for async registration)
         use plexspaces_core::service_names;
@@ -1158,9 +1174,7 @@ mod tests {
         // Retry lookup with timeout (actor registration is async)
         let mut found = None;
         for _ in 0..10 {
-            found = actor_registry
-                .lookup_actor(&"mailbox-actor@test-node-mailbox-spawn".to_string())
-                .await;
+            found = actor_registry.lookup_actor(&expected_actor_id).await;
             if found.is_some() {
                 break;
             }
@@ -1183,7 +1197,7 @@ mod tests {
         use plexspaces_core::RequestContext;
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let result = ActorBuilder::new(Box::new(TestBehavior))
-            .with_id("test-actor@test-node".to_string())
+            .with_name("test-actor")
             .with_namespace("test".to_string())
             .spawn(&ctx, service_locator.clone())
             .await;
@@ -1220,8 +1234,11 @@ mod tests {
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let mut actor_refs = Vec::new();
         for i in 0..5 {
+            let actor_id =
+                ActorId::new(format!("multi-actor-{i}"), "test", "test", "test-node-multi-spawn")
+                    .unwrap();
             let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
-                .with_id(format!("multi-actor-{}@test-node-multi-spawn", i))
+                .with_id(actor_id)
                 .with_namespace("test".to_string())
                 .spawn(&ctx, node.service_locator().clone())
                 .await
@@ -1240,7 +1257,9 @@ mod tests {
             .expect("ActorRegistry not found");
 
         for i in 0..5 {
-            let actor_id = format!("multi-actor-{}@test-node-multi-spawn", i);
+            let actor_id =
+                ActorId::new(format!("multi-actor-{i}"), "test", "test", "test-node-multi-spawn")
+                    .unwrap();
             // Retry lookup with timeout (actor registration is async)
             let mut found = None;
             for _ in 0..10 {

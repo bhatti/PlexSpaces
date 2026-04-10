@@ -20,7 +20,7 @@
 
 use async_trait::async_trait;
 use plexspaces_actor::Actor;
-use plexspaces_core::BehaviorType;
+use plexspaces_core::{ActorId, BehaviorType};
 use plexspaces_mailbox::{Mailbox, MailboxConfig};
 use plexspaces_node::{default_node_config, Node, NodeId};
 
@@ -89,14 +89,14 @@ async fn test_node_spawns_actor_with_full_context() {
     // Use a mailbox with larger capacity to avoid "Mailbox is full" errors
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
-    // Create actor with just the actor name (no @node suffix)
-    // spawn_actor_arc will fix the actor ID to include the node ID
     let actor_name = "test-actor";
-    let mailbox = Mailbox::new(mailbox_config, format!("{}@temp", actor_name))
+    let actor_id =
+        ActorId::new(actor_name, "gen_server", "default", node.id().as_str()).unwrap();
+    let mailbox = Mailbox::new(mailbox_config, actor_id.to_string())
         .await
         .unwrap();
     let actor = Actor::new(
-        format!("{}@temp", actor_name), // Temporary ID, will be fixed by spawn_actor_arc
+        actor_id.clone(),
         behavior,
         mailbox,
         "default".to_string(),
@@ -163,7 +163,7 @@ async fn test_node_spawns_actor_with_full_context() {
     // Verify actor was spawned - the ID should match the node ID
     assert_eq!(
         actor_ref.id(),
-        &format!("test-actor@{}", node.id().as_str())
+        &actor_id
     );
 }
 
@@ -177,11 +177,12 @@ async fn test_actor_context_has_node_id() {
     node.initialize_services().await.unwrap();
 
     let behavior = Box::new(ContextAwareBehavior::new());
-    let mailbox = Mailbox::new(MailboxConfig::default(), "test-actor@test-node".to_string())
+    let actor_id = ActorId::new("test-actor-2", "gen_server", "default", "test-node-2").unwrap();
+    let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
         .await
         .unwrap();
     let actor = Actor::new(
-        "test-actor-2@test-node-2".to_string(),
+        actor_id.clone(),
         behavior,
         mailbox,
         "default".to_string(),
@@ -198,7 +199,7 @@ async fn test_actor_context_has_node_id() {
     let actor_ref = spawn_actor_helper(&node, actor).await.unwrap();
 
     // Verify actor was spawned successfully
-    assert_eq!(actor_ref.id(), "test-actor-2@test-node-2");
+    assert_eq!(actor_ref.id(), &actor_id);
 
     // Note: We can't access actor's context after spawning (it's moved into the actor task)
     // But Node::spawn_actor() calls create_actor_context() which sets the correct node_id

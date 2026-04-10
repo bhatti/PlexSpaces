@@ -1199,7 +1199,7 @@ async fn test_dashboard_metrics_not_zero() {
 
 #[tokio::test]
 async fn test_actors_by_type_on_home_page() {
-    use plexspaces_core::ActorFactory;
+    use plexspaces_core::{ActorFactory, ActorId};
     use std::collections::HashMap;
 
     // ARRANGE: Create node and spawn actors with different types
@@ -1218,7 +1218,13 @@ async fn test_actors_by_type_on_home_page() {
 
     // Spawn 3 Counter actors
     for i in 0..3 {
-        let actor_id = format!("counter-{}@test-node-actors-type", i);
+        let actor_id = ActorId::new(
+            format!("counter-{}", i),
+            "Counter",
+            "system",
+            "test-node-actors-type",
+        )
+        .expect("valid counter actor id");
         actor_factory
             .spawn_actor(
                 &ctx,
@@ -1235,7 +1241,13 @@ async fn test_actors_by_type_on_home_page() {
 
     // Spawn 2 Worker actors
     for i in 0..2 {
-        let actor_id = format!("worker-{}@test-node-actors-type", i);
+        let actor_id = ActorId::new(
+            format!("worker-{}", i),
+            "Worker",
+            "system",
+            "test-node-actors-type",
+        )
+        .expect("valid worker actor id");
         actor_factory
             .spawn_actor(
                 &ctx,
@@ -1285,7 +1297,7 @@ async fn test_actors_by_type_on_home_page() {
 
 #[tokio::test]
 async fn test_actors_by_type_on_node_page() {
-    use plexspaces_core::ActorFactory;
+    use plexspaces_core::{ActorFactory, ActorId};
     use std::collections::HashMap;
 
     // ARRANGE: Create node and spawn actors
@@ -1304,7 +1316,13 @@ async fn test_actors_by_type_on_node_page() {
 
     // Spawn 2 Calculator actors
     for i in 0..2 {
-        let actor_id = format!("calculator-{}@test-node-actors-node-type", i);
+        let actor_id = ActorId::new(
+            format!("calculator-{}", i),
+            "Calculator",
+            "system",
+            "test-node-actors-node-type",
+        )
+        .expect("valid calculator actor id");
         actor_factory
             .spawn_actor(
                 &ctx,

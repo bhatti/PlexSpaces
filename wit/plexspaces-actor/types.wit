@@ -4,8 +4,9 @@
 // These provide the foundation for type-safe actor communication.
 
 interface types {
-    /// Actor identifier - format: "name@node" or ULID
-    /// Examples: "counter@node-1", "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    /// Actor identifier in canonical format:
+    /// `{name}//{actor_type}::{namespace}@{node_id}`
+    /// Example: `counter//gen_server::default@node-1`
     type actor-id = string;
 
     /// Message payload - opaque bytes for maximum flexibility

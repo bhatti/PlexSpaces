@@ -42,6 +42,19 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use tokio::time::{sleep, timeout as tokio_timeout, Duration};
 
+fn test_actor_id(name: &str) -> plexspaces_core::ActorId {
+    plexspaces_core::ActorId::new(name, "GenServer", "namespace", "test-node")
+        .expect("valid test actor id")
+}
+
+fn actor_id_from_legacy(id: &str) -> plexspaces_core::ActorId {
+    if let Ok(actor_id) = plexspaces_core::ActorId::from_canonical(id) {
+        return actor_id;
+    }
+    let name = id.split('@').next().unwrap_or(id);
+    test_actor_id(name)
+}
+
 /// Helper function to create a ChildSpec from a sync factory
 /// Uses worker_sync with core ActorRef (ChildSpec now uses plexspaces_core::ActorRef)
 fn create_child_spec_from_factory(
@@ -53,7 +66,8 @@ fn create_child_spec_from_factory(
     use plexspaces_core::ActorRef as CoreActorRef;
 
     // Create core ActorRef (now accepted by ChildSpec::worker_sync)
-    let actor_ref = CoreActorRef::new(id.clone()).expect("Failed to create actor ref");
+    let actor_ref =
+        CoreActorRef::new(actor_id_from_legacy(&id)).expect("Failed to create actor ref");
 
     let restart_strategy = match restart_policy {
         RestartPolicy::Permanent => RestartStrategy::Permanent,
@@ -62,8 +76,13 @@ fn create_child_spec_from_factory(
         RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
     };
 
-    let mut spec =
-        ChildSpec::worker_sync(id.clone(), id, factory, actor_ref).with_restart(restart_strategy);
+    let mut spec = ChildSpec::worker_sync(
+        id.clone(),
+        actor_id_from_legacy(&id).to_string(),
+        factory,
+        actor_ref,
+    )
+    .with_restart(restart_strategy);
 
     // Apply shutdown timeout if specified
     spec = match shutdown_timeout_ms {
@@ -135,7 +154,7 @@ async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<Su
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(None, None).await;
     Supervisor::new(
-        "test-supervisor".to_string(),
+        test_actor_id("test-supervisor").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -150,8 +169,8 @@ async fn test_bottom_up_startup_3_level_hierarchy() {
     let (mut root_supervisor, _event_rx) = create_test_supervisor().await;
 
     // Level 1: Root supervisor with 2 children
-    let child1_id = "child1@test-node".to_string();
-    let child2_id = "child2@test-node".to_string();
+    let child1_id = test_actor_id("child1").to_string();
+    let child2_id = test_actor_id("child2").to_string();
 
     let spec1 = create_child_spec_from_factory(
         child1_id.clone(),
@@ -173,7 +192,7 @@ async fn test_bottom_up_startup_3_level_hierarchy() {
                 .expect("Thread panicked")
                 .expect("Failed to create mailbox in factory");
                 Ok(Actor::new(
-                    child1_id.clone(),
+                    actor_id_from_legacy(&child1_id),
                     Box::new(TestActor::new(child1_id.clone())),
                     mailbox,
                     "tenant".to_string(),
@@ -206,7 +225,7 @@ async fn test_bottom_up_startup_3_level_hierarchy() {
                 .expect("Thread panicked")
                 .expect("Failed to create mailbox in factory");
                 Ok(Actor::new(
-                    child2_id.clone(),
+                    actor_id_from_legacy(&child2_id),
                     Box::new(TestActor::new(child2_id.clone())),
                     mailbox,
                     "tenant".to_string(),
@@ -244,7 +263,7 @@ async fn test_startup_rollback_on_failure() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
 
     // Add first child (should succeed)
-    let child1_id = "child1@test-node".to_string();
+    let child1_id = test_actor_id("child1").to_string();
     let spec1 = create_child_spec_from_factory(
         child1_id.clone(),
         Arc::new({
@@ -265,7 +284,7 @@ async fn test_startup_rollback_on_failure() {
                 .expect("Thread panicked")
                 .expect("Failed to create mailbox in factory");
                 Ok(Actor::new(
-                    child1_id.clone(),
+                    actor_id_from_legacy(&child1_id),
                     Box::new(TestActor::new(child1_id.clone())),
                     mailbox,
                     "tenant".to_string(),
@@ -284,7 +303,7 @@ async fn test_startup_rollback_on_failure() {
         .expect("add_child should succeed");
 
     // Add second child that fails init()
-    let child2_id = "child2@test-node".to_string();
+    let child2_id = test_actor_id("child2").to_string();
     let spec2 = create_child_spec_from_factory(
         child2_id.clone(),
         Arc::new({
@@ -305,7 +324,7 @@ async fn test_startup_rollback_on_failure() {
                 .expect("Thread panicked")
                 .expect("Failed to create mailbox in factory");
                 Ok(Actor::new(
-                    child2_id.clone(),
+                    actor_id_from_legacy(&child2_id),
                     Box::new(TestActor::new(child2_id.clone()).with_init_fail()),
                     mailbox,
                     "tenant".to_string(),
@@ -337,7 +356,7 @@ async fn test_top_down_shutdown_nested_supervisors() {
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(None, None).await;
     let (root_supervisor, _root_event_rx) = Supervisor::new(
-        "root".to_string(),
+        test_actor_id("root").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -347,7 +366,7 @@ async fn test_top_down_shutdown_nested_supervisors() {
 
     // Create child supervisor
     let (child_supervisor, _child_event_rx) = Supervisor::new(
-        "child-supervisor".to_string(),
+        test_actor_id("child-supervisor").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -356,7 +375,7 @@ async fn test_top_down_shutdown_nested_supervisors() {
     );
 
     // Add actor to child supervisor
-    let actor_id = "actor1@test-node".to_string();
+    let actor_id = test_actor_id("actor1").to_string();
     let actor_spec = create_child_spec_from_factory(
         actor_id.clone(),
         Arc::new({
@@ -378,7 +397,7 @@ async fn test_top_down_shutdown_nested_supervisors() {
                 .expect("Thread panicked")
                 .expect("Failed to create mailbox in factory");
                 Ok(Actor::new(
-                    actor_id_for_actor.clone(),
+                    actor_id_from_legacy(&actor_id_for_actor),
                     Box::new(TestActor::new(actor_id_for_actor.clone())),
                     mailbox,
                     "tenant".to_string(),
@@ -412,7 +431,7 @@ async fn test_shutdown_brutal_kill() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
 
     // Add child with BrutalKill shutdown (timeout = 0)
-    let child_id = "child1@test-node".to_string();
+    let child_id = test_actor_id("child1").to_string();
     let spec = create_child_spec_from_factory(
         child_id.clone(),
         Arc::new({
@@ -433,7 +452,7 @@ async fn test_shutdown_brutal_kill() {
                 .expect("Thread panicked")
                 .expect("Failed to create mailbox in factory");
                 Ok(Actor::new(
-                    child_id.clone(),
+                    actor_id_from_legacy(&child_id),
                     Box::new(TestActor::new(child_id.clone())),
                     mailbox,
                     "tenant".to_string(),
@@ -472,7 +491,7 @@ async fn test_shutdown_timeout() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
 
     // Add child with timeout shutdown
-    let child_id = "child1@test-node".to_string();
+    let child_id = test_actor_id("child1").to_string();
     let spec = create_child_spec_from_factory(
         child_id.clone(),
         Arc::new({
@@ -493,7 +512,7 @@ async fn test_shutdown_timeout() {
                 .expect("Thread panicked")
                 .expect("Failed to create mailbox in factory");
                 Ok(Actor::new(
-                    child_id.clone(),
+                    actor_id_from_legacy(&child_id),
                     Box::new(TestActor::new(child_id.clone())),
                     mailbox,
                     "tenant".to_string(),
@@ -547,7 +566,7 @@ async fn test_empty_supervisor() {
 async fn test_single_child_supervisor() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
 
-    let child_id = "child1@test-node".to_string();
+    let child_id = test_actor_id("child1").to_string();
     let spec = create_child_spec_from_factory(
         child_id.clone(),
         Arc::new({
@@ -568,7 +587,7 @@ async fn test_single_child_supervisor() {
                 .expect("Thread panicked")
                 .expect("Failed to create mailbox in factory");
                 Ok(Actor::new(
-                    child_id.clone(),
+                    actor_id_from_legacy(&child_id),
                     Box::new(TestActor::new(child_id.clone())),
                     mailbox,
                     "tenant".to_string(),
@@ -610,7 +629,7 @@ async fn test_deep_hierarchy_4_levels() {
 
     // Add multiple children to simulate hierarchy
     for i in 1..=4 {
-        let child_id = format!("child{}@test-node", i);
+        let child_id = test_actor_id(&format!("child{}", i)).to_string();
         let spec = create_child_spec_from_factory(
             child_id.clone(),
             Arc::new({
@@ -631,7 +650,7 @@ async fn test_deep_hierarchy_4_levels() {
                     .expect("Thread panicked")
                     .expect("Failed to create mailbox in factory");
                     Ok(Actor::new(
-                        child_id.clone(),
+                        actor_id_from_legacy(&child_id),
                         Box::new(TestActor::new(child_id.clone())),
                         mailbox,
                         "tenant".to_string(),

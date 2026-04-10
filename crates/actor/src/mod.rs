@@ -239,7 +239,10 @@ fn parse_exit_reason_from_str(
             .unwrap_or("Normal");
         let linked_reason = parse_exit_reason_from_str(linked_error_str, metadata);
         ExitReason::Linked {
-            actor_id: linked_actor_id,
+            actor_id: ActorId::from_canonical(&linked_actor_id).unwrap_or_else(|_| {
+                ActorId::new("unknown", "system", "default", "unknown")
+                    .expect("fallback linked actor id must be valid")
+            }),
             reason: Box::new(linked_reason),
         }
     } else {
@@ -886,7 +889,7 @@ impl Actor {
 
         // OBSERVABILITY: Track actor creation
         metrics::counter!("plexspaces_actor_created_total",
-            "actor_id" => self.id.clone()
+            "actor_id" => self.id.to_string()
         )
         .increment(1);
 
@@ -899,7 +902,7 @@ impl Actor {
 
         // OBSERVABILITY: Track state transition
         metrics::counter!("plexspaces_actor_state_transitions_total",
-            "actor_id" => self.id.clone(),
+            "actor_id" => self.id.to_string(),
             "from" => "Creating",
             "to" => "Activating"
         )
@@ -917,12 +920,12 @@ impl Actor {
                     // Init succeeded - track metrics
                     let init_duration = init_start.elapsed();
                     metrics::counter!("plexspaces_actor_init_total",
-                        "actor_id" => self.id.clone(),
+                        "actor_id" => self.id.to_string(),
                         "status" => "success"
                     )
                     .increment(1);
                     metrics::histogram!("plexspaces_actor_init_duration_seconds",
-                        "actor_id" => self.id.clone()
+                        "actor_id" => self.id.to_string()
                     )
                     .record(init_duration.as_secs_f64());
                 }
@@ -934,16 +937,16 @@ impl Actor {
 
                     // Track init failure metrics
                     metrics::counter!("plexspaces_actor_init_total",
-                        "actor_id" => self.id.clone(),
+                        "actor_id" => self.id.to_string(),
                         "status" => "failure"
                     )
                     .increment(1);
                     metrics::histogram!("plexspaces_actor_init_duration_seconds",
-                        "actor_id" => self.id.clone()
+                        "actor_id" => self.id.to_string()
                     )
                     .record(init_duration.as_secs_f64());
                     metrics::counter!("plexspaces_actor_init_errors_total",
-                        "actor_id" => self.id.clone(),
+                        "actor_id" => self.id.to_string(),
                         "error_type" => format!("{:?}", e)
                     )
                     .increment(1);
@@ -986,7 +989,7 @@ impl Actor {
 
             let facets_init_complete_duration = facets_init_complete_start.elapsed();
             metrics::histogram!("plexspaces_facet_init_complete_duration_seconds",
-                "actor_id" => self.id.clone()
+                "actor_id" => self.id.to_string()
             )
             .record(facets_init_complete_duration.as_secs_f64());
             if tracing::enabled!(tracing::Level::TRACE) {
@@ -1008,7 +1011,7 @@ impl Actor {
                 Ok(()) => {
                     let facets_ready_duration = facets_ready_start.elapsed();
                     metrics::histogram!("plexspaces_actor_facets_ready_duration_seconds",
-                        "actor_id" => self.id.clone()
+                        "actor_id" => self.id.to_string()
                     )
                     .record(facets_ready_duration.as_secs_f64());
                     if tracing::enabled!(tracing::Level::TRACE) {
@@ -1023,7 +1026,7 @@ impl Actor {
                     // Log error but don't fail activation (behavior may have non-critical errors)
                     let facets_ready_duration = facets_ready_start.elapsed();
                     metrics::counter!("plexspaces_actor_facets_ready_errors_total",
-                        "actor_id" => self.id.clone(),
+                        "actor_id" => self.id.to_string(),
                         "error_type" => format!("{:?}", e)
                     )
                     .increment(1);
@@ -1143,7 +1146,7 @@ impl Actor {
                                     let facet_exit_duration = facet_exit_start.elapsed();
                                     if !facet_exit_errors.is_empty() {
                                         metrics::counter!("plexspaces_facet_exit_errors_total",
-                                            "actor_id" => actor_id_for_logging.clone(),
+                                            "actor_id" => actor_id_for_logging.to_string(),
                                             "error_count" => facet_exit_errors.len().to_string()
                                         ).increment(facet_exit_errors.len() as u64);
                                         tracing::warn!(
@@ -1163,25 +1166,39 @@ impl Actor {
                                         }
                                     }
                                     metrics::histogram!("plexspaces_facet_exit_duration_seconds",
-                                        "actor_id" => actor_id_for_logging.clone()
+                                        "actor_id" => actor_id_for_logging.to_string()
                                     ).record(facet_exit_duration.as_secs_f64());
                                     metrics::counter!("plexspaces_facet_exit_total",
-                                        "actor_id" => actor_id_for_logging.clone()
+                                        "actor_id" => actor_id_for_logging.to_string()
                                     ).increment(1);
 
                                     // Call handle_exit() - actor can decide to propagate or handle
                                     let handle_exit_start = std::time::Instant::now();
                                     let mut behavior_guard = behavior.write().await;
-                                    match behavior_guard.handle_exit(&context, &from_actor_id, &exit_reason).await {
+                                    let from_actor_id_typed =
+                                        match ActorId::from_canonical(&from_actor_id) {
+                                            Ok(actor_id) => actor_id,
+                                            Err(error) => {
+                                                tracing::warn!(
+                                                    actor_id = %actor_id_for_logging,
+                                                    from = %from_actor_id,
+                                                    error = %error,
+                                                    "Received EXIT from non-canonical linked actor id; using fallback actor identity"
+                                                );
+                                                ActorId::new("unknown", "system", "default", "unknown")
+                                                    .expect("fallback linked actor id must be valid")
+                                            }
+                                        };
+                                    match behavior_guard.handle_exit(&context, &from_actor_id_typed, &exit_reason).await {
                                         Ok(ExitAction::Propagate) => {
                                             // Actor decided to propagate - terminate this actor
                                             let handle_exit_duration = handle_exit_start.elapsed();
                                             metrics::counter!("plexspaces_actor_exit_handled_total",
-                                                "actor_id" => actor_id_for_logging.clone(),
+                                                "actor_id" => actor_id_for_logging.to_string(),
                                                 "action" => "propagate"
                                             ).increment(1);
                                             metrics::histogram!("plexspaces_actor_exit_handle_duration_seconds",
-                                                "actor_id" => actor_id_for_logging.clone()
+                                                "actor_id" => actor_id_for_logging.to_string()
                                             ).record(handle_exit_duration.as_secs_f64());
                                             tracing::info!(
                                                 actor_id = %actor_id_for_logging,
@@ -1226,11 +1243,11 @@ impl Actor {
                                             // Actor decided to handle - continue running
                                             let handle_exit_duration = handle_exit_start.elapsed();
                                             metrics::counter!("plexspaces_actor_exit_handled_total",
-                                                "actor_id" => actor_id_for_logging.clone(),
+                                                "actor_id" => actor_id_for_logging.to_string(),
                                                 "action" => "handle"
                                             ).increment(1);
                                             metrics::histogram!("plexspaces_actor_exit_handle_duration_seconds",
-                                                "actor_id" => actor_id_for_logging.clone()
+                                                "actor_id" => actor_id_for_logging.to_string()
                                             ).record(handle_exit_duration.as_secs_f64());
                                             if tracing::enabled!(tracing::Level::DEBUG) {
                                                 tracing::debug!(
@@ -1246,11 +1263,11 @@ impl Actor {
                                         Err(e) => {
                                             let handle_exit_duration = handle_exit_start.elapsed();
                                             metrics::counter!("plexspaces_actor_exit_handled_total",
-                                                "actor_id" => actor_id_for_logging.clone(),
+                                                "actor_id" => actor_id_for_logging.to_string(),
                                                 "action" => "error"
                                             ).increment(1);
                                             metrics::counter!("plexspaces_actor_exit_handle_errors_total",
-                                                "actor_id" => actor_id_for_logging.clone(),
+                                                "actor_id" => actor_id_for_logging.to_string(),
                                                 "error_type" => format!("{:?}", e)
                                             ).increment(1);
                                             tracing::error!(
@@ -1269,7 +1286,7 @@ impl Actor {
                                 } else {
                                     // Actor doesn't trap exits - terminate immediately (Erlang default behavior)
                                     metrics::counter!("plexspaces_actor_exit_propagated_total",
-                                        "actor_id" => actor_id_for_logging.clone(),
+                                        "actor_id" => actor_id_for_logging.to_string(),
                                         "from" => from_actor_id.clone(),
                                         "trapped" => "false"
                                     ).increment(1);
@@ -1282,7 +1299,19 @@ impl Actor {
                                     let mut behavior_guard = behavior.write().await;
                                     let from_actor_id_clone = from_actor_id.clone();
                                     let linked_reason = ExitReason::Linked {
-                                        actor_id: from_actor_id,
+                                        actor_id: match ActorId::from_canonical(&from_actor_id) {
+                                            Ok(actor_id) => actor_id,
+                                            Err(error) => {
+                                                tracing::warn!(
+                                                    actor_id = %actor_id_for_logging,
+                                                    from = %from_actor_id,
+                                                    error = %error,
+                                                    "Received EXIT from non-canonical linked actor id; using fallback actor identity"
+                                                );
+                                                ActorId::new("unknown", "system", "default", "unknown")
+                                                    .expect("fallback linked actor id must be valid")
+                                            }
+                                        },
                                         reason: Box::new(exit_reason),
                                     };
                                     // Store exit reason before terminating (use cloned Arc)
@@ -1609,7 +1638,7 @@ impl Actor {
                         }
                     };
                     plexspaces_facet::ExitReason::Linked {
-                        actor_id: actor_id.clone(),
+                        actor_id: actor_id.to_string(),
                         reason: Box::new(linked_reason),
                     }
                 }
@@ -1638,7 +1667,7 @@ impl Actor {
             let facets_terminate_start_duration = facets_terminate_start_time.elapsed();
             facets_terminate_start_duration_ms = facets_terminate_start_duration.as_millis();
             metrics::histogram!("plexspaces_facet_terminate_start_duration_seconds",
-                "actor_id" => self.id.clone()
+                "actor_id" => self.id.to_string()
             )
             .record(facets_terminate_start_duration.as_secs_f64());
         }
@@ -1657,7 +1686,7 @@ impl Actor {
                     let facets_detaching_duration = facets_detaching_start.elapsed();
                     facets_detaching_duration_ms = facets_detaching_duration.as_millis();
                     metrics::histogram!("plexspaces_actor_facets_detaching_duration_seconds",
-                        "actor_id" => self.id.clone()
+                        "actor_id" => self.id.to_string()
                     )
                     .record(facets_detaching_duration.as_secs_f64());
                 }
@@ -1666,7 +1695,7 @@ impl Actor {
                     let facets_detaching_duration = facets_detaching_start.elapsed();
                     facets_detaching_duration_ms = facets_detaching_duration.as_millis();
                     metrics::counter!("plexspaces_actor_facets_detaching_errors_total",
-                        "actor_id" => self.id.clone(),
+                        "actor_id" => self.id.to_string(),
                         "error_type" => format!("{:?}", e)
                     )
                     .increment(1);
@@ -1690,28 +1719,28 @@ impl Actor {
                 Ok(()) => {
                     let terminate_duration = terminate_start.elapsed();
                     metrics::counter!("plexspaces_actor_terminate_total",
-                        "actor_id" => self.id.clone(),
+                        "actor_id" => self.id.to_string(),
                         "reason" => "shutdown"
                     )
                     .increment(1);
                     metrics::histogram!("plexspaces_actor_terminate_duration_seconds",
-                        "actor_id" => self.id.clone()
+                        "actor_id" => self.id.to_string()
                     )
                     .record(terminate_duration.as_secs_f64());
                 }
                 Err(e) => {
                     let terminate_duration = terminate_start.elapsed();
                     metrics::counter!("plexspaces_actor_terminate_total",
-                        "actor_id" => self.id.clone(),
+                        "actor_id" => self.id.to_string(),
                         "reason" => "shutdown"
                     )
                     .increment(1);
                     metrics::histogram!("plexspaces_actor_terminate_duration_seconds",
-                        "actor_id" => self.id.clone()
+                        "actor_id" => self.id.to_string()
                     )
                     .record(terminate_duration.as_secs_f64());
                     metrics::counter!("plexspaces_actor_terminate_errors_total",
-                        "actor_id" => self.id.clone(),
+                        "actor_id" => self.id.to_string(),
                         "error_type" => format!("{:?}", e)
                     )
                     .increment(1);
@@ -1764,7 +1793,7 @@ impl Actor {
 
             let facets_detach_duration = facets_detach_start.elapsed();
             metrics::histogram!("plexspaces_facet_detach_all_duration_seconds",
-                "actor_id" => self.id.clone()
+                "actor_id" => self.id.to_string()
             )
             .record(facets_detach_duration.as_secs_f64());
             if tracing::enabled!(tracing::Level::DEBUG) {
@@ -1785,7 +1814,7 @@ impl Actor {
 
         // OBSERVABILITY: Track actor termination
         metrics::counter!("plexspaces_actor_terminated_total",
-            "actor_id" => self.id.clone()
+            "actor_id" => self.id.to_string()
         )
         .increment(1);
 
@@ -2122,7 +2151,7 @@ impl Actor {
 
         // OBSERVABILITY: Track state transition
         metrics::counter!("plexspaces_actor_state_transitions_total",
-            "actor_id" => actor_id.clone(),
+            "actor_id" => actor_id.to_string(),
             "from" => "Created",
             "to" => "Activating"
         )
@@ -2141,14 +2170,14 @@ impl Actor {
 
         // OBSERVABILITY: Track activation success
         metrics::counter!("plexspaces_actor_state_transitions_total",
-            "actor_id" => actor_id.clone(),
+            "actor_id" => actor_id.to_string(),
             "from" => "Activating",
             "to" => "Active"
         )
         .increment(1);
 
         metrics::gauge!("plexspaces_actor_active_total",
-            "actor_id" => actor_id.clone()
+            "actor_id" => actor_id.to_string()
         )
         .increment(1.0);
 
@@ -2185,7 +2214,7 @@ impl Actor {
 
         // OBSERVABILITY: Track state transition
         metrics::counter!("plexspaces_actor_state_transitions_total",
-            "actor_id" => actor_id.clone(),
+            "actor_id" => actor_id.to_string(),
             "from" => "Active",
             "to" => "Deactivating"
         )
@@ -2202,14 +2231,14 @@ impl Actor {
 
         // OBSERVABILITY: Track deactivation success
         metrics::counter!("plexspaces_actor_state_transitions_total",
-            "actor_id" => actor_id.clone(),
+            "actor_id" => actor_id.to_string(),
             "from" => "Deactivating",
             "to" => "Terminated"
         )
         .increment(1);
 
         metrics::gauge!("plexspaces_actor_active_total",
-            "actor_id" => actor_id.clone()
+            "actor_id" => actor_id.to_string()
         )
         .decrement(1.0);
 
@@ -2399,7 +2428,12 @@ impl Actor {
                         .send_reply(
                             Some(&message.correlation_id),
                             &message.sender_id,
-                            actor_id_owned.clone(),
+                            ActorId::from_canonical(&actor_id_owned).map_err(|e| {
+                                ActorError::BehaviorError(format!(
+                                    "invalid actor id '{}' while sending facet reply: {}",
+                                    actor_id_owned, e
+                                ))
+                            })?,
                             reply_msg,
                         )
                         .await
@@ -2590,6 +2624,11 @@ mod tests {
         msg
     }
 
+    fn runtime_actor_id(name: &str) -> ActorId {
+        ActorId::new(name, "GenServer", "test-namespace", "test-node")
+            .expect("test actor id should be valid")
+    }
+
     struct TerminateTrackingBehavior {
         terminated: Arc<AtomicBool>,
     }
@@ -2688,9 +2727,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_actor_lifecycle() {
-        let id = "test-actor".to_string();
+        let id = runtime_actor_id("test-actor");
         let behavior = Box::new(MockBehavior::new());
-        let mailbox = Mailbox::new(MailboxConfig::default(), id.clone())
+        let mailbox = Mailbox::new(MailboxConfig::default(), id.to_string())
             .await
             .unwrap();
 
@@ -2717,12 +2756,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_actor_handle_stop_actor_runs_terminate() {
-        let id = "test-stop-handle".to_string();
+        let id = runtime_actor_id("test-stop-handle");
         let terminated = Arc::new(AtomicBool::new(false));
         let behavior = Box::new(TerminateTrackingBehavior {
             terminated: terminated.clone(),
         });
-        let mailbox = Mailbox::new(MailboxConfig::default(), id.clone())
+        let mailbox = Mailbox::new(MailboxConfig::default(), id.to_string())
             .await
             .unwrap();
 
@@ -2744,7 +2783,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_virtual_durable_actor_restores_checkpoint_on_restart() {
-        let actor_id = "durable-checkpoint-actor".to_string();
+        let actor_id = runtime_actor_id("durable-checkpoint-actor");
         let namespace = "test-namespace".to_string();
         let observed_count = Arc::new(tokio::sync::RwLock::new(0));
         let storage: Arc<dyn JournalStorage> = Arc::new(
@@ -2758,7 +2797,7 @@ mod tests {
             observed_count: observed_count.clone(),
             behavior_type: plexspaces_core::BehaviorType::GenServer,
         });
-        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
             .unwrap();
         let mut actor = actor_with_default_service_locator(
@@ -2794,7 +2833,7 @@ mod tests {
         CoreActorStateHandle::stop_actor(&actor).await.unwrap();
 
         let checkpoint = storage
-            .get_latest_checkpoint(&actor_id)
+            .get_latest_checkpoint(&actor_id.to_string())
             .await
             .expect("checkpoint should be saved on stop");
         assert!(!checkpoint.state_data.is_empty());
@@ -2814,7 +2853,7 @@ mod tests {
             observed_count: observed_count.clone(),
             behavior_type: plexspaces_core::BehaviorType::GenServer,
         });
-        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
             .unwrap();
         let mut restarted_actor = actor_with_default_service_locator(
@@ -2843,7 +2882,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_virtual_non_durable_actor_restarts_from_fresh_state() {
-        let actor_id = "non-durable-checkpoint-actor".to_string();
+        let actor_id = runtime_actor_id("non-durable-checkpoint-actor");
         let observed_count = Arc::new(tokio::sync::RwLock::new(0));
 
         let behavior = Box::new(CheckpointTrackingBehavior {
@@ -2851,7 +2890,7 @@ mod tests {
             observed_count: observed_count.clone(),
             behavior_type: plexspaces_core::BehaviorType::GenServer,
         });
-        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
             .unwrap();
         let mut actor = actor_with_default_service_locator(
@@ -2880,7 +2919,7 @@ mod tests {
             observed_count: observed_count.clone(),
             behavior_type: plexspaces_core::BehaviorType::GenServer,
         });
-        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
             .unwrap();
         let mut restarted_actor = actor_with_default_service_locator(
@@ -2897,7 +2936,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_virtual_durable_workflow_actor_restores_checkpoint_on_restart() {
-        let actor_id = "durable-workflow-checkpoint-actor".to_string();
+        let actor_id = runtime_actor_id("durable-workflow-checkpoint-actor");
         let namespace = "test-namespace".to_string();
         let observed_count = Arc::new(tokio::sync::RwLock::new(0));
         let storage: Arc<dyn JournalStorage> = Arc::new(
@@ -2911,7 +2950,7 @@ mod tests {
             observed_count: observed_count.clone(),
             behavior_type: plexspaces_core::BehaviorType::Workflow,
         });
-        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
             .unwrap();
         let mut actor = actor_with_default_service_locator(
@@ -2952,7 +2991,7 @@ mod tests {
             observed_count: observed_count.clone(),
             behavior_type: plexspaces_core::BehaviorType::Workflow,
         });
-        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
             .unwrap();
         let mut restarted_actor = actor_with_default_service_locator(
@@ -2981,7 +3020,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_virtual_durable_event_actor_restores_checkpoint_on_restart() {
-        let actor_id = "durable-event-checkpoint-actor".to_string();
+        let actor_id = runtime_actor_id("durable-event-checkpoint-actor");
         let namespace = "test-namespace".to_string();
         let observed_count = Arc::new(tokio::sync::RwLock::new(0));
         let storage: Arc<dyn JournalStorage> = Arc::new(
@@ -2995,7 +3034,7 @@ mod tests {
             observed_count: observed_count.clone(),
             behavior_type: plexspaces_core::BehaviorType::GenEvent,
         });
-        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+        let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
             .unwrap();
         let mut actor = actor_with_default_service_locator(
@@ -3036,7 +3075,7 @@ mod tests {
             observed_count: observed_count.clone(),
             behavior_type: plexspaces_core::BehaviorType::GenEvent,
         });
-        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.clone())
+        let restarted_mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
             .await
             .unwrap();
         let mut restarted_actor = actor_with_default_service_locator(
@@ -3065,10 +3104,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_actor_id() {
-        let id1 = "test".to_string();
-        let id2 = "test".to_string();
+        let id1 = runtime_actor_id("test");
+        let id2 = runtime_actor_id("test");
         assert_eq!(id1, id2);
-        assert_eq!(id1.as_str(), "test");
+        assert_eq!(id1.name(), "test");
     }
 
     /// Test that on_activate is ALWAYS called during actor start
@@ -3081,7 +3120,7 @@ mod tests {
             .unwrap();
 
         let mut actor = actor_with_default_service_locator(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3106,7 +3145,7 @@ mod tests {
             .unwrap();
 
         let mut actor = actor_with_default_service_locator(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3130,7 +3169,7 @@ mod tests {
             .unwrap();
 
         let mut actor = actor_with_default_service_locator(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3162,7 +3201,7 @@ mod tests {
             .unwrap();
 
         let mut actor = actor_with_default_service_locator(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3189,7 +3228,7 @@ mod tests {
         let profile = ResourceProfile::CpuIntensive;
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3221,7 +3260,7 @@ mod tests {
         };
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3246,7 +3285,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3272,7 +3311,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3295,7 +3334,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3324,7 +3363,7 @@ mod tests {
         };
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3350,7 +3389,7 @@ mod tests {
             .unwrap();
 
         let mut actor = actor_with_default_service_locator(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3376,7 +3415,7 @@ mod tests {
             .unwrap();
 
         let mut actor = actor_with_default_service_locator(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3404,7 +3443,7 @@ mod tests {
             .expect("Failed to create mailbox");
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3429,7 +3468,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor-123".to_string(),
+            runtime_actor_id("test-actor-123"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3438,7 +3477,7 @@ mod tests {
         );
 
         // Test id() getter
-        assert_eq!(actor.id(), "test-actor-123");
+        assert_eq!(actor.id(), &runtime_actor_id("test-actor-123"));
     }
 
     #[tokio::test]
@@ -3449,7 +3488,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3475,7 +3514,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior1,
             mailbox,
             "test-tenant".to_string(),
@@ -3497,7 +3536,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior1,
             mailbox,
             "test-tenant".to_string(),
@@ -3522,7 +3561,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3604,7 +3643,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3626,7 +3665,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3647,7 +3686,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3678,7 +3717,7 @@ mod tests {
             .expect("Failed to create mailbox");
 
         let mut actor = actor_with_default_service_locator(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3714,7 +3753,7 @@ mod tests {
             .unwrap();
 
         let mut actor = actor_with_default_service_locator(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3747,7 +3786,7 @@ mod tests {
             .unwrap();
 
         let mut actor = Actor::new(
-            "test-actor".to_string(),
+            runtime_actor_id("test-actor"),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3774,7 +3813,7 @@ mod tests {
             .expect("Failed to create mailbox");
 
         let mut actor = actor_with_default_service_locator(
-            "receiver".to_string(),
+            runtime_actor_id("receiver"),
             behavior,
             mailbox,
             "test-tenant".to_string(),
@@ -3833,7 +3872,7 @@ mod tests {
             .unwrap();
 
         let mut actor = actor_with_default_service_locator(
-            "failing-actor".to_string(),
+            ActorId::new("failing-actor", "failing", "test-namespace", "test-node").unwrap(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)
@@ -3868,7 +3907,7 @@ mod tests {
             .unwrap();
 
         let actor = Actor::new(
-            "test-actor".to_string(),
+            ActorId::new("test-actor", "mock", "test-namespace", "test-node").unwrap(),
             behavior,
             mailbox,
             String::new(), // tenant_id (empty if auth disabled)

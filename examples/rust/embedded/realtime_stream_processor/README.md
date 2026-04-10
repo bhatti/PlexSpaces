@@ -91,7 +91,7 @@ impl StreamProcessor {
 let processor = spawn_gen_server(
     &ctx,
     service_locator,
-    "processor-0@node",
+    "processor-0",
     StreamProcessor::new("processor-0", EventType::PageView),
     vec![],
 ).await?;

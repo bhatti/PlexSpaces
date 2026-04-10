@@ -39,6 +39,16 @@ use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 use ulid::Ulid;
 
+fn linked_actor_id(name: &str) -> ActorId {
+    ActorId::new(
+        name.to_string(),
+        "GenServer".to_string(),
+        "namespace".to_string(),
+        "test-node".to_string(),
+    )
+    .expect("linked actor id should be valid")
+}
+
 /// Test actor that tracks all lifecycle hook calls with atomic counters
 struct ComprehensiveLifecycleActor {
     init_called: Arc<AtomicBool>,
@@ -158,7 +168,7 @@ impl plexspaces_core::Actor for ComprehensiveLifecycleActor {
     ) -> Result<ExitAction, ActorError> {
         self.handle_exit_called.store(true, Ordering::SeqCst);
         self.handle_exit_call_count.fetch_add(1, Ordering::SeqCst);
-        *self.handle_exit_from.lock().unwrap() = Some(from.clone());
+        *self.handle_exit_from.lock().unwrap() = Some(from.to_string());
         *self.handle_exit_reason.lock().unwrap() = Some(reason.clone());
 
         // Return configured action or default to Propagate
@@ -519,7 +529,7 @@ async fn test_handle_exit_called_when_trap_exit_true() {
 
     let mut actor_impl_test = ComprehensiveLifecycleActor::new();
     let handle_exit_called_test = actor_impl_test.handle_exit_called.clone();
-    let from = ActorId::from("linked-actor");
+    let from = linked_actor_id("linked-actor");
     let reason = ExitReason::Error("linked actor crashed".to_string());
 
     let result = actor_impl_test.handle_exit(&ctx, &from, &reason).await;
@@ -553,7 +563,7 @@ async fn test_handle_exit_propagate_action_terminates_actor() {
 
     let mut actor_impl =
         ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Propagate);
-    let from = ActorId::from("linked-actor");
+    let from = linked_actor_id("linked-actor");
     let reason = ExitReason::Error("linked actor crashed".to_string());
 
     let result = actor_impl.handle_exit(&ctx, &from, &reason).await;
@@ -587,7 +597,7 @@ async fn test_handle_exit_handle_action_continues_actor() {
     let mut actor_impl_test =
         ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Handle);
     let handle_exit_called_test = actor_impl_test.handle_exit_called.clone();
-    let from = ActorId::from("linked-actor");
+    let from = linked_actor_id("linked-actor");
     let reason = ExitReason::Error("linked actor crashed".to_string());
 
     let result = actor_impl_test.handle_exit(&ctx, &from, &reason).await;
@@ -628,14 +638,14 @@ async fn test_handle_exit_receives_correct_parameters() {
     let mut actor_impl_test = ComprehensiveLifecycleActor::new();
     let handle_exit_from_test = actor_impl_test.handle_exit_from.clone();
     let handle_exit_reason_test = actor_impl_test.handle_exit_reason.clone();
-    let from = ActorId::from("linked-actor-123");
+    let from = linked_actor_id("linked-actor-123");
     let reason = ExitReason::Error("database timeout".to_string());
 
     let _ = actor_impl_test.handle_exit(&ctx, &from, &reason).await;
 
     assert_eq!(
         handle_exit_from_test.lock().unwrap().as_ref(),
-        Some(&"linked-actor-123".to_string()),
+        Some(&from.to_string()),
         "handle_exit() should receive correct from actor ID"
     );
     assert_eq!(
@@ -679,12 +689,13 @@ async fn test_exit_message_terminates_actor_when_not_trapping() {
     use ulid::Ulid;
     let mut headers = std::collections::HashMap::new();
     headers.insert("type".to_string(), "__EXIT__".to_string());
-    headers.insert("exit_from".to_string(), "linked-actor".to_string());
+    let linked_actor_id = linked_actor_id("linked-actor");
+    headers.insert("exit_from".to_string(), linked_actor_id.to_string());
     headers.insert("exit_reason".to_string(), "Error:crashed".to_string());
     let now = Utc::now();
     let exit_msg = Message {
         id: Ulid::new().to_string(),
-        sender_id: "linked-actor".to_string(),
+        sender_id: linked_actor_id.to_string(),
         receiver_id: "unknown".to_string(),
         channel: String::new(),
         message_type: "__EXIT__".to_string(),
@@ -777,7 +788,7 @@ async fn test_exit_message_calls_handle_exit_when_trapping() {
     let mut actor_impl_test =
         ComprehensiveLifecycleActor::new().with_handle_exit_action(ExitAction::Handle);
     let handle_exit_called_test = actor_impl_test.handle_exit_called.clone();
-    let from = ActorId::from("linked-actor");
+    let from = linked_actor_id("linked-actor");
     let reason = ExitReason::Error("crashed".to_string());
 
     let result = actor_impl_test.handle_exit(&ctx, &from, &reason).await;
@@ -897,7 +908,7 @@ async fn test_multiple_exit_messages_handled_correctly() {
 
     // Call handle_exit() multiple times
     for i in 0..5 {
-        let from = ActorId::from(format!("linked-actor-{}", i));
+        let from = linked_actor_id(&format!("linked-actor-{}", i));
         let reason = ExitReason::Error(format!("crashed-{}", i));
         let _ = actor_impl_test.handle_exit(&ctx, &from, &reason).await;
     }
@@ -933,10 +944,10 @@ async fn test_exit_message_with_linked_reason() {
     let handle_exit_reason_test = actor_impl_test.handle_exit_reason.clone();
     let linked_reason = ExitReason::Error("nested error".to_string());
     let exit_reason = ExitReason::Linked {
-        actor_id: "linked-actor".to_string(),
+        actor_id: linked_actor_id("linked-actor"),
         reason: Box::new(linked_reason.clone()),
     };
-    let from = ActorId::from("linked-actor");
+    let from = linked_actor_id("linked-actor");
 
     let _ = actor_impl_test.handle_exit(&ctx, &from, &exit_reason).await;
 

@@ -671,6 +671,14 @@ test:
 	if [ "$$CARGO_JOBS" = "0" ]; then \
 		CARGO_JOBS=$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8); \
 	fi; \
+	FAIL_FAST="$${CARGO_FAIL_FAST:-$(CARGO_FAIL_FAST)}"; \
+	ACTUAL_JOBS=$$CARGO_JOBS; \
+	if [ "$$FAIL_FAST" = "1" ]; then \
+		ACTUAL_JOBS=1; \
+		echo "Cargo fail-fast: --jobs 1 for test build/test execution. Parallel: make test CARGO_FAIL_FAST=0" | tee -a test-out; \
+	else \
+		echo "Using $$CARGO_JOBS Cargo jobs for test build/test execution" | tee -a test-out; \
+	fi; \
 	MESSAGE_FORMAT=$${VERBOSE:-human}; \
 		if [ "$${VERBOSE:-1}" = "0" ]; then \
 		MESSAGE_FORMAT=short; \
@@ -695,9 +703,9 @@ test:
 	fi; \
 	if [ "$${TEST_SKIP_PREBUILD:-0}" = "0" ]; then \
 		echo "Building workspace first for faster test execution (incremental build enabled)..." | tee -a test-out; \
-		$(CARGO) build --lib $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out; \
+		$(CARGO) build --lib $(CARGO_TEST_FEATURES) --workspace --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out; \
 		echo "Building node_runner binary (required by plexspaces-services integration_tests)..." | tee -a test-out; \
-		$(CARGO) build --bin node_runner $(CARGO_TEST_FEATURES) -p plexspaces-services --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out; \
+		$(CARGO) build --bin node_runner $(CARGO_TEST_FEATURES) -p plexspaces-services --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out; \
 	else \
 		echo "Skipping prebuild (TEST_SKIP_PREBUILD=1)" | tee -a test-out; \
 	fi; \
@@ -707,7 +715,7 @@ test:
 		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
 		echo "Note: tuplespace tests run with single thread (configured in nextest.toml)" | tee -a test-out; \
 		echo "Running default test suite (ignored tests run only when requested explicitly)" | tee -a test-out; \
-		cargo nextest run --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || exit 1; \
+		cargo nextest run --fail-fast --profile $(NEXTTEST_PROFILE) --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT 2>&1 | tee -a test-out || exit 1; \
 	else \
 		echo "Using standard cargo test (install cargo-nextest for faster execution: cargo install cargo-nextest)..." | tee -a test-out; \
 		echo "Scope: --lib (unit tests) + --tests (integration test binaries)" | tee -a test-out; \
@@ -720,13 +728,13 @@ test:
 			TIMEOUT_CMD="gtimeout 14400"; \
 		fi; \
 		if [ -n "$$TIMEOUT_CMD" ]; then \
-			$$TIMEOUT_CMD $(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
-			$$TIMEOUT_CMD $(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			$$TIMEOUT_CMD $(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
+			$$TIMEOUT_CMD $(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT \
 				--exclude plexspaces-tuplespace 2>&1 | tee -a test-out || exit 1; \
 		else \
 			echo "Warning: timeout command not found, running without timeout (install coreutils for timeout: brew install coreutils)" | tee -a test-out; \
-			$(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
-			$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$CARGO_JOBS --message-format=$$MESSAGE_FORMAT \
+			$(CARGO) test --lib $(CARGO_TEST_FEATURES) -p plexspaces-tuplespace --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT -- --test-threads=1 2>&1 | tee -a test-out || exit 1; \
+			$(CARGO) test --lib --tests $(CARGO_TEST_FEATURES) --workspace --jobs $$ACTUAL_JOBS --message-format=$$MESSAGE_FORMAT \
 				--exclude plexspaces-tuplespace 2>&1 | tee -a test-out || exit 1; \
 		fi; \
 	fi; \

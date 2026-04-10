@@ -94,7 +94,7 @@ let ctx = RequestContext::new_without_auth("my-tenant".into(), "default".into())
 // Spawn actor using SDK helper
 let actor_ref = spawn_with_facets(
     &ctx, service_locator.clone(),
-    ActorId::from("counter@node1"), "default",
+    "counter", "default",
     Counter::new(), vec![],
 ).await?;
 

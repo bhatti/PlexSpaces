@@ -198,7 +198,7 @@ async fn test_workflow_ref_run() {
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
 
     let actor_ref = ActorBuilder::new(Box::new(TestApprovalWorkflow::new()))
-        .with_id("test-workflow@test-node")
+        .with_name("test-workflow")
         .with_namespace("test")
         .spawn(&ctx, node.service_locator())
         .await
@@ -246,7 +246,7 @@ async fn test_workflow_ref_signal_and_query() {
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
 
     let actor_ref = ActorBuilder::new(Box::new(TestApprovalWorkflow::new()))
-        .with_id("test-workflow-2@test-node-2")
+        .with_name("test-workflow-2")
         .with_namespace("test")
         .spawn(&ctx, node.service_locator())
         .await
@@ -337,7 +337,7 @@ async fn test_workflow_ref_with_timeout() {
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
 
     let actor_ref = ActorBuilder::new(Box::new(TestApprovalWorkflow::new()))
-        .with_id("test-workflow-3@test-node-3")
+        .with_name("test-workflow-3")
         .with_namespace("test")
         .spawn(&ctx, node.service_locator())
         .await
@@ -346,7 +346,10 @@ async fn test_workflow_ref_with_timeout() {
     // Create WorkflowRef (no global timeout - per-operation timeouts instead)
     let workflow = WorkflowRef::new(actor_ref);
 
-    assert_eq!(workflow.id(), "test-workflow-3@test-node-3");
+    let workflow_id = plexspaces_core::ActorId::from_canonical(workflow.id()).unwrap();
+    assert_eq!(workflow_id.name(), "test-workflow-3");
+    assert_eq!(workflow_id.namespace(), "test");
+    assert_eq!(workflow_id.node_id(), "test-node-3");
 
     // Run workflow with custom timeout (for long-running workflows)
     let request = ApprovalRequest {
@@ -395,7 +398,7 @@ async fn test_workflow_ref_error_handling() {
         RequestContext::new_without_auth("test-tenant".to_string(), "test-namespace".to_string());
 
     let actor_ref = ActorBuilder::new(Box::new(TestApprovalWorkflow::new()))
-        .with_id("test-workflow-4@test-node-4")
+        .with_name("test-workflow-4")
         .with_namespace("test")
         .spawn(&ctx, node.service_locator())
         .await

@@ -120,7 +120,8 @@ async fn spawn_registry_facet_actor(node: &Arc<Node>) -> (ActorRef, ActorId) {
 
     let node_id = node.id();
     let actor_name = format!("reg-tbl-{}", ulid::Ulid::new());
-    let actor_id = ActorId::from(format!("{actor_name}@{node_id}"));
+    let actor_id = ActorId::new(&actor_name, "GenServer", "test-namespace", node_id.as_str())
+        .expect("test actor id should be valid");
     let ctx = plexspaces_core::RequestContext::new_without_auth(
         "test-tenant".to_string(),
         "test-namespace".to_string(),

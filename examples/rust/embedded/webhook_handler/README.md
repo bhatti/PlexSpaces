@@ -11,7 +11,7 @@
 
 - **NodeBuilder** — Build node with `with_listen_addr`, `with_in_memory_backends`, `build().await`, then `start().await`.
 - **RequestContext::new_without_auth(tenant_id, namespace)** — Explicit tenant/namespace (e.g. `"acme-corp"`, `"webhooks"`).
-- **ActorBuilder::new(behavior).with_id(...).with_namespace(...).spawn(&ctx, service_locator)** — Spawn actor; type `BehaviorType::Custom("webhook_handler")` for HTTP path routing.
+- **ActorBuilder::new(behavior).with_name(...).with_namespace(...).spawn(&ctx, service_locator)** — Spawn actor; provide a unique actor name and the framework constructs the structured actor ID for type `BehaviorType::Custom("webhook_handler")`.
 - **GenServer** — Request/reply; `action=list` vs deliver; reply via `ctx.send_reply(...)`.
 
 ## Running

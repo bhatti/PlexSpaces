@@ -79,7 +79,7 @@ let room = registry.create_group(&ctx, "general").await?;
 ```rust
 use plexspaces_core::ActorId;
 
-let user = ActorId::from("alice@chat-server");
+let user = ActorId::from_canonical("alice//chat_user::default@chat-server")?;
 registry.join_group(&ctx, "general", &user, vec![]).await?;
 ```
 

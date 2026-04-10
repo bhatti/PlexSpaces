@@ -68,7 +68,7 @@ async fn register_actor_as_active_in_registry(
     let mailbox = Arc::new(
         Mailbox::new(
             plexspaces_mailbox::mailbox_config_default(),
-            actor_id.clone(),
+            actor_id.to_string(),
         )
         .await
         .unwrap(),
@@ -164,6 +164,10 @@ async fn create_test_actor_registry_with_node(node_id: &str) -> Arc<ActorRegistr
     ))
 }
 
+fn test_actor_id(name: &str) -> ActorId {
+    ActorId::new(name, "gen_server", "default", "test-node").unwrap()
+}
+
 #[tokio::test]
 async fn test_lru_eviction_basic() {
     // Create ActorRegistry and VirtualActorManager
@@ -176,7 +180,9 @@ async fn test_lru_eviction_basic() {
     let actor_type = "TestActor".to_string();
 
     // Register 4 actors (exceeds limit of 3)
-    let actor_ids: Vec<ActorId> = (0..4).map(|i| format!("actor-{}@test-node", i)).collect();
+    let actor_ids: Vec<ActorId> = (0..4)
+        .map(|i| test_actor_id(&format!("actor-{i}")))
+        .collect();
 
     let service_locator = test_service_locator();
 
@@ -222,7 +228,7 @@ async fn test_lru_eviction_basic() {
     }
 
     // Try to activate a 5th actor - should evict 2 (4 + 1 - 3 = 2 to evict)
-    let actor_id_5 = "actor-5@test-node".to_string();
+    let actor_id_5 = test_actor_id("actor-5");
     let facet_5 = create_mock_facet(actor_id_5.clone());
     manager
         .register(
@@ -285,8 +291,8 @@ async fn test_lru_eviction_ordering() {
     let service_locator = test_service_locator();
 
     // Register 2 actors
-    let actor_id_1 = "actor-1@test-node".to_string();
-    let actor_id_2 = "actor-2@test-node".to_string();
+    let actor_id_1 = test_actor_id("actor-1");
+    let actor_id_2 = test_actor_id("actor-2");
 
     let facet_1 = create_mock_facet(actor_id_1.clone());
     manager
@@ -348,7 +354,7 @@ async fn test_lru_eviction_ordering() {
     manager.update_last_access(&actor_id_2).await;
 
     // Register 3rd actor - should evict actor_1 (oldest)
-    let actor_id_3 = "actor-3@test-node".to_string();
+    let actor_id_3 = test_actor_id("actor-3");
     let facet_3 = create_mock_facet(actor_id_3.clone());
     manager
         .register(
@@ -401,7 +407,7 @@ async fn test_lru_eviction_multiple_types() {
 
     // Register 3 actors of Type1
     for i in 0..3 {
-        let actor_id = format!("type1-actor-{}@test-node", i);
+        let actor_id = test_actor_id(&format!("type1-actor-{i}"));
         let facet = create_mock_facet(actor_id.clone());
         manager
             .register(
@@ -431,7 +437,7 @@ async fn test_lru_eviction_multiple_types() {
 
     // Register 3 actors of Type2
     for i in 0..3 {
-        let actor_id = format!("type2-actor-{}@test-node", i);
+        let actor_id = test_actor_id(&format!("type2-actor-{i}"));
         let facet = create_mock_facet(actor_id.clone());
         manager
             .register(
@@ -468,11 +474,11 @@ async fn test_lru_eviction_multiple_types() {
 
     // Verify types don't interfere
     assert!(
-        !evicted_1.iter().any(|id| id.contains("type2")),
+        !evicted_1.iter().any(|id| id.name().contains("type2")),
         "Type1 eviction shouldn't affect Type2"
     );
     assert!(
-        !evicted_2.iter().any(|id| id.contains("type1")),
+        !evicted_2.iter().any(|id| id.name().contains("type1")),
         "Type2 eviction shouldn't affect Type1"
     );
 }
@@ -488,15 +494,15 @@ async fn test_lru_eviction_skips_eager_virtual_actors() {
 
     for (actor_id, strategy) in [
         (
-            "eager-actor@test-node".to_string(),
+            test_actor_id("eager-actor"),
             ActivationStrategy::ActivationStrategyEager,
         ),
         (
-            "lazy-actor-1@test-node".to_string(),
+            test_actor_id("lazy-actor-1"),
             ActivationStrategy::ActivationStrategyLazy,
         ),
         (
-            "lazy-actor-2@test-node".to_string(),
+            test_actor_id("lazy-actor-2"),
             ActivationStrategy::ActivationStrategyLazy,
         ),
     ] {
@@ -528,7 +534,7 @@ async fn test_lru_eviction_skips_eager_virtual_actors() {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
 
-    let actor_id_4 = "lazy-actor-3@test-node".to_string();
+    let actor_id_4 = test_actor_id("lazy-actor-3");
     manager
         .register(
             actor_id_4.clone(),
@@ -547,10 +553,10 @@ async fn test_lru_eviction_skips_eager_virtual_actors() {
     let evicted = manager.evict_lru_if_needed(&actor_type, None).await;
     assert_eq!(evicted.len(), 1, "should evict exactly one lazy actor");
     assert!(
-        !evicted.contains(&"eager-actor@test-node".to_string()),
+        !evicted.contains(&test_actor_id("eager-actor")),
         "eager actors must not be evicted"
     );
-    assert_eq!(evicted[0], "lazy-actor-1@test-node".to_string());
+    assert_eq!(evicted[0], test_actor_id("lazy-actor-1"));
 }
 
 #[tokio::test]
@@ -560,7 +566,7 @@ async fn test_update_last_access() {
     let manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
 
     let actor_type = "TestActor".to_string();
-    let actor_id = "actor-1@test-node".to_string();
+    let actor_id = test_actor_id("actor-1");
 
     let facet = create_mock_facet(actor_id.clone());
     manager
@@ -617,7 +623,7 @@ async fn test_remove_from_active_tracking() {
     let manager = Arc::new(VirtualActorManager::new(actor_registry.clone()));
 
     let actor_type = "TestActor".to_string();
-    let actor_id = "actor-1@test-node".to_string();
+    let actor_id = test_actor_id("actor-1");
 
     let facet = create_mock_facet(actor_id.clone());
     manager

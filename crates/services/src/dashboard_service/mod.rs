@@ -406,20 +406,6 @@ impl DashboardServiceImpl {
         }
     }
 
-    /// Parse actor ID to extract namespace and tenant
-    fn parse_actor_id(&self, actor_id: &ActorId) -> (String, String) {
-        // Actor ID format: "{namespace}/{name}@{node}" or "{name}@{node}"
-        let parts: Vec<&str> = actor_id.split('@').collect();
-        let name_part = parts[0];
-        let name_parts: Vec<&str> = name_part.split('/').collect();
-
-        if name_parts.len() == 2 {
-            (name_parts[0].to_string(), String::new()) // Namespace from actor ID, empty tenant
-        } else {
-            (String::new(), String::new()) // Empty namespace and tenant
-        }
-    }
-
     /// Apply pagination to a vector using offset and limit
     fn apply_pagination<T: Clone>(
         items: Vec<T>,
@@ -947,7 +933,7 @@ impl DashboardService for DashboardServiceImpl {
             }
 
             if !req.node_id.is_empty() {
-                // Parse actor_id to extract node_id (format: "actor@node")
+                // Parse actor_id to extract node_id from the canonical actor ID
                 let parts: Vec<&str> = actor_id.split('@').collect();
                 // Get local node ID from metrics
                 let metrics_accessor = self.service_locator.get_node_metrics_accessor().await;
@@ -983,8 +969,7 @@ impl DashboardService for DashboardServiceImpl {
                 }
             }
 
-            // Parse actor_id for namespace/tenant
-            let (namespace, tenant_id) = self.parse_actor_id(actor_id);
+            let namespace = actor_id.namespace().to_string();
 
             if !req.namespace.is_empty() {
                 if &namespace != &req.namespace {
@@ -993,9 +978,7 @@ impl DashboardService for DashboardServiceImpl {
             }
 
             if !req.tenant_id.is_empty() {
-                if &tenant_id != &req.tenant_id {
-                    continue;
-                }
+                continue;
             }
 
             // Check actor status (running if registered, terminated otherwise)
@@ -1026,27 +1009,12 @@ impl DashboardService for DashboardServiceImpl {
 
             // Create ActorInfo
             let actor_info = ActorInfo {
-                actor_id: actor_id.clone(),
+                actor_id: actor_id.to_string(),
                 actor_type,
                 actor_group: req.actor_group.clone(),
                 namespace,
-                tenant_id,
-                node_id: {
-                    let parts: Vec<&str> = actor_id.split('@').collect();
-                    if parts.len() == 2 {
-                        parts[1].to_string()
-                    } else {
-                        // Get local node ID from metrics
-                        let metrics_accessor =
-                            self.service_locator.get_node_metrics_accessor().await;
-                        if let Some(getter) = metrics_accessor {
-                            let metrics = getter.get_metrics().await;
-                            metrics.node_id
-                        } else {
-                            "unknown".to_string()
-                        }
-                    }
-                },
+                tenant_id: String::new(),
+                node_id: actor_id.node_id().to_string(),
                 status: status.to_string(),
                 metrics,
                 journal_size_bytes,
@@ -1452,24 +1420,16 @@ mod tests {
         assert!(!page_response.has_next);
     }
 
-    // test_parse_actor_id disabled - requires Node
-    /*
-    #[tokio::test]
-    async fn test_parse_actor_id() {
-        let node = create_test_node().await;
-        let service = create_test_service(node).await;
+    #[test]
+    fn test_actor_namespace_is_read_from_structured_actor_id() {
+        let actor_id =
+            ActorId::from_canonical("actor//worker::tenant-a@node").expect("canonical actor id");
+        assert_eq!(actor_id.namespace(), "tenant-a");
 
-        let actor_id = ActorId::from("namespace/actor@node");
-        let (namespace, tenant) = service.parse_actor_id(&actor_id);
-        assert_eq!(namespace, "namespace");
-        assert_eq!(tenant, "default");
-
-        let actor_id2 = ActorId::from("actor@node");
-        let (namespace2, tenant2) = service.parse_actor_id(&actor_id2);
-        assert_eq!(namespace2, "default");
-        assert_eq!(tenant2, "default");
+        let actor_id2 =
+            ActorId::from_canonical("actor//worker::default@node").expect("canonical actor id");
+        assert_eq!(actor_id2.namespace(), "default");
     }
-    */
 
     #[tokio::test]
     async fn test_default_since() {

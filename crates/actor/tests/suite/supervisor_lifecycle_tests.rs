@@ -44,6 +44,19 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use tokio::time::{sleep, Duration};
 
+fn test_actor_id(name: &str) -> plexspaces_core::ActorId {
+    plexspaces_core::ActorId::new(name, "GenServer", "namespace", "test-node")
+        .expect("valid test actor id")
+}
+
+fn actor_id_from_legacy(id: &str) -> plexspaces_core::ActorId {
+    if let Ok(actor_id) = plexspaces_core::ActorId::from_canonical(id) {
+        return actor_id;
+    }
+    let name = id.split('@').next().unwrap_or(id);
+    test_actor_id(name)
+}
+
 /// Helper function to create a ChildSpec from a sync factory
 fn create_child_spec_from_factory(
     id: String,
@@ -53,7 +66,8 @@ fn create_child_spec_from_factory(
 ) -> ChildSpec {
     use plexspaces_actor::child_spec::ShutdownSpec;
 
-    let actor_ref = CoreActorRef::new(id.clone()).expect("Failed to create actor ref");
+    let actor_ref =
+        CoreActorRef::new(actor_id_from_legacy(&id)).expect("Failed to create actor ref");
 
     let restart_strategy = match restart_policy {
         RestartPolicy::Permanent => RestartStrategy::Permanent,
@@ -62,8 +76,13 @@ fn create_child_spec_from_factory(
         RestartPolicy::ExponentialBackoff { .. } => RestartStrategy::Permanent,
     };
 
-    let mut spec =
-        ChildSpec::worker_sync(id.clone(), id, factory, actor_ref).with_restart(restart_strategy);
+    let mut spec = ChildSpec::worker_sync(
+        id.clone(),
+        actor_id_from_legacy(&id).to_string(),
+        factory,
+        actor_ref,
+    )
+    .with_restart(restart_strategy);
 
     // Apply shutdown timeout if specified
     spec = match shutdown_timeout_ms {
@@ -109,7 +128,7 @@ async fn create_test_supervisor() -> (Supervisor, tokio::sync::mpsc::Receiver<Su
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(None, None).await;
     Supervisor::new(
-        "test-supervisor".to_string(),
+        test_actor_id("test-supervisor").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
@@ -123,7 +142,7 @@ async fn test_start_child() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
 
     let child_id = "worker1".to_string();
-    let actor_id = format!("{}@test-node", child_id);
+    let actor_id = test_actor_id(&child_id).to_string();
 
     let actor_id_for_closure = actor_id.clone();
     let spec = ChildSpec::worker(
@@ -146,7 +165,7 @@ async fn test_start_child() {
                     "namespace".to_string(),
                 )
                 .await;
-                let actor_ref = CoreActorRef::new(actor_id.clone())
+                let actor_ref = CoreActorRef::new(actor_id_from_legacy(&actor_id))
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                 Ok(StartedChild::Worker { actor, actor_ref })
             })
@@ -169,7 +188,7 @@ async fn test_delete_child() {
 
     // Add a child first
     let child_id = "worker1".to_string();
-    let actor_id = format!("{}@test-node", child_id);
+    let actor_id = test_actor_id(&child_id).to_string();
 
     let actor_id_for_closure = actor_id.clone();
     let spec = ChildSpec::worker(
@@ -192,7 +211,7 @@ async fn test_delete_child() {
                     "namespace".to_string(),
                 )
                 .await;
-                let actor_ref = CoreActorRef::new(actor_id.clone())
+                let actor_ref = CoreActorRef::new(actor_id_from_legacy(&actor_id))
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                 Ok(StartedChild::Worker { actor, actor_ref })
             })
@@ -221,7 +240,7 @@ async fn test_which_children() {
     // Add multiple children
     for i in 1..=3 {
         let child_id = format!("worker{}", i);
-        let actor_id = format!("{}@test-node", child_id);
+        let actor_id = test_actor_id(&child_id).to_string();
 
         let spec = ChildSpec::worker(
             child_id.clone(),
@@ -243,7 +262,7 @@ async fn test_which_children() {
                         "namespace".to_string(),
                     )
                     .await;
-                    let actor_ref = CoreActorRef::new(actor_id.clone())
+                    let actor_ref = CoreActorRef::new(actor_id_from_legacy(&actor_id))
                         .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                     Ok(StartedChild::Worker { actor, actor_ref })
                 })
@@ -262,9 +281,9 @@ async fn test_which_children() {
 
     // Verify all children are listed
     let child_ids: Vec<String> = children.iter().map(|c| c.child_id.clone()).collect();
-    assert!(child_ids.contains(&"worker1@test-node".to_string()));
-    assert!(child_ids.contains(&"worker2@test-node".to_string()));
-    assert!(child_ids.contains(&"worker3@test-node".to_string()));
+    assert!(child_ids.contains(&test_actor_id("worker1").to_string()));
+    assert!(child_ids.contains(&test_actor_id("worker2").to_string()));
+    assert!(child_ids.contains(&test_actor_id("worker3").to_string()));
 }
 
 #[tokio::test]
@@ -280,7 +299,7 @@ async fn test_count_children() {
     // Add actors
     for i in 1..=2 {
         let child_id = format!("worker{}", i);
-        let actor_id = format!("{}@test-node", child_id);
+        let actor_id = test_actor_id(&child_id).to_string();
 
         let spec = ChildSpec::worker(
             child_id.clone(),
@@ -302,7 +321,7 @@ async fn test_count_children() {
                         "namespace".to_string(),
                     )
                     .await;
-                    let actor_ref = CoreActorRef::new(actor_id.clone())
+                    let actor_ref = CoreActorRef::new(actor_id_from_legacy(&actor_id))
                         .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                     Ok(StartedChild::Worker { actor, actor_ref })
                 })
@@ -326,7 +345,7 @@ async fn test_get_childspec() {
     let (mut supervisor, _event_rx) = create_test_supervisor().await;
 
     let child_id = "worker1".to_string();
-    let actor_id = format!("{}@test-node", child_id);
+    let actor_id = test_actor_id(&child_id).to_string();
 
     let actor_id_for_closure = actor_id.clone();
     let original_spec = ChildSpec::worker(
@@ -349,7 +368,7 @@ async fn test_get_childspec() {
                     "namespace".to_string(),
                 )
                 .await;
-                let actor_ref = CoreActorRef::new(actor_id.clone())
+                let actor_ref = CoreActorRef::new(actor_id_from_legacy(&actor_id))
                     .map_err(|e| ActorError::InvalidState(e.to_string()))?;
                 Ok(StartedChild::Worker { actor, actor_ref })
             })
@@ -379,7 +398,7 @@ async fn test_restart_child() {
 
     // Add a child using ChildSpec
     let child_id = "worker1".to_string();
-    let actor_id = format!("{}@test-node", child_id);
+    let actor_id = test_actor_id(&child_id).to_string();
 
     let child_spec = create_child_spec_from_factory(
         actor_id.clone(),

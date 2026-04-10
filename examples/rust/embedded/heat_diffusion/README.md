@@ -83,7 +83,7 @@ Multi-node parallelization means **one** simulation run with work **split across
 - **Region actors**: The grid is split into **8 horizontal regions**. Each region is a **GridRegionActor** (GenServer). The driver spawns all 8 with the SDK `spawn()` and sends **compute** each iteration — so **one** run uses 8 actors doing stencil work in parallel.
 - **TupleSpace**: Neighbors exchange ghost cells via **TupleSpace** (`write` / `read` boundaries). **Barrier** synchronizes each iteration. APIs: `spawn()`, `GenServerRef.call()`, `ActorContext::get_tuplespace()`, `tuplespace.write()`, `tuplespace.read()`, `tuplespace.barrier()`, **CoordinationComputeTracker**.
 
-Today all 8 regions run on **one node**. True multi-node would be: **one** run, with regions **placed on different nodes** (e.g. regions 0–2 on node A, 3–5 on node B, 6–7 on node C). The driver (or a leader) would spawn region actors on the right nodes (via **remote spawn**: `ActorService.SpawnActor` on each node’s gRPC channel), then send compute to `region_id@node_id`. TupleSpace would need shared backing across nodes (shared DB) or be replaced with direct message passing between neighbor regions.
+Today all 8 regions run on **one node**. True multi-node would be: **one** run, with regions **placed on different nodes** (e.g. regions 0–2 on node A, 3–5 on node B, 6–7 on node C). The driver (or a leader) would spawn region actors on the right nodes (via **remote spawn**: `ActorService.SpawnActor` on each node’s gRPC channel), then send compute to each region’s canonical actor ID such as `region-3//grid_region::heat@node-b`. TupleSpace would need shared backing across nodes (shared DB) or be replaced with direct message passing between neighbor regions.
 
 ### Testing with multiple nodes (future)
 

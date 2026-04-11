@@ -54,12 +54,10 @@
 // - **Provides**: Core abstraction for ALL distributed computation in PlexSpaces
 //
 // ## Design Decisions
-// - **Why actor_id is plain string** (not wrapper message):
-//   - Simplifies distributed lookup (no extra layer to unwrap)
-//   - Human-readable for debugging (e.g., "namespace/counter-123")
-//   - Compatible with various ID schemes (UUID, hierarchical, ULID)
-//   - Works across all languages (no proto dependency for IDs)
-//   - Format: "{namespace}/{actor_name}" or "{node_id}/{actor_name}"
+// - **Why actor_id remains a string field here**:
+//   - Actor identity is defined structurally by plexspaces.common.v1.ActorId
+//   - Runtime envelopes still carry the canonical string for storage and wire compatibility
+//   - Format: "{name}//{actor_type}::{namespace}@{node_id}"
 //
 // - **Why separate ActorState enum**:
 //   - Enables state machine validation (can't go from TERMINATED to ACTIVE)
@@ -1832,7 +1830,10 @@ type Actor struct {
 	// Namespace for this actor's data isolation.
 	// When actor is part of an application deployment, namespace must match application namespace.
 	// Source of truth for namespace is the application (when deploying) or actor creation request.
-	Namespace     string `protobuf:"bytes,14,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Namespace string `protobuf:"bytes,14,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	// User-specified actor name. Together with actor_type, namespace, and node_id
+	// this forms the structured ActorId.
+	Name          string `protobuf:"bytes,15,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1954,6 +1955,13 @@ func (x *Actor) GetErrorMessage() string {
 func (x *Actor) GetNamespace() string {
 	if x != nil {
 		return x.Namespace
+	}
+	return ""
+}
+
+func (x *Actor) GetName() string {
+	if x != nil {
+		return x.Name
 	}
 	return ""
 }
@@ -6742,7 +6750,7 @@ func (x *ActorMigrating) GetTargetNode() string {
 // Works the same for local and remote processes (location transparent).
 //
 // ## Design Notes
-//   - actor_id: The actor to monitor (can be "actor@node" for remote)
+//   - actor_id: Canonical actor ID for the actor to monitor
 //   - supervisor_id: The supervisor that wants notifications (for logging/debugging)
 //   - supervisor_callback: gRPC address where to send NotifyActorDown
 //     (e.g., "http://supervisor-node:8000")
@@ -8360,7 +8368,7 @@ var File_plexspaces_v1_actors_actor_runtime_proto protoreflect.FileDescriptor
 
 const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\n" +
-	"(plexspaces/v1/actors/actor_runtime.proto\x12\x13plexspaces.actor.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xcd\x05\n" +
+	"(plexspaces/v1/actors/actor_runtime.proto\x12\x13plexspaces.actor.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/protobuf/any.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1aplexspaces/v1/common.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\x8a\x06\n" +
 	"\x05Actor\x12(\n" +
 	"\bactor_id\x18\x01 \x01(\tB\r\xe0A\x02\xbaH\ar\x05\x10\x01\x18\xff\x01R\aactorId\x12@\n" +
 	"\n" +
@@ -8377,7 +8385,8 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	" \x03(\v2\x1b.plexspaces.common.v1.FacetR\x06facets\x12;\n" +
 	"\x1aactor_state_schema_version\x18\f \x01(\rR\x17actorStateSchemaVersion\x12(\n" +
 	"\rerror_message\x18\r \x01(\tB\x03\xe0A\x03R\ferrorMessage\x12\x1c\n" +
-	"\tnamespace\x18\x0e \x01(\tR\tnamespace:<\x92A9\n" +
+	"\tnamespace\x18\x0e \x01(\tR\tnamespace\x12;\n" +
+	"\x04name\x18\x0f \x01(\tB'\xbaH$r\"\x10\x01\x18\x80\x012\x1b^[a-zA-Z0-9][a-zA-Z0-9_-]*$R\x04name:<\x92A9\n" +
 	"7*\x05Actor2\x16Durable actor instance\xd2\x01\bactor_id\xd2\x01\n" +
 	"actor_type\"\xba\x01\n" +
 	"\x11ExitReasonDetails\x12-\n" +

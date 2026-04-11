@@ -30,7 +30,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }  # For metadata serialization
 uuid = { workspace = true }
 ulid = { workspace = true }  # For request_id generation
-metrics = "0.23"  # For observability
+metrics = { workspace = true }
 chrono = { workspace = true }  # For lease timestamps and health service timestamps
 prost-types = "0.12"  # For proto Duration/Timestamp types
 tracing = { workspace = true }  # Always enabled, feature kept for compatibility

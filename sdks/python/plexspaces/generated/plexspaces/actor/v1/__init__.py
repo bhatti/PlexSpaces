@@ -494,6 +494,12 @@ class Actor(betterproto.Message):
      Source of truth for namespace is the application (when deploying) or actor creation request.
     """
 
+    name: str = betterproto.string_field(15)
+    """
+    User-specified actor name. Together with actor_type, namespace, and node_id
+     this forms the structured ActorId.
+    """
+
 
 @dataclass(eq=False, repr=False)
 class ExitReasonDetails(betterproto.Message):
@@ -1663,7 +1669,7 @@ class MonitorActorRequest(betterproto.Message):
      Works the same for local and remote processes (location transparent).
 
      ## Design Notes
-     - actor_id: The actor to monitor (can be "actor@node" for remote)
+     - actor_id: Canonical actor ID for the actor to monitor
      - supervisor_id: The supervisor that wants notifications (for logging/debugging)
      - supervisor_callback: gRPC address where to send NotifyActorDown
        (e.g., "http://supervisor-node:8000")

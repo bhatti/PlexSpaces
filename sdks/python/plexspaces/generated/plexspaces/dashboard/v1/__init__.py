@@ -313,6 +313,39 @@ class GetDependencyHealthResponse(betterproto.Message):
     """Node ID this health check is for (empty if aggregated)"""
 
 
+@dataclass(eq=False, repr=False)
+class GetDashboardMetricsRequest(betterproto.Message):
+    """
+    Dashboard metrics request (local node; same recorder as MetricsService gRPC).
+    """
+
+    namespace: str = betterproto.string_field(1)
+    """Optional `namespace` label filter (application / actor namespace)"""
+
+    name_pattern: str = betterproto.string_field(2)
+    """Name glob; empty or "*" matches all metric names"""
+
+    label_filter: Dict[str, str] = betterproto.map_field(
+        3, betterproto.TYPE_STRING, betterproto.TYPE_STRING
+    )
+    """Additional label equality filters (AND)"""
+
+    include_definitions: bool = betterproto.bool_field(4)
+    """Include metric definitions (metadata)"""
+
+    include_prometheus_text: bool = betterproto.bool_field(5)
+    """
+    Include full Prometheus exposition text (for Prometheus-compatible UIs)
+    """
+
+
+@dataclass(eq=False, repr=False)
+class GetDashboardMetricsResponse(betterproto.Message):
+    metrics: List["__metrics_v1__.Metric"] = betterproto.message_field(1)
+    definitions: List["__metrics_v1__.MetricDefinition"] = betterproto.message_field(2)
+    prometheus_text: str = betterproto.string_field(3)
+
+
 class DashboardServiceStub(betterproto.ServiceStub):
     async def get_summary(
         self,
@@ -433,6 +466,23 @@ class DashboardServiceStub(betterproto.ServiceStub):
             metadata=metadata,
         )
 
+    async def get_dashboard_metrics(
+        self,
+        get_dashboard_metrics_request: "GetDashboardMetricsRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "GetDashboardMetricsResponse":
+        return await self._unary_unary(
+            "/plexspaces.dashboard.v1.DashboardService/GetDashboardMetrics",
+            get_dashboard_metrics_request,
+            GetDashboardMetricsResponse,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
 
 class DashboardServiceBase(ServiceBase):
 
@@ -469,6 +519,11 @@ class DashboardServiceBase(ServiceBase):
     async def get_dependency_health(
         self, get_dependency_health_request: "GetDependencyHealthRequest"
     ) -> "GetDependencyHealthResponse":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def get_dashboard_metrics(
+        self, get_dashboard_metrics_request: "GetDashboardMetricsRequest"
+    ) -> "GetDashboardMetricsResponse":
         raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
 
     async def __rpc_get_summary(
@@ -523,6 +578,14 @@ class DashboardServiceBase(ServiceBase):
         response = await self.get_dependency_health(request)
         await stream.send_message(response)
 
+    async def __rpc_get_dashboard_metrics(
+        self,
+        stream: "grpclib.server.Stream[GetDashboardMetricsRequest, GetDashboardMetricsResponse]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.get_dashboard_metrics(request)
+        await stream.send_message(response)
+
     def __mapping__(self) -> Dict[str, grpclib.const.Handler]:
         return {
             "/plexspaces.dashboard.v1.DashboardService/GetSummary": grpclib.const.Handler(
@@ -566,5 +629,11 @@ class DashboardServiceBase(ServiceBase):
                 grpclib.const.Cardinality.UNARY_UNARY,
                 GetDependencyHealthRequest,
                 GetDependencyHealthResponse,
+            ),
+            "/plexspaces.dashboard.v1.DashboardService/GetDashboardMetrics": grpclib.const.Handler(
+                self.__rpc_get_dashboard_metrics,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                GetDashboardMetricsRequest,
+                GetDashboardMetricsResponse,
             ),
         }

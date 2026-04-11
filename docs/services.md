@@ -665,17 +665,19 @@ Distributed object registry for **unified discovery**: actors, tuple spaces, app
 
 **Proto**: `proto/plexspaces/v1/metrics/metrics.proto`
 
-Metrics collection and aggregation.
+Unified Prometheus-oriented metrics: in-process `metrics` macros, export via `ExportPrometheus`, and typed R.E.D. recording RPCs. `plexspaces_services::metrics_service::install_metrics_recorder()` installs the process-wide Prometheus recorder and runs early during `ServiceLocator` initialization (see [Metrics and Prometheus export](metrics.md)).
 
 #### RPCs
 
 | Method | Description | Request | Response |
 |--------|-------------|---------|----------|
-| `RecordMetric` | Record single metric | `RecordMetricRequest` | `RecordMetricResponse` |
-| `RecordMetrics` | Record batch | `RecordMetricsRequest` | `RecordMetricsResponse` |
-| `GetMetrics` | Get metrics | `GetMetricsRequest` | `GetMetricsResponse` |
-| `GetActorMetrics` | Get actor metrics | `GetActorMetricsRequest` | `GetActorMetricsResponse` |
-| `StreamMetrics` | Stream metrics | `StreamMetricsRequest` | `stream MetricEvent` |
+| `ExportPrometheus` | Prometheus text exposition | `ExportPrometheusRequest` | `ExportPrometheusResponse` |
+| `GetMetrics` | Structured metric values | `GetMetricsRequest` | `GetMetricsResponse` |
+| `ListMetricDefinitions` | Registered metric definitions | `ListMetricDefinitionsRequest` | `ListMetricDefinitionsResponse` |
+| `RecordMetric` | Manual counter/gauge/histogram | `RecordMetricRequest` | `plexspaces.common.v1.Empty` |
+| `RecordMessageRouting` | R.E.D. for routing (namespace labels) | `RecordMessageRoutingRequest` | `plexspaces.common.v1.Empty` |
+| `RecordActorActivation` | R.E.D. for activation | `RecordActorActivationRequest` | `plexspaces.common.v1.Empty` |
+| `RecordChannelMetrics` | R.E.D. for channel operations | `RecordChannelMetricsRequest` | `plexspaces.common.v1.Empty` |
 
 ### DashboardService
 

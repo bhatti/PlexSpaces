@@ -168,7 +168,9 @@ use plexspaces_core::behavior_factory::BehaviorRegistry;
 use plexspaces_core::facet_service_wrapper::{
     FacetManagerServiceWrapper, FacetRegistryServiceWrapper,
 };
-use plexspaces_core::monitoring::{NodeConnectionInfo, NodeMetricsAccessor};
+use plexspaces_core::metrics_renderer::MetricsPrometheusRenderer;
+use plexspaces_core::metrics_service_access::MetricsServiceAccess;
+use plexspaces_core::monitoring::NodeConnectionInfo;
 use plexspaces_core::JournalStorage;
 use plexspaces_core::ServiceLocator;
 use plexspaces_core::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
@@ -310,9 +312,11 @@ pub struct ServiceLocatorImpl {
     /// This allows components to retrieve LockManager as a trait object without knowing the concrete type
     lock_manager: Arc<RwLock<Option<Arc<dyn plexspaces_locks::LockManager + Send + Sync>>>>,
 
-    /// Registered NodeMetricsAccessor (stored separately for type-safe access)
-    /// This allows components to read and update NodeMetrics without depending on Node type
-    node_metrics_accessor: Arc<RwLock<Option<Arc<dyn NodeMetricsAccessor + Send + Sync>>>>,
+    /// Prometheus text renderer for operational counter overlays
+    metrics_prometheus_renderer:
+        Arc<RwLock<Option<Arc<dyn MetricsPrometheusRenderer + Send + Sync>>>>,
+    /// Unified metrics (structured + Prometheus text) for in-process callers
+    metrics_service_access: Arc<RwLock<Option<Arc<dyn MetricsServiceAccess + Send + Sync>>>>,
     /// Registered NodeConnectionInfo (stored separately for type-safe access)
     /// This allows components to access node connection information without depending on Node type
     node_connection_info: Arc<RwLock<Option<Arc<dyn NodeConnectionInfo + Send + Sync>>>>,
@@ -457,7 +461,8 @@ impl ServiceLocatorImpl {
             channel_service: Arc::new(RwLock::new(None)),
             journal_storage: Arc::new(RwLock::new(None)),
             lock_manager: Arc::new(RwLock::new(None)),
-            node_metrics_accessor: Arc::new(RwLock::new(None)),
+            metrics_prometheus_renderer: Arc::new(RwLock::new(None)),
+            metrics_service_access: Arc::new(RwLock::new(None)),
             node_connection_info: Arc::new(RwLock::new(None)),
             actor_factory: Arc::new(RwLock::new(None)),
             object_registry: Arc::new(RwLock::new(None)),
@@ -915,35 +920,37 @@ impl ServiceLocatorImpl {
         journal_storage.clone()
     }
 
-    /// Register NodeMetricsAccessor as a trait object
-    ///
-    /// ## Purpose
-    /// Allows NodeMetricsAccessor to be retrieved by trait type when the concrete type is unknown.
-    /// This is used by Node to register NodeMetricsAccessorWrapper as a trait object.
-    ///
-    /// ## Arguments
-    /// * `accessor` - NodeMetricsAccessor as a trait object
-    pub async fn register_node_metrics_accessor(
+    /// Register Prometheus exposition renderer (in-process metrics snapshot).
+    pub async fn register_metrics_prometheus_renderer(
         &self,
-        accessor: Arc<dyn NodeMetricsAccessor + Send + Sync>,
+        renderer: Arc<dyn MetricsPrometheusRenderer + Send + Sync>,
     ) {
-        let mut metrics_accessor = self.node_metrics_accessor.write().await;
-        *metrics_accessor = Some(accessor);
+        let mut g = self.metrics_prometheus_renderer.write().await;
+        *g = Some(renderer);
     }
 
-    /// Get NodeMetricsAccessor
-    ///
-    /// ## Purpose
-    /// Retrieves NodeMetricsAccessor that was registered as a trait object.
-    /// This allows components to read and update NodeMetrics without depending on Node type.
-    ///
-    /// ## Returns
-    /// `Some(Arc<dyn NodeMetricsAccessor>)` if registered, `None` otherwise
-    pub async fn get_node_metrics_accessor(
+    /// Get registered Prometheus renderer.
+    pub async fn get_metrics_prometheus_renderer(
         &self,
-    ) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>> {
-        let metrics_accessor = self.node_metrics_accessor.read().await;
-        metrics_accessor.clone()
+    ) -> Option<Arc<dyn MetricsPrometheusRenderer + Send + Sync>> {
+        let g = self.metrics_prometheus_renderer.read().await;
+        g.clone()
+    }
+
+    /// Register in-process metrics service (same backend as gRPC MetricsService).
+    pub async fn register_metrics_service_access(
+        &self,
+        service: Arc<dyn MetricsServiceAccess + Send + Sync>,
+    ) {
+        let mut g = self.metrics_service_access.write().await;
+        *g = Some(service);
+    }
+
+    pub async fn get_metrics_service_access(
+        &self,
+    ) -> Option<Arc<dyn MetricsServiceAccess + Send + Sync>> {
+        let g = self.metrics_service_access.read().await;
+        g.clone()
     }
 
     /// Register NodeConnectionInfo as a trait object
@@ -1518,19 +1525,30 @@ impl plexspaces_core::ServiceLocator for ServiceLocatorImpl {
         *manager = Some(service);
     }
 
-    async fn get_node_metrics_accessor(
+    async fn get_metrics_prometheus_renderer(
         &self,
-    ) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>> {
-        let accessor = self.node_metrics_accessor.read().await;
-        accessor.clone()
+    ) -> Option<Arc<dyn MetricsPrometheusRenderer + Send + Sync>> {
+        ServiceLocatorImpl::get_metrics_prometheus_renderer(self).await
     }
 
-    async fn register_node_metrics_accessor(
+    async fn register_metrics_prometheus_renderer(
         &self,
-        service: Arc<dyn NodeMetricsAccessor + Send + Sync>,
+        renderer: Arc<dyn MetricsPrometheusRenderer + Send + Sync>,
     ) {
-        let mut accessor = self.node_metrics_accessor.write().await;
-        *accessor = Some(service);
+        ServiceLocatorImpl::register_metrics_prometheus_renderer(self, renderer).await;
+    }
+
+    async fn get_metrics_service_access(
+        &self,
+    ) -> Option<Arc<dyn MetricsServiceAccess + Send + Sync>> {
+        ServiceLocatorImpl::get_metrics_service_access(self).await
+    }
+
+    async fn register_metrics_service_access(
+        &self,
+        service: Arc<dyn MetricsServiceAccess + Send + Sync>,
+    ) {
+        ServiceLocatorImpl::register_metrics_service_access(self, service).await;
     }
 
     async fn get_facet_manager(&self) -> Option<Arc<FacetManagerServiceWrapper>> {
@@ -1936,6 +1954,11 @@ impl ServiceLocatorImpl {
 ///
 /// # Panics
 /// Panics if database initialization fails (fatal error).
+///
+/// # Metrics
+/// Installs the process-wide Prometheus `metrics` recorder first via
+/// [`crate::metrics_service::install_metrics_recorder`] so all later `metrics::` emissions and
+/// `MetricsServiceImpl` share one handle.
 async fn initialize_services_impl(
     service_locator_impl: Arc<ServiceLocatorImpl>,
     release_config: Option<plexspaces_proto::node::v1::ReleaseSpec>,
@@ -1943,6 +1966,8 @@ async fn initialize_services_impl(
     use plexspaces_core::{ActorRegistry, ReplyWaiterRegistry, VirtualActorManager};
     use plexspaces_process_groups::ProcessGroupRegistry;
     use std::collections::HashMap;
+
+    let prometheus_handle = crate::metrics_service::install_metrics_recorder();
 
     let default_node_config = |node_id: String| plexspaces_proto::node::v1::NodeConfig {
         id: node_id,
@@ -2418,6 +2443,17 @@ async fn initialize_services_impl(
             }
         }
     }
+
+    service_locator_impl
+        .register_metrics_prometheus_renderer(Arc::new(
+            crate::metrics_service::PrometheusHandleRenderer::new(prometheus_handle.clone()),
+        ))
+        .await;
+    service_locator_impl
+        .register_metrics_service_access(Arc::new(crate::metrics_service::MetricsServiceImpl::new(
+            prometheus_handle,
+        )))
+        .await;
 }
 
 impl Default for ServiceLocatorImpl {

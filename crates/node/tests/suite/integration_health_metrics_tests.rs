@@ -213,28 +213,31 @@ async fn test_health_check_get_all_service_statuses() {
 async fn test_metrics_service_export_prometheus() {
     // Test: Prometheus metrics export
     use plexspaces_proto::metrics::v1::metrics_service_server::MetricsService;
-    use plexspaces_services::metrics_service::MetricsServiceImpl;
+    use plexspaces_services::metrics_service::{install_metrics_recorder, MetricsServiceImpl};
 
-    let metrics_service = MetricsServiceImpl::new();
+    let handle = install_metrics_recorder();
+    let metrics_service = MetricsServiceImpl::new(handle);
+    metrics::counter!("plexspaces_node_health_requests_total").increment(1);
     let request = tonic::Request::new(plexspaces_proto::metrics::v1::ExportPrometheusRequest {});
 
     let response = metrics_service.export_prometheus(request).await.unwrap();
     let content = response.get_ref().content.clone();
 
-    // Should contain Prometheus format
-    assert!(content.contains("PlexSpaces Metrics"));
+    assert!(
+        content.contains("# TYPE") || content.contains("# HELP"),
+        "expected Prometheus exposition, got: {}",
+        content
+    );
     assert!(content.contains("plexspaces_node_health_requests_total"));
-    assert!(content.contains("# TYPE"));
-    assert!(content.contains("# HELP"));
 }
 
 #[tokio::test]
 async fn test_metrics_service_list_definitions() {
     // Test: List metric definitions
     use plexspaces_proto::metrics::v1::metrics_service_server::MetricsService;
-    use plexspaces_services::metrics_service::MetricsServiceImpl;
+    use plexspaces_services::metrics_service::{install_metrics_recorder, MetricsServiceImpl};
 
-    let metrics_service = MetricsServiceImpl::new();
+    let metrics_service = MetricsServiceImpl::new(install_metrics_recorder());
     let request = tonic::Request::new(
         plexspaces_proto::metrics::v1::ListMetricDefinitionsRequest {
             name_pattern: String::new(),
@@ -260,9 +263,9 @@ async fn test_metrics_service_list_definitions() {
 async fn test_metrics_service_get_metrics() {
     // Test: Get structured metrics
     use plexspaces_proto::metrics::v1::metrics_service_server::MetricsService;
-    use plexspaces_services::metrics_service::MetricsServiceImpl;
+    use plexspaces_services::metrics_service::{install_metrics_recorder, MetricsServiceImpl};
 
-    let metrics_service = MetricsServiceImpl::new();
+    let metrics_service = MetricsServiceImpl::new(install_metrics_recorder());
     let request = tonic::Request::new(plexspaces_proto::metrics::v1::GetMetricsRequest {
         name_pattern: String::new(),
         label_filter: std::collections::HashMap::new(),

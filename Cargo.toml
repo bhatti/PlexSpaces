@@ -258,6 +258,10 @@ nix = "0.27"
 # Development and testing
 env_logger = "0.11"
 
+# Metrics (unified Prometheus recorder)
+metrics = "0.23"
+metrics-exporter-prometheus = { version = "0.15", default-features = false }
+
 # Internal crates
 plexspaces-proto = { path = "crates/proto" }
 plexspaces-lattice = { path = "crates/lattice" }

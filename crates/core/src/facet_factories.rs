@@ -716,7 +716,7 @@ mod tests {
     };
     use crate::behavior_factory::BehaviorRegistry;
     use crate::facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
-    use crate::monitoring::{NodeConnectionInfo, NodeMetricsAccessor};
+    use crate::monitoring::NodeConnectionInfo;
     use crate::{
         ActorFactory, ActorRegistry, ApplicationManager, BlobServiceTrait, GrpcConnectionManager,
         KeyValueStore, LockManager, NodeRegistryTrait, ReplyWaiterRegistry, Service,
@@ -967,15 +967,27 @@ mod tests {
             *self.lock_manager.write().await = Some(service);
         }
 
-        async fn get_node_metrics_accessor(
+        async fn get_metrics_prometheus_renderer(
             &self,
-        ) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>> {
+        ) -> Option<Arc<dyn crate::MetricsPrometheusRenderer + Send + Sync>> {
             None
         }
 
-        async fn register_node_metrics_accessor(
+        async fn register_metrics_prometheus_renderer(
             &self,
-            _service: Arc<dyn NodeMetricsAccessor + Send + Sync>,
+            _renderer: Arc<dyn crate::MetricsPrometheusRenderer + Send + Sync>,
+        ) {
+        }
+
+        async fn get_metrics_service_access(
+            &self,
+        ) -> Option<Arc<dyn crate::MetricsServiceAccess + Send + Sync>> {
+            None
+        }
+
+        async fn register_metrics_service_access(
+            &self,
+            _service: Arc<dyn crate::MetricsServiceAccess + Send + Sync>,
         ) {
         }
 

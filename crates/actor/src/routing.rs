@@ -34,6 +34,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use plexspaces_core::{
+    monitoring::{
+        record_node_failed_delivery, record_node_local_delivery, record_node_messages_routed,
+        record_node_remote_delivery,
+    },
     ActorId, ReplyWaiter, ReplyWaiterError, RequestContext, ServiceLocator as ServiceLocatorTrait,
 };
 use plexspaces_proto::actor::v1::{
@@ -99,7 +103,7 @@ pub async fn is_actor_local(
 
 fn parse_target_actor_id(actor_id: &str) -> Result<ActorId, ActorRefError> {
     ActorId::from_canonical(actor_id).map_err(|e| {
-        ActorRefError::SendFailed(format!("Invalid canonical ActorId '{}': {}", actor_id, e))
+        ActorRefError::InvalidActorId(format!("Invalid actor ID '{}': {}", actor_id, e))
     })
 }
 
@@ -276,6 +280,13 @@ pub fn route_local(
             .await
             .ok_or_else(|| ActorRefError::SendFailed("ActorRegistry not available".to_string()))?;
 
+        let local_node_id = service_locator
+            .get_node_config()
+            .await
+            .map(|c| c.id)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "unknown".to_string());
+
         // OBSERVABILITY: Track duration
         let duration = start.elapsed();
         metrics::histogram!("plexspaces_routing_local_route_duration_seconds")
@@ -297,23 +308,20 @@ pub fn route_local(
             // Update metrics
             match &result {
                 Ok(_) => {
-                    if let Some(accessor) = service_locator.get_node_metrics_accessor().await {
-                        accessor.increment_messages_routed().await;
-                        accessor.increment_local_deliveries().await;
-                    }
+                    record_node_messages_routed(&local_node_id);
+                    record_node_local_delivery(&local_node_id);
                     metrics::counter!("plexspaces_routing_local_route_success_total",
                         "pattern" => "ask"
                     )
                     .increment(1);
                 }
                 Err(e) => {
-                    if let Some(accessor) = service_locator.get_node_metrics_accessor().await {
-                        accessor.increment_messages_routed().await;
-                        accessor.increment_failed_deliveries().await;
-                    }
+                    record_node_messages_routed(&local_node_id);
+                    record_node_failed_delivery(&local_node_id);
                     let error_type = match e {
                         ActorRefError::Timeout => "timeout",
                         ActorRefError::ActorNotFound(_) => "not_found",
+                        ActorRefError::InvalidActorId(_) => "invalid_actor_id",
                         _ => "other",
                     };
                     metrics::counter!("plexspaces_routing_local_route_error_total",
@@ -337,14 +345,11 @@ pub fn route_local(
                     other => ActorRefError::SendFailed(other.to_string()),
                 });
 
-            // Update metrics
-            if let Some(accessor) = service_locator.get_node_metrics_accessor().await {
-                accessor.increment_messages_routed().await;
-                if result.is_ok() {
-                    accessor.increment_local_deliveries().await;
-                } else {
-                    accessor.increment_failed_deliveries().await;
-                }
+            record_node_messages_routed(&local_node_id);
+            if result.is_ok() {
+                record_node_local_delivery(&local_node_id);
+            } else {
+                record_node_failed_delivery(&local_node_id);
             }
 
             metrics::counter!("plexspaces_routing_local_route_success_total",
@@ -386,6 +391,13 @@ pub fn route_remote(
     Box::pin(async move {
         let start = std::time::Instant::now();
         let message_id = message.id.clone();
+
+        let local_node_id = service_locator
+            .get_node_config()
+            .await
+            .map(|c| c.id)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "unknown".to_string());
 
         // OBSERVABILITY: Track remote routing
         metrics::counter!("plexspaces_routing_remote_route_total",
@@ -468,11 +480,8 @@ pub fn route_remote(
         } {
             Ok(r) => r,
             Err(e) => {
-                // Update Node metrics on failure
-                if let Some(accessor) = service_locator.get_node_metrics_accessor().await {
-                    accessor.increment_messages_routed().await;
-                    accessor.increment_failed_deliveries().await;
-                }
+                record_node_messages_routed(&local_node_id);
+                record_node_failed_delivery(&local_node_id);
                 metrics::counter!("plexspaces_routing_remote_route_error_total",
                     "target_node" => node_id.clone(),
                     "error" => e.code().to_string()
@@ -500,11 +509,8 @@ pub fn route_remote(
         )
         .increment(1);
 
-        // Update Node metrics on success
-        if let Some(accessor) = service_locator.get_node_metrics_accessor().await {
-            accessor.increment_messages_routed().await;
-            accessor.increment_remote_deliveries().await;
-        }
+        record_node_messages_routed(&local_node_id);
+        record_node_remote_delivery(&local_node_id);
 
         if wait_for_response {
             let (resolved_actor_id, payload, headers, _) = response;

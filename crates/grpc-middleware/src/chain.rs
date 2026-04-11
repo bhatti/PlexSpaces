@@ -500,6 +500,8 @@ mod tests {
                 std::time::SystemTime::now(),
             )),
             duration: None,
+            request_id: ulid::Ulid::new().to_string(),
+            method: "/test.Service/Method".to_string(),
         };
 
         let result = chain.after_response(&context).await;

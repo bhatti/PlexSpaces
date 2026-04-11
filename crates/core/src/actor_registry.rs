@@ -27,8 +27,8 @@ use crate::actor_context::ObjectRegistry;
 use crate::ActorFactory;
 use crate::Service;
 use crate::{
-    ActorId, ActorMetricsExt, ActorMetricsHandle, ExitReason, MessageSender, ReplyWaiter,
-    ReplyWaiterRegistry, RequestContext, VirtualActorManager, TEMP_SENDER_ACTOR_TYPE,
+    ActorId, ExitReason, MessageSender, ReplyWaiter, ReplyWaiterRegistry, RequestContext,
+    VirtualActorManager, TEMP_SENDER_ACTOR_TYPE,
 };
 use plexspaces_facet::{ExitReason as FacetExitReason, FacetManager};
 use plexspaces_proto::common::v1::Message;
@@ -134,8 +134,6 @@ pub struct ActorRegistry {
     /// This includes actors that are known to the system even when no live sender
     /// currently exists, such as passivated virtual actors retained for discovery.
     registered_actor_entries: Arc<RwLock<HashSet<ScopedActorKey>>>,
-    /// Actor metrics (extracted from NodeMetrics for better separation of concerns)
-    actor_metrics: ActorMetricsHandle,
     /// Temporary sender mappings: temporary_sender_id -> TemporarySenderEntry
     /// Used for ask() pattern when called from outside actor context
     /// Key: structured temporary sender ActorId
@@ -235,7 +233,6 @@ impl ActorRegistry {
             lifecycle_subscribers: Arc::new(RwLock::new(Vec::new())),
             actor_configs: Arc::new(RwLock::new(HashMap::new())),
             registered_actor_entries: Arc::new(RwLock::new(HashSet::new())),
-            actor_metrics: Arc::new(RwLock::new(ActorMetricsExt::new())),
             temporary_senders: Arc::new(RwLock::new(HashMap::new())),
             actor_type_index: Arc::new(RwLock::new(HashMap::new())),
             parent_to_children: Arc::new(RwLock::new(HashMap::new())),
@@ -559,11 +556,6 @@ impl ActorRegistry {
         &self.local_node_id
     }
 
-    /// Get actor metrics handle
-    pub fn actor_metrics(&self) -> &ActorMetricsHandle {
-        &self.actor_metrics
-    }
-
     /// Get actor type index (for efficient type-based lookups)
     pub fn actor_type_index(
         &self,
@@ -679,9 +671,9 @@ impl ActorRegistry {
 
         // Update metrics if this is a new actor
         if was_new {
-            let mut metrics = self.actor_metrics.write().await;
-            metrics.increment_spawn_total();
-            metrics.increment_active();
+            let ns = ctx.namespace().to_string();
+            metrics::counter!("plexspaces_actor_spawn_total", "namespace" => ns.clone()).increment(1);
+            metrics::gauge!("plexspaces_actor_active", "namespace" => ns).increment(1.0);
         }
     }
 
@@ -1119,6 +1111,18 @@ impl ActorRegistry {
             actors.keys().any(|key| key.actor_id == *actor_id)
         };
 
+        let namespaces_for_actor: Vec<String> = {
+            let actors = self.actors.read().await;
+            actors
+                .keys()
+                .filter(|key| key.actor_id == *actor_id)
+                .map(|key| key.namespace.clone())
+                .collect()
+        };
+        for ns in namespaces_for_actor {
+            metrics::gauge!("plexspaces_actor_active", "namespace" => ns).decrement(1.0);
+        }
+
         // Remove from actors (MessageSender trait objects)
         {
             let mut actors = self.actors.write().await;
@@ -1158,12 +1162,6 @@ impl ActorRegistry {
         self.facet_manager.remove_facets(actor_id).await;
         registered_entries.retain(|key| key.actor_id != *actor_id);
         actor_configs.remove(actor_id);
-
-        // Update metrics if actor existed
-        if existed {
-            let mut metrics = self.actor_metrics.write().await;
-            metrics.decrement_active();
-        }
 
         // OBSERVABILITY: Log actor unregistration (TRACE to reduce log noise)
         if tracing::enabled!(tracing::Level::TRACE) {

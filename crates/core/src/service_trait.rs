@@ -52,8 +52,6 @@ pub mod service_names {
     pub const FACET_SERVICE: &str = "FacetService";
     /// Firecracker VM service
     pub const FIRECRACKER_VM_SERVICE: &str = "FirecrackerVmService";
-    /// Node metrics accessor
-    pub const NODE_METRICS_ACCESSOR: &str = "NodeMetricsAccessor";
     /// Node
     pub const NODE: &str = "Node";
     /// Tuplespace service

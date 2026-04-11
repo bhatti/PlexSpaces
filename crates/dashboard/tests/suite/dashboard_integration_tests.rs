@@ -116,15 +116,6 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
 
     // NodeBuilder::build() already called initialize_services(); avoid repeating it (slow + contends under parallel tests).
 
-    // Register NodeMetricsAccessor
-    use plexspaces_node::service_wrappers::NodeMetricsAccessorWrapper;
-    let metrics_accessor = Arc::new(NodeMetricsAccessorWrapper::new(node.clone()));
-    let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> =
-        metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
-    service_locator
-        .register_node_metrics_accessor(metrics_accessor_trait)
-        .await;
-
     // ApplicationManager is already registered in service_locator by NodeBuilder::build()
     // Do NOT create a new one here - that would overwrite the one apps are registered in
 
@@ -1167,8 +1158,6 @@ async fn test_dashboard_node_page_data() {
 async fn test_dashboard_metrics_not_zero() {
     let node = create_test_node("test-node-metrics").await;
     let service = create_dashboard_service(node.clone()).await;
-
-    // NodeMetricsAccessorWrapper refreshes CPU/memory from sysinfo without node.start().
 
     // Get node dashboard
     let node_dashboard_req = Request::new(GetNodeDashboardRequest {

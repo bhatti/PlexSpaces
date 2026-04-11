@@ -136,6 +136,16 @@ service DashboardService {
       tags: "Dashboard"
     };
   }
+
+  // Unified Prometheus-backed metrics for dashboard clients (node / namespace / filtered series).
+  rpc GetDashboardMetrics(GetDashboardMetricsRequest) returns (GetDashboardMetricsResponse) {
+    option (google.api.http) = {get: "/api/v1/dashboard/metrics"};
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Get Dashboard Metrics"
+      description: "Returns structured metric samples and optional full Prometheus text for this node"
+      tags: "Dashboard"
+    };
+  }
 }
 
 // ============================================================================
@@ -422,4 +432,28 @@ message GetDependencyHealthResponse {
 
   // Node ID this health check is for (empty if aggregated)
   string node_id = 2;
+}
+
+// Dashboard metrics request (local node; same recorder as MetricsService gRPC).
+message GetDashboardMetricsRequest {
+  // Optional `namespace` label filter (application / actor namespace)
+  string namespace = 1 [(buf.validate.field).string.max_len = 512];
+
+  // Name glob; empty or "*" matches all metric names
+  string name_pattern = 2 [(buf.validate.field).string.max_len = 512];
+
+  // Additional label equality filters (AND)
+  map<string, string> label_filter = 3;
+
+  // Include metric definitions (metadata)
+  bool include_definitions = 4;
+
+  // Include full Prometheus exposition text (for Prometheus-compatible UIs)
+  bool include_prometheus_text = 5;
+}
+
+message GetDashboardMetricsResponse {
+  repeated plexspaces.metrics.v1.Metric metrics = 1;
+  repeated plexspaces.metrics.v1.MetricDefinition definitions = 2;
+  string prometheus_text = 3;
 }

@@ -79,9 +79,18 @@ pub mod facet_service_wrapper;
 pub use facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 pub mod message_metrics;
 pub mod monitoring;
+pub mod metrics_renderer;
+pub mod metrics_service_access;
+pub mod prometheus_text;
 pub mod reply_waiter;
-pub use message_metrics::{new_actor_metrics, ActorMetrics, ActorMetricsExt, ActorMetricsHandle};
-pub use monitoring::{NodeConnectionInfo, NodeMetricsAccessor};
+pub use message_metrics::ActorMetrics;
+pub use metrics_renderer::MetricsPrometheusRenderer;
+pub use metrics_service_access::MetricsServiceAccess;
+pub use monitoring::NodeConnectionInfo;
+pub use prometheus_text::{
+    actor_metrics_from_exposition_for_namespace, overlay_node_operational_counters_from_exposition,
+    sum_counter_all_label_sets, sum_counter_for_labels,
+};
 pub mod journal_storage;
 pub use journal_storage::{JournalError, JournalResult, JournalStorage};
 /// Health module - consolidated health checking, reporting, and service functionality.

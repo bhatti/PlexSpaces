@@ -69,12 +69,12 @@ impl ActorServiceMessageSender {
     }
 
     async fn local_node_id(&self) -> Result<String, String> {
-        let accessor = self
-            .service_locator
-            .get_node_metrics_accessor()
+        self.service_locator
+            .get_node_config()
             .await
-            .ok_or_else(|| "NodeMetricsAccessor not found in ServiceLocator".to_string())?;
-        Ok(accessor.get_metrics().await.node_id)
+            .filter(|c| !c.id.is_empty())
+            .map(|c| c.id)
+            .ok_or_else(|| "NodeConfig not found in ServiceLocator".to_string())
     }
 
     fn canonical_node_address_key(address: &str) -> String {

@@ -52,7 +52,7 @@ socket2 = { version = "0.5", optional = true }
 aws-sdk-sqs = { version = "1", optional = true }
 aws-config = { version = "1", optional = true }
 plexspaces-common = { path = "../common", optional = true }
-metrics = { version = "0.23", optional = true }
+metrics = { workspace = true }
 
 # Optional: Process Group backend (for Erlang pg/pg2-style pub/sub)
 plexspaces-core = { path = "../core", optional = true }
@@ -78,10 +78,9 @@ sqs-backend = [
     "aws-config",
     "plexspaces-common",
     "plexspaces-common/test-helpers",
-    "metrics",
     "base64",
 ]
-process-group-backend = ["plexspaces-core", "metrics"]
+process-group-backend = ["plexspaces-core"]
 test-helpers = ["plexspaces-common/test-helpers"]
 test-utils = []  # Enable mock_backend for integration tests
 

@@ -131,7 +131,14 @@ use plexspaces_actor::parallel::{
     select_collective_value, shard_group_config, shard_query_responses_from_results,
 };
 use plexspaces_actor::ActorRef as ActorRefImpl;
-use plexspaces_core::{ActorId, ActorRegistry, RequestContext, ServiceLocator as ServiceLocatorTrait};
+use plexspaces_core::{
+    monitoring::{
+        record_node_shard_groups_created, record_node_shard_messages_received,
+        record_node_shard_messages_sent, record_node_shard_operation,
+        record_node_shard_operation_failed,
+    },
+    ActorId, ActorRegistry, RequestContext, ServiceLocator as ServiceLocatorTrait,
+};
 use plexspaces_proto::common::v1::Message;
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime};
@@ -957,6 +964,9 @@ impl ActorServiceImpl {
             }
             plexspaces_actor::ActorRefError::ActorNotFound(id) => {
                 Status::not_found(format!("Actor not found: {}", id))
+            }
+            plexspaces_actor::ActorRefError::InvalidActorId(msg) => {
+                Status::invalid_argument(msg)
             }
             plexspaces_actor::ActorRefError::SendFailed(msg) => {
                 Status::internal(format!("Failed to send message: {}", msg))
@@ -2030,7 +2040,7 @@ impl ActorServiceTrait for ActorServiceImpl {
         }
 
         // Emit metrics
-        metrics::counter!("plexspaces_shard_group_deleted_total", 
+        let _ = metrics::counter!("plexspaces_shard_group_deleted_total", 
             "group_id" => req.group_id.clone());
 
         tracing::info!(group_id = %req.group_id, "Deleted ShardGroup");
@@ -2060,13 +2070,15 @@ impl ActorServiceTrait for ActorServiceImpl {
         request: Request<ScaleShardGroupRequest>,
     ) -> Result<Response<ScaleShardGroupResponse>, Status> {
         self.check_accepting_requests().await?;
-        let req = request.into_inner();
+        let _ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
+        let _req = request.into_inner();
 
-        // Extract RequestContext from gRPC metadata
-        let ctx = RequestContext::new_without_auth(String::new(), String::new());
-
-        // TODO: Implement scale_shard_group_internal
-        // For now, return not implemented
         Err(Status::unimplemented("ScaleShardGroup not yet implemented"))
     }
 
@@ -2121,6 +2133,15 @@ impl ActorServiceTrait for ActorServiceImpl {
         request: Request<SendToShardRequest>,
     ) -> Result<Response<SendToShardResponse>, Status> {
         self.check_accepting_requests().await?;
+        let service_locator_trait: Arc<dyn plexspaces_core::ServiceLocator> =
+            self.service_locator.clone();
+        let ctx = crate::request_context_from_grpc_request(
+            request.metadata(),
+            &HashMap::new(),
+            &service_locator_trait,
+        )
+        .await
+        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
         let req = request.into_inner();
 
         // Get group
@@ -2159,10 +2180,6 @@ impl ActorServiceTrait for ActorServiceImpl {
                 + std::time::Duration::from_nanos(d.nanos as u64)
         });
 
-        // Extract RequestContext from gRPC request
-        // TODO: Extract tenant_id and namespace from metadata headers
-        let ctx = RequestContext::new_without_auth(String::new(), String::new());
-
         let response_message = if req.wait_for_response {
             let (_, response) = self
                 .route_message(ctx.clone(), &shard_actor_id, message, true, timeout)
@@ -2175,19 +2192,10 @@ impl ActorServiceTrait for ActorServiceImpl {
             None
         };
 
-        // Track shard message metrics
-        if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
-            accessor.increment_shard_messages_sent().await;
-        }
-        if let Some(registry) = self.service_locator.actor_registry().await {
-            let actor_metrics = registry.actor_metrics();
-            use plexspaces_core::message_metrics::ActorMetricsExt;
-            let mut metrics = actor_metrics.write().await;
-            metrics.increment_shard_messages_sent_total();
-        }
+        record_node_shard_messages_sent(self.local_node_id.as_str());
 
         // Emit metrics
-        metrics::counter!("plexspaces_send_to_shard_total",
+        let _ = metrics::counter!("plexspaces_send_to_shard_total",
             "group_id" => req.group_id.clone(),
             "shard_id" => shard_id.to_string());
 
@@ -2460,16 +2468,7 @@ impl ActorServiceImpl {
             }
         }
 
-        // Track shard group creation metrics
-        if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
-            accessor.increment_shard_groups_created().await;
-        }
-        if let Some(registry) = self.service_locator.actor_registry().await {
-            let actor_metrics = registry.actor_metrics();
-            use plexspaces_core::message_metrics::ActorMetricsExt;
-            let mut metrics = actor_metrics.write().await;
-            metrics.increment_shard_groups_created_total();
-        }
+        record_node_shard_groups_created(self.local_node_id.as_str());
 
         // Emit metrics
         metrics::counter!("plexspaces_shard_group_created_total", 
@@ -2850,16 +2849,7 @@ impl ActorServiceImpl {
         // Track shard messages received (for all successful replies)
         for result in &results {
             if result.3 {
-                // success = true
-                if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
-                    accessor.increment_shard_messages_received().await;
-                }
-                if let Some(registry) = self.service_locator.actor_registry().await {
-                    let actor_metrics = registry.actor_metrics();
-                    use plexspaces_core::message_metrics::ActorMetricsExt;
-                    let mut metrics = actor_metrics.write().await;
-                    metrics.increment_shard_messages_received_total();
-                }
+                record_node_shard_messages_received(self.local_node_id.as_str());
             }
         }
 
@@ -2985,21 +2975,9 @@ impl ActorServiceImpl {
 
         let total_duration = start_time.elapsed();
 
-        // Track shard operation metrics
-        if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
-            accessor.increment_shard_operations_total().await;
-            if shards_failed > 0 {
-                accessor.increment_shard_operations_failed().await;
-            }
-        }
-        if let Some(registry) = self.service_locator.actor_registry().await {
-            let actor_metrics = registry.actor_metrics();
-            use plexspaces_core::message_metrics::ActorMetricsExt;
-            let mut metrics = actor_metrics.write().await;
-            metrics.increment_shard_operations_total();
-            if shards_failed > 0 {
-                metrics.increment_shard_operations_failed_total();
-            }
+        record_node_shard_operation(self.local_node_id.as_str());
+        if shards_failed > 0 {
+            record_node_shard_operation_failed(self.local_node_id.as_str());
         }
 
         if shards_failed > 0 {
@@ -3221,21 +3199,9 @@ impl ActorServiceImpl {
 
         let total_duration = start_time.elapsed();
 
-        // Track shard operation metrics
-        if let Some(accessor) = self.service_locator.get_node_metrics_accessor().await {
-            accessor.increment_shard_operations_total().await;
-            if shards_failed > 0 {
-                accessor.increment_shard_operations_failed().await;
-            }
-        }
-        if let Some(registry) = self.service_locator.actor_registry().await {
-            let actor_metrics = registry.actor_metrics();
-            use plexspaces_core::message_metrics::ActorMetricsExt;
-            let mut metrics = actor_metrics.write().await;
-            metrics.increment_shard_operations_total();
-            if shards_failed > 0 {
-                metrics.increment_shard_operations_failed_total();
-            }
+        record_node_shard_operation(self.local_node_id.as_str());
+        if shards_failed > 0 {
+            record_node_shard_operation_failed(self.local_node_id.as_str());
         }
 
         tracing::info!(
@@ -3442,228 +3408,6 @@ impl ActorServiceImpl {
             shard_responses: response.shard_responses,
             stats: response.stats,
         })
-    }
-
-    async fn delete_shard_group(
-        &self,
-        request: Request<DeleteShardGroupRequest>,
-    ) -> Result<Response<Empty>, Status> {
-        self.check_accepting_requests().await?;
-        let ctx = crate::request_context_from_grpc_request(
-            request.metadata(),
-            &std::collections::HashMap::new(),
-            &(self.service_locator.clone() as Arc<dyn plexspaces_core::ServiceLocator>),
-        )
-        .await
-        .map_err(|e| Status::invalid_argument(format!("Invalid request context: {}", e)))?;
-
-        let req = request.into_inner();
-
-        // Get group
-        let group = {
-            let groups = self.shard_groups.read().await;
-            groups.get(&req.group_id).cloned()
-        };
-
-        let group = match group {
-            Some(g) => g,
-            None => {
-                // Idempotent: succeed if group doesn't exist
-                return Ok(Response::new(Empty {}));
-            }
-        };
-
-        // Stop all shard actors
-        let actor_factory = self
-            .service_locator
-            .get_actor_factory()
-            .await
-            .ok_or_else(|| Status::internal("Actor factory not available"))?;
-
-        for shard_actor_id in &group.shard_actor_ids {
-            if let Ok(shard_actor_id) = self.parse_canonical_actor_id(shard_actor_id) {
-                let _ = actor_factory.stop_actor(&ctx, &shard_actor_id).await;
-            }
-        }
-
-        // Remove from registry
-        {
-            let mut groups = self.shard_groups.write().await;
-            groups.remove(&req.group_id);
-        }
-
-        // Unregister from TaskRouter (if registered)
-        if let Some(task_router) = self.service_locator.get_task_router().await {
-            if let Err(e) = task_router.unregister_group(&req.group_id).await {
-                tracing::warn!(
-                    group_id = %req.group_id,
-                    error = %e,
-                    "Failed to unregister ShardGroup from TaskRouter (non-fatal)"
-                );
-            } else {
-                tracing::debug!(
-                    group_id = %req.group_id,
-                    "Unregistered ShardGroup from TaskRouter"
-                );
-            }
-        }
-
-        // Emit metrics
-        metrics::counter!("plexspaces_shard_group_deleted_total", 
-            "group_id" => req.group_id.clone());
-
-        tracing::info!(group_id = %req.group_id, "Deleted ShardGroup");
-
-        Ok(Response::new(Empty {}))
-    }
-
-    async fn get_shard_group(
-        &self,
-        request: Request<GetShardGroupRequest>,
-    ) -> Result<Response<GetShardGroupResponse>, Status> {
-        self.check_accepting_requests().await?;
-        let req = request.into_inner();
-
-        let groups = self.shard_groups.read().await;
-        let group = groups
-            .get(&req.group_id)
-            .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?;
-
-        Ok(Response::new(GetShardGroupResponse {
-            group: Some(group.clone()),
-        }))
-    }
-
-    async fn scale_shard_group(
-        &self,
-        request: Request<ScaleShardGroupRequest>,
-    ) -> Result<Response<ScaleShardGroupResponse>, Status> {
-        self.check_accepting_requests().await?;
-        let req = request.into_inner();
-
-        // Extract RequestContext from gRPC metadata
-        let ctx = RequestContext::new_without_auth(String::new(), String::new());
-
-        // TODO: Implement scale_shard_group_internal
-        // For now, return not implemented
-        Err(Status::unimplemented("ScaleShardGroup not yet implemented"))
-    }
-
-    async fn list_shard_groups(
-        &self,
-        request: Request<ListShardGroupsRequest>,
-    ) -> Result<Response<ListShardGroupsResponse>, Status> {
-        self.check_accepting_requests().await?;
-        let req = request.into_inner();
-
-        let groups = self.shard_groups.read().await;
-        let filtered: Vec<ShardGroup> = groups
-            .values()
-            .filter(|g| {
-                // Filter by actor_type if specified
-                if !req.actor_type.is_empty() && g.actor_type != req.actor_type {
-                    return false;
-                }
-                // Filter by state if specified
-                if req.state != ShardGroupState::ShardGroupStateUnspecified as i32
-                    && g.state != req.state
-                {
-                    return false;
-                }
-                true
-            })
-            .cloned()
-            .collect();
-
-        // Apply pagination
-        let page = req.page.unwrap_or_default();
-        let offset = page.offset as usize;
-        let limit = page.limit as usize;
-        let total_size = filtered.len();
-        let has_next = offset + limit < total_size;
-
-        let paginated: Vec<ShardGroup> = filtered.into_iter().skip(offset).take(limit).collect();
-
-        Ok(Response::new(ListShardGroupsResponse {
-            groups: paginated,
-            page: Some(plexspaces_proto::common::v1::PageResponse {
-                total_size: total_size as i32,
-                offset: offset as i32,
-                limit: limit as i32,
-                has_next,
-            }),
-        }))
-    }
-
-    async fn send_to_shard(
-        &self,
-        request: Request<SendToShardRequest>,
-    ) -> Result<Response<SendToShardResponse>, Status> {
-        self.check_accepting_requests().await?;
-        let req = request.into_inner();
-
-        // Get group
-        let group = {
-            let groups = self.shard_groups.read().await;
-            groups
-                .get(&req.group_id)
-                .ok_or_else(|| Status::not_found(format!("ShardGroup {} not found", req.group_id)))?
-                .clone()
-        };
-
-        // Calculate shard_id from partition_key using partition strategy
-        use crate::actor_service::partition::calculate_shard_id;
-        let shard_id = calculate_shard_id(
-            &req.partition_key,
-            shard_group_config(&group).partition_strategy,
-            shard_group_config(&group).shard_count,
-            None, // TODO: Support range boundaries from group metadata
-        )
-        .map_err(|e| Status::invalid_argument(format!("Partition calculation failed: {}", e)))?;
-
-        let shard_actor_id = group
-            .shard_actor_ids
-            .get(shard_id as usize)
-            .ok_or_else(|| Status::internal(format!("Invalid shard_id {}", shard_id)))?
-            .clone();
-
-        // Route message to shard actor
-        let mut message = req
-            .message
-            .ok_or_else(|| Status::invalid_argument("message is required"))?;
-        message.receiver_id = shard_actor_id.clone();
-
-        let timeout = req.timeout.map(|d| {
-            std::time::Duration::from_secs(d.seconds as u64)
-                + std::time::Duration::from_nanos(d.nanos as u64)
-        });
-
-        // Extract RequestContext from gRPC request
-        // TODO: Extract tenant_id and namespace from metadata headers
-        let ctx = RequestContext::new_without_auth(String::new(), String::new());
-
-        let response_message = if req.wait_for_response {
-            let (_, response) = self
-                .route_message(ctx.clone(), &shard_actor_id, message, true, timeout)
-                .await?;
-            response
-        } else {
-            let _ = self
-                .route_message(ctx.clone(), &shard_actor_id, message, false, None)
-                .await?;
-            None
-        };
-
-        // Emit metrics
-        metrics::counter!("plexspaces_send_to_shard_total",
-            "group_id" => req.group_id.clone(),
-            "shard_id" => shard_id.to_string());
-
-        Ok(Response::new(SendToShardResponse {
-            shard_id,
-            shard_actor_id,
-            response: response_message,
-        }))
     }
 }
 

@@ -611,6 +611,14 @@ class InterceptorResponse(betterproto.Message):
     duration: timedelta = betterproto.message_field(4)
     """Request duration (calculated by interceptor chain)"""
 
+    request_id: str = betterproto.string_field(5)
+    """Request ID for correlation with InterceptorRequest"""
+
+    method: str = betterproto.string_field(6)
+    """
+    gRPC method full path (echoed from the originating InterceptorRequest)
+    """
+
 
 @dataclass(eq=False, repr=False)
 class InterceptorResult(betterproto.Message):

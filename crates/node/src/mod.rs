@@ -701,8 +701,18 @@ impl Node {
     /// ## Note
     /// For gRPC-based metrics, use `NodeService::get_metrics`.
     pub async fn metrics(&self) -> NodeMetrics {
-        let guard = self.metrics.read().await;
-        guard.clone()
+        self.update_metrics_with_system_info().await;
+        let mut m = self.metrics.read().await.clone();
+        let sl: Arc<dyn plexspaces_core::ServiceLocator> = self.service_locator.clone();
+        if let Some(renderer) = sl.get_metrics_prometheus_renderer().await {
+            let text = renderer.render_prometheus_text();
+            plexspaces_core::overlay_node_operational_counters_from_exposition(
+                &text,
+                self.id.as_str(),
+                &mut m,
+            );
+        }
+        m
     }
 
     /// Look up a remote node's address from NodeRegistry
@@ -801,60 +811,6 @@ impl Node {
     /// For gRPC-based metrics, use `NodeService::get_metrics`.
     pub async fn stats(&self) -> NodeMetrics {
         self.metrics().await
-    }
-
-    /// Increment messages_routed counter (for NodeMetricsAccessor)
-    pub(crate) async fn increment_messages_routed(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.messages_routed += 1;
-    }
-
-    /// Increment local_deliveries counter (for NodeMetricsAccessor)
-    pub(crate) async fn increment_local_deliveries(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.local_deliveries += 1;
-    }
-
-    /// Increment remote_deliveries counter (for NodeMetricsAccessor)
-    pub(crate) async fn increment_remote_deliveries(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.remote_deliveries += 1;
-    }
-
-    /// Increment failed_deliveries counter (for NodeMetricsAccessor)
-    pub(crate) async fn increment_failed_deliveries(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.failed_deliveries += 1;
-    }
-
-    /// Increment shard_groups_created counter (for NodeMetricsAccessor)
-    pub(crate) async fn increment_shard_groups_created(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.shard_groups_created += 1;
-    }
-
-    /// Increment shard_messages_sent counter (for NodeMetricsAccessor)
-    pub(crate) async fn increment_shard_messages_sent(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.shard_messages_sent += 1;
-    }
-
-    /// Increment shard_messages_received counter (for NodeMetricsAccessor)
-    pub(crate) async fn increment_shard_messages_received(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.shard_messages_received += 1;
-    }
-
-    /// Increment shard_operations_total counter (for NodeMetricsAccessor)
-    pub(crate) async fn increment_shard_operations_total(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.shard_operations_total += 1;
-    }
-
-    /// Increment shard_operations_failed counter (for NodeMetricsAccessor)
-    pub(crate) async fn increment_shard_operations_failed(&self) {
-        let mut metrics = self.metrics.write().await;
-        metrics.shard_operations_failed += 1;
     }
 
     /// Calculate the current node capacity.
@@ -1523,19 +1479,8 @@ impl Node {
                 .await;
         }
 
-        // Register NodeMetricsAccessor for monitoring helpers and dashboard
-        use crate::service_wrappers::{NodeConnectionInfoWrapper, NodeMetricsAccessorWrapper};
-        let metrics_accessor = Arc::new(NodeMetricsAccessorWrapper::new(self.clone()));
-        self.service_locator
-            .register_service(metrics_accessor.clone())
-            .await;
-        let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> =
-            metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
-        self.service_locator
-            .register_node_metrics_accessor(metrics_accessor_trait)
-            .await;
-
         // Register NodeConnectionInfo for services that need connection information
+        use crate::service_wrappers::NodeConnectionInfoWrapper;
         let connection_info = Arc::new(NodeConnectionInfoWrapper::new(self.clone()));
         self.service_locator
             .register_service(connection_info.clone())
@@ -1845,10 +1790,21 @@ impl Node {
         // Create SystemService (provides HTTP endpoints via gRPC-Gateway)
         let system_service = SystemServiceImpl::new(plexspaces_health_reporter.clone());
 
-        // Create MetricsService for Prometheus export
+        // Create MetricsService for Prometheus export (install global `metrics` recorder once)
         use plexspaces_proto::metrics::v1::metrics_service_server::MetricsServiceServer;
-        use plexspaces_services::metrics_service::MetricsServiceImpl;
-        let metrics_service = MetricsServiceImpl::new();
+        use plexspaces_services::metrics_service::{
+            install_metrics_recorder, MetricsServiceImpl, PrometheusHandleRenderer,
+        };
+        let prometheus_handle = install_metrics_recorder();
+        self.service_locator
+            .register_metrics_prometheus_renderer(Arc::new(PrometheusHandleRenderer::new(
+                prometheus_handle.clone(),
+            )))
+            .await;
+        let metrics_service = MetricsServiceImpl::new(prometheus_handle);
+        self.service_locator
+            .register_metrics_service_access(Arc::new(metrics_service.clone()))
+            .await;
 
         // Start connection health monitoring and stale connection cleanup
         // Connection health monitoring is handled by gRPC client pool
@@ -4582,16 +4538,6 @@ mod tests {
 
         let node_arc = Arc::new(NodeBuilder::new("test-node").build().await);
 
-        // Register NodeMetricsAccessor early for tests (normally done in create_actor_context_arc)
-        let metrics_accessor = Arc::new(crate::service_wrappers::NodeMetricsAccessorWrapper::new(
-            node_arc.clone(),
-        ));
-        let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> =
-            metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
-        node_arc
-            .service_locator()
-            .register_node_metrics_accessor(metrics_accessor_trait)
-            .await;
         let node = node_arc.as_ref();
 
         let mailbox = Arc::new(
@@ -5799,16 +5745,6 @@ mod tests {
 
         let node_arc = Arc::new(NodeBuilder::new("test-node").build().await);
 
-        // Register NodeMetricsAccessor early for tests (normally done in create_actor_context_arc)
-        let metrics_accessor = Arc::new(crate::service_wrappers::NodeMetricsAccessorWrapper::new(
-            node_arc.clone(),
-        ));
-        let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> =
-            metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
-        node_arc
-            .service_locator()
-            .register_node_metrics_accessor(metrics_accessor_trait)
-            .await;
         let node = node_arc.as_ref();
 
         // Initial stats

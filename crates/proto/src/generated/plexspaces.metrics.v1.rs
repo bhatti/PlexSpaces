@@ -150,6 +150,61 @@ pub struct RecordMetricRequest {
     #[prost(message, optional, tag="1")]
     pub metric: ::core::option::Option<Metric>,
 }
+/// R.E.D. metrics for message routing
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RecordMessageRoutingRequest {
+    #[prost(string, tag="1")]
+    pub actor_id: ::prost::alloc::string::String,
+    /// App / namespace dimension (e.g. tenant app-id)
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
+    #[prost(bool, tag="3")]
+    pub success: bool,
+    #[prost(message, optional, tag="4")]
+    pub duration: ::core::option::Option<::prost_types::Duration>,
+    /// Empty when success is true
+    #[prost(string, tag="5")]
+    pub error_type: ::prost::alloc::string::String,
+}
+/// R.E.D. metrics for actor activation
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RecordActorActivationRequest {
+    #[prost(string, tag="1")]
+    pub actor_id: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
+    /// e.g. "lazy", "eager", "virtual"
+    #[prost(string, tag="3")]
+    pub activation_type: ::prost::alloc::string::String,
+    #[prost(bool, tag="4")]
+    pub success: bool,
+    #[prost(message, optional, tag="5")]
+    pub duration: ::core::option::Option<::prost_types::Duration>,
+}
+/// R.E.D. metrics for channel operations
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RecordChannelMetricsRequest {
+    #[prost(string, tag="1")]
+    pub channel_name: ::prost::alloc::string::String,
+    #[prost(string, tag="2")]
+    pub namespace: ::prost::alloc::string::String,
+    /// e.g. "ack", "nack", "dlq", "send", "receive"
+    #[prost(string, tag="3")]
+    pub operation: ::prost::alloc::string::String,
+    #[prost(string, tag="4")]
+    pub backend: ::prost::alloc::string::String,
+    #[prost(bool, tag="5")]
+    pub success: bool,
+    #[prost(message, optional, tag="6")]
+    pub duration: ::core::option::Option<::prost_types::Duration>,
+    #[prost(uint32, tag="7")]
+    pub delivery_count: u32,
+    #[prost(string, tag="8")]
+    pub reason: ::prost::alloc::string::String,
+}
 /// Request to get actor metrics
 ///
 /// Empty - returns metrics for the local ActorService
@@ -629,80 +684,6 @@ impl MetricType {
         }
     }
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]

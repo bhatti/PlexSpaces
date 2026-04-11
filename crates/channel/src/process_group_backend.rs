@@ -505,15 +505,27 @@ mod tests {
         }
 
         // Monitoring
-        async fn get_node_metrics_accessor(
+        async fn get_metrics_prometheus_renderer(
             &self,
-        ) -> Option<Arc<dyn plexspaces_core::monitoring::NodeMetricsAccessor + Send + Sync>>
-        {
+        ) -> Option<Arc<dyn plexspaces_core::MetricsPrometheusRenderer + Send + Sync>> {
             None
         }
-        async fn register_node_metrics_accessor(
+
+        async fn register_metrics_prometheus_renderer(
             &self,
-            _: Arc<dyn plexspaces_core::monitoring::NodeMetricsAccessor + Send + Sync>,
+            _: Arc<dyn plexspaces_core::MetricsPrometheusRenderer + Send + Sync>,
+        ) {
+        }
+
+        async fn get_metrics_service_access(
+            &self,
+        ) -> Option<Arc<dyn plexspaces_core::MetricsServiceAccess + Send + Sync>> {
+            None
+        }
+
+        async fn register_metrics_service_access(
+            &self,
+            _: Arc<dyn plexspaces_core::MetricsServiceAccess + Send + Sync>,
         ) {
         }
 

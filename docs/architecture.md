@@ -36,6 +36,12 @@ PlexSpaces modernizes these concepts with:
 
 See [SDK guide](sdk.md) and [AGENTS.md](../AGENTS.md) for conventions.
 
+### Metrics, dashboard, and APIs
+
+Observability uses one Prometheus-oriented pipeline: process-local recording through the `metrics` crate with a single install path (`metrics_service::install_metrics_recorder`), export via `MetricsService`, and parsing/overlay for dashboard and node APIs (see [Metrics and Prometheus export](metrics.md) and [Actor System — Observability](actor-system.md#observability)). gRPC services that emit or route work must obtain `RequestContext` from metadata through the shared helper (`request_context_from_grpc_request`) so tenant isolation matches [Security — gRPC](security.md#grpc-middleware-plexspaces-grpc-middleware).
+
+For how workspace crates depend on each other (including dev-dependency edges in `cargo metadata`), see [Dependency graph](dependency-graph.md).
+
 ## Five Foundational Pillars
 
 ### Pillar Architecture Diagram

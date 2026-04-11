@@ -32,8 +32,9 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::actor_context::{ActorService, ChannelService, ObjectRegistry, TupleSpaceProvider};
-use crate::actor_trait::MessageSender;
-use crate::monitoring::{NodeConnectionInfo, NodeMetricsAccessor};
+use crate::metrics_renderer::MetricsPrometheusRenderer;
+use crate::metrics_service_access::MetricsServiceAccess;
+use crate::monitoring::NodeConnectionInfo;
 use crate::JournalStorage;
 use crate::KeyValueStore;
 use crate::RequestContext;
@@ -150,14 +151,25 @@ pub trait ServiceLocator: Send + Sync {
         service: Arc<dyn plexspaces_locks::LockManager + Send + Sync>,
     );
 
-    /// Get NodeMetricsAccessor
-    async fn get_node_metrics_accessor(&self)
-        -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>>;
-
-    /// Register NodeMetricsAccessor
-    async fn register_node_metrics_accessor(
+    /// Prometheus text renderer for the in-process metrics recorder (optional).
+    async fn get_metrics_prometheus_renderer(
         &self,
-        service: Arc<dyn NodeMetricsAccessor + Send + Sync>,
+    ) -> Option<Arc<dyn MetricsPrometheusRenderer + Send + Sync>>;
+
+    /// Register Prometheus renderer (typically once at node startup).
+    async fn register_metrics_prometheus_renderer(
+        &self,
+        renderer: Arc<dyn MetricsPrometheusRenderer + Send + Sync>,
+    );
+
+    /// In-process metrics service (same recorder as gRPC `MetricsService`).
+    async fn get_metrics_service_access(
+        &self,
+    ) -> Option<Arc<dyn MetricsServiceAccess + Send + Sync>>;
+
+    async fn register_metrics_service_access(
+        &self,
+        service: Arc<dyn MetricsServiceAccess + Send + Sync>,
     );
 
     /// Get FacetManager

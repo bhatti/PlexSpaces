@@ -155,6 +155,33 @@ service MetricsService {
       tags: "Metrics"
     };
   }
+
+  // R.E.D. metrics: message routing (rate, errors, duration) with namespace dimension
+  rpc RecordMessageRouting(RecordMessageRoutingRequest) returns (plexspaces.common.v1.Empty) {
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Record Message Routing Metrics"
+      description: "Records message routing counters and latency histogram"
+      tags: "Metrics"
+    };
+  }
+
+  // R.E.D. metrics: actor activation
+  rpc RecordActorActivation(RecordActorActivationRequest) returns (plexspaces.common.v1.Empty) {
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Record Actor Activation Metrics"
+      description: "Records actor activation counters and duration"
+      tags: "Metrics"
+    };
+  }
+
+  // R.E.D. metrics: channel operations
+  rpc RecordChannelMetrics(RecordChannelMetricsRequest) returns (plexspaces.common.v1.Empty) {
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      summary: "Record Channel Metrics"
+      description: "Records channel operation counters and latency"
+      tags: "Metrics"
+    };
+  }
 }
 
 // ============================================================================
@@ -284,6 +311,40 @@ message ListMetricDefinitionsResponse {
 message RecordMetricRequest {
   // Metric to record
   Metric metric = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// R.E.D. metrics for message routing
+message RecordMessageRoutingRequest {
+  string actor_id = 1 [(buf.validate.field).string.max_len = 512];
+  // App / namespace dimension (e.g. tenant app-id)
+  string namespace = 2 [(buf.validate.field).string.max_len = 512];
+  bool success = 3;
+  google.protobuf.Duration duration = 4;
+  // Empty when success is true
+  string error_type = 5 [(buf.validate.field).string.max_len = 256];
+}
+
+// R.E.D. metrics for actor activation
+message RecordActorActivationRequest {
+  string actor_id = 1 [(buf.validate.field).string.max_len = 512];
+  string namespace = 2 [(buf.validate.field).string.max_len = 512];
+  // e.g. "lazy", "eager", "virtual"
+  string activation_type = 3 [(buf.validate.field).string.max_len = 64];
+  bool success = 4;
+  google.protobuf.Duration duration = 5;
+}
+
+// R.E.D. metrics for channel operations
+message RecordChannelMetricsRequest {
+  string channel_name = 1 [(buf.validate.field).string.max_len = 512];
+  string namespace = 2 [(buf.validate.field).string.max_len = 512];
+  // e.g. "ack", "nack", "dlq", "send", "receive"
+  string operation = 3 [(buf.validate.field).string.max_len = 64];
+  string backend = 4 [(buf.validate.field).string.max_len = 64];
+  bool success = 5;
+  google.protobuf.Duration duration = 6;
+  uint32 delivery_count = 7;
+  string reason = 8 [(buf.validate.field).string.max_len = 512];
 }
 
 // Request to get actor metrics

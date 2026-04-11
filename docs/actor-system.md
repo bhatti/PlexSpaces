@@ -1368,6 +1368,10 @@ This ensures that multi-tenant deployments maintain strict isolation -- actors i
 
 PlexSpaces exposes comprehensive metrics in Prometheus format:
 
+#### Unified collection
+
+Counters and gauges are recorded with the in-process `metrics` crate and rendered as Prometheus text from a single process-wide handle installed via `metrics_service::install_metrics_recorder` (see [Metrics and Prometheus export](metrics.md)). `MetricsService` and `MetricsPrometheusRenderer` on `ServiceLocator` share that handle. Node and actor aggregates for the dashboard and `NodeService.GetMetrics` are derived from that exposition (plus sysinfo for host resources), not from a second in-memory metrics store. Actor registry updates Prometheus counters for spawn/active alongside mailbox lifecycle.
+
 #### Actor Metrics
 
 - `plexspaces_actor_spawn_total` (counter) - Actors created

@@ -532,6 +532,12 @@ message InterceptorResponse {
 
   // Request duration (calculated by interceptor chain)
   google.protobuf.Duration duration = 4;
+
+  // Request ID for correlation with InterceptorRequest
+  string request_id = 5;
+
+  // gRPC method full path (echoed from the originating InterceptorRequest)
+  string method = 6;
 }
 
 // Interceptor decision

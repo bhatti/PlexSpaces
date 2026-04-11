@@ -201,6 +201,96 @@ pub mod metrics_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        pub async fn record_message_routing(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RecordMessageRoutingRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.metrics.v1.MetricsService/RecordMessageRouting",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.metrics.v1.MetricsService",
+                        "RecordMessageRouting",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn record_actor_activation(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RecordActorActivationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.metrics.v1.MetricsService/RecordActorActivation",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.metrics.v1.MetricsService",
+                        "RecordActorActivation",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn record_channel_metrics(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RecordChannelMetricsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/plexspaces.metrics.v1.MetricsService/RecordChannelMetrics",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "plexspaces.metrics.v1.MetricsService",
+                        "RecordChannelMetrics",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -234,6 +324,27 @@ pub mod metrics_service_server {
         async fn record_metric(
             &self,
             request: tonic::Request<super::RecordMetricRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Status,
+        >;
+        async fn record_message_routing(
+            &self,
+            request: tonic::Request<super::RecordMessageRoutingRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Status,
+        >;
+        async fn record_actor_activation(
+            &self,
+            request: tonic::Request<super::RecordActorActivationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::super::super::common::v1::Empty>,
+            tonic::Status,
+        >;
+        async fn record_channel_metrics(
+            &self,
+            request: tonic::Request<super::RecordChannelMetricsRequest>,
         ) -> std::result::Result<
             tonic::Response<super::super::super::common::v1::Empty>,
             tonic::Status,
@@ -492,6 +603,156 @@ pub mod metrics_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = RecordMetricSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.metrics.v1.MetricsService/RecordMessageRouting" => {
+                    #[allow(non_camel_case_types)]
+                    struct RecordMessageRoutingSvc<T: MetricsService>(pub Arc<T>);
+                    impl<
+                        T: MetricsService,
+                    > tonic::server::UnaryService<super::RecordMessageRoutingRequest>
+                    for RecordMessageRoutingSvc<T> {
+                        type Response = super::super::super::common::v1::Empty;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RecordMessageRoutingRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as MetricsService>::record_message_routing(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = RecordMessageRoutingSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.metrics.v1.MetricsService/RecordActorActivation" => {
+                    #[allow(non_camel_case_types)]
+                    struct RecordActorActivationSvc<T: MetricsService>(pub Arc<T>);
+                    impl<
+                        T: MetricsService,
+                    > tonic::server::UnaryService<super::RecordActorActivationRequest>
+                    for RecordActorActivationSvc<T> {
+                        type Response = super::super::super::common::v1::Empty;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RecordActorActivationRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as MetricsService>::record_actor_activation(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = RecordActorActivationSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/plexspaces.metrics.v1.MetricsService/RecordChannelMetrics" => {
+                    #[allow(non_camel_case_types)]
+                    struct RecordChannelMetricsSvc<T: MetricsService>(pub Arc<T>);
+                    impl<
+                        T: MetricsService,
+                    > tonic::server::UnaryService<super::RecordChannelMetricsRequest>
+                    for RecordChannelMetricsSvc<T> {
+                        type Response = super::super::super::common::v1::Empty;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RecordChannelMetricsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as MetricsService>::record_channel_metrics(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = RecordChannelMetricsSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

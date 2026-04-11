@@ -1123,7 +1123,7 @@ ctx.facet_service()
 
 #### MetricsFacet
 
-Prometheus metrics collection:
+Prometheus metrics collection. Node-level export and the gRPC `MetricsService` share the unified pipeline in [Metrics and Prometheus export](metrics.md) (`metrics` crate + `metrics-exporter-prometheus`).
 
 ```rust
 pub struct MetricsFacet {

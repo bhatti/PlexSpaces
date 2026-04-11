@@ -83,6 +83,32 @@ class Metadata(betterproto.Message):
 
 
 @dataclass(eq=False, repr=False)
+class ActorId(betterproto.Message):
+    """
+    Structured actor identity.
+
+     The canonical string form is `{name}//{actor_type}::{namespace}@{node_id}`.
+     Construct actor IDs from fields, and only derive the canonical string for
+     storage or display.
+    """
+
+    name: str = betterproto.string_field(1)
+    """
+    User-specified actor name. Must be unique within the actor type,
+     namespace, and node scope.
+    """
+
+    actor_type: str = betterproto.string_field(2)
+    """Actor type from behavior registration."""
+
+    namespace: str = betterproto.string_field(3)
+    """Namespace for tenancy and application isolation."""
+
+    node_id: str = betterproto.string_field(4)
+    """Node where the actor currently resides."""
+
+
+@dataclass(eq=False, repr=False)
 class ErrorDetail(betterproto.Message):
     """Standard error details"""
 
@@ -471,14 +497,13 @@ class Message(betterproto.Message):
 
     sender_id: str = betterproto.string_field(2)
     """
-    Sender actor/producer ID (optional for anonymous messages)
-     Example: "user-service@node-1", "kafka-producer-123"
+    Canonical ActorId string or temporary sender routing ID.
+     Temporary senders use canonical ActorId strings; there is no separate temp syntax.
     """
 
     receiver_id: str = betterproto.string_field(3)
     """
-    Receiver actor ID (for point-to-point messaging)
-     Example: "payment-processor@node-2"
+    Canonical ActorId string or temporary sender routing ID for replies.
      Note: For pub/sub, use 'channel' field instead
     """
 
@@ -553,7 +578,7 @@ class Message(betterproto.Message):
     """
     Reply-to address (channel or actor ID for responses)
      Tells receiver where to send the response
-     Example: "response-queue-42", "callback-actor@node-1"
+     Example: "response-queue-42", "callback-actor"
     """
 
     partition_key: str = betterproto.string_field(15)

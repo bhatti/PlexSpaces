@@ -33,15 +33,16 @@ use std::sync::Arc;
 /// and creates a RequestContext using shared validation from RequestContext::from_auth.
 ///
 /// ## Sources (in order of precedence):
-/// 1. `x-tenant-id` header (set by auth middleware from JWT/mTLS only - never trust client-sent value)
-/// 2. `x-namespace` header (from request, can be empty)
+/// 1. `x-tenant-id` in metadata after interceptors run — **not** a client-supplied tenant channel: when auth
+///    is enabled, `AuthInterceptor` strips inbound values and repopulates from JWT/mTLS claims only.
+/// 2. `x-namespace` header (namespace override or scope hint; may be empty)
 /// 3. `x-user-id` header (from JWT middleware, optional)
 /// 4. `x-admin` header (from JWT middleware, optional)
 /// 5. `tenant_id` in request labels (fallback, only if auth disabled)
 /// 6. Default values from NodeConfig in ServiceLocator (if auth disabled)
 ///
 /// ## Arguments
-/// * `metadata` - gRPC request metadata (x-tenant-id must be set by auth middleware from JWT/mTLS)
+/// * `metadata` - gRPC metadata after the interceptor chain (tenant id must originate from auth, not from raw client metadata)
 /// * `labels` - Request labels (for fallback)
 /// * `service_locator` - ServiceLocator to get NodeConfig and auth_enabled from SecurityConfig
 ///

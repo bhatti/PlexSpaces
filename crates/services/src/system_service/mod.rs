@@ -576,7 +576,7 @@ impl SystemService for SystemServiceImpl {
             size_bytes: {
                 // Estimate backup size based on components
                 let estimated_size = if req.components.is_empty() {
-                    // Full backup - estimate (use ServiceLocator::get_node_metrics_accessor() if needed)
+                    // Full backup - no size estimate until backup walks real components
                     0
                 } else {
                     // Partial backup - estimate based on component count

@@ -285,6 +285,10 @@ pub enum ActorRefError {
     #[error("Actor not found: {0}")]
     ActorNotFound(ActorId),
 
+    /// Malformed or non-canonical actor id string before routing.
+    #[error("Invalid actor ID: {0}")]
+    InvalidActorId(String),
+
     #[error("Failed to send message: {0}")]
     SendFailed(String),
 
@@ -886,10 +890,10 @@ impl ActorRef {
             }
         }
 
-        // Get local node ID once for all uses (metrics and routing decisions)
+        // Local node id for remote-path misconfiguration checks
         let local_node_id = self.get_local_node_id().await;
 
-        let (result, is_local, remote_node_id) = match &self.inner {
+        let result = match &self.inner {
             ActorRefInner::Local {
                 mailbox,
                 service_locator,
@@ -930,27 +934,13 @@ impl ActorRef {
                 let success = send_result.is_ok();
                 let error_type = send_result.as_ref().err().map(|e| format!("{:?}", e));
 
-                let metrics_accessor = service_locator.get_node_metrics_accessor().await;
-                let actor_metrics = {
-                    if let Some(registry) = service_locator.actor_registry().await {
-                        Some(registry.actor_metrics().clone())
-                    } else {
-                        None
-                    }
-                };
-
                 monitoring::record_message_routing_metrics(
                     &actor_id,
-                    local_node_id.as_deref().unwrap_or("unknown"),
-                    true, // is_local
-                    None, // remote_node_id
+                    self.namespace(),
                     duration,
                     success,
                     error_type.as_deref(),
-                    metrics_accessor,
-                    actor_metrics,
-                )
-                .await;
+                );
 
                 return send_result;
             }
@@ -1014,7 +1004,7 @@ impl ActorRef {
                     Ok::<(), ActorRefError>(())
                 }
                 .await;
-                (result, false, Some(node_id.clone()))
+                result
             }
         };
 
@@ -1023,40 +1013,13 @@ impl ActorRef {
         let success = result.is_ok();
         let error_type = result.as_ref().err().map(|e| format!("{:?}", e));
 
-        // Get NodeMetricsAccessor from ServiceLocator (if available)
-        let service_locator = match &self.inner {
-            ActorRefInner::Local {
-                service_locator, ..
-            }
-            | ActorRefInner::Remote {
-                service_locator, ..
-            } => service_locator.clone(),
-        };
-        let metrics_accessor = service_locator.get_node_metrics_accessor().await;
-
-        // Get ActorMetrics from ActorRegistry (preferred - ActorRegistry tracks metrics directly)
-        let actor_metrics = {
-            if let Some(registry) = service_locator.actor_registry().await {
-                Some(registry.actor_metrics().clone())
-            } else {
-                None
-            }
-        };
-
-        // Use monitoring helper for consistent metrics
-        // Always call record_message_routing_metrics - it handles None node_id gracefully
         monitoring::record_message_routing_metrics(
             &actor_id,
-            local_node_id.as_deref().unwrap_or("unknown"),
-            is_local,
-            remote_node_id.as_deref(),
+            self.namespace(),
             duration,
             success,
             error_type.as_deref(),
-            metrics_accessor,
-            actor_metrics,
-        )
-        .await;
+        );
 
         result
     }

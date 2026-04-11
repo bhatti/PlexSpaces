@@ -672,6 +672,12 @@ The `plexspaces-grpc-middleware` crate provides production-ready interceptors:
 
 Full integration of the gRPC InterceptorChain into the node server (so every gRPC request runs through the chain) is done when the node is built with middleware config; the chain and auth interceptor are implemented and tested in the grpc-middleware crate.
 
+#### gRPC tenant-id vs namespace (caller contract)
+
+- **Tenant-id**: Callers do **not** choose tenant by setting metadata themselves when JWT auth is enabled. The JWT proves identity; middleware writes `x-tenant-id` (and related identity headers) from validated claims. Treat any pre-middleware client value as untrusted; production paths rely on `AuthInterceptor` clearing and repopulating metadata.
+- **Namespace**: `x-namespace` may be supplied for request scoping (or taken from proto fields / labels where documented). Services build `RequestContext` via `request_context_from_grpc_request` so tenant and namespace follow the same validation rules as HTTP.
+- **Services**: gRPC handlers should use `request_context_from_grpc_request` (or equivalent) for every RPC that touches tenant-scoped state. Avoid ad hoc `RequestContext::new_without_auth("", "")` on code paths that perform routing or registry access.
+
 ### RequestContext and Auth
 
 - **Auth enabled**: `request_context_from_grpc_request` uses `auth_enabled = !service_locator.is_auth_disabled().await`. Tenant_id must be present in metadata (set by auth middleware from JWT/mTLS). If missing, errors include a hint: *"Authentication required: provide a valid JWT (HTTP) or use mTLS (gRPC). For local testing, set PLEXSPACES_DISABLE_AUTH=1."*

@@ -178,12 +178,13 @@ impl ApplicationServiceImpl {
     }
 
     async fn local_status_endpoint(&self) -> Result<(String, String), Status> {
-        let metrics_accessor = self
+        let node_id = self
             .service_locator
-            .get_node_metrics_accessor()
+            .get_node_config()
             .await
-            .ok_or_else(|| Status::failed_precondition("NodeMetricsAccessor not registered"))?;
-        let node_id = metrics_accessor.get_metrics().await.node_id;
+            .filter(|c| !c.id.is_empty())
+            .map(|c| c.id)
+            .ok_or_else(|| Status::failed_precondition("NodeConfig not registered"))?;
 
         let ctx = self
             .service_locator

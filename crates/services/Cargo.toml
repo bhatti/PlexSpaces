@@ -58,7 +58,8 @@ thiserror = { workspace = true }
 anyhow = "1.0"
 
 # Observability
-metrics = "0.23"
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
 tracing = { workspace = true }
 
 # Utilities

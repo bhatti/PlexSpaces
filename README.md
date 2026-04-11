@@ -83,7 +83,7 @@ PlexSpaces is a distributed actor framework that unifies the best patterns from 
 - **Multi-Tenancy**: Two-level isolation (tenant-id from auth + namespace from application/actor) for secure multi-tenant deployments
 - **Event Sourcing**: Complete audit trail with time-travel debugging
 - **Distributed Coordination**: Actor groups, process groups, and distributed locks
-- **Observability**: Built-in metrics, tracing, and health checks
+- **Observability**: Built-in metrics (unified Prometheus pipeline; see [Metrics](docs/metrics.md)), tracing, and health checks
 - **gRPC-First**: All APIs defined in Protocol Buffers for type safety and multi-language support
 - **Capability Providers**: HTTP, KeyValue, BlobStorage facets for I/O operations
 - **Security Facets**: Authentication, authorization, and encryption support
@@ -333,6 +333,7 @@ See [Examples](examples/README.md) for the complete list.
 ## Documentation
 
 - **[Actor System](docs/actor-system.md)**: Comprehensive guide to the unified actor system - actors, supervisors, applications, facets, behaviors, lifecycle, linking/monitoring, and observability
+- **[Metrics](docs/metrics.md)**: Unified Prometheus pipeline, global recorder crate, and `MetricsService` alignment with the metrics unification plan
 - **[Getting Started](docs/getting-started.md)**: Quick start guide and tutorials
 - **[Concepts](docs/concepts.md)**: Core concepts explained (Actors, Behaviors, Facets, TupleSpace, FaaS-Style Invocation, etc.)
 - **[Architecture](docs/architecture.md)**: System design, abstractions, and primitives (including FaaS Invocation)

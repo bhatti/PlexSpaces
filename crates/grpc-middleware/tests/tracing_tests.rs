@@ -129,6 +129,8 @@ async fn test_tracing_interceptor_records_duration() {
             seconds: 0,
             nanos: 100_000_000, // 100ms
         }),
+        request_id: ulid::Ulid::new().to_string(),
+        method: "/plexspaces.actor.v1.ActorService/SpawnActor".to_string(),
     };
 
     let result = chain.after_response(&response_context).await;

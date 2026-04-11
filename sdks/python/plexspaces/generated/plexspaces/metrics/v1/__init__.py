@@ -4,7 +4,10 @@
 # This file has been @generated
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import (
+    datetime,
+    timedelta,
+)
 from typing import (
     TYPE_CHECKING,
     Dict,
@@ -146,6 +149,49 @@ class ListMetricDefinitionsResponse(betterproto.Message):
 class RecordMetricRequest(betterproto.Message):
     metric: "Metric" = betterproto.message_field(1)
     """Metric to record"""
+
+
+@dataclass(eq=False, repr=False)
+class RecordMessageRoutingRequest(betterproto.Message):
+    """R.E.D. metrics for message routing"""
+
+    actor_id: str = betterproto.string_field(1)
+    namespace: str = betterproto.string_field(2)
+    """App / namespace dimension (e.g. tenant app-id)"""
+
+    success: bool = betterproto.bool_field(3)
+    duration: timedelta = betterproto.message_field(4)
+    error_type: str = betterproto.string_field(5)
+    """Empty when success is true"""
+
+
+@dataclass(eq=False, repr=False)
+class RecordActorActivationRequest(betterproto.Message):
+    """R.E.D. metrics for actor activation"""
+
+    actor_id: str = betterproto.string_field(1)
+    namespace: str = betterproto.string_field(2)
+    activation_type: str = betterproto.string_field(3)
+    """e.g. "lazy", "eager", "virtual"""
+
+    success: bool = betterproto.bool_field(4)
+    duration: timedelta = betterproto.message_field(5)
+
+
+@dataclass(eq=False, repr=False)
+class RecordChannelMetricsRequest(betterproto.Message):
+    """R.E.D. metrics for channel operations"""
+
+    channel_name: str = betterproto.string_field(1)
+    namespace: str = betterproto.string_field(2)
+    operation: str = betterproto.string_field(3)
+    """e.g. "ack", "nack", "dlq", "send", "receive"""
+
+    backend: str = betterproto.string_field(4)
+    success: bool = betterproto.bool_field(5)
+    duration: timedelta = betterproto.message_field(6)
+    delivery_count: int = betterproto.uint32_field(7)
+    reason: str = betterproto.string_field(8)
 
 
 @dataclass(eq=False, repr=False)
@@ -642,6 +688,57 @@ class MetricsServiceStub(betterproto.ServiceStub):
             metadata=metadata,
         )
 
+    async def record_message_routing(
+        self,
+        record_message_routing_request: "RecordMessageRoutingRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "__common_v1__.Empty":
+        return await self._unary_unary(
+            "/plexspaces.metrics.v1.MetricsService/RecordMessageRouting",
+            record_message_routing_request,
+            __common_v1__.Empty,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def record_actor_activation(
+        self,
+        record_actor_activation_request: "RecordActorActivationRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "__common_v1__.Empty":
+        return await self._unary_unary(
+            "/plexspaces.metrics.v1.MetricsService/RecordActorActivation",
+            record_actor_activation_request,
+            __common_v1__.Empty,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
+    async def record_channel_metrics(
+        self,
+        record_channel_metrics_request: "RecordChannelMetricsRequest",
+        *,
+        timeout: Optional[float] = None,
+        deadline: Optional["Deadline"] = None,
+        metadata: Optional["MetadataLike"] = None
+    ) -> "__common_v1__.Empty":
+        return await self._unary_unary(
+            "/plexspaces.metrics.v1.MetricsService/RecordChannelMetrics",
+            record_channel_metrics_request,
+            __common_v1__.Empty,
+            timeout=timeout,
+            deadline=deadline,
+            metadata=metadata,
+        )
+
 
 class MetricsServiceBase(ServiceBase):
 
@@ -662,6 +759,21 @@ class MetricsServiceBase(ServiceBase):
 
     async def record_metric(
         self, record_metric_request: "RecordMetricRequest"
+    ) -> "__common_v1__.Empty":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def record_message_routing(
+        self, record_message_routing_request: "RecordMessageRoutingRequest"
+    ) -> "__common_v1__.Empty":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def record_actor_activation(
+        self, record_actor_activation_request: "RecordActorActivationRequest"
+    ) -> "__common_v1__.Empty":
+        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
+
+    async def record_channel_metrics(
+        self, record_channel_metrics_request: "RecordChannelMetricsRequest"
     ) -> "__common_v1__.Empty":
         raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
 
@@ -695,6 +807,30 @@ class MetricsServiceBase(ServiceBase):
         response = await self.record_metric(request)
         await stream.send_message(response)
 
+    async def __rpc_record_message_routing(
+        self,
+        stream: "grpclib.server.Stream[RecordMessageRoutingRequest, __common_v1__.Empty]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.record_message_routing(request)
+        await stream.send_message(response)
+
+    async def __rpc_record_actor_activation(
+        self,
+        stream: "grpclib.server.Stream[RecordActorActivationRequest, __common_v1__.Empty]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.record_actor_activation(request)
+        await stream.send_message(response)
+
+    async def __rpc_record_channel_metrics(
+        self,
+        stream: "grpclib.server.Stream[RecordChannelMetricsRequest, __common_v1__.Empty]",
+    ) -> None:
+        request = await stream.recv_message()
+        response = await self.record_channel_metrics(request)
+        await stream.send_message(response)
+
     def __mapping__(self) -> Dict[str, grpclib.const.Handler]:
         return {
             "/plexspaces.metrics.v1.MetricsService/ExportPrometheus": grpclib.const.Handler(
@@ -719,6 +855,24 @@ class MetricsServiceBase(ServiceBase):
                 self.__rpc_record_metric,
                 grpclib.const.Cardinality.UNARY_UNARY,
                 RecordMetricRequest,
+                __common_v1__.Empty,
+            ),
+            "/plexspaces.metrics.v1.MetricsService/RecordMessageRouting": grpclib.const.Handler(
+                self.__rpc_record_message_routing,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                RecordMessageRoutingRequest,
+                __common_v1__.Empty,
+            ),
+            "/plexspaces.metrics.v1.MetricsService/RecordActorActivation": grpclib.const.Handler(
+                self.__rpc_record_actor_activation,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                RecordActorActivationRequest,
+                __common_v1__.Empty,
+            ),
+            "/plexspaces.metrics.v1.MetricsService/RecordChannelMetrics": grpclib.const.Handler(
+                self.__rpc_record_channel_metrics,
+                grpclib.const.Cardinality.UNARY_UNARY,
+                RecordChannelMetricsRequest,
                 __common_v1__.Empty,
             ),
         }

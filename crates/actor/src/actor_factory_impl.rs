@@ -1479,14 +1479,6 @@ impl ActorFactoryImpl {
             }
         }
 
-        // OBSERVABILITY: Update ActorMetrics before stopping
-        // Note: unregister_with_cleanup will also decrement active, but we track here for explicit observability
-        {
-            let _actor_metrics = registry.actor_metrics().write().await;
-            // Active count will be decremented by unregister_with_cleanup, but we track here for observability
-            // This ensures metrics are updated even if unregister_with_cleanup fails
-        }
-
         // Emit Deactivating event before unregistration
         registry
             .publish_lifecycle_event(ActorLifecycleEvent {
@@ -1538,19 +1530,6 @@ impl ActorFactoryImpl {
             "namespace" => namespace.clone()
         )
         .increment(1);
-
-        // OBSERVABILITY: Verify ActorMetrics were updated (active should be decremented)
-        {
-            use plexspaces_core::message_metrics::ActorMetricsExt;
-            let actor_metrics = registry.actor_metrics().read().await;
-            if tracing::enabled!(tracing::Level::TRACE) {
-                tracing::trace!(
-                    actor_id = %actor_id,
-                    active_actors = actor_metrics.active,
-                    "ActorMetrics updated after stop"
-                );
-            }
-        }
 
         // Emit Deactivated event after unregistration
         registry

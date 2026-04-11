@@ -109,15 +109,6 @@ async fn create_dashboard_service(node: Arc<plexspaces_node::Node>) -> Dashboard
         .await
         .expect("Failed to initialize services");
 
-    // Register NodeMetricsAccessor
-    use plexspaces_node::service_wrappers::NodeMetricsAccessorWrapper;
-    let metrics_accessor = Arc::new(NodeMetricsAccessorWrapper::new(node.clone()));
-    let metrics_accessor_trait: Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync> =
-        metrics_accessor.clone() as Arc<dyn plexspaces_core::NodeMetricsAccessor + Send + Sync>;
-    service_locator
-        .register_node_metrics_accessor(metrics_accessor_trait)
-        .await;
-
     // ApplicationManager is accessed via node.application_manager(), not ServiceLocator
     // This test doesn't need explicit app_manager registration
 

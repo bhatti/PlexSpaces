@@ -33,8 +33,9 @@ use plexspaces_core::facet_service_wrapper::{
 };
 use plexspaces_core::{
     ActorRegistry, ActorService, BehaviorRegistry, ChannelService, GrpcConnectionManager,
-    JournalStorage, NodeMetricsAccessor, ObjectRegistry, ProcessGroupService, ReplyWaiterRegistry,
-    RequestContext, Service, ServiceLocator, TupleSpaceProvider, VirtualActorManager,
+    JournalStorage, MetricsPrometheusRenderer, ObjectRegistry,
+    ProcessGroupService, ReplyWaiterRegistry, RequestContext, Service, ServiceLocator,
+    TupleSpaceProvider, VirtualActorManager,
 };
 use std::sync::Arc;
 
@@ -156,17 +157,28 @@ impl ServiceLocator for TestServiceLocatorStub {
         // No-op for stub
     }
 
-    async fn get_node_metrics_accessor(
+    async fn get_metrics_prometheus_renderer(
         &self,
-    ) -> Option<Arc<dyn NodeMetricsAccessor + Send + Sync>> {
+    ) -> Option<Arc<dyn MetricsPrometheusRenderer + Send + Sync>> {
         None
     }
 
-    async fn register_node_metrics_accessor(
+    async fn register_metrics_prometheus_renderer(
         &self,
-        _accessor: Arc<dyn NodeMetricsAccessor + Send + Sync>,
+        _renderer: Arc<dyn MetricsPrometheusRenderer + Send + Sync>,
     ) {
-        // No-op for stub
+    }
+
+    async fn get_metrics_service_access(
+        &self,
+    ) -> Option<Arc<dyn plexspaces_core::MetricsServiceAccess + Send + Sync>> {
+        None
+    }
+
+    async fn register_metrics_service_access(
+        &self,
+        _service: Arc<dyn plexspaces_core::MetricsServiceAccess + Send + Sync>,
+    ) {
     }
 
     async fn get_facet_manager(&self) -> Option<Arc<FacetManagerServiceWrapper>> {

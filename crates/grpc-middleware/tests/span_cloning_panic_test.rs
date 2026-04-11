@@ -87,6 +87,8 @@ async fn test_span_cloning_panic_reproduction() {
                     seconds: 0,
                     nanos: 100_000_000,
                 }),
+                request_id: ulid::Ulid::new().to_string(),
+                method: "/test.Service/ConcurrentMethod".to_string(),
             };
 
             let result = chain_clone.after_response(&response_context).await;
@@ -154,6 +156,8 @@ async fn test_span_cloning_with_error_handling() {
             seconds: 0,
             nanos: 50_000_000,
         }),
+        request_id: ulid::Ulid::new().to_string(),
+        method: "/test.Service/ErrorMethod".to_string(),
     };
 
     let result = chain.after_response(&response_context).await;
@@ -212,6 +216,8 @@ async fn test_tracing_interceptor_no_panic_on_rapid_requests() {
                 seconds: 0,
                 nanos: 10_000_000, // 10ms
             }),
+            request_id: ulid::Ulid::new().to_string(),
+            method: format!("/ActorService/Method{}", i),
         };
 
         let result = chain.after_response(&response_context).await;

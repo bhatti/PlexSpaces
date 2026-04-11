@@ -71,7 +71,7 @@ async fn route_message_rejects_non_canonical_ids() {
     )
     .await;
 
-    assert!(matches!(result, Err(ActorRefError::SendFailed(_))));
+    assert!(matches!(result, Err(ActorRefError::InvalidActorId(_))));
 }
 
 #[tokio::test]

@@ -48,8 +48,8 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, info, trace, warn};
 
 use plexspaces_core::{
-    mask_release_spec, ConnectNodesResult, NodeConnectivity, NodeRegistryTrait, RequestContext,
-    ServiceLocator,
+    mask_release_spec, overlay_node_operational_counters_from_exposition, ConnectNodesResult,
+    NodeConnectivity, NodeRegistryTrait, RequestContext, ServiceLocator,
 };
 use plexspaces_proto::node::v1::{
     node_service_client::NodeServiceClient, node_service_server::NodeService as NodeServiceTrait,
@@ -68,30 +68,79 @@ use crate::node_address::{
 };
 use crate::request_context_from_grpc_request;
 
-/// Metrics tracking for NodeService
-struct NodeServiceMetrics {
-    /// Total messages routed
-    messages_routed: std::sync::atomic::AtomicU64,
-    /// Local message deliveries
-    local_deliveries: std::sync::atomic::AtomicU64,
-    /// Remote message deliveries
-    remote_deliveries: std::sync::atomic::AtomicU64,
-    /// Failed message deliveries
-    failed_deliveries: std::sync::atomic::AtomicU64,
-    /// Node start time (for uptime calculation)
-    start_time: Instant,
-}
+/// Sysinfo snapshot plus Prometheus operational counters for this process (same pipeline as gRPC `GetMetrics`).
+pub async fn snapshot_local_node_metrics(
+    service_locator: Arc<dyn ServiceLocator>,
+    local_node_id: String,
+    uptime_seconds: u64,
+) -> NodeMetrics {
+    use sysinfo::System;
 
-impl Default for NodeServiceMetrics {
-    fn default() -> Self {
-        Self {
-            messages_routed: std::sync::atomic::AtomicU64::new(0),
-            local_deliveries: std::sync::atomic::AtomicU64::new(0),
-            remote_deliveries: std::sync::atomic::AtomicU64::new(0),
-            failed_deliveries: std::sync::atomic::AtomicU64::new(0),
-            start_time: Instant::now(),
+    let mut system = System::new();
+    system.refresh_all();
+
+    let used_memory = system.used_memory();
+    let available_memory = system.available_memory();
+    let cpu_count = system.cpus().len() as u32;
+    let cpu_usage = if cpu_count > 0 {
+        system
+            .cpus()
+            .iter()
+            .map(|cpu| cpu.cpu_usage() as f64)
+            .sum::<f64>()
+            / cpu_count as f64
+    } else {
+        0.0
+    };
+
+    let active_actors = if let Some(actor_registry) = service_locator.actor_registry().await {
+        actor_registry.live_actor_count().await as u32
+    } else {
+        0
+    };
+
+    let connected_nodes = if let Some(node_registry) = service_locator.get_node_registry().await {
+        let ctx = service_locator
+            .request_context_for_system_operations()
+            .await;
+        match node_registry.list_nodes(&ctx, None, 1000, "").await {
+            Ok((nodes, _)) => nodes.len() as u32,
+            Err(_) => 0,
         }
+    } else {
+        0
+    };
+
+    let cluster_name = if let Some(config) = service_locator.get_node_config().await {
+        config.cluster_name.clone()
+    } else {
+        String::new()
+    };
+
+    let mut m = NodeMetrics {
+        memory_used_bytes: used_memory,
+        memory_available_bytes: available_memory,
+        cpu_usage_percent: cpu_usage,
+        uptime_seconds,
+        messages_routed: 0,
+        local_deliveries: 0,
+        remote_deliveries: 0,
+        failed_deliveries: 0,
+        active_actors,
+        connected_nodes,
+        shard_groups_created: 0,
+        shard_messages_sent: 0,
+        shard_messages_received: 0,
+        shard_operations_total: 0,
+        shard_operations_failed: 0,
+        node_id: local_node_id.clone(),
+        cluster_name,
+    };
+    if let Some(renderer) = service_locator.get_metrics_prometheus_renderer().await {
+        let text = renderer.render_prometheus_text();
+        overlay_node_operational_counters_from_exposition(&text, local_node_id.as_str(), &mut m);
     }
+    m
 }
 
 /// NodeService implementation
@@ -100,8 +149,8 @@ impl Default for NodeServiceMetrics {
 /// NodeServiceImpl is `Send + Sync` and can be safely shared across gRPC handlers.
 ///
 /// ## Performance
-/// - Uses atomic counters for metrics (lock-free)
-/// - Caches system info to avoid repeated sysinfo calls
+/// - Operational counters use the `metrics` crate (same pipeline as Prometheus export)
+/// - System metrics are refreshed on each `get_metrics` call (sysinfo is efficient)
 /// - Streams large result sets to minimize memory usage
 pub struct NodeServiceImpl {
     /// ServiceLocator for accessing required services
@@ -114,8 +163,8 @@ pub struct NodeServiceImpl {
     release_spec: Arc<RwLock<Option<ReleaseSpec>>>,
     /// Registered NodeConnectivity (typically self; used for seed_nodes and cluster_seed_nodes)
     connectivity: Arc<RwLock<Option<Arc<dyn NodeConnectivity>>>>,
-    /// Internal metrics tracking
-    metrics: NodeServiceMetrics,
+    /// Service start instant (uptime; distinct from Node process uptime when embedded in tests)
+    started_at: Instant,
 }
 
 impl NodeServiceImpl {
@@ -131,7 +180,7 @@ impl NodeServiceImpl {
             local_cluster: String::new(),
             release_spec: Arc::new(RwLock::new(None)),
             connectivity: Arc::new(RwLock::new(None)),
-            metrics: NodeServiceMetrics::default(),
+            started_at: Instant::now(),
         }
     }
 
@@ -157,7 +206,7 @@ impl NodeServiceImpl {
             local_cluster,
             release_spec: Arc::new(RwLock::new(Some(release_spec))),
             connectivity: Arc::new(RwLock::new(None)),
-            metrics: NodeServiceMetrics::default(),
+            started_at: Instant::now(),
         }
     }
 
@@ -187,7 +236,7 @@ impl NodeServiceImpl {
 
     /// Get node uptime in seconds
     pub fn uptime_seconds(&self) -> u64 {
-        self.metrics.start_time.elapsed().as_secs()
+        self.started_at.elapsed().as_secs()
     }
 
     /// Extract RequestContext from gRPC request
@@ -202,79 +251,15 @@ impl NodeServiceImpl {
     ///
     /// ## Performance
     /// - System metrics are refreshed on each call (sysinfo is efficient)
-    /// - Actor/connection counts are cached via ServiceLocator
-    /// - Message counters use atomic operations (no locks)
+    /// - Actor/connection counts come from ServiceLocator
+    /// - Message counters are read from Prometheus exposition (single source of truth)
     async fn get_metrics_internal(&self) -> NodeMetrics {
-        use std::sync::atomic::Ordering;
-        use sysinfo::System;
-
-        let mut system = System::new();
-        system.refresh_all();
-
-        // Get system info
-        let used_memory = system.used_memory();
-        let available_memory = system.available_memory();
-        let cpu_count = system.cpus().len() as u32;
-        let cpu_usage = if cpu_count > 0 {
-            system
-                .cpus()
-                .iter()
-                .map(|cpu| cpu.cpu_usage() as f64)
-                .sum::<f64>()
-                / cpu_count as f64
-        } else {
-            0.0
-        };
-
-        // Get actor counts from ActorRegistry
-        let active_actors =
-            if let Some(actor_registry) = self.service_locator.actor_registry().await {
-                actor_registry.live_actor_count().await as u32
-            } else {
-                0
-            };
-
-        // Get connected nodes count from NodeRegistry
-        let connected_nodes =
-            if let Some(node_registry) = self.service_locator.get_node_registry().await {
-                let ctx = self
-                    .service_locator
-                    .request_context_for_system_operations()
-                    .await;
-                match node_registry.list_nodes(&ctx, None, 1000, "").await {
-                    Ok((nodes, _)) => nodes.len() as u32,
-                    Err(_) => 0,
-                }
-            } else {
-                0
-            };
-
-        // Get cluster name from NodeConfig
-        let cluster_name = if let Some(config) = self.service_locator.get_node_config().await {
-            config.cluster_name.clone()
-        } else {
-            String::new()
-        };
-
-        NodeMetrics {
-            memory_used_bytes: used_memory,
-            memory_available_bytes: available_memory,
-            cpu_usage_percent: cpu_usage,
-            uptime_seconds: self.uptime_seconds(),
-            messages_routed: self.metrics.messages_routed.load(Ordering::Relaxed),
-            local_deliveries: self.metrics.local_deliveries.load(Ordering::Relaxed),
-            remote_deliveries: self.metrics.remote_deliveries.load(Ordering::Relaxed),
-            failed_deliveries: self.metrics.failed_deliveries.load(Ordering::Relaxed),
-            active_actors,
-            connected_nodes,
-            shard_groups_created: 0, // TODO: Track shard groups created in NodeService
-            shard_messages_sent: 0,  // TODO: Track shard messages sent in NodeService
-            shard_messages_received: 0, // TODO: Track shard messages received in NodeService
-            shard_operations_total: 0, // TODO: Track shard operations total in NodeService
-            shard_operations_failed: 0, // TODO: Track shard operations failed in NodeService
-            node_id: self.local_node_id.clone(),
-            cluster_name,
-        }
+        snapshot_local_node_metrics(
+            self.service_locator.clone(),
+            self.local_node_id.clone(),
+            self.uptime_seconds(),
+        )
+        .await
     }
 
     /// Calculate node capacity
@@ -326,69 +311,36 @@ impl NodeServiceImpl {
         }
     }
 
-    /// Increment messages_routed counter
-    ///
-    /// Thread-safe: uses atomic increment
+    /// Increment messages_routed counter (Prometheus pipeline; for tests and RPC hooks).
     pub fn increment_messages_routed(&self) {
-        use std::sync::atomic::Ordering;
-        self.metrics.messages_routed.fetch_add(1, Ordering::Relaxed);
         metrics::counter!("plexspaces_node_messages_routed_total",
             "node_id" => self.local_node_id.clone()
         )
         .increment(1);
     }
 
-    /// Increment local_deliveries counter
-    ///
-    /// Thread-safe: uses atomic increment
+    /// Increment local_deliveries counter.
     pub fn increment_local_deliveries(&self) {
-        use std::sync::atomic::Ordering;
-        self.metrics
-            .local_deliveries
-            .fetch_add(1, Ordering::Relaxed);
         metrics::counter!("plexspaces_node_local_deliveries_total",
             "node_id" => self.local_node_id.clone()
         )
         .increment(1);
     }
 
-    /// Increment remote_deliveries counter
-    ///
-    /// Thread-safe: uses atomic increment
+    /// Increment remote_deliveries counter.
     pub fn increment_remote_deliveries(&self) {
-        use std::sync::atomic::Ordering;
-        self.metrics
-            .remote_deliveries
-            .fetch_add(1, Ordering::Relaxed);
         metrics::counter!("plexspaces_node_remote_deliveries_total",
             "node_id" => self.local_node_id.clone()
         )
         .increment(1);
     }
 
-    /// Increment failed_deliveries counter
-    ///
-    /// Thread-safe: uses atomic increment
+    /// Increment failed_deliveries counter.
     pub fn increment_failed_deliveries(&self) {
-        use std::sync::atomic::Ordering;
-        self.metrics
-            .failed_deliveries
-            .fetch_add(1, Ordering::Relaxed);
         metrics::counter!("plexspaces_node_failed_deliveries_total",
             "node_id" => self.local_node_id.clone()
         )
         .increment(1);
-    }
-
-    /// Get current message routing statistics
-    pub fn routing_stats(&self) -> (u64, u64, u64, u64) {
-        use std::sync::atomic::Ordering;
-        (
-            self.metrics.messages_routed.load(Ordering::Relaxed),
-            self.metrics.local_deliveries.load(Ordering::Relaxed),
-            self.metrics.remote_deliveries.load(Ordering::Relaxed),
-            self.metrics.failed_deliveries.load(Ordering::Relaxed),
-        )
     }
 }
 
@@ -1383,85 +1335,6 @@ mod tests {
     use plexspaces_proto::node::v1::ReleaseSpec;
     use std::collections::HashMap;
 
-    #[test]
-    fn test_node_service_metrics_default() {
-        let metrics = NodeServiceMetrics::default();
-        assert_eq!(
-            metrics
-                .messages_routed
-                .load(std::sync::atomic::Ordering::Relaxed),
-            0
-        );
-        assert_eq!(
-            metrics
-                .local_deliveries
-                .load(std::sync::atomic::Ordering::Relaxed),
-            0
-        );
-        assert_eq!(
-            metrics
-                .remote_deliveries
-                .load(std::sync::atomic::Ordering::Relaxed),
-            0
-        );
-        assert_eq!(
-            metrics
-                .failed_deliveries
-                .load(std::sync::atomic::Ordering::Relaxed),
-            0
-        );
-    }
-
-    #[test]
-    fn test_node_service_metrics_increment() {
-        let metrics = NodeServiceMetrics::default();
-        metrics
-            .messages_routed
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        metrics
-            .local_deliveries
-            .fetch_add(2, std::sync::atomic::Ordering::Relaxed);
-        metrics
-            .remote_deliveries
-            .fetch_add(3, std::sync::atomic::Ordering::Relaxed);
-        metrics
-            .failed_deliveries
-            .fetch_add(4, std::sync::atomic::Ordering::Relaxed);
-
-        assert_eq!(
-            metrics
-                .messages_routed
-                .load(std::sync::atomic::Ordering::Relaxed),
-            1
-        );
-        assert_eq!(
-            metrics
-                .local_deliveries
-                .load(std::sync::atomic::Ordering::Relaxed),
-            2
-        );
-        assert_eq!(
-            metrics
-                .remote_deliveries
-                .load(std::sync::atomic::Ordering::Relaxed),
-            3
-        );
-        assert_eq!(
-            metrics
-                .failed_deliveries
-                .load(std::sync::atomic::Ordering::Relaxed),
-            4
-        );
-    }
-
-    #[test]
-    fn test_node_service_metrics_uptime() {
-        let metrics = NodeServiceMetrics::default();
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        let uptime_ms = metrics.start_time.elapsed().as_millis();
-        assert!(uptime_ms >= 10);
-    }
-
     #[tokio::test]
     async fn test_node_service_impl_new() {
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
@@ -1524,23 +1397,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_node_service_increment_metrics() {
+        let h = crate::metrics_service::install_metrics_recorder();
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
-        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        service_locator
+            .register_metrics_prometheus_renderer(Arc::new(
+                crate::metrics_service::PrometheusHandleRenderer::new(h),
+            ))
+            .await;
+        let node_id = format!("test-node-inc-metrics-{}", ulid::Ulid::new());
+        let service = NodeServiceImpl::new(service_locator, node_id);
 
-        // Increment each metric type
         service.increment_messages_routed();
         service.increment_messages_routed();
         service.increment_local_deliveries();
         service.increment_remote_deliveries();
         service.increment_failed_deliveries();
 
-        // Get stats
-        let (routed, local, remote, failed) = service.routing_stats();
-
-        assert_eq!(routed, 2);
-        assert_eq!(local, 1);
-        assert_eq!(remote, 1);
-        assert_eq!(failed, 1);
+        let m = service.get_metrics_internal().await;
+        assert_eq!(m.messages_routed, 2);
+        assert_eq!(m.local_deliveries, 1);
+        assert_eq!(m.remote_deliveries, 1);
+        assert_eq!(m.failed_deliveries, 1);
     }
 
     #[tokio::test]
@@ -1576,16 +1453,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_metrics_internal() {
+        let h = crate::metrics_service::install_metrics_recorder();
         let service_locator = Arc::new(crate::service_locator::ServiceLocatorImpl::new());
-        let service = NodeServiceImpl::new(service_locator, "test-node".to_string());
+        service_locator
+            .register_metrics_prometheus_renderer(Arc::new(
+                crate::metrics_service::PrometheusHandleRenderer::new(h),
+            ))
+            .await;
+        let node_id = format!("test-node-get-metrics-{}", ulid::Ulid::new());
+        let service = NodeServiceImpl::new(service_locator, node_id.clone());
 
-        // Increment some metrics first
         service.increment_messages_routed();
         service.increment_local_deliveries();
 
         let metrics = service.get_metrics_internal().await;
 
-        assert_eq!(metrics.node_id, "test-node");
+        assert_eq!(metrics.node_id, node_id);
         assert_eq!(metrics.messages_routed, 1);
         assert_eq!(metrics.local_deliveries, 1);
         assert!(metrics.memory_available_bytes > 0 || metrics.memory_used_bytes > 0);

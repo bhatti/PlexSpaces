@@ -35,16 +35,18 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use plexspaces_core::{
-    ActorId, ActorRegistry, RequestContext, ServiceLocator as ServiceLocatorTrait, ServiceLocator,
+    actor_metrics_from_exposition_for_namespace, sum_counter_for_labels, ActorId, ActorRegistry,
+    RequestContext, ServiceLocator as ServiceLocatorTrait, ServiceLocator,
 };
 use plexspaces_proto::application::v1::application_service_client::ApplicationServiceClient;
 use plexspaces_proto::common::v1::{PageRequest, PageResponse};
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService, ActorInfo, GetActorsRequest, GetActorsResponse,
-    GetApplicationsRequest, GetApplicationsResponse, GetDependencyHealthRequest,
-    GetDependencyHealthResponse, GetNodeDashboardRequest, GetNodeDashboardResponse,
-    GetNodesRequest, GetNodesResponse, GetSummaryRequest, GetSummaryResponse, GetWorkflowsRequest,
-    GetWorkflowsResponse, NodeSummaryMetrics,
+    GetApplicationsRequest, GetApplicationsResponse, GetDashboardMetricsRequest,
+    GetDashboardMetricsResponse, GetDependencyHealthRequest, GetDependencyHealthResponse,
+    GetNodeDashboardRequest, GetNodeDashboardResponse, GetNodesRequest, GetNodesResponse,
+    GetSummaryRequest, GetSummaryResponse, GetWorkflowsRequest, GetWorkflowsResponse,
+    NodeSummaryMetrics,
 };
 use plexspaces_proto::metrics::v1::{ActorMetrics, SystemMetrics};
 use plexspaces_proto::node::v1::{
@@ -141,18 +143,21 @@ impl DashboardServiceImpl {
         }
     }
 
-    /// Convert Node to ProtoNode
+    /// Convert local node to proto (sysinfo + unified Prometheus counters).
     async fn node_to_proto(&self) -> Result<ProtoNode, Status> {
-        // Get NodeMetricsAccessor from ServiceLocator
-        let metrics_accessor = self
+        let cfg = self
             .service_locator
-            .get_node_metrics_accessor()
+            .get_node_config()
             .await
-            .ok_or_else(|| {
-                Status::internal("NodeMetricsAccessor not registered in ServiceLocator")
-            })?;
+            .filter(|c| !c.id.is_empty())
+            .ok_or_else(|| Status::internal("NodeConfig not registered in ServiceLocator"))?;
 
-        let metrics = metrics_accessor.get_metrics().await;
+        let metrics = crate::node_service::snapshot_local_node_metrics(
+            self.service_locator.clone(),
+            cfg.id.clone(),
+            0,
+        )
+        .await;
 
         Ok(ProtoNode {
             id: metrics.node_id.clone(),
@@ -166,25 +171,7 @@ impl DashboardServiceImpl {
                 nanos: Utc::now().timestamp_subsec_nanos() as i32,
             }),
             actor_ids: vec![],
-            metrics: Some(ProtoNodeMetrics {
-                node_id: metrics.node_id.clone(),
-                cluster_name: metrics.cluster_name.clone(),
-                memory_used_bytes: metrics.memory_used_bytes,
-                memory_available_bytes: metrics.memory_available_bytes,
-                cpu_usage_percent: metrics.cpu_usage_percent,
-                uptime_seconds: metrics.uptime_seconds,
-                messages_routed: metrics.messages_routed,
-                local_deliveries: metrics.local_deliveries,
-                remote_deliveries: metrics.remote_deliveries,
-                failed_deliveries: metrics.failed_deliveries,
-                active_actors: metrics.active_actors,
-                connected_nodes: metrics.connected_nodes,
-                shard_groups_created: metrics.shard_groups_created,
-                shard_messages_sent: metrics.shard_messages_sent,
-                shard_messages_received: metrics.shard_messages_received,
-                shard_operations_total: metrics.shard_operations_total,
-                shard_operations_failed: metrics.shard_operations_failed,
-            }),
+            metrics: Some(metrics.clone()),
             mtls_identity: None,
             public_certificate: vec![],
             auto_generate_certs: false,
@@ -359,51 +346,43 @@ impl DashboardServiceImpl {
         (0, None)
     }
 
-    /// Get actor metrics from ActorRegistry
+    /// Actor row metrics from the unified Prometheus recorder (namespace + local node_id).
     async fn get_actor_metrics(&self, actor_id: &ActorId) -> Option<ActorMetrics> {
-        if let Some(actor_registry) = self.service_locator.actor_registry().await {
-            let metrics_handle = actor_registry.actor_metrics();
-            let metrics = metrics_handle.read().await;
-
-            // Get metrics for this specific actor
-            // Note: ActorMetrics in registry is aggregate, not per-actor
-            // For per-actor metrics, we'd need to track them separately
-            // For now, return aggregate metrics as approximation
-            // ActorMetrics is a proto struct with fields, not methods
-            let is_live = actor_registry
-                .live_actor_entries()
+        let node_id = self
+            .service_locator
+            .get_node_config()
+            .await?
+            .id
+            .clone();
+        if node_id.is_empty() {
+            return None;
+        }
+        let exposition =
+            if let Some(access) = self.service_locator.get_metrics_service_access().await {
+                access.export_prometheus_text().await
+            } else if let Some(renderer) = self
+                .service_locator
+                .get_metrics_prometheus_renderer()
+                .await
+            {
+                renderer.render_prometheus_text()
+            } else {
+                return None;
+            };
+        let is_live = if let Some(reg) = self.service_locator.actor_registry().await {
+            reg.live_actor_entries()
                 .await
                 .iter()
-                .any(|(_, _, live_actor_id)| live_actor_id == actor_id);
-            Some(ActorMetrics {
-                spawn_total: metrics.spawn_total,
-                active: if is_live { 1 } else { 0 },
-                messages_routed: metrics.messages_routed,
-                local_deliveries: metrics.local_deliveries,
-                remote_deliveries: metrics.remote_deliveries,
-                failed_deliveries: metrics.failed_deliveries,
-                error_total: metrics.error_total,
-                // Lifecycle metrics (Phase 1-3) - aggregate across all actors
-                init_total: metrics.init_total,
-                init_errors_total: metrics.init_errors_total,
-                terminate_total: metrics.terminate_total,
-                terminate_errors_total: metrics.terminate_errors_total,
-                exit_handled_total: metrics.exit_handled_total,
-                exit_propagated_total: metrics.exit_propagated_total,
-                exit_handle_errors_total: metrics.exit_handle_errors_total,
-                // Parent-child metrics (Phase 3)
-                parent_child_registered_total: metrics.parent_child_registered_total,
-                parent_child_unregistered_total: metrics.parent_child_unregistered_total,
-                // Shard group metrics (Data-Parallel Actors)
-                shard_groups_created_total: metrics.shard_groups_created_total,
-                shard_messages_sent_total: metrics.shard_messages_sent_total,
-                shard_messages_received_total: metrics.shard_messages_received_total,
-                shard_operations_total: metrics.shard_operations_total,
-                shard_operations_failed_total: metrics.shard_operations_failed_total,
-            })
+                .any(|(_, _, id)| id == actor_id)
         } else {
-            None
-        }
+            false
+        };
+        Some(actor_metrics_from_exposition_for_namespace(
+            &exposition,
+            actor_id.namespace(),
+            node_id.as_str(),
+            is_live,
+        ))
     }
 
     /// Apply pagination to a vector using offset and limit
@@ -480,6 +459,111 @@ impl DashboardServiceImpl {
             .collect();
 
         Ok(nodes)
+    }
+
+    /// Fills [`plexspaces_proto::application::v1::ApplicationMetrics`] from Prometheus exposition.
+    async fn merge_application_prometheus_metrics(
+        &self,
+        info: &mut plexspaces_proto::application::v1::ApplicationInfo,
+    ) {
+        let exposition =
+            if let Some(access) = self.service_locator.get_metrics_service_access().await {
+                access.export_prometheus_text().await
+            } else if let Some(renderer) = self
+                .service_locator
+                .get_metrics_prometheus_renderer()
+                .await
+            {
+                renderer.render_prometheus_text()
+            } else {
+                return;
+            };
+        Self::merge_application_info_from_exposition(
+            info,
+            &exposition,
+            self.service_locator.actor_registry().await.as_ref(),
+        )
+        .await;
+    }
+
+    /// Applies exposition text to one application row (local or fetched from a peer).
+    async fn merge_application_info_from_exposition(
+        info: &mut plexspaces_proto::application::v1::ApplicationInfo,
+        exposition: &str,
+        local_registry: Option<&Arc<ActorRegistry>>,
+    ) {
+        let namespace = if !info.name.is_empty() {
+            info.name.as_str()
+        } else {
+            info.application_id.as_str()
+        };
+        if namespace.is_empty() {
+            return;
+        }
+        let ns = [("namespace", namespace)];
+        let mut metrics = info.metrics.take().unwrap_or_default();
+        metrics.message_count = metrics.message_count.saturating_add(sum_counter_for_labels(
+            exposition,
+            "plexspaces_messages_routed_total",
+            &ns,
+        ));
+        metrics.error_count = metrics.error_count.saturating_add(sum_counter_for_labels(
+            exposition,
+            "plexspaces_messages_failed_total",
+            &ns,
+        ));
+        if let Some(reg) = local_registry {
+            let entries = reg.registered_actor_entries().await;
+            let n = entries
+                .iter()
+                .filter(|(_, ns_entry, _)| *ns_entry == namespace)
+                .count() as u64;
+            metrics.actor_counts.insert("registered".to_string(), n);
+        }
+        info.metrics = Some(metrics);
+    }
+
+    /// Remote `GetMetrics` via gRPC (same shape as local [`crate::node_service::snapshot_local_node_metrics`]).
+    async fn query_remote_node_metrics(
+        &self,
+        ctx: &RequestContext,
+        node_id: &str,
+    ) -> Result<ProtoNodeMetrics, Status> {
+        use plexspaces_proto::node::v1::node_service_client::NodeServiceClient;
+        use plexspaces_proto::node::v1::GetMetricsRequest;
+        use plexspaces_proto::object_registry::v1::ObjectType;
+
+        let object_registry = self
+            .service_locator
+            .get_object_registry()
+            .await
+            .ok_or_else(|| Status::internal("ObjectRegistry not found in ServiceLocator"))?;
+
+        let registration = object_registry
+            .lookup_full(ctx, ObjectType::ObjectTypeNode, node_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to lookup node: {}", e)))?
+            .ok_or_else(|| Status::not_found(format!("Node not found: {}", node_id)))?;
+
+        let endpoint = tonic::transport::Channel::from_shared(format!(
+            "http://{}",
+            registration.grpc_address
+        ))
+        .map_err(|e| Status::internal(format!("Invalid endpoint: {}", e)))?;
+        let channel = endpoint
+            .connect()
+            .await
+            .map_err(|e| Status::internal(format!("Connection failed: {}", e)))?;
+
+        let mut client = NodeServiceClient::new(channel);
+        client
+            .get_metrics(Request::new(GetMetricsRequest {
+                node_id: node_id.to_string(),
+                include_extended: false,
+            }))
+            .await
+            .map_err(|e| Status::internal(format!("Remote GetMetrics failed: {}", e)))
+            .map(|r| r.into_inner())
     }
 }
 
@@ -710,47 +794,33 @@ impl DashboardService for DashboardServiceImpl {
         let tenant_id = self.get_tenant_id_from_context(&request_for_context);
         let ctx = self.request_context_for_dashboard(tenant_id, None).await;
 
-        // Get local node ID from metrics
-        let metrics_accessor = self
+        let local_node_id = self
             .service_locator
-            .get_node_metrics_accessor()
+            .get_node_config()
             .await
-            .ok_or_else(|| {
-                Status::internal("NodeMetricsAccessor not registered in ServiceLocator")
-            })?;
-        let local_metrics = metrics_accessor.get_metrics().await;
-        let local_node_id = local_metrics.node_id;
+            .filter(|c| !c.id.is_empty())
+            .map(|c| c.id)
+            .ok_or_else(|| Status::internal("NodeConfig not registered in ServiceLocator"))?;
 
         // Get node information
         let node = if req.node_id == local_node_id {
-            // Local node
             self.node_to_proto().await?
         } else {
-            // Remote node - query via NodeService (request-scoped context, no admin)
             self.query_remote_node(&ctx, &req.node_id).await?
         };
 
-        // Get node metrics from NodeMetricsAccessor
-        let metrics = metrics_accessor.get_metrics().await;
-        let node_metrics = Some(ProtoNodeMetrics {
-            node_id: metrics.node_id.clone(),
-            cluster_name: metrics.cluster_name.clone(),
-            memory_used_bytes: metrics.memory_used_bytes,
-            memory_available_bytes: metrics.memory_available_bytes,
-            cpu_usage_percent: metrics.cpu_usage_percent,
-            uptime_seconds: metrics.uptime_seconds,
-            messages_routed: metrics.messages_routed,
-            local_deliveries: metrics.local_deliveries,
-            remote_deliveries: metrics.remote_deliveries,
-            failed_deliveries: metrics.failed_deliveries,
-            active_actors: metrics.active_actors,
-            connected_nodes: metrics.connected_nodes,
-            shard_groups_created: metrics.shard_groups_created,
-            shard_messages_sent: metrics.shard_messages_sent,
-            shard_messages_received: metrics.shard_messages_received,
-            shard_operations_total: metrics.shard_operations_total,
-            shard_operations_failed: metrics.shard_operations_failed,
-        });
+        let node_metrics = if req.node_id == local_node_id {
+            Some(
+                crate::node_service::snapshot_local_node_metrics(
+                    self.service_locator.clone(),
+                    local_node_id.clone(),
+                    0,
+                )
+                .await,
+            )
+        } else {
+            self.query_remote_node_metrics(&ctx, &req.node_id).await.ok()
+        };
 
         // Get applications count
         let app_manager = self
@@ -841,16 +911,13 @@ impl DashboardService for DashboardServiceImpl {
         };
         let is_admin = self.is_admin(&request_for_context);
 
-        // Get local node ID from metrics
-        let metrics_accessor = self
+        let local_node_id = self
             .service_locator
-            .get_node_metrics_accessor()
+            .get_node_config()
             .await
-            .ok_or_else(|| {
-                Status::internal("NodeMetricsAccessor not registered in ServiceLocator")
-            })?;
-        let local_metrics = metrics_accessor.get_metrics().await;
-        let local_node_id = local_metrics.node_id;
+            .filter(|c| !c.id.is_empty())
+            .map(|c| c.id)
+            .ok_or_else(|| Status::internal("NodeConfig not registered in ServiceLocator"))?;
 
         // Filter by node_id if provided
         if !req.node_id.is_empty() {
@@ -888,6 +955,8 @@ impl DashboardService for DashboardServiceImpl {
                 // Filtering by these would require extending ApplicationInfo proto
                 // For now, all applications are returned (filtering by name_pattern works)
 
+                let mut info = info;
+                self.merge_application_prometheus_metrics(&mut info).await;
                 applications.push(info);
             }
         }
@@ -936,13 +1005,13 @@ impl DashboardService for DashboardServiceImpl {
                 // Parse actor_id to extract node_id from the canonical actor ID
                 let parts: Vec<&str> = actor_id.split('@').collect();
                 // Get local node ID from metrics
-                let metrics_accessor = self.service_locator.get_node_metrics_accessor().await;
-                let local_node_id = if let Some(getter) = metrics_accessor {
-                    let metrics = getter.get_metrics().await;
-                    metrics.node_id
-                } else {
-                    "unknown".to_string()
-                };
+                let local_node_id = self
+                    .service_locator
+                    .get_node_config()
+                    .await
+                    .map(|c| c.id)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "unknown".to_string());
                 if parts.len() == 2 && parts[1] != &req.node_id {
                     continue;
                 } else if parts.len() != 2 && &req.node_id != &local_node_id {
@@ -1049,6 +1118,84 @@ impl DashboardService for DashboardServiceImpl {
             health_check: Some(health_check),
             node_id: req.node_id,
         }))
+    }
+
+    async fn get_dashboard_metrics(
+        &self,
+        request: Request<GetDashboardMetricsRequest>,
+    ) -> Result<Response<GetDashboardMetricsResponse>, Status> {
+        let req = request.into_inner();
+        let name_pattern = if req.name_pattern.trim().is_empty() {
+            "*".to_string()
+        } else {
+            req.name_pattern
+        };
+        let mut label_filter = req.label_filter;
+        if !req.namespace.is_empty() {
+            label_filter
+                .entry("namespace".to_string())
+                .or_insert(req.namespace);
+        }
+        let include_defs = req.include_definitions;
+        let include_text = req.include_prometheus_text;
+
+        if let Some(access) = self.service_locator.get_metrics_service_access().await {
+            let metrics = access
+                .get_metrics_filtered(name_pattern.clone(), label_filter.clone())
+                .await;
+            let definitions = if include_defs {
+                access
+                    .list_metric_definitions_filtered(name_pattern.clone())
+                    .await
+            } else {
+                vec![]
+            };
+            let prometheus_text = if include_text {
+                access.export_prometheus_text().await
+            } else {
+                String::new()
+            };
+            return Ok(Response::new(GetDashboardMetricsResponse {
+                metrics,
+                definitions,
+                prometheus_text,
+            }));
+        }
+
+        if let Some(renderer) = self
+            .service_locator
+            .get_metrics_prometheus_renderer()
+            .await
+        {
+            let prometheus_text_full = renderer.render_prometheus_text();
+            let metrics = crate::metrics_service::parse_prometheus_text(
+                &prometheus_text_full,
+                &name_pattern,
+                &label_filter,
+            );
+            let definitions = if include_defs {
+                crate::metrics_service::unified_metric_definitions()
+                    .into_iter()
+                    .filter(|d| crate::metrics_service::metric_name_matches(&name_pattern, &d.name))
+                    .collect()
+            } else {
+                vec![]
+            };
+            let prometheus_text = if include_text {
+                prometheus_text_full
+            } else {
+                String::new()
+            };
+            return Ok(Response::new(GetDashboardMetricsResponse {
+                metrics,
+                definitions,
+                prometheus_text,
+            }));
+        }
+
+        Err(Status::failed_precondition(
+            "metrics service not registered (no Prometheus recorder on this node)",
+        ))
     }
 
     async fn get_workflows(
@@ -1171,10 +1318,22 @@ impl DashboardServiceImpl {
             .connect()
             .await
             .map_err(|e| Status::internal(format!("Connection failed: {}", e)))?;
+
+        use plexspaces_proto::metrics::v1::metrics_service_client::MetricsServiceClient;
+        use plexspaces_proto::metrics::v1::ExportPrometheusRequest;
+        use tonic::Request as TonicRequest;
+
+        let exposition = {
+            let mut mc = MetricsServiceClient::new(channel.clone());
+            mc.export_prometheus(TonicRequest::new(ExportPrometheusRequest {}))
+                .await
+                .ok()
+                .map(|r| r.into_inner().content)
+                .unwrap_or_default()
+        };
+
         let mut client = ApplicationServiceClient::new(channel);
 
-        // Call ListApplications
-        use tonic::Request as TonicRequest;
         let list_req = plexspaces_proto::application::v1::ListApplicationsRequest {
             status_filter: None,
         };
@@ -1182,6 +1341,12 @@ impl DashboardServiceImpl {
         match client.list_applications(TonicRequest::new(list_req)).await {
             Ok(response) => {
                 let mut applications = response.into_inner().applications;
+
+                if !exposition.is_empty() {
+                    for app in &mut applications {
+                        Self::merge_application_info_from_exposition(app, &exposition, None).await;
+                    }
+                }
 
                 // Apply filters
                 if !req.name_pattern.is_empty() {

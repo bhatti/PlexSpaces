@@ -91,6 +91,8 @@ async fn test_retry_interceptor_identifies_retryable_errors() {
         headers: std::collections::HashMap::new(),
         timestamp: None,
         duration: None,
+        request_id: ulid::Ulid::new().to_string(),
+        method: "/test.Service/RetryableMethod".to_string(),
     };
 
     // Retry interceptor should identify this as retryable
@@ -133,6 +135,8 @@ async fn test_retry_interceptor_does_not_retry_non_retryable_errors() {
         headers: std::collections::HashMap::new(),
         timestamp: None,
         duration: None,
+        request_id: ulid::Ulid::new().to_string(),
+        method: "/test.Service/NonRetryableMethod".to_string(),
     };
 
     // Should not retry
@@ -177,6 +181,8 @@ async fn test_retry_interceptor_respects_max_retries() {
         headers: std::collections::HashMap::new(),
         timestamp: None,
         duration: None,
+        request_id: ulid::Ulid::new().to_string(),
+        method: "/test.Service/MaxRetryMethod".to_string(),
     };
 
     let result = chain.after_response(&response_context).await;

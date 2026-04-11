@@ -472,6 +472,12 @@ pub struct InterceptorResponse {
     /// Request duration (calculated by interceptor chain)
     #[prost(message, optional, tag="4")]
     pub duration: ::core::option::Option<::prost_types::Duration>,
+    /// Request ID for correlation with InterceptorRequest
+    #[prost(string, tag="5")]
+    pub request_id: ::prost::alloc::string::String,
+    /// gRPC method full path (echoed from the originating InterceptorRequest)
+    #[prost(string, tag="6")]
+    pub method: ::prost::alloc::string::String,
 }
 /// Interceptor result
 ///

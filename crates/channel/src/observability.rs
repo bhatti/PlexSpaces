@@ -65,6 +65,13 @@ pub fn record_channel_ack(channel_name: &str, message_id: &str, backend: &str) {
         operation = "ack",
         "✅ Channel ACK: Message acknowledged successfully"
     );
+
+    metrics::counter!(
+        "plexspaces_channel_ack_total",
+        "channel" => channel_name.to_string(),
+        "backend" => backend.to_string(),
+    )
+    .increment(1);
 }
 
 /// Record a NACK operation (failed processing, may requeue or DLQ)
@@ -107,6 +114,14 @@ pub fn record_channel_nack(
         requeue,
         delivery_count
     );
+
+    metrics::counter!(
+        "plexspaces_channel_nack_total",
+        "channel" => channel_name.to_string(),
+        "backend" => backend.to_string(),
+        "requeue" => requeue.to_string(),
+    )
+    .increment(1);
 }
 
 /// Record a message sent to Dead Letter Queue (DLQ)
@@ -140,6 +155,14 @@ pub fn record_channel_dlq(
         delivery_count,
         reason
     );
+
+    metrics::counter!(
+        "plexspaces_channel_dlq_total",
+        "channel" => channel_name.to_string(),
+        "backend" => backend.to_string(),
+        "reason" => reason.to_string(),
+    )
+    .increment(1);
 }
 
 /// Record a channel operation error
@@ -164,6 +187,14 @@ pub fn record_channel_error(channel_name: &str, operation: &str, error: &str, ba
         operation,
         error
     );
+
+    metrics::counter!(
+        "plexspaces_channel_error_total",
+        "channel" => channel_name.to_string(),
+        "backend" => backend.to_string(),
+        "operation" => operation.to_string(),
+    )
+    .increment(1);
 }
 
 /// Record channel operation latency
@@ -192,6 +223,14 @@ pub fn record_channel_latency(
         backend = %backend,
         "Channel operation latency"
     );
+
+    metrics::histogram!(
+        "plexspaces_channel_operation_duration_seconds",
+        "channel" => channel_name.to_string(),
+        "backend" => backend.to_string(),
+        "operation" => operation.to_string(),
+    )
+    .record(duration.as_secs_f64());
 }
 
 /// Helper to measure and record operation latency
@@ -245,6 +284,13 @@ pub fn record_channel_stats(
         backend = %backend,
         "Channel statistics snapshot"
     );
+
+    metrics::gauge!(
+        "plexspaces_channel_messages_pending",
+        "channel" => channel_name.to_string(),
+        "backend" => backend.to_string(),
+    )
+    .set(messages_pending as f64);
 }
 
 /// Get backend name as string for observability
@@ -264,5 +310,21 @@ pub fn backend_name(backend: i32) -> &'static str {
         Some(ChannelProvider::ChannelProviderSqlite) => "sqlite",
         Some(ChannelProvider::ChannelProviderCustom) => "custom",
         _ => "unknown",
+    }
+}
+
+#[cfg(test)]
+mod observability_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn record_channel_ack_emits_without_panic() {
+        record_channel_ack("ch1", "mid", "in_memory");
+    }
+
+    #[test]
+    fn record_channel_latency_emits_histogram_without_panic() {
+        record_channel_latency("ch1", "ack", Duration::from_millis(2), "in_memory");
     }
 }

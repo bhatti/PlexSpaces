@@ -1074,6 +1074,13 @@ pub struct SendMessageRequest {
     /// Optional client-provided message id.
     #[prost(string, tag="13")]
     pub message_id: ::prost::alloc::string::String,
+    /// Optional actor instance name. When set together with actor_type and namespace,
+    /// the handler constructs the canonical actor ID directly:
+    ///    actor_name//actor_type::namespace@node_id
+    /// This avoids ambiguous lookups and makes addressing explicit.
+    /// If empty, falls back to registry lookup by actor_type within the namespace.
+    #[prost(string, tag="20")]
+    pub actor_name: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1673,6 +1680,12 @@ pub struct AskReplyRequest {
     /// HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
     #[prost(message, optional, tag="14")]
     pub timeout: ::core::option::Option<::prost_types::Duration>,
+    /// Optional actor instance name. When set together with actor_type and namespace,
+    /// the handler constructs the canonical actor ID directly:
+    ///    actor_name//actor_type::namespace@node_id
+    /// If empty, falls back to registry lookup by actor_type within the namespace.
+    #[prost(string, tag="20")]
+    pub actor_name: ::prost::alloc::string::String,
 }
 /// Response from asking an actor
 ///
@@ -2851,14 +2864,6 @@ impl ActorHealthStatus {
         }
     }
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 include!("plexspaces.actor.v1.tonic.rs");

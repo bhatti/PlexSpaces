@@ -225,6 +225,10 @@ impl MessageSender for ActorServiceMessageSender {
     ) -> Result<(), String> {
         trace!(from = %from, to = %to, message_type = %message_type, "WASM send_message (tell)");
 
+        let ctx = plexspaces_core::ActorId::from_canonical(from)
+            .map(|id| plexspaces_core::RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
+            .unwrap_or_else(|_| plexspaces_core::RequestContext::new_without_auth(String::new(), String::new()));
+
         let msg = Message {
             id: ulid::Ulid::new().to_string(),
             payload: message.to_vec(),
@@ -235,7 +239,7 @@ impl MessageSender for ActorServiceMessageSender {
         };
 
         self.actor_service
-            .send(to, msg)
+            .send(&ctx, to, msg)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -253,14 +257,6 @@ impl MessageSender for ActorServiceMessageSender {
     ) -> Result<Vec<u8>, String> {
         // Build request message with req- prefix (ActorRef::ask will also add req- if missing)
         let request_id = format!("req-{}", ulid::Ulid::new());
-        let msg = Message {
-            id: request_id.clone(),
-            payload,
-            sender_id: from.to_string(),
-            receiver_id: to.to_string(),
-            message_type: message_type.to_string(),
-            ..Default::default()
-        };
 
         let timeout = if timeout_ms == 0 {
             std::time::Duration::from_secs(5)
@@ -277,9 +273,22 @@ impl MessageSender for ActorServiceMessageSender {
             "WASM ask: sending request via ActorService"
         );
 
+        let ctx = plexspaces_core::ActorId::from_canonical(from)
+            .map(|id| plexspaces_core::RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
+            .unwrap_or_else(|_| plexspaces_core::RequestContext::new_without_auth(String::new(), String::new()));
+
+        let msg = Message {
+            id: request_id.clone(),
+            payload,
+            sender_id: from.to_string(),
+            receiver_id: to.to_string(),
+            message_type: message_type.to_string(),
+            ..Default::default()
+        };
+
         match self
             .actor_service
-            .send_and_wait(to, msg, Some(timeout))
+            .send_and_wait(&ctx, to, msg, Some(timeout))
             .await
         {
             Ok(reply) => {
@@ -310,28 +319,27 @@ impl MessageSender for ActorServiceMessageSender {
 
     async fn spawn_actor(
         &self,
-        _from: &str,
+        from: &str,
         module_ref: &str,
         initial_state: Vec<u8>,
         actor_id: Option<String>,
         labels: Vec<(String, String)>,
         _durable: bool,
     ) -> Result<String, String> {
-        // Use ActorService to spawn actor
-        // WASM spawn path: tenant/namespace come from auth, not config
-        use plexspaces_core::RequestContext;
-        let _ctx = RequestContext::new_without_auth(String::new(), String::new());
-
         let _labels_map: std::collections::HashMap<String, String> = labels.into_iter().collect();
 
         // For now, use module_ref as actor_type
         // TODO: Resolve module_ref to get actual actor_type
         let actor_type = module_ref.to_string();
 
-        // Spawn actor using ActorService
+        // Derive namespace from calling actor's canonical ID
+        let ctx = plexspaces_core::ActorId::from_canonical(from)
+            .map(|id| plexspaces_core::RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
+            .unwrap_or_else(|_| plexspaces_core::RequestContext::new_without_auth(String::new(), String::new()));
         let spawned_id = self
             .actor_service
             .spawn_actor(
+                &ctx,
                 &actor_id.unwrap_or_else(|| ulid::Ulid::new().to_string()),
                 &actor_type,
                 initial_state,
@@ -365,7 +373,10 @@ impl MessageSender for ActorServiceMessageSender {
                 {
                     RequestContext::new_without_auth(tenant_id, namespace)
                 } else {
-                    RequestContext::new_without_auth(String::new(), sender_id.namespace().to_string())
+                    RequestContext::new_without_auth(
+                        String::new(),
+                        sender_id.namespace().to_string(),
+                    )
                 }
             } else {
                 RequestContext::new_without_auth(String::new(), String::new())
@@ -739,6 +750,7 @@ mod tests {
     impl ActorServiceTrait for RecordingActorService {
         async fn spawn_actor(
             &self,
+            _ctx: &plexspaces_core::RequestContext,
             _actor_id: &str,
             _actor_type: &str,
             _initial_state: Vec<u8>,
@@ -748,6 +760,7 @@ mod tests {
 
         async fn send(
             &self,
+            _ctx: &plexspaces_core::RequestContext,
             _actor_id: &str,
             _message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -756,6 +769,7 @@ mod tests {
 
         async fn send_and_wait(
             &self,
+            _ctx: &plexspaces_core::RequestContext,
             actor_id: &str,
             message: Message,
             _timeout: Option<std::time::Duration>,

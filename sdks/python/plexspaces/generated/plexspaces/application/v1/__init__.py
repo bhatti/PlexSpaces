@@ -683,17 +683,23 @@ class ApplicationInfo(betterproto.Message):
     name: str = betterproto.string_field(2)
     """Application name"""
 
-    version: str = betterproto.string_field(3)
+    tenant_id: str = betterproto.string_field(3)
+    """Tenant ID for visibility and isolation."""
+
+    namespace: str = betterproto.string_field(4)
+    """Namespace for application-scoped actors and filters."""
+
+    version: str = betterproto.string_field(5)
     """Application version"""
 
-    status: "ApplicationStatus" = betterproto.enum_field(4)
+    status: "ApplicationStatus" = betterproto.enum_field(6)
     """Current status"""
 
-    deployed_at: datetime = betterproto.message_field(5)
+    deployed_at: datetime = betterproto.message_field(7)
     """When the application was deployed"""
 
     metrics: Optional["ApplicationMetrics"] = betterproto.message_field(
-        6, optional=True
+        8, optional=True
     )
     """Application metrics (optional)"""
 

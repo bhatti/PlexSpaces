@@ -47,8 +47,7 @@ pub fn test_runtime_actor_id(name: &str, node_id: &str) -> ActorId {
 
 /// Build a canonical actor ID for generic node integration tests.
 pub fn test_actor_id(name: &str, node_id: &str) -> ActorId {
-    ActorId::new(name, "test_actor", "default", node_id)
-        .expect("test actor IDs must be valid")
+    ActorId::new(name, "test_actor", "default", node_id).expect("test actor IDs must be valid")
 }
 
 async fn actor_exists_locally(actor_registry: &ActorRegistry, actor_id: &ActorId) -> bool {
@@ -359,7 +358,9 @@ pub async fn find_actor_helper(
                 plexspaces_node::NodeId::from(node_id),
             ))
         } else {
-            Err(plexspaces_node::NodeError::ActorNotFound(actor_id.to_string()))
+            Err(plexspaces_node::NodeError::ActorNotFound(
+                actor_id.to_string(),
+            ))
         }
     }
 }

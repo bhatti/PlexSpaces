@@ -6,6 +6,8 @@ Examples live under `examples/<language>/{apps,embedded}/<name>/`. Each director
 
 **Parallelism, collectives, scatter/gather, and workload / ML-style demos:** For MPI-style shard-group collectives, multi-node benchmarks, and ring/allreduce-style training narratives, start with **Go `mpi_collectives`**, **Rust embedded `matrix_vector_mpi`**, **Rust apps `ring_allreduce`**, **`data_parallel_worker`**, **`parameter_server`** (Rust, Python, Go), **`batch_image_classification`**, **`genomics_pipeline`**, **`heat_diffusion`** (apps and embedded), **`data_lake_rag`**, and **Python `job_processing`** (TupleSpace scatter/gather). **Rust embedded `event_analytics`** and **`realtime_stream_processor`** illustrate shard groups and streaming analytics at scale.
 
+**AI agents, RAG, MCP, and A2A patterns:** For production AI/ML agent patterns see **Python `parallel_ai_inference`** (all four parallelization mechanisms + MPI collectives), **Python `mcp_tool_server`** (Model Context Protocol tool calling), **Go `agentic_rag_pipeline`** (retrieve→generate→validate durable RAG), **Go `a2a_multi_agent`** (multi-agent A2A collaboration), **Go `resource_aware_inference`** (cost-aware model routing with budget enforcement), and **TypeScript `llm_workflow_orchestrator`** (prompt chaining, routing, reflection, LLM-as-Judge). These examples collectively demonstrate all four behavior types (GenServer, GenEvent, GenFSM, Workflow) and all key facets (virtual_actor, durability, timer, metrics).
+
 Further reading: [Component / service design (internal)](../archived_docs/component-services-design.md), [SDK guide](../docs/sdk.md), [Polyglot WASM](../docs/polyglot.md), [Services — components, service links, ObjectRegistry](../docs/services.md#built-in-and-custom-components-facets), [Implementation roadmap](../archived_docs/component-services-roadmap.md), [WASM deployment](../docs/wasm-deployment.md), [Durability](../docs/durability.md).
 
 ---
@@ -30,6 +32,14 @@ Further reading: [Component / service design (internal)](../archived_docs/compon
 | `migrating_temporal` | **Migration:** Temporal-style order fulfillment workflow. | `WorkflowActor`, signals/queries; `native/` | [README](go/apps/migrating_temporal/README.md) |
 | `mpi_collectives` | **Parallel / MPI:** Benchmark of BroadcastShardGroup, ScatterGather, ReduceShardGroup, AllReduceShardGroup, BarrierShardGroup over a dynamic shard group. | Shard-group collectives, per-node metrics, registry placement | [README](go/apps/mpi_collectives/README.md) |
 | `parameter_server` | **Workload / ML:** Synthetic distributed training coordination (leader/worker, shard groups, metrics). | `ActorRouter`, shard-group placement, application metrics | [README](go/apps/parameter_server/README.md) |
+
+**AI Agents & Workloads (Go)**
+
+| Example | Description | Actors & Behaviors | README |
+|---------|-------------|-------------------|--------|
+| `agentic_rag_pipeline` | **AI / RAG:** Durable retrieve→generate→validate→retry RAG pipeline. `RetrieverActor` supports `single` and `deep` (multi-hop word-level) search modes. `GeneratorActor` has an in-actor circuit breaker (3 failures → open). `ValidatorActor` runs three quality checks: length, source grounding, and safety. `RAGWorkflow` checkpoints between steps and fires fire-and-forget audit events to `PipelineEventActor` after every step. | `IndexerActor` (GenServer), `RetrieverActor` (GenServer), `GeneratorActor` (GenServer), `ValidatorActor` (GenServer), `RAGWorkflow` (WorkflowActor + durability), `PipelineEventActor` (GenEvent + process group), `RAGPipelineFSM` (GenFSM, 6 states: idle/indexing/retrieving/generating/validating/error) | [README](go/apps/agentic_rag_pipeline/README.md) |
+| `a2a_multi_agent` | **AI / A2A:** Multi-agent A2A collaboration with capability-based discovery. `AgentRegistryActor` maintains a dual KV index (`agent:{id}` and `cap:{cap}:{id}`) so the orchestrator can find agents by capability intersection. `OrchestratorAgent` decomposes tasks, delegates to `ResearchAgent`, `AnalysisAgent`, and `WriterAgent`, then aggregates intermediate results via TupleSpace tuples. All agents join the `agents` process group on startup. | `AgentRegistryActor` (GenServer + virtual_actor), `ResearchAgent` / `AnalysisAgent` / `WriterAgent` (GenServer), `OrchestratorAgent` (WorkflowActor + durability), `TaskEventActor` (GenEvent + process group), `AgentStateFSM` (GenFSM, 5 states: idle/assigned/working/reporting/error) | [README](go/apps/a2a_multi_agent/README.md) |
+| `resource_aware_inference` | **AI / Routing:** Cost-aware model tier selection with per-tenant USD budget enforcement. `RoutingWorkflow` runs: budget check → complexity estimate → model select → infer → deduct cost. `ModelRegistryActor` seeds three tiers (gpt-nano/gpt-base/gpt-large) and picks by complexity + remaining budget + GPU preference. `BudgetManagerActor` tracks spend per tenant in KV. `BudgetFSM` transitions active→warning→throttled→exhausted based on spend percentage. | `ModelRegistryActor` (GenServer + virtual_actor), `InferenceActor` ×3 tiers (GenServer + virtual_actor), `BudgetManagerActor` (GenServer + durability), `RoutingWorkflow` (WorkflowActor + durability), `InferenceEventActor` (GenEvent + process group), `BudgetFSM` (GenFSM, 4 states: active/warning/throttled/exhausted) | [README](go/apps/resource_aware_inference/README.md) |
 
 **Build / test (typical Go WASM app):**
 
@@ -75,6 +85,13 @@ cd go/apps/<example>
 | `registry` | Service discovery via registry facet. | `RegistryFacet` | [README](python/apps/registry/README.md) |
 | `storefront` | E-commerce storefront API on host KV. | `host.kv_*`; see README for node feature requirements | [README](python/apps/storefront/README.md) |
 | `task-queue` | Background tasks with distributed locks. | `LockFacet`, task claiming | [README](python/apps/task-queue/README.md) |
+
+**AI Agents & Workloads (Python)**
+
+| Example | Description | Actors & Behaviors | README |
+|---------|-------------|-------------------|--------|
+| `parallel_ai_inference` | **AI / Scaling:** All four parallelization mechanisms side-by-side in one benchmark. `BenchmarkActor` runs three suites: (1) shard-group scatter-gather across 1/2/4/8/16 shards measuring throughput and p50/p99 latency; (2) elastic pool `pool_checkout` / `pool_checkin` tracking wait and execution time; (3) MPI collectives pipeline — `broadcast_shard_group` → `barrier_shard_group` → `scatter_gather` → `reduce_shard_group` → `all_reduce_shard_group`. `OrchestratorWorkflow` exposes all three modes via `workflow_run` with `signal` (scale) and `query` (status). `WorkerCircuitBreakerFSM` auto-resets via `send_after`. | `InferenceWorkerActor` (GenServer + virtual_actor + durability + metrics), `BenchmarkActor` (GenServer + virtual_actor), `OrchestratorWorkflow` (WorkflowActor + durability + timer), `MetricsEventActor` (GenEvent + process group `metrics-events`), `WorkerCircuitBreakerFSM` (GenFSM, 3 states: closed/open/half_open + timer) | [README](python/apps/parallel_ai_inference/README.md) |
+| `mcp_tool_server` | **AI / MCP:** Model Context Protocol tool server with JSON-RPC 2.0 gateway. `ToolRegistryActor` maintains a catalogue of tools with JSON Schema descriptors, validates required fields, routes `tools/call` to specialist actors, and fires fire-and-forget audit events to `ToolAuditEventActor` after each invocation. `MCPGatewayWorkflow` handles the full JSON-RPC 2.0 session lifecycle and validates `tenant` namespace on every request. `ToolCircuitBreakerFSM` tracks health of tool execution. Supports dynamic tool registration at runtime without redeployment. | `ToolRegistryActor` (GenServer + virtual_actor + durability + metrics), `CalculatorToolActor` / `SearchToolActor` / `WeatherToolActor` (GenServer + virtual_actor), `MCPGatewayWorkflow` (WorkflowActor + durability), `ToolAuditEventActor` (GenEvent + process group `tool-audit`), `ToolCircuitBreakerFSM` (GenFSM, 3 states: healthy/degraded/circuit_open + timer) | [README](python/apps/mcp_tool_server/README.md) |
 
 ```bash
 cd python/apps/<app>
@@ -166,6 +183,12 @@ cargo run
 | `migrating_temporal` | **Migration:** Temporal order fulfillment. | `native/temporal_order_workflow.ts` | [README](typescript/apps/migrating_temporal/README.md) |
 | `migrating_v8_isolates` | **Migration:** V8 isolates–style log processing. | `native/v8_isolates_ref.md` | [README](typescript/apps/migrating_v8_isolates/README.md) |
 | `streaming_pipeline` | Streaming data pipeline WASM actor. | TS SDK, streaming handlers | [README](typescript/apps/streaming_pipeline/README.md) |
+
+**AI Agents & Workloads (TypeScript)**
+
+| Example | Description | Actors & Behaviors | README |
+|---------|-------------|-------------------|--------|
+| `llm_workflow_orchestrator` | **AI / LLM:** Five foundational agentic LLM patterns in one example. `RouterActor` classifies input (keyword + length heuristics) and dispatches to four specialist pipelines. `ChainActor` executes multi-step transforms (`summarize → extract_keywords → format_output`) and Evol-Instruct prompt mutation (prefix injection, suffix appending, synonym substitution). `JudgeActor` scores output on relevance, completeness, and clarity (0–10 composite score). `OrchestratorWorkflow` runs a reflection loop: chain → judge → refine until score threshold or max iterations; writes final result to TupleSpace; accepts `feedback` and `reset` signals; answers `progress` and `history` queries. `QualityFSMActor` tracks per-task approval state. `PipelineAuditActor` receives fire-and-forget step events and emits Prometheus metrics. | `RouterActor` (GenServer + virtual_actor), `ChainActor` (GenServer + virtual_actor + durability), `JudgeActor` (GenServer + virtual_actor + durability), `OrchestratorWorkflow` (WorkflowActor + durability + TupleSpace), `PipelineAuditActor` (GenEvent), `QualityFSMActor` (GenFSM, 5 states: pending/evaluating/approved/rejected/escalated + durability) | [README](typescript/apps/llm_workflow_orchestrator/README.md) |
 
 ```bash
 cd typescript/apps/<app>

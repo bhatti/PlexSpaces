@@ -16,8 +16,8 @@ use async_trait::async_trait;
 use plexspaces_actor::{actor_factory_impl::ActorFactoryImpl, ActorFactory};
 use plexspaces_behavior::GenServer;
 use plexspaces_core::{
-    behavior_factory::BehaviorRegistry, Actor as ActorTrait, ActorContext, ActorRegistry,
-    ActorId, BehaviorError, BehaviorType, FacetManager, Message, ReplyWaiterRegistry,
+    behavior_factory::BehaviorRegistry, Actor as ActorTrait, ActorContext, ActorId, ActorRegistry,
+    BehaviorError, BehaviorType, FacetManager, Message, ReplyWaiterRegistry,
     ServiceLocator as ServiceLocatorTrait, VirtualActorManager,
 };
 use plexspaces_mailbox::new_message;
@@ -38,7 +38,12 @@ struct CounterActor {
     count: i64,
 }
 
-fn canonical_actor_id(name: impl Into<String>, actor_type: &str, namespace: &str, node_id: &str) -> ActorId {
+fn canonical_actor_id(
+    name: impl Into<String>,
+    actor_type: &str,
+    namespace: &str,
+    node_id: &str,
+) -> ActorId {
     ActorId::new(name, actor_type, namespace, node_id).expect("valid test actor id")
 }
 
@@ -321,7 +326,8 @@ async fn create_test_registry_with_actors(
         "default".to_string(),
     );
     for i in 0..num_actors {
-        let actor_id = canonical_actor_id(format!("{actor_type}-{i}"), actor_type, "default", node_id);
+        let actor_id =
+            canonical_actor_id(format!("{actor_type}-{i}"), actor_type, "default", node_id);
 
         // Use spawn_actor instead of building and spawning separately
         let message_sender = actor_factory
@@ -499,7 +505,7 @@ async fn test_ask_reply_ignores_stale_actor_type_index_entries() {
         create_test_actor_service(actor_registry.clone(), service_locator, "node1".to_string())
             .await;
 
-        let stale_actor_id = canonical_actor_id("stale-counter", "counter", "default", "node1");
+    let stale_actor_id = canonical_actor_id("stale-counter", "counter", "default", "node1");
     let key = ("".to_string(), "default".to_string(), "counter".to_string());
     {
         let mut index = actor_registry.actor_type_index().write().await;

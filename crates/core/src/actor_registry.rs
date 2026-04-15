@@ -144,7 +144,6 @@ pub struct ActorRegistry {
     /// Maintained in sync with actors map for O(1) lookup
     /// Key: (tenant_id, namespace, actor_type), Value: List of actor IDs of that type
     actor_type_index: Arc<RwLock<HashMap<(String, String, String), Vec<ActorId>>>>,
-
     // === Parent-Child Relationships (Phase 3) ===
     /// Parent-to-children mapping: parent_id -> Vec<child_id>
     /// Tracks supervision hierarchy for graceful shutdown and subtree operations
@@ -563,6 +562,23 @@ impl ActorRegistry {
         &self.actor_type_index
     }
 
+    pub fn behavior_kind_key(behavior_kind: &crate::BehaviorType) -> String {
+        match behavior_kind {
+            crate::BehaviorType::GenServer => "gen_server".to_string(),
+            crate::BehaviorType::GenEvent => "gen_event".to_string(),
+            crate::BehaviorType::GenStateMachine => "gen_state_machine".to_string(),
+            crate::BehaviorType::Workflow => "workflow".to_string(),
+            crate::BehaviorType::Custom(name) => name.clone(),
+        }
+    }
+
+    /// Get the runtime behavior kind registered for an actor.
+    pub async fn get_behavior_kind(&self, actor_id: &ActorId) -> Option<String> {
+        self.lookup_actor(actor_id)
+            .await
+            .and_then(|sender| sender.behavior_kind())
+    }
+
     /// Register an actor (consolidated method for all actor types)
     ///
     /// ## Purpose
@@ -592,6 +608,11 @@ impl ActorRegistry {
         behavior_kind: Option<crate::BehaviorType>,
     ) {
         sender.set_actor_type(Some(actor_type.clone())).await;
+        if let Some(ref behavior_kind) = behavior_kind {
+            sender
+                .set_behavior_kind(Some(Self::behavior_kind_key(behavior_kind)))
+                .await;
+        }
         if let Some(ref handle) = instance {
             sender.set_local_state_handle(Some(handle.clone())).await;
         }
@@ -672,7 +693,8 @@ impl ActorRegistry {
         // Update metrics if this is a new actor
         if was_new {
             let ns = ctx.namespace().to_string();
-            metrics::counter!("plexspaces_actor_spawn_total", "namespace" => ns.clone()).increment(1);
+            metrics::counter!("plexspaces_actor_spawn_total", "namespace" => ns.clone())
+                .increment(1);
             metrics::gauge!("plexspaces_actor_active", "namespace" => ns).increment(1.0);
         }
     }
@@ -1138,7 +1160,6 @@ impl ActorRegistry {
                 !actor_ids.is_empty() // Remove empty entries
             });
         }
-
         // CRITICAL: Lock acquisition order must be consistent to prevent deadlocks
         // Order: 1. facet_manager (via remove_facets), 2. registered inventory, 3. actor_configs
         let mut registered_entries = self.registered_actor_entries.write().await;

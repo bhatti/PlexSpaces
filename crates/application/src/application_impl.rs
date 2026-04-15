@@ -675,14 +675,13 @@ impl Application for SpecApplication {
                 );
 
                 for actor_id in actor_ids.iter().rev() {
-                    let actor_id = plexspaces_core::ActorId::from_canonical(actor_id).map_err(
-                        |e| {
+                    let actor_id =
+                        plexspaces_core::ActorId::from_canonical(actor_id).map_err(|e| {
                             ApplicationError::ActorStopFailed(
                                 actor_id.clone(),
                                 format!("Invalid canonical actor ID during shutdown: {}", e),
                             )
-                        },
-                    )?;
+                        })?;
                     if let Err(e) = actor_factory.stop_actor(&ctx, &actor_id).await {
                         error!(
                             application = %self.spec.name,

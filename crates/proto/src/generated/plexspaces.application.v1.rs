@@ -358,17 +358,23 @@ pub struct ApplicationInfo {
     /// Application name
     #[prost(string, tag="2")]
     pub name: ::prost::alloc::string::String,
-    /// Application version
+    /// Tenant ID for visibility and isolation.
     #[prost(string, tag="3")]
+    pub tenant_id: ::prost::alloc::string::String,
+    /// Namespace for application-scoped actors and filters.
+    #[prost(string, tag="4")]
+    pub namespace: ::prost::alloc::string::String,
+    /// Application version
+    #[prost(string, tag="5")]
     pub version: ::prost::alloc::string::String,
     /// Current status
-    #[prost(enumeration="ApplicationStatus", tag="4")]
+    #[prost(enumeration="ApplicationStatus", tag="6")]
     pub status: i32,
     /// When the application was deployed
-    #[prost(message, optional, tag="5")]
+    #[prost(message, optional, tag="7")]
     pub deployed_at: ::core::option::Option<::prost_types::Timestamp>,
     /// Application metrics (optional)
-    #[prost(message, optional, tag="6")]
+    #[prost(message, optional, tag="8")]
     pub metrics: ::core::option::Option<ApplicationMetrics>,
 }
 /// Application metrics
@@ -827,14 +833,6 @@ impl ApplicationStatus {
         }
     }
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 include!("plexspaces.application.v1.tonic.rs");

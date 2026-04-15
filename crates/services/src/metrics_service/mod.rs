@@ -217,10 +217,7 @@ pub(crate) fn metric_name_matches(pattern: &str, name: &str) -> bool {
     name == pattern
 }
 
-fn labels_match_filter(
-    labels: &HashMap<String, String>,
-    filter: &HashMap<String, String>,
-) -> bool {
+fn labels_match_filter(labels: &HashMap<String, String>, filter: &HashMap<String, String>) -> bool {
     filter
         .iter()
         .all(|(k, v)| labels.get(k).map(|lv| lv == v).unwrap_or(false))
@@ -330,6 +327,20 @@ pub(crate) fn unified_metric_definitions() -> Vec<MetricDefinition> {
             r#type: MetricType::MetricTypeCounter as i32,
             help: "Failed message routings".to_string(),
             labels: vec!["namespace".to_string(), "error_type".to_string()],
+            buckets: vec![],
+        },
+        MetricDefinition {
+            name: "plexspaces_local_deliveries_total".to_string(),
+            r#type: MetricType::MetricTypeCounter as i32,
+            help: "Local message deliveries by namespace".to_string(),
+            labels: vec!["namespace".to_string()],
+            buckets: vec![],
+        },
+        MetricDefinition {
+            name: "plexspaces_remote_deliveries_total".to_string(),
+            r#type: MetricType::MetricTypeCounter as i32,
+            help: "Remote message deliveries by namespace".to_string(),
+            labels: vec!["namespace".to_string()],
             buckets: vec![],
         },
         MetricDefinition {
@@ -702,7 +713,10 @@ impl plexspaces_core::MetricsServiceAccess for MetricsServiceImpl {
         parse_prometheus_text(&text, &name_pattern, &label_filter)
     }
 
-    async fn list_metric_definitions_filtered(&self, name_pattern: String) -> Vec<MetricDefinition> {
+    async fn list_metric_definitions_filtered(
+        &self,
+        name_pattern: String,
+    ) -> Vec<MetricDefinition> {
         unified_metric_definitions()
             .into_iter()
             .filter(|d| metric_name_matches(&name_pattern, &d.name))
@@ -854,7 +868,8 @@ mod tests {
     #[tokio::test]
     async fn test_export_prometheus_includes_recorded_counter() {
         let service = test_service();
-        metrics::counter!("plexspaces_messages_routed_total", "namespace" => "test-ns").increment(1);
+        metrics::counter!("plexspaces_messages_routed_total", "namespace" => "test-ns")
+            .increment(1);
         let request = Request::new(ExportPrometheusRequest {});
         let response = service.export_prometheus(request).await.unwrap();
         let body = &response.get_ref().content;
@@ -882,7 +897,10 @@ mod tests {
             .export_prometheus(Request::new(ExportPrometheusRequest {}))
             .await
             .unwrap();
-        assert!(exp.get_ref().content.contains("plexspaces_manual_test_counter"));
+        assert!(exp
+            .get_ref()
+            .content
+            .contains("plexspaces_manual_test_counter"));
     }
 
     #[tokio::test]
@@ -903,7 +921,10 @@ mod tests {
             .export_prometheus(Request::new(ExportPrometheusRequest {}))
             .await
             .unwrap();
-        assert!(exp.get_ref().content.contains("plexspaces_messages_routed_total"));
+        assert!(exp
+            .get_ref()
+            .content
+            .contains("plexspaces_messages_routed_total"));
         assert!(exp.get_ref().content.contains("app1"));
     }
 
@@ -933,13 +954,11 @@ mod tests {
             label_filter: std::collections::HashMap::new(),
         });
         let response = service.get_metrics(request).await.unwrap();
-        assert!(
-            response
-                .get_ref()
-                .metrics
-                .iter()
-                .any(|m| m.name == "plexspaces_messages_routed_total")
-        );
+        assert!(response
+            .get_ref()
+            .metrics
+            .iter()
+            .any(|m| m.name == "plexspaces_messages_routed_total"));
     }
 
     #[tokio::test]
@@ -947,7 +966,8 @@ mod tests {
         use plexspaces_core::MetricsServiceAccess;
 
         let service = test_service();
-        metrics::counter!("plexspaces_messages_routed_total", "namespace" => "trait-ns").increment(3);
+        metrics::counter!("plexspaces_messages_routed_total", "namespace" => "trait-ns")
+            .increment(3);
         let text = MetricsServiceAccess::export_prometheus_text(&service).await;
         assert!(text.contains("trait-ns"));
         let mut lf = std::collections::HashMap::new();
@@ -968,7 +988,8 @@ mod tests {
             .list_metric_definitions_filtered("plexspaces_actor_spawn_total".to_string())
             .await;
         assert!(
-            defs.iter().any(|d| d.name == "plexspaces_actor_spawn_total"),
+            defs.iter()
+                .any(|d| d.name == "plexspaces_actor_spawn_total"),
             "defs={:?}",
             defs
         );

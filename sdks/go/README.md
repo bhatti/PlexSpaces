@@ -8,6 +8,7 @@ The SDK also exposes a proto-first authoring metadata layer so Go stays aligned 
 - `GenServerActor(...)`
 - `EventActor(...)`
 - `FSMActor(...)`
+- `FSMActorDef(factory, FSMOpts{States: [...], Initial: "...", Facets: [...]})` — FSM with explicit state list and initial state
 - `WorkflowActorDefinition(...)`
 
 Use these with `ActorRouter.RouteDefinition(...)` when you want explicit behavior/facet metadata without inventing a separate Go-specific API shape.

@@ -457,6 +457,115 @@ impl ObjectRegistryRepository for DynamoDBObjectRegistryRepository {
         offset: usize,
         limit: usize,
     ) -> RepositoryResult<Vec<ObjectRegistration>> {
+        let tenant_scoped = !ctx.is_admin() || !ctx.tenant_id().is_empty();
+        let namespace_scoped = !ctx.is_admin() || !ctx.namespace().is_empty();
+
+        if !tenant_scoped || !namespace_scoped {
+            let mut expression_values: HashMap<String, AttributeValue> = HashMap::new();
+            let mut filter_parts = Vec::new();
+
+            if tenant_scoped {
+                filter_parts.push("tenant_id = :tenant_id");
+                expression_values.insert(
+                    ":tenant_id".to_string(),
+                    AttributeValue::S(ctx.tenant_id().to_string()),
+                );
+            }
+            if namespace_scoped {
+                filter_parts.push("namespace = :namespace");
+                expression_values.insert(
+                    ":namespace".to_string(),
+                    AttributeValue::S(ctx.namespace().to_string()),
+                );
+            }
+            if let Some(ref obj_type) = filter.object_type {
+                filter_parts.push("object_type = :object_type");
+                expression_values.insert(
+                    ":object_type".to_string(),
+                    AttributeValue::N((obj_type.clone() as i32).to_string()),
+                );
+            }
+            if let Some(ref category) = filter.object_category {
+                filter_parts.push("object_category = :category");
+                expression_values
+                    .insert(":category".to_string(), AttributeValue::S(category.clone()));
+            }
+            if let Some(ref node_id) = filter.node_id {
+                filter_parts.push("node_id = :node_id");
+                expression_values
+                    .insert(":node_id".to_string(), AttributeValue::S(node_id.clone()));
+            }
+            if let Some(ref status) = filter.health_status {
+                filter_parts.push("health_status = :health_status");
+                expression_values.insert(
+                    ":health_status".to_string(),
+                    AttributeValue::N((status.clone() as i32).to_string()),
+                );
+            }
+            if let Some(before) = filter.last_heartbeat_before {
+                filter_parts.push("last_heartbeat < :hb_before");
+                expression_values.insert(
+                    ":hb_before".to_string(),
+                    AttributeValue::N(before.to_string()),
+                );
+            }
+            if let Some(after) = filter.last_heartbeat_after {
+                filter_parts.push("last_heartbeat > :hb_after");
+                expression_values.insert(
+                    ":hb_after".to_string(),
+                    AttributeValue::N(after.to_string()),
+                );
+            }
+
+            let mut scan = self.client.scan().table_name(&self.table_name);
+            if !filter_parts.is_empty() {
+                scan = scan
+                    .filter_expression(filter_parts.join(" AND "))
+                    .set_expression_attribute_values(Some(expression_values));
+            }
+            scan = scan.limit((offset + limit) as i32);
+
+            let result = scan
+                .send()
+                .await
+                .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+            let items = result.items();
+            let mut results = Vec::with_capacity(limit);
+
+            for (i, item) in items.iter().enumerate() {
+                if i < offset {
+                    continue;
+                }
+                if results.len() >= limit {
+                    break;
+                }
+
+                let registration = Self::parse_registration(item)?;
+
+                if let Some(ref required_labels) = filter.labels {
+                    if !required_labels
+                        .iter()
+                        .all(|l| registration.labels.contains(l))
+                    {
+                        continue;
+                    }
+                }
+                if let Some(ref required_caps) = filter.capabilities {
+                    if !required_caps
+                        .iter()
+                        .all(|c| registration.capabilities.contains(c))
+                    {
+                        continue;
+                    }
+                }
+
+                results.push(registration);
+            }
+
+            return Ok(results);
+        }
+
         let tenant_namespace = Self::make_tenant_namespace(ctx.tenant_id(), ctx.namespace());
 
         // Choose index based on filter
@@ -671,6 +780,71 @@ impl ObjectRegistryRepository for DynamoDBObjectRegistryRepository {
         // This is not efficient for large datasets but works for moderate sizes
         let results = self.discover(ctx, filter, 0, 10000).await?;
         Ok(results.len())
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), object_type = ?object_type))]
+    async fn list_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+        offset: usize,
+        limit: usize,
+    ) -> RepositoryResult<Vec<String>> {
+        if ctx.auth_enabled && !ctx.is_admin() {
+            return Ok((!ctx.tenant_id().is_empty())
+                .then(|| ctx.tenant_id().to_string())
+                .into_iter()
+                .collect());
+        }
+
+        let registrations = self
+            .discover(
+                ctx,
+                &DiscoverFilter {
+                    object_type: Some(object_type),
+                    ..Default::default()
+                },
+                0,
+                10_000,
+            )
+            .await?;
+        let mut tenant_ids = std::collections::BTreeSet::new();
+        for registration in registrations {
+            if !registration.tenant_id.is_empty() {
+                tenant_ids.insert(registration.tenant_id);
+            }
+        }
+        Ok(tenant_ids.into_iter().skip(offset).take(limit).collect())
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), object_type = ?object_type))]
+    async fn count_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+    ) -> RepositoryResult<usize> {
+        if ctx.auth_enabled && !ctx.is_admin() {
+            return Ok((!ctx.tenant_id().is_empty()) as usize);
+        }
+
+        let registrations = self
+            .discover(
+                ctx,
+                &DiscoverFilter {
+                    object_type: Some(object_type),
+                    ..Default::default()
+                },
+                0,
+                10_000,
+            )
+            .await?;
+        let mut tenant_ids = std::collections::BTreeSet::new();
+        for registration in registrations {
+            if !registration.tenant_id.is_empty() {
+                tenant_ids.insert(registration.tenant_id);
+            }
+        }
+        Ok(tenant_ids.len())
     }
 
     #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), object_id = %object_id))]

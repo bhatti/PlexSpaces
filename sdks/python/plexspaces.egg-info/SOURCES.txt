@@ -1,6 +1,7 @@
 README.md
 pyproject.toml
 plexspaces/__init__.py
+plexspaces/actor_id.py
 plexspaces/decorators.py
 plexspaces/host.py
 plexspaces/leader_worker.py
@@ -84,6 +85,7 @@ plexspaces/generated/plexspaces/workflow/v1/__init__.py
 plexspaces_cli/__init__.py
 plexspaces_cli/build.py
 tests/test_abstractions_contract.py
+tests/test_actor_id.py
 tests/test_decorators.py
 tests/test_host.py
 tests/test_host_collective.py

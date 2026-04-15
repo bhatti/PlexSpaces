@@ -326,7 +326,14 @@ mod tests {
 
     #[test]
     fn rejects_invalid_names() {
-        for name in ["", "-counter", "bad@name", "bad//name", "bad::name", "bad space"] {
+        for name in [
+            "",
+            "-counter",
+            "bad@name",
+            "bad//name",
+            "bad::name",
+            "bad space",
+        ] {
             let err = ActorId::new(name, "worker", "default", "node-1").unwrap_err();
             assert!(matches!(err, ActorIdError::InvalidName(_)));
         }

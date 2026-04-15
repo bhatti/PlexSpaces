@@ -1,18 +1,21 @@
 # PlexSpaces Dashboard
 
-Dashboard service and UI for monitoring PlexSpaces nodes, applications, actors, and workflows.
+Dashboard service and UI for monitoring PlexSpaces nodes, applications, tenants, and actors.
 
 ## Features
 
-- **Home Page**: Aggregated metrics across all nodes (clusters, nodes, tenants, apps, actors by type)
-- **Node Page**: Detailed metrics and data for individual nodes
-- **Real-time Updates**: HTMX polling for live data
+- **Home Page**: Aggregated metrics across all nodes with tenant and application inventories
+- **Node Page**: Detailed metrics and data for an individual node
+- **Application Page**: Full-page application view with namespace-first identity, application metrics, and filtered actors
+- **Tenant Page**: Full-page tenant view with application inventory and filtered actors
+- **Real-time Updates**: Embedded JavaScript polling for live data and chart refresh
 - **Search & Filter**: Filter by tenant, node, cluster with datetime support
 - **Pagination**: Support for large datasets
-- **Production Ready**: Complete error handling, validation, and test coverage
+- **Actor Actions**: View actor metrics and stop actors directly from node, tenant, and application tables
+- **Build Metadata**: Footer shows embedded PlexSpaces version, optional git commit, and last refresh time
 - **Multi-node Support**: Aggregate metrics from multiple nodes in a cluster
 - **Tenant Isolation**: Role-based filtering (admin vs non-admin)
-- **System Metrics**: CPU, memory, disk, network metrics via sysinfo
+- **System Metrics**: Process-local CPU and memory for node dashboard views, plus host/system metrics where explicitly requested
 - **Dependency Health Monitoring**: Monitor external dependencies (PostgreSQL, Redis, Kafka, MinIO, DynamoDB, SQS) with circuit breaker state
 
 ## Architecture
@@ -20,6 +23,7 @@ Dashboard service and UI for monitoring PlexSpaces nodes, applications, actors, 
 - **DashboardService**: gRPC service for aggregating metrics from local and remote nodes
 - **Dashboard Handlers**: HTTP handlers for serving HTML pages and static assets
 - **Static Assets**: HTML templates, CSS, and JavaScript embedded in binary
+- **Actor behavior filtering**: Dashboard actor views use runtime `behavior_kind` carried by live actor refs and filter it at query time rather than maintaining dashboard-specific behavior registries
 
 ## Usage
 
@@ -40,6 +44,8 @@ cargo build --release --bin plexspaces-node -p plexspaces-node --no-default-feat
 
 - `GET /` - Home page with aggregated metrics
 - `GET /node/{node_id}` - Node detail page with node-specific metrics
+- `GET /dashboard/application/{application_id}` - Application detail page
+- `GET /dashboard/tenant/{tenant_id}` - Tenant detail page
 - `GET /static/dashboard.css` - CSS styles
 - `GET /static/dashboard.js` - JavaScript for charts and interactivity
 - `GET /api/v1/dashboard/*` - Dashboard API endpoints (via gRPC-Gateway)
@@ -52,9 +58,24 @@ All endpoints support pagination via `PageRequest` and return `PageResponse`:
 - `GET /api/v1/dashboard/nodes` - List all nodes
 - `GET /api/v1/dashboard/node/{node_id}` - Get node dashboard details
 - `GET /api/v1/dashboard/applications` - List applications (with filters)
+- `GET /api/v1/dashboard/application/{application_id}` - Get one application plus its actor slice
+- `GET /api/v1/dashboard/tenants` - List visible tenants from application registrations
 - `GET /api/v1/dashboard/actors` - List actors (with filters)
-- `GET /api/v1/dashboard/workflows` - List workflows (optional service)
 - `GET /api/v1/dashboard/dependencies` - Get dependency health status with circuit breaker info
+- `GET /api/v1/dashboard/actor/{actor_id}` - Get actor detail for table actions
+- `POST /api/v1/dashboard/actor/{actor_id}/stop` - Stop a specific actor
+- `GET /api/v1/dashboard/system-info` - Get embedded version/build metadata for the footer
+
+`/api/v1/dashboard/actors` is the shared table source for node, tenant, and application pages. It supports:
+- `behavior_kind` for runtime behavior filtering (`builtin`, `custom`, `gen_server`, `gen_event`, `gen_state_machine`, `workflow`, or a custom behavior name)
+- `actor_type` for concrete implementation filtering
+- `status` for current lifecycle status filtering
+
+Exit status in the UI is derived from the actor lifecycle state so terminated and failed actors remain visible without separate workflow/FSM-specific endpoints.
+
+Nodes, applications, tenants, and actors all expose offset/limit pagination through the dashboard
+HTTP API. Tenant pagination is backed by distinct application-tenant discovery in the object
+registry instead of reconstructing tenant ids from other dashboard responses.
 
 ### Dependency Health Endpoint
 
@@ -75,8 +96,7 @@ This information is also included in the node dashboard response under `dependen
 
 ## Dependencies
 
-- HTMX - Dynamic content updates without page reloads
-- Alpine.js - Lightweight reactivity for UI components
+- Embedded HTML/CSS/JavaScript - Dashboard pages and table actions
 - uPlot - Fast time-series charts for metrics visualization
 
 ## Testing
@@ -228,10 +248,9 @@ Open your browser and navigate to:
 - **Node 2 Dashboard**: http://localhost:8002/ (if port-forwarded)
 
 You should see:
-- Home page with aggregated metrics (clusters, nodes, tenants, apps, actors)
-- Search and filter controls
-- Nodes table with links to node detail pages
-- Workflows table (empty initially)
+- Home page with aggregated metrics (clusters, nodes, tenants, applications)
+- Nodes, applications, and tenants tables with drill-down links
+- Node, application, and tenant pages with behavior-filtered actor tables
 
 ### Step 6: Deploy Test Application
 
@@ -745,7 +764,7 @@ kubectl port-forward -n plexspaces-test svc/plexspaces-node-1 8001:8001
 curl http://localhost:8001/api/v1/dashboard/summary | jq
 
 # Check logs (local)
-tail -f /tmp/plexspaces-node.log
+RUST_LOG=info cargo run --bin plexspaces-node 2>&1 | tee plexspaces-node.log
 
 # Check logs (Kubernetes)
 kubectl logs -n plexspaces-test deployment/plexspaces-node-1 --tail=50 -f
@@ -788,7 +807,3 @@ curl http://localhost:8001/api/v1/dashboard/dependencies
 - [Kubernetes Test Configs](../../tests/k8s/README.md)
 - [WASM Examples](../../examples/wasm_showcase/README.md)
 - [Dependency Monitoring Implementation](../../DEPENDENCY_MONITORING_IMPLEMENTATION.md) - Dependency health monitoring details
-
-
-
-

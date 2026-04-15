@@ -289,6 +289,7 @@ impl MockActorService {
 impl ActorService for MockActorService {
     async fn spawn_actor(
         &self,
+        _ctx: &RequestContext,
         _actor_id: &str,
         _actor_type: &str,
         _initial_state: Vec<u8>,
@@ -298,6 +299,7 @@ impl ActorService for MockActorService {
 
     async fn send(
         &self,
+        _ctx: &RequestContext,
         actor_id: &str,
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -762,7 +764,8 @@ async fn test_reply_with_sender_id() {
         ..Default::default()
     };
 
-    let result = actor_service.send(&original_msg.sender_id, reply_msg).await;
+    let ctx = RequestContext::new_without_auth(String::new(), "test-ns".to_string());
+    let result = actor_service.send(&ctx, &original_msg.sender_id, reply_msg).await;
     assert!(result.is_ok());
 
     let sent = sent_messages.lock().unwrap();

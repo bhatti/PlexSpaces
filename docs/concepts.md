@@ -113,6 +113,7 @@ let reply = actor_ref.ask(request, Duration::from_secs(5)).await?;
 | `#[gen_server_actor]` | GenServer | Request-reply (call by default) |
 | `#[event_actor]` | GenEvent | Fire-and-forget events (cast) |
 | `#[fsm_actor]` | GenStateMachine | State machine transitions |
+| `#[fsm_actor(states = ["a","b"], initial = "a")]` | GenStateMachine | FSM with explicit state list and initial state |
 | `#[workflow_actor]` | Workflow | Durable workflow orchestration |
 
 ### GenServer Example (SDK)

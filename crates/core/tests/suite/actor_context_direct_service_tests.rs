@@ -74,6 +74,7 @@ struct MockActorService {
 impl ActorService for MockActorService {
     async fn spawn_actor(
         &self,
+        _ctx: &RequestContext,
         _actor_id: &str,
         _actor_type: &str,
         _initial_state: Vec<u8>,
@@ -82,6 +83,7 @@ impl ActorService for MockActorService {
     }
     async fn send(
         &self,
+        _ctx: &RequestContext,
         actor_id: &str,
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -343,7 +345,8 @@ async fn test_reply_using_actor_service() {
     let reply_msg = create_test_message_with_correlation(vec![1, 2, 3], "corr-123");
 
     // Use actor_service directly
-    let result = actor_service.send("sender-actor", reply_msg).await;
+    let ctx = RequestContext::new_without_auth(String::new(), "test-ns".to_string());
+    let result = actor_service.send(&ctx, "sender-actor", reply_msg).await;
     assert!(result.is_ok());
 
     let sent = sent_messages.lock().unwrap();

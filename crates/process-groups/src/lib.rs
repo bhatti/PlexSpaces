@@ -996,7 +996,12 @@ mod tests {
         let registry = create_test_registry().await;
 
         let result = registry
-            .join_group(&test_ctx(), "nonexistent", &test_actor_id("actor-1"), vec![])
+            .join_group(
+                &test_ctx(),
+                "nonexistent",
+                &test_actor_id("actor-1"),
+                vec![],
+            )
             .await;
         assert!(matches!(result, Err(ProcessGroupError::GroupNotFound(_))));
     }
@@ -1664,11 +1669,7 @@ mod tests {
             .unwrap();
 
         let result = registry
-            .leave_group(
-                &ctx,
-                "test-group",
-                &test_actor_id("nonexistent-actor"),
-            )
+            .leave_group(&ctx, "test-group", &test_actor_id("nonexistent-actor"))
             .await;
         assert!(matches!(
             result,

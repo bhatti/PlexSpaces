@@ -1302,9 +1302,7 @@ impl Supervisor {
 
         if failed_index.is_none() {
             drop(children);
-            return Err(SupervisorError::ChildNotFound(
-                failed_id.to_string().into(),
-            ));
+            return Err(SupervisorError::ChildNotFound(failed_id.to_string().into()));
         }
 
         let failed_idx = failed_index.unwrap();
@@ -2287,7 +2285,7 @@ impl Supervisor {
                             ))
                         })?,
                     )
-                        .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?,
+                    .map_err(|e| SupervisorError::ActorCreationFailed(e.to_string()))?,
                     handle: Some(handle),
                     restart_count: 0,
                     last_restart: None,
@@ -2304,8 +2302,8 @@ impl Supervisor {
                 if let Some(service_locator) = &self.service_locator {
                     if let Some(registry) = service_locator.actor_registry().await {
                         let supervisor_id = ActorId::from(self.id.clone());
-                        let child_id =
-                            ActorId::from_canonical(&spec.actor_or_supervisor_id).map_err(|e| {
+                        let child_id = ActorId::from_canonical(&spec.actor_or_supervisor_id)
+                            .map_err(|e| {
                                 SupervisorError::ActorCreationFailed(format!(
                                     "invalid child actor id '{}': {}",
                                     spec.actor_or_supervisor_id, e
@@ -2873,8 +2871,8 @@ impl SupervisorBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::ActorId;
     use plexspaces_behavior::MockBehavior;
+    use plexspaces_core::ActorId;
     use plexspaces_mailbox::{Mailbox, MailboxConfig};
     use plexspaces_node::create_default_service_locator;
 
@@ -2972,8 +2970,8 @@ mod tests {
             });
 
         // Create ActorRef for the sync factory wrapper
-        let actor_ref = plexspaces_core::ActorRef::new(test_actor_id(&id))
-            .expect("Failed to create actor ref");
+        let actor_ref =
+            plexspaces_core::ActorRef::new(test_actor_id(&id)).expect("Failed to create actor ref");
 
         // Convert RestartPolicy to RestartStrategy
         let restart_strategy = match restart {
@@ -3051,10 +3049,7 @@ mod tests {
         .await;
 
         // Add a child
-        let spec = create_child_spec_sync(
-            "removable-child".to_string(),
-            RestartPolicy::Permanent,
-        );
+        let spec = create_child_spec_sync("removable-child".to_string(), RestartPolicy::Permanent);
 
         supervisor.add_child(spec).await.unwrap();
         let _ = event_rx.recv().await; // Consume ChildStarted event
@@ -3088,9 +3083,7 @@ mod tests {
         .await;
 
         // Try to remove a child that doesn't exist
-        let result = supervisor
-            .remove_child(&test_actor_id("nonexistent"))
-            .await;
+        let result = supervisor.remove_child(&test_actor_id("nonexistent")).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             SupervisorError::ChildNotFound(_) => (),
@@ -3110,10 +3103,7 @@ mod tests {
         .await;
 
         // Add a child
-        let spec = create_child_spec_sync(
-            "failing-child".to_string(),
-            RestartPolicy::Permanent,
-        );
+        let spec = create_child_spec_sync("failing-child".to_string(), RestartPolicy::Permanent);
 
         supervisor.add_child(spec).await.unwrap();
         let _ = event_rx.recv().await; // Consume ChildStarted
@@ -3201,10 +3191,7 @@ mod tests {
         )
         .await;
 
-        let spec = create_child_spec_sync(
-            "crash-child".to_string(),
-            RestartPolicy::Permanent,
-        );
+        let spec = create_child_spec_sync("crash-child".to_string(), RestartPolicy::Permanent);
 
         supervisor.add_child(spec).await.unwrap();
         let _ = event_rx.recv().await; // ChildStarted
@@ -3212,11 +3199,7 @@ mod tests {
         // Trigger failures until max restarts exceeded
         for i in 0..3 {
             let result = supervisor
-                .handle_failure(
-                    &test_actor_id("crash-child"),
-                    format!("crash {}", i),
-                    None,
-                )
+                .handle_failure(&test_actor_id("crash-child"), format!("crash {}", i), None)
                 .await;
 
             let _ = event_rx.recv().await; // ChildFailed
@@ -3256,10 +3239,7 @@ mod tests {
         )
         .await;
 
-        let spec = create_child_spec_sync(
-            "stats-child".to_string(),
-            RestartPolicy::Permanent,
-        );
+        let spec = create_child_spec_sync("stats-child".to_string(), RestartPolicy::Permanent);
 
         supervisor.add_child(spec).await.unwrap();
         let _ = event_rx.recv().await; // ChildStarted
@@ -3407,11 +3387,7 @@ mod tests {
 
         // Trigger failure on child-1
         supervisor
-            .handle_failure(
-                &test_actor_id("child-1"),
-                "test error".to_string(),
-                None,
-            )
+            .handle_failure(&test_actor_id("child-1"), "test error".to_string(), None)
             .await
             .unwrap();
 
@@ -3465,11 +3441,7 @@ mod tests {
 
         // Trigger failure on child-1
         supervisor
-            .handle_failure(
-                &test_actor_id("child-1"),
-                "test error".to_string(),
-                None,
-            )
+            .handle_failure(&test_actor_id("child-1"), "test error".to_string(), None)
             .await
             .unwrap();
 
@@ -3509,10 +3481,7 @@ mod tests {
         .await;
 
         // Add a child
-        let spec = create_child_spec_sync(
-            "adaptive-child".to_string(),
-            RestartPolicy::Permanent,
-        );
+        let spec = create_child_spec_sync("adaptive-child".to_string(), RestartPolicy::Permanent);
 
         supervisor.add_child(spec).await.unwrap();
         let _ = event_rx.recv().await; // Consume ChildStarted
@@ -3604,21 +3573,14 @@ mod tests {
         )
         .await;
 
-        let spec = create_child_spec_sync(
-            "window-child".to_string(),
-            RestartPolicy::Permanent,
-        );
+        let spec = create_child_spec_sync("window-child".to_string(), RestartPolicy::Permanent);
 
         supervisor.add_child(spec).await.unwrap();
         let _ = event_rx.recv().await; // ChildStarted
 
         // First restart
         supervisor
-            .handle_failure(
-                &test_actor_id("window-child"),
-                "error 1".to_string(),
-                None,
-            )
+            .handle_failure(&test_actor_id("window-child"), "error 1".to_string(), None)
             .await
             .unwrap();
         let _ = event_rx.recv().await; // ChildFailed
@@ -3626,11 +3588,7 @@ mod tests {
 
         // Second restart (within window)
         supervisor
-            .handle_failure(
-                &test_actor_id("window-child"),
-                "error 2".to_string(),
-                None,
-            )
+            .handle_failure(&test_actor_id("window-child"), "error 2".to_string(), None)
             .await
             .unwrap();
         let _ = event_rx.recv().await; // ChildFailed
@@ -3641,11 +3599,7 @@ mod tests {
 
         // Third restart (outside window - should reset counter)
         let result = supervisor
-            .handle_failure(
-                &test_actor_id("window-child"),
-                "error 3".to_string(),
-                None,
-            )
+            .handle_failure(&test_actor_id("window-child"), "error 3".to_string(), None)
             .await;
 
         // Should succeed because counter was reset

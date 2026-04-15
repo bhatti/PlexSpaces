@@ -76,9 +76,7 @@ impl GenServer for TestActor {
 #[tokio::test]
 async fn test_span_cloning_panic_reproduction() {
     // Set up tracing to ensure spans are created
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("warn")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
     let node = Arc::new(
         NodeBuilder::new("test-node")
@@ -174,9 +172,7 @@ async fn test_span_cloning_panic_reproduction() {
 /// simulating multiple concurrent gRPC requests.
 #[tokio::test]
 async fn test_span_cloning_panic_reproduction_concurrent() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("warn")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
     let node = Arc::new(
         NodeBuilder::new("test-node")

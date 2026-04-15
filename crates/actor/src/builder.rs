@@ -745,26 +745,6 @@ impl ActorBuilder {
         self.tenant_id = ctx.tenant_id().to_string();
         self.namespace = ctx.namespace().to_string();
 
-        // CRITICAL: Clone tenant_id before self is moved by build()
-        let tenant_id_for_ref = self.tenant_id.clone();
-        let namespace_for_ref = ctx.namespace().to_string();
-
-        let behavior_type = self.behavior.behavior_type();
-        let actor_type = match behavior_type {
-            plexspaces_core::BehaviorType::GenServer => "gen_server".to_string(),
-            plexspaces_core::BehaviorType::GenEvent => "gen_event".to_string(),
-            plexspaces_core::BehaviorType::GenStateMachine => "gen_state_machine".to_string(),
-            plexspaces_core::BehaviorType::Workflow => "workflow".to_string(),
-            plexspaces_core::BehaviorType::Custom(s) => s,
-        };
-
-        // Build the actor (facets are attached during build)
-        let mut actor = self.build().await?;
-
-        // Extract actor ID and mailbox before spawning (needed for ActorRef creation)
-        let actor_id = actor.id().clone();
-        let mailbox = actor.mailbox().clone();
-
         // Get required services from ServiceLocator
         let registry = service_locator.actor_registry().await.ok_or_else(|| {
             "ActorRegistry not found in ServiceLocator. Ensure Node::start() has been called."
@@ -776,16 +756,21 @@ impl ActorBuilder {
             .ok_or_else(|| "FacetManager not found in ServiceLocator".to_string())?;
         let facet_manager = facet_manager_wrapper.inner_clone();
 
-        // Get local node ID for actor ID normalization
+        // Build with the local node id up front so the actor registers itself exactly once with
+        // the canonical runtime identity and behavior metadata.
         let local_node_id = registry.local_node_id();
+        self.node_id = Some(local_node_id.to_string());
 
-        let actor_id = if actor_id.node_id() == local_node_id {
-            actor_id
-        } else {
-            actor_id.with_node_id(local_node_id).map_err(|e| {
-                format!("failed to normalize actor id {} to local node: {}", actor_id, e)
-            })?
-        };
+        // CRITICAL: Clone tenant_id before self is moved by build()
+        let tenant_id_for_ref = self.tenant_id.clone();
+        let namespace_for_ref = ctx.namespace().to_string();
+
+        // Build the actor (facets are attached during build)
+        let mut actor = self.build().await?;
+
+        // Extract actor ID and mailbox before spawning (needed for ActorRef creation)
+        let actor_id = actor.id().clone();
+        let mailbox = actor.mailbox().clone();
 
         // Create ActorContext with proper node ID
         let actor_context = plexspaces_core::ActorContext::new(
@@ -813,41 +798,19 @@ impl ActorBuilder {
         let facets_clone = actor.facets().clone();
         facet_manager.store_facets(&actor_id, facets_clone).await;
 
-        // Create ActorRef (implements MessageSender)
-        // CRITICAL: Pass tenant_id from ActorBuilder to ActorRef
         use crate::ActorRef;
-        let actor_ref_impl = ActorRef::local(
-            actor_id.clone(),
-            tenant_id_for_ref.clone(), // CRITICAL: tenant_id from ActorBuilder (from API)
-            namespace_for_ref.clone(),
-            mailbox.clone(),
-            service_locator.clone(),
-        );
-        let actor_ref: std::sync::Arc<dyn plexspaces_core::MessageSender> =
-            std::sync::Arc::new(actor_ref_impl.clone());
 
-        // Start actor (calls init() internally, then registers in ActorRegistry)
+        // Start actor (init → on_activate → background message loop)
         let _join_handle = actor
             .start()
             .await
             .map_err(|e| format!("Failed to start actor: {}", e))?;
 
-        // Register actor in registry
-        registry
-            .register_actor(
-                ctx,
-                actor_id.clone(),
-                actor_ref.clone(),
-                actor_type,
-                actor.context().config.clone(),
-                Some(std::sync::Arc::new(actor)
-                    as std::sync::Arc<dyn plexspaces_core::ActorStateHandle>),
-                None, // behavior_kind not available from builder (actor registers with kind in start())
-            )
-            .await;
+        // Register in ActorRegistry so discovery, routing, and lookup all work.
+        // This mirrors what actor_factory_impl and supervisor do after start().
+        actor.register_started(&registry).await;
 
         // Return ActorRef
-        // CRITICAL: Pass tenant_id from ActorBuilder to ActorRef
         Ok(ActorRef::local(
             actor_id,
             tenant_id_for_ref,
@@ -1234,9 +1197,13 @@ mod tests {
         let ctx = RequestContext::new_without_auth("test-tenant".to_string(), "test".to_string());
         let mut actor_refs = Vec::new();
         for i in 0..5 {
-            let actor_id =
-                ActorId::new(format!("multi-actor-{i}"), "test", "test", "test-node-multi-spawn")
-                    .unwrap();
+            let actor_id = ActorId::new(
+                format!("multi-actor-{i}"),
+                "test",
+                "test",
+                "test-node-multi-spawn",
+            )
+            .unwrap();
             let actor_ref = ActorBuilder::new(Box::new(TestBehavior))
                 .with_id(actor_id)
                 .with_namespace("test".to_string())
@@ -1257,9 +1224,13 @@ mod tests {
             .expect("ActorRegistry not found");
 
         for i in 0..5 {
-            let actor_id =
-                ActorId::new(format!("multi-actor-{i}"), "test", "test", "test-node-multi-spawn")
-                    .unwrap();
+            let actor_id = ActorId::new(
+                format!("multi-actor-{i}"),
+                "test",
+                "test",
+                "test-node-multi-spawn",
+            )
+            .unwrap();
             // Retry lookup with timeout (actor registration is async)
             let mut found = None;
             for _ in 0..10 {

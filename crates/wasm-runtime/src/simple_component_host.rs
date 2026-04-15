@@ -1729,6 +1729,8 @@ mod tests {
                 ApplicationInfo {
                     application_id: application_id.to_string(),
                     name: application_id.to_string(),
+                    tenant_id: String::new(),
+                    namespace: application_id.to_string(),
                     version: "1.0.0".to_string(),
                     status: 2,
                     deployed_at: None,

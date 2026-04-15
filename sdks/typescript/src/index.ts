@@ -31,3 +31,4 @@ export {
   LeaderWorkerClient,
   listWorkerNodeIds,
 } from "./leader_worker.js";
+export { ActorID } from "./actor_id.js";

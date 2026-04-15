@@ -33,9 +33,9 @@ use plexspaces_core::facet_service_wrapper::{
 };
 use plexspaces_core::{
     ActorRegistry, ActorService, BehaviorRegistry, ChannelService, GrpcConnectionManager,
-    JournalStorage, MetricsPrometheusRenderer, ObjectRegistry,
-    ProcessGroupService, ReplyWaiterRegistry, RequestContext, Service, ServiceLocator,
-    TupleSpaceProvider, VirtualActorManager,
+    JournalStorage, MetricsPrometheusRenderer, ObjectRegistry, ProcessGroupService,
+    ReplyWaiterRegistry, RequestContext, Service, ServiceLocator, TupleSpaceProvider,
+    VirtualActorManager,
 };
 use std::sync::Arc;
 

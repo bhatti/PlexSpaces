@@ -31,9 +31,9 @@
 //! 3. Verify isolation (failures don't propagate unnecessarily)
 //! 4. Verify escalation (failures propagate when appropriate)
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::sleep;
 
 use plexspaces_actor::child_spec::{ChildType as CSChildType, RestartStrategy};
 use plexspaces_actor::supervisor::{
@@ -65,7 +65,11 @@ async fn create_supervisor_with_locator(
 ) -> (Supervisor, tokio::sync::mpsc::Receiver<SupervisorEvent>) {
     use plexspaces_node::create_default_service_locator;
     let service_locator = create_default_service_locator(None, None).await;
-    Supervisor::new(actor_id_from_legacy_test_id(&id).to_string(), strategy, service_locator)
+    Supervisor::new(
+        actor_id_from_legacy_test_id(&id).to_string(),
+        strategy,
+        service_locator,
+    )
 }
 
 /// Helper function to create a ChildSpec with sync factory
@@ -454,59 +458,59 @@ async fn test_failure_isolation_across_branches() {
 /// - Shutdown event propagation
 #[tokio::test]
 async fn test_cascading_shutdown() {
-    // Create root supervisor
-    let (mut root_supervisor, mut root_events) = create_supervisor_with_locator(
+    // One ServiceLocator / node init for the whole tree (same pattern as test_dynamic_tree_modification).
+    use plexspaces_node::create_default_service_locator;
+    let service_locator = create_default_service_locator(None, None).await;
+
+    let (mut root_supervisor, mut root_events) = Supervisor::new(
         test_actor_id("root-supervisor").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
         },
-    )
-    .await;
+        service_locator.clone(),
+    );
 
-    // Create 2 mid-level supervisors
-    let (mid1_supervisor, mid1_events) = create_supervisor_with_locator(
-        "mid-supervisor-1".to_string(),
+    let (mid1_supervisor, mid1_events) = Supervisor::new(
+        test_actor_id("mid-supervisor-1").to_string(),
         SupervisionStrategy::OneForOne {
             max_restarts: 3,
             within_seconds: 60,
         },
-    )
-    .await;
+        service_locator.clone(),
+    );
 
-    let (mid2_supervisor, mid2_events) = create_supervisor_with_locator(
-        "mid-supervisor-2".to_string(),
+    let (mid2_supervisor, mid2_events) = Supervisor::new(
+        test_actor_id("mid-supervisor-2").to_string(),
         SupervisionStrategy::OneForAll {
             max_restarts: 3,
             within_seconds: 60,
         },
-    )
-    .await;
+        service_locator.clone(),
+    );
 
-    let journal = Arc::new(MemoryJournal::new());
-
-    // Add actors to mid-level supervisors
     for i in 1..=2 {
         let actor_id = test_actor_id(&format!("actor-{}", i)).to_string();
-        let j = journal.clone();
-        let spec = create_test_actor(actor_id.clone());
+        let spec = create_test_actor(actor_id);
         mid1_supervisor.add_child(spec).await.unwrap();
     }
 
     for i in 3..=4 {
         let actor_id = test_actor_id(&format!("actor-{}", i)).to_string();
-        let spec = create_test_actor(actor_id.clone());
+        let spec = create_test_actor(actor_id);
         mid2_supervisor.add_child(spec).await.unwrap();
     }
 
-    // Add mid-level supervisors to root
+    // Per-child supervisor shutdown cap (recursive shutdown); keep tests fast.
+    let supervisor_shutdown_timeout_ms: u64 = 1500;
+
     root_supervisor
         .add_supervisor_child(
             mid1_supervisor,
             mid1_events,
             plexspaces_proto::supervision::v1::EventPropagation::EventPropagationForwardAll,
             RestartPolicy::Permanent,
-            Some(5000),
+            Some(supervisor_shutdown_timeout_ms),
         )
         .await
         .unwrap();
@@ -517,95 +521,57 @@ async fn test_cascading_shutdown() {
             mid2_events,
             plexspaces_proto::supervision::v1::EventPropagation::EventPropagationForwardAll,
             RestartPolicy::Permanent,
-            Some(5000),
+            Some(supervisor_shutdown_timeout_ms),
         )
         .await
         .unwrap();
 
-    println!("✅ Three-level tree created");
-
-    // Consume initial ChildStarted events for supervisors
-    let mut supervisor_started = 0;
-    while supervisor_started < 2 {
-        if let Some(event) = root_events.recv().await {
-            match event {
-                SupervisorEvent::ChildStarted(id) => {
-                    let id_str = id.to_string();
-                    if id_str == "mid-supervisor-1" || id_str == "mid-supervisor-2" {
-                        supervisor_started += 1;
-                        println!("✅ Supervisor {} started", id_str);
-                    }
-                }
-                _ => {
-                    // Consume other events (e.g., forwarded ChildStarted for actors)
-                }
+    // Supervisor IDs are canonical strings; compare logical names (see test_three_level_supervision_tree).
+    for expected in ["mid-supervisor-1", "mid-supervisor-2"] {
+        let event = root_events
+            .recv()
+            .await
+            .expect("ChildStarted for mid supervisor");
+        match event {
+            SupervisorEvent::ChildStarted(id) => {
+                assert_eq!(id.name(), expected, "mid supervisor start order");
             }
+            other => panic!("expected ChildStarted for {expected}, got {other:?}"),
         }
     }
 
-    // Consume any remaining forwarded events from child supervisors (ChildStarted for actors)
-    // These are forwarded from mid-level supervisors when they add actors
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    while let Ok(Some(_)) =
-        tokio::time::timeout(tokio::time::Duration::from_millis(50), root_events.recv()).await
-    {
-        // Drain any remaining forwarded events
-    }
-
-    // Shutdown root supervisor (should cascade to all children)
     root_supervisor.shutdown().await.unwrap();
-    println!("✅ Root supervisor shutdown completed");
 
-    // Verify ChildStopped events for both supervisors
-    // Events may arrive in reverse order due to shutdown order
-    // Use timeout to avoid hanging if events don't arrive
-    let mut stopped_ids = Vec::new();
-    let timeout = tokio::time::Duration::from_secs(5);
-    let mut attempts = 0;
-    const MAX_ATTEMPTS: usize = 10; // Allow for forwarded events from child supervisors
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let mut stopped = HashSet::new();
 
-    while stopped_ids.len() < 2 && attempts < MAX_ATTEMPTS {
-        match tokio::time::timeout(timeout, root_events.recv()).await {
+    while stopped.len() < 2 {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            panic!(
+                "timed out waiting for ChildStopped for mid supervisors; got {:?}",
+                stopped
+            );
+        }
+
+        match tokio::time::timeout(remaining, root_events.recv()).await {
             Ok(Some(SupervisorEvent::ChildStopped(id))) => {
-                let id_str = id.to_string();
-                // Only count supervisor IDs, ignore forwarded actor events
-                if id_str == "mid-supervisor-1" || id_str == "mid-supervisor-2" {
-                    stopped_ids.push(id_str.clone());
-                    println!("✅ Received ChildStopped for supervisor {}", id_str);
-                } else {
-                    println!("⚠️ Received ChildStopped for non-supervisor: {}", id_str);
+                let name = id.name();
+                if name == "mid-supervisor-1" || name == "mid-supervisor-2" {
+                    stopped.insert(name.to_string());
                 }
             }
-            Ok(Some(other)) => {
-                println!("⚠️ Received unexpected event: {:?}", other);
-            }
-            Ok(None) => {
-                println!("⚠️ Event channel closed");
-                break;
-            }
-            Err(_) => {
-                println!("⚠️ Timeout waiting for events");
-                break;
-            }
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("event channel closed before both mid supervisors stopped"),
+            Err(_) => panic!(
+                "timed out waiting for ChildStopped; expected both mid supervisors, got {:?}",
+                stopped
+            ),
         }
-        attempts += 1;
     }
 
-    println!("📊 Collected stopped_ids: {:?}", stopped_ids);
-
-    // Verify both supervisors were stopped
-    assert!(
-        stopped_ids.contains(&"mid-supervisor-1".to_string()),
-        "Expected mid-supervisor-1 in stopped_ids, got: {:?}",
-        stopped_ids
-    );
-    assert!(
-        stopped_ids.contains(&"mid-supervisor-2".to_string()),
-        "Expected mid-supervisor-2 in stopped_ids, got: {:?}",
-        stopped_ids
-    );
-
-    println!("✅ Test passed: Cascading shutdown worked correctly");
+    assert!(stopped.contains("mid-supervisor-1"));
+    assert!(stopped.contains("mid-supervisor-2"));
 }
 
 // ============================================================================

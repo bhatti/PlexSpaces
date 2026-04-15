@@ -283,9 +283,7 @@ async fn test_one_for_one_restart() {
                 SupervisorEvent::ChildFailed(id, _) if id.as_str() == "faulty-worker" => {
                     failed_event_seen = true;
                 }
-                SupervisorEvent::ChildRestarted(id, _)
-                    if id.as_str() == "faulty-worker" =>
-                {
+                SupervisorEvent::ChildRestarted(id, _) if id.as_str() == "faulty-worker" => {
                     restarted_event_seen = true;
                 }
                 SupervisorEvent::ChildFailed(id, _) if id.as_str() == "stable-worker" => {

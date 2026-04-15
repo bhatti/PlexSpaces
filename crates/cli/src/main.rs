@@ -249,8 +249,7 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+async fn async_main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -343,4 +342,12 @@ async fn main() -> Result<()> {
                 .await
         }
     }
+}
+
+fn main() -> Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("plexspaces-runtime-worker")
+        .build()?
+        .block_on(async_main())
 }

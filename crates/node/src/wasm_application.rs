@@ -207,7 +207,11 @@ impl Actor for WasmActorBehavior {
                         ..Default::default()
                     };
                     if let Some(actor_service) = ctx.service_locator.get_actor_service().await {
-                        if let Err(e) = actor_service.send(&message.sender_id, reply_message).await
+                        let reply_ctx = plexspaces_core::RequestContext::new_without_auth(
+                            ctx.tenant_id.clone(),
+                            ctx.namespace.clone(),
+                        );
+                        if let Err(e) = actor_service.send(&reply_ctx, &message.sender_id, reply_message).await
                         {
                             tracing::warn!(
                                 request_message_id = %message_id,
@@ -254,8 +258,12 @@ impl Actor for WasmActorBehavior {
                         ..Default::default()
                     };
                     if let Some(actor_service) = ctx.service_locator.get_actor_service().await {
+                        let reply_ctx = plexspaces_core::RequestContext::new_without_auth(
+                            ctx.tenant_id.clone(),
+                            ctx.namespace.clone(),
+                        );
                         if let Err(send_e) =
-                            actor_service.send(&message.sender_id, reply_message).await
+                            actor_service.send(&reply_ctx, &message.sender_id, reply_message).await
                         {
                             tracing::warn!(error = %send_e, "Failed to send error reply via ActorService::send()");
                         }
@@ -646,20 +654,21 @@ impl WasmApplication {
         let object_registry: Option<Arc<dyn plexspaces_core::ObjectRegistry>> =
             service_locator.get_object_registry().await;
 
-        // Get JournalStorage - use SQLite file-based storage for durability
-        //
-        // Note: Env var handling is centralized in config_manager::initialize()
-        // TODO: Get database URL from ReleaseSpec instead of env vars
-        // For now, keeping env var fallback for backward compatibility until
-        // this function receives the initialized ReleaseSpec
+        // Get JournalStorage from the node runtime config so WASM durability uses the same
+        // shared database as the rest of the node. Env vars remain a fallback only when the
+        // runtime config is unavailable.
         use plexspaces_journaling::JournalStorage;
         let journal_storage: Option<Arc<dyn JournalStorage>> = {
-            let journal_db_path = std::env::var("PLEXSPACES_DATABASE_URL")
-                .or_else(|_| std::env::var("PLEXSPACES_JOURNAL_DB"))
-                .unwrap_or_else(|_| {
-                    // Use node ID to support multiple nodes on same machine
-                    let node_id = node.id().replace(['@', '/', '\\', ':'], "-");
-                    format!("/tmp/plexspaces-{}.db", node_id)
+            let journal_db_path = service_locator
+                .get_runtime_config()
+                .await
+                .and_then(|runtime| runtime.db.map(|db| db.connection_string))
+                .filter(|value| !value.is_empty())
+                .or_else(|| std::env::var("PLEXSPACES_DATABASE_URL").ok())
+                .or_else(|| std::env::var("PLEXSPACES_JOURNAL_DB").ok())
+                .unwrap_or_else(|| {
+                    let base_dir = plexspaces_common::config_manager::get_default_base_dir();
+                    plexspaces_common::config_manager::default_shared_db_url(&base_dir)
                 });
 
             match plexspaces_journaling::SqliteJournalStorage::new(&journal_db_path).await {

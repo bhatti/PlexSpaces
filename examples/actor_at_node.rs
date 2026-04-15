@@ -101,7 +101,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .spawn(&ctx, node1.service_locator().clone())
         .await?;
 
-    println!("✅ counter spawned with canonical ID: {}", counter1_ref.id());
+    println!(
+        "✅ counter spawned with canonical ID: {}",
+        counter1_ref.id()
+    );
 
     // Create a minimal ActorContext for sending messages
     // In a real actor, you would get this from handle_message() parameter
@@ -131,7 +134,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .send(&counter1_ref.id(), msg1)
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
-    println!("   ✅ Sent 'increment' to {} via ActorService.send()", counter1_ref.id());
+    println!(
+        "   ✅ Sent 'increment' to {} via ActorService.send()",
+        counter1_ref.id()
+    );
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -153,7 +159,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .await
         .ok_or("ActorService not available")?;
     actor_service.send(&counter1_ref.id(), msg3).await?;
-    println!("   ✅ Sent 'get' to {} via ActorService.send()", counter1_ref.id());
+    println!(
+        "   ✅ Sent 'get' to {} via ActorService.send()",
+        counter1_ref.id()
+    );
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -164,7 +173,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .send(&counter1_ref.id(), msg4)
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
-    println!("   ✅ Sent 'increment' to {} via ActorService.send()", counter1_ref.id());
+    println!(
+        "   ✅ Sent 'increment' to {} via ActorService.send()",
+        counter1_ref.id()
+    );
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -175,7 +187,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .send(&counter1_ref.id(), msg5)
         .await
         .map_err(|e| format!("Failed to send message: {}", e))?;
-    println!("   ✅ Sent 'get' to {} via ActorService.send()", counter1_ref.id());
+    println!(
+        "   ✅ Sent 'get' to {} via ActorService.send()",
+        counter1_ref.id()
+    );
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 

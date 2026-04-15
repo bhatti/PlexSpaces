@@ -94,6 +94,43 @@ fn parse_name_attr(attr: TokenStream) -> Option<String> {
     None
 }
 
+/// Extract a string-list attribute, e.g. `states = ["a", "b"]`, returning the items.
+fn parse_string_list_attr(attr: TokenStream, key: &str) -> Vec<String> {
+    let attr_str = attr.to_string();
+    if !attr_str.contains(key) {
+        return vec![];
+    }
+    // Find the key, then the first '[' after it
+    if let Some(key_pos) = attr_str.find(key) {
+        let after_key = &attr_str[key_pos + key.len()..];
+        if let Some(bracket_start) = after_key.find('[') {
+            if let Some(bracket_end) = after_key.find(']') {
+                let items_str = &after_key[bracket_start + 1..bracket_end];
+                return items_str
+                    .split(',')
+                    .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        }
+    }
+    vec![]
+}
+
+/// Extract a single quoted string attribute, e.g. `initial = "idle"`.
+fn parse_string_attr(attr: TokenStream, key: &str) -> Option<String> {
+    let attr_str = attr.to_string();
+    if let Some(key_pos) = attr_str.find(key) {
+        let after_key = &attr_str[key_pos + key.len()..];
+        if let Some(start) = after_key.find('"') {
+            if let Some(end) = after_key[start + 1..].find('"') {
+                return Some(after_key[start + 1..start + 1 + end].to_string());
+            }
+        }
+    }
+    None
+}
+
 fn attr_contains_mode(attr: &TokenStream, needle: &str) -> bool {
     let attr_str = attr.to_string();
     attr_str.contains(needle)
@@ -370,6 +407,12 @@ pub fn event_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// #[fsm_actor(facets = ["durability"])]
 /// struct DurableWorkflow { ... }
 ///
+/// #[fsm_actor(states = ["idle", "running", "done"], initial = "idle")]
+/// struct TrackedWorkflow { ... }
+///
+/// #[fsm_actor(states = ["idle", "running"], initial = "idle", facets = ["durability"])]
+/// struct DurableTrackedWorkflow { ... }
+///
 /// #[fsm_actor(name = "order_workflow")]
 /// struct OrderWorkflowActor { ... }
 /// ```
@@ -378,6 +421,8 @@ pub fn event_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// - `impl Actor` with `behavior_type() = GenStateMachine`
 /// - `handle_message` dispatches to state handlers
 /// - `const FACETS` with declared facets
+/// - `const FSM_STATES` with valid state names (if `states` provided)
+/// - `const FSM_INITIAL` with the initial state name (if `initial` provided)
 /// - Use `#[plexspaces_handlers(fsm)]` on impl block to generate dispatch
 ///
 /// ## Handler Semantics
@@ -390,7 +435,9 @@ pub fn fsm_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemStruct);
     let name = &input.ident;
     let facets = parse_facets(attr.clone());
-    let custom_name = parse_name_attr(attr);
+    let custom_name = parse_name_attr(attr.clone());
+    let fsm_states = parse_string_list_attr(attr.clone(), "states");
+    let fsm_initial = parse_string_attr(attr.clone(), "initial");
 
     let facets_impl = gen_facets_const(name, &facets);
 
@@ -401,10 +448,37 @@ pub fn fsm_actor(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote! { plexspaces_core::BehaviorType::GenStateMachine }
     };
 
+    // Generate FSM_STATES const if states provided
+    let fsm_states_impl = if !fsm_states.is_empty() {
+        let state_strs: Vec<_> = fsm_states.iter().map(|s| quote! { #s }).collect();
+        quote! {
+            impl #name {
+                /// Valid FSM states declared for this actor.
+                pub const FSM_STATES: &'static [&'static str] = &[#(#state_strs),*];
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    // Generate FSM_INITIAL const if initial provided
+    let fsm_initial_impl = if let Some(ref initial) = fsm_initial {
+        quote! {
+            impl #name {
+                /// Initial FSM state declared for this actor.
+                pub const FSM_INITIAL: &'static str = #initial;
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let expanded = quote! {
         #input
 
         #facets_impl
+        #fsm_states_impl
+        #fsm_initial_impl
 
         #[plexspaces_sdk::async_trait]
         impl plexspaces_core::Actor for #name {

@@ -382,7 +382,15 @@ where
 {
     let declared = B::declared_facets();
     let facets = create_facets(declared, &serde_json::json!({}), service_locator.clone())?;
-    spawn_with_facets(ctx, service_locator, actor_name, namespace, behavior, facets).await
+    spawn_with_facets(
+        ctx,
+        service_locator,
+        actor_name,
+        namespace,
+        behavior,
+        facets,
+    )
+    .await
 }
 
 /// Spawn a durable actor using its declared facets with storage backend.
@@ -426,7 +434,15 @@ where
         Some(storage),
         service_locator.clone(),
     )?;
-    spawn_with_facets(ctx, service_locator, actor_name, namespace, behavior, facets).await
+    spawn_with_facets(
+        ctx,
+        service_locator,
+        actor_name,
+        namespace,
+        behavior,
+        facets,
+    )
+    .await
 }
 
 /// Spawn an actor with explicit facets (low-level API).

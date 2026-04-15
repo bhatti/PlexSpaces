@@ -552,6 +552,8 @@ mod list_json_tests {
             applications: vec![ApplicationInfo {
                 application_id: "app-1".into(),
                 name: "my-app".into(),
+                tenant_id: "tenant-a".into(),
+                namespace: "my-app".into(),
                 version: "1.0.0".into(),
                 status: 0,
                 deployed_at: None,
@@ -573,6 +575,8 @@ mod list_json_tests {
             applications: vec![ApplicationInfo {
                 application_id: "a".into(),
                 name: "n".into(),
+                tenant_id: "tenant-a".into(),
+                namespace: "n".into(),
                 version: "1".into(),
                 status: 0,
                 deployed_at: Some(prost_types::Timestamp {

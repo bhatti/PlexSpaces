@@ -634,6 +634,38 @@ impl ObjectRegistryImpl {
         let count = self.repository.count(ctx, &filter).await?;
         Ok(count)
     }
+
+    /// List distinct tenant ids for registrations of the given object type.
+    ///
+    /// ## Purpose
+    /// Supports tenant discovery from the registry itself so callers do not
+    /// reconstruct tenant state from higher-level dashboard projections.
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_type = ?object_type))]
+    pub async fn list_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<String>, ObjectRegistryError> {
+        self.repository
+            .list_tenant_ids_by_object_type(ctx, object_type, offset, limit)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Count distinct tenant ids for registrations of the given object type.
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), namespace = %ctx.namespace(), object_type = ?object_type))]
+    pub async fn count_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+    ) -> Result<usize, ObjectRegistryError> {
+        self.repository
+            .count_tenant_ids_by_object_type(ctx, object_type)
+            .await
+            .map_err(Into::into)
+    }
 }
 
 // Debug impl for ObjectRegistryImpl
@@ -733,6 +765,38 @@ impl plexspaces_core::actor_context::ObjectRegistry for ObjectRegistryImpl {
         object_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.unregister(ctx, object_type, object_id)
+            .await
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
+    }
+
+    async fn list_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        self.list_tenant_ids_by_object_type(ctx, object_type, offset, limit)
+            .await
+            .map_err(|e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                )) as Box<dyn std::error::Error + Send + Sync>
+            })
+    }
+
+    async fn count_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        self.count_tenant_ids_by_object_type(ctx, object_type)
             .await
             .map_err(|e| {
                 Box::new(std::io::Error::new(
@@ -1056,6 +1120,109 @@ mod tests {
 
         assert_eq!(unhealthy.len(), 1);
         assert_eq!(unhealthy[0].object_id, "actor-1");
+    }
+
+    #[tokio::test]
+    async fn test_list_tenant_ids_by_object_type_for_admin_reads_distinct_application_tenants() {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+
+        let tenant_a_ns1 =
+            RequestContext::new_without_auth("tenant-a".to_string(), "ns-1".to_string());
+        let tenant_a_ns2 =
+            RequestContext::new_without_auth("tenant-a".to_string(), "ns-2".to_string());
+        let tenant_b_ns1 =
+            RequestContext::new_without_auth("tenant-b".to_string(), "ns-1".to_string());
+        let admin_ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+
+        registry
+            .register(
+                &tenant_a_ns1,
+                create_test_registration("app-a-1", ObjectType::ObjectTypeApplication),
+            )
+            .await
+            .unwrap();
+        registry
+            .register(
+                &tenant_a_ns2,
+                create_test_registration("app-a-2", ObjectType::ObjectTypeApplication),
+            )
+            .await
+            .unwrap();
+        registry
+            .register(
+                &tenant_b_ns1,
+                create_test_registration("app-b-1", ObjectType::ObjectTypeApplication),
+            )
+            .await
+            .unwrap();
+        registry
+            .register(
+                &tenant_b_ns1,
+                create_test_registration("actor-b-1", ObjectType::ObjectTypeActor),
+            )
+            .await
+            .unwrap();
+
+        let tenant_ids = registry
+            .list_tenant_ids_by_object_type(&admin_ctx, ObjectType::ObjectTypeApplication, 0, 10)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            tenant_ids,
+            vec!["tenant-a".to_string(), "tenant-b".to_string()]
+        );
+        assert_eq!(
+            registry
+                .count_tenant_ids_by_object_type(&admin_ctx, ObjectType::ObjectTypeApplication)
+                .await
+                .unwrap(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_tenant_ids_by_object_type_for_authenticated_non_admin_returns_request_tenant(
+    ) {
+        let repo = Arc::new(
+            SqliteObjectRegistryRepository::new(":memory:")
+                .await
+                .unwrap(),
+        );
+        let registry = ObjectRegistryImpl::new(repo);
+
+        let tenant_a_ctx =
+            RequestContext::new("tenant-a".to_string(), String::new(), true).unwrap();
+        let tenant_b_ctx =
+            RequestContext::new_without_auth("tenant-b".to_string(), "ns-1".to_string());
+
+        registry
+            .register(
+                &tenant_b_ctx,
+                create_test_registration("app-b-1", ObjectType::ObjectTypeApplication),
+            )
+            .await
+            .unwrap();
+
+        let tenant_ids = registry
+            .list_tenant_ids_by_object_type(&tenant_a_ctx, ObjectType::ObjectTypeApplication, 0, 10)
+            .await
+            .unwrap();
+
+        assert_eq!(tenant_ids, vec!["tenant-a".to_string()]);
+        assert_eq!(
+            registry
+                .count_tenant_ids_by_object_type(&tenant_a_ctx, ObjectType::ObjectTypeApplication)
+                .await
+                .unwrap(),
+            1
+        );
     }
 }
 

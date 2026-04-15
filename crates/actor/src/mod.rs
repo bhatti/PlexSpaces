@@ -802,17 +802,13 @@ impl Actor {
         );
 
         let behavior_guard = self.behavior.read().await;
-        let behavior_type = behavior_guard.behavior_type();
         let behavior_kind = behavior_guard.behavior_kind();
         drop(behavior_guard);
 
-        let actor_type = match behavior_type {
-            plexspaces_core::BehaviorType::GenServer => "GenServer".to_string(),
-            plexspaces_core::BehaviorType::GenEvent => "GenEvent".to_string(),
-            plexspaces_core::BehaviorType::GenStateMachine => "GenStateMachine".to_string(),
-            plexspaces_core::BehaviorType::Workflow => "Workflow".to_string(),
-            plexspaces_core::BehaviorType::Custom(s) => s,
-        };
+        // Preserve the declared actor type from the canonical actor identity.
+        // Runtime behavior kind (GenServer/Workflow/etc.) is a separate concern and should
+        // not overwrite registry type indexing used by dashboard and discovery.
+        let actor_type = self.id.actor_type().to_string();
 
         registry
             .register_actor(
@@ -1079,14 +1075,8 @@ impl Actor {
             // Signal that actor is now active and ready to process messages
             // Ignore error if receiver was dropped (shouldn't happen in normal flow)
             let _ = active_tx.send(());
-            let mut loop_iteration = 0;
             loop {
-                loop_iteration += 1;
-                if loop_iteration % 100 == 0 {}
-                // Use tokio::select! with biased to prioritize shutdown
-                // Add a very short timeout to periodically check shutdown (non-blocking)
-                // This allows shutdown to interrupt even when mailbox is empty
-                // The timeout is very short (1ms) to minimize latency while ensuring responsive shutdown
+                // Use tokio::select! with biased to prioritize shutdown over mailbox work.
                 tokio::select! {
                     biased; // Prioritize shutdown branch
                     result = shutdown_rx.recv() => {
@@ -1103,7 +1093,6 @@ impl Actor {
                                 break; // Exit the message loop
                             }
                         }
-                        tracing::error!("[ACTOR::SHUTDOWN] ERROR: Should not reach here after break! actor_id={}", actor_id_for_logging);
                     }
                     Some(message) = mailbox.dequeue() => {
                         if tracing::enabled!(tracing::Level::TRACE) {
@@ -1476,37 +1465,6 @@ impl Actor {
                                 break;
                             }
                         }
-                    }
-                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(1)) => {
-                        // Very short timeout to check shutdown periodically
-                        // This ensures shutdown can interrupt even when mailbox is empty
-                        // The 1ms timeout is negligible for latency but ensures responsive shutdown
-                        if shutdown_rx.try_recv().is_ok() {
-                            if tracing::enabled!(tracing::Level::DEBUG) {
-                                tracing::debug!(
-                                actor_id = %actor_id_for_logging,
-                                "Actor message loop: Shutdown signal received (via timeout check), exiting loop"
-                            );
-                            }
-                            break;
-                        }
-                        // Check if task is cancelled (aborted) - use tokio::task::yield_now()
-                        // If the task is cancelled, yield_now() will return immediately
-                        // This is a production-grade way to check for cancellation
-                        tokio::task::yield_now().await;
-                        // After yield, check if we should continue (task might have been cancelled)
-                        // The break will happen naturally when shutdown_rx.recv() returns None or when aborted
-                        // Log every 1000 iterations at TRACE only (avoid flooding debug logs)
-                        if loop_iteration % 1000 == 0 {
-                            if tracing::enabled!(tracing::Level::TRACE) {
-                                tracing::trace!(
-                                    actor_id = %actor_id_for_logging,
-                                    iteration = loop_iteration,
-                                    "Actor message loop: Still running, waiting for messages..."
-                                );
-                            }
-                        }
-                        // Continue loop (messages will wake us up via channel/Notify)
                     }
                 }
             }

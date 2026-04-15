@@ -118,6 +118,27 @@ pub async fn create_gateway_state(
     )
 }
 
+/// Stamp validated JWT claims into request headers for downstream HTTP and tonic handlers.
+///
+/// This keeps the HTTP gateway as the single place that translates authenticated identity
+/// into the normalized header contract used across dashboard and actor APIs.
+pub(crate) fn apply_jwt_claim_headers(headers: &mut axum::http::HeaderMap, claims: &JwtClaims) {
+    if let Ok(value) = axum::http::HeaderValue::from_str(&claims.tenant_id) {
+        headers.insert("x-tenant-id", value);
+    }
+    if let Ok(value) =
+        axum::http::HeaderValue::from_str(if claims.is_admin { "true" } else { "false" })
+    {
+        headers.insert("x-admin", value);
+    }
+    if let Ok(value) = axum::http::HeaderValue::from_str(&claims.roles.join(",")) {
+        headers.insert("x-user-roles", value);
+    }
+    if claims.is_admin {
+        headers.insert("x-user-role", axum::http::HeaderValue::from_static("admin"));
+    }
+}
+
 /// Resolve tenant_id from JWT claims, with local-test fallback when auth is disabled.
 ///
 /// ## Purpose
@@ -190,8 +211,10 @@ pub async fn http_auth_middleware(
     mut req: axum::extract::Request,
     next: Next,
 ) -> Response {
-    // Skip auth for non-actor routes
-    if !req.uri().path().starts_with("/api/v1/actors") {
+    let path = req.uri().path().to_string();
+
+    // Skip auth for routes that do not use JWT-backed tenant visibility.
+    if !path.starts_with("/api/v1/actors") && !path.starts_with("/api/v1/dashboard") {
         return next.run(req).await;
     }
 
@@ -199,8 +222,6 @@ pub async fn http_auth_middleware(
     if auth_disabled {
         return next.run(req).await;
     }
-
-    let path = req.uri().path().to_string();
 
     // Check JWT secret is configured
     let secret = match &jwt_secret {
@@ -232,6 +253,7 @@ pub async fn http_auth_middleware(
 
     match crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref()) {
         Ok(claims) => {
+            apply_jwt_claim_headers(req.headers_mut(), &claims);
             req.extensions_mut().insert(claims);
             next.run(req).await
         }
@@ -356,6 +378,7 @@ pub async fn actor_http_request(
         let mut grpc_req = TonicRequest::new(AskReplyRequest {
             namespace,
             actor_type,
+            actor_name: String::new(),
             http_method: method.as_str().to_string(),
             payload: body.map(|b| b.to_vec()).unwrap_or_default(),
             headers: request_headers,
@@ -424,6 +447,7 @@ pub async fn actor_http_request(
         let mut grpc_req = TonicRequest::new(SendMessageRequest {
             namespace,
             actor_type,
+            actor_name: String::new(),
             http_method: method.as_str().to_string(),
             payload: body.map(|b| b.to_vec()).unwrap_or_default(),
             headers: request_headers,

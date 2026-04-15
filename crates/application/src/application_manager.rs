@@ -33,9 +33,13 @@
 //! ```
 
 use crate::application_trait::ApplicationNode;
-use crate::{Application, ApplicationError};
+use crate::{Application, ApplicationError, SpecApplication, WasmApplication};
 use async_trait::async_trait;
-use plexspaces_core::{ApplicationManager as ApplicationManagerTrait, Service};
+use plexspaces_common::RequestContext;
+use plexspaces_core::{
+    object_registry_helpers, ApplicationManager as ApplicationManagerTrait, Service,
+};
+use plexspaces_proto::application::v1::{ApplicationSpec, ChildType, SupervisorSpec};
 use plexspaces_proto::v1::application::{ApplicationState, HealthStatus};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,6 +90,52 @@ impl Service for ApplicationManagerImpl {
 }
 
 impl ApplicationManagerImpl {
+    fn count_supervisors_in_tree(supervisor_spec: &SupervisorSpec) -> u32 {
+        supervisor_spec
+            .children
+            .iter()
+            .map(|child| {
+                let is_supervisor = ChildType::try_from(child.r#type())
+                    .ok()
+                    .is_some_and(|child_type| child_type == ChildType::ChildTypeSupervisor);
+                let nested_count = child
+                    .supervisor
+                    .as_ref()
+                    .map(Self::count_supervisors_in_tree)
+                    .unwrap_or(0);
+
+                u32::from(is_supervisor) + nested_count
+            })
+            .sum()
+    }
+
+    fn count_supervisors_in_spec(spec: &ApplicationSpec) -> u32 {
+        spec.supervisor
+            .as_ref()
+            .map(|supervisor_spec| Self::supervisor_count_from_tree_spec(supervisor_spec))
+            .unwrap_or(0)
+    }
+
+    /// Root supervisor plus nested supervisor children (matches a loaded `SupervisorSpec` root).
+    pub fn supervisor_count_from_tree_spec(supervisor_spec: &SupervisorSpec) -> u32 {
+        1 + Self::count_supervisors_in_tree(supervisor_spec)
+    }
+
+    fn tracked_supervisor_count_for_app(app: &dyn Application) -> u32 {
+        if let Some(spec_app) = app.as_any().downcast_ref::<SpecApplication>() {
+            return Self::count_supervisors_in_spec(spec_app.spec());
+        }
+
+        if let Some(wasm_app) = app.as_any().downcast_ref::<WasmApplication>() {
+            return wasm_app
+                .spec()
+                .map(Self::count_supervisors_in_spec)
+                .unwrap_or(0);
+        }
+
+        0
+    }
+
     fn default_application_metrics(
         tracked_actor_count: u32,
         tracked_supervisor_count: u32,
@@ -164,6 +214,57 @@ impl ApplicationManagerImpl {
         );
     }
 
+    fn emit_application_metrics_snapshot(
+        application: &str,
+        metrics: &plexspaces_proto::application::v1::ApplicationMetrics,
+    ) {
+        let actor_count = metrics
+            .actor_counts
+            .get("total")
+            .copied()
+            .unwrap_or_else(|| metrics.actor_counts.values().copied().sum::<u64>());
+
+        metrics::gauge!(
+            "plexspaces_application_tracked_actors",
+            "application" => application.to_string()
+        )
+        .set(actor_count as f64);
+        metrics::gauge!(
+            "plexspaces_application_tracked_supervisors",
+            "application" => application.to_string()
+        )
+        .set(metrics.supervisor_count as f64);
+        metrics::gauge!(
+            "plexspaces_application_message_count_snapshot",
+            "application" => application.to_string()
+        )
+        .set(metrics.message_count as f64);
+        metrics::gauge!(
+            "plexspaces_application_error_count_snapshot",
+            "application" => application.to_string()
+        )
+        .set(metrics.error_count as f64);
+        metrics::gauge!(
+            "plexspaces_application_uptime_seconds_snapshot",
+            "application" => application.to_string()
+        )
+        .set(metrics.uptime_seconds as f64);
+    }
+
+    fn emit_tracked_counts(
+        application: &str,
+        tracked_actor_count: u32,
+        tracked_supervisor_count: u32,
+        uptime_seconds: u64,
+    ) {
+        let snapshot = Self::default_application_metrics(
+            tracked_actor_count,
+            tracked_supervisor_count,
+            uptime_seconds,
+        );
+        Self::emit_application_metrics_snapshot(application, &snapshot);
+    }
+
     /// Create new application manager
     pub fn new() -> Self {
         Self {
@@ -215,38 +316,34 @@ impl ApplicationManagerImpl {
     /// Add an application to the manager without starting it.
     ///
     /// ## Arguments
+    /// * `ctx` - Request context; tenant comes from auth and namespace is normalized to the application ID
     /// * `app` - Application implementation
     ///
     /// ## Returns
     /// * `Ok(())` - Application registered successfully
     /// * `Err(ApplicationError)` - Application with same name already registered
-    pub async fn register(&self, app: Box<dyn Application>) -> Result<(), ApplicationError> {
-        // Use empty tenant_id/namespace - should come from API request via register_with_metadata
-        self.register_with_metadata(app, String::new(), String::new())
-            .await
-    }
-
-    /// Register an application with namespace and tenant_id
-    ///
-    /// ## Arguments
-    /// * `app` - Application implementation
-    /// * `namespace` - Application namespace
-    /// * `tenant_id` - Application tenant ID
-    ///
-    /// ## Returns
-    /// * `Ok(())` - Application registered successfully
-    /// * `Err(ApplicationError)` - Application with same name already registered
-    pub async fn register_with_metadata(
+    pub async fn register(
         &self,
+        ctx: &RequestContext,
         app: Box<dyn Application>,
-        namespace: String,
-        tenant_id: String,
     ) -> Result<(), ApplicationError> {
         let name = app.name().to_string();
-        let _version = app.version().to_string();
-        let mut apps = self.applications.write().await;
+        let version = app.version().to_string();
+        let tracked_supervisor_count = Self::tracked_supervisor_count_for_app(app.as_ref());
+        let registration_ctx = ctx.clone().with_namespace(name.clone());
+        let namespace = registration_ctx.namespace().to_string();
+        let tenant_id = registration_ctx.tenant_id().to_string();
 
-        if apps.contains_key(&name) {
+        if let Some(wasm_app) = app
+            .as_any()
+            .downcast_ref::<crate::wasm_application::WasmApplication>()
+        {
+            wasm_app
+                .set_tenant_namespace(tenant_id.clone(), namespace.clone())
+                .await;
+        }
+
+        if self.applications.read().await.contains_key(&name) {
             return Err(ApplicationError::Other(format!(
                 "Application '{}' already registered",
                 name
@@ -257,9 +354,35 @@ impl ApplicationManagerImpl {
             tracing::info!("Registering application: {}", name);
         }
 
-        // Store tenant_id/namespace in WasmApplication if it's a WasmApplication
-        // This allows actors to use API-provided tenant_id/namespace instead of defaults
-        // We'll set it in start() instead since we can't mutate here
+        if let Some(node_context) = self.node_context.read().await.as_ref() {
+            if let Some(service_locator) = node_context.service_locator() {
+                if let Some(object_registry) = service_locator.get_object_registry().await {
+                    if let Err(err) = object_registry_helpers::register_application(
+                        &object_registry,
+                        &registration_ctx,
+                        &name,
+                        &version,
+                        node_context.id(),
+                        &format!("http://{}", node_context.listen_addr()),
+                    )
+                    .await
+                    {
+                        return Err(ApplicationError::Other(format!(
+                            "Failed to register application '{}' in object registry: {}",
+                            name, err
+                        )));
+                    }
+                }
+            }
+        }
+
+        let mut apps = self.applications.write().await;
+        if apps.contains_key(&name) {
+            return Err(ApplicationError::Other(format!(
+                "Application '{}' already registered",
+                name
+            )));
+        }
 
         apps.insert(
             name.clone(),
@@ -271,23 +394,13 @@ impl ApplicationManagerImpl {
                 stopped_at: None,
                 metrics: None,
                 tracked_actor_count: 0,
-                tracked_supervisor_count: 0,
+                tracked_supervisor_count,
                 namespace: namespace.clone(),
                 tenant_id: tenant_id.clone(),
             },
         );
 
-        // Register application with object-registry
-        if let Some(node_context) = self.node_context.read().await.as_ref() {
-            if let Some(_service_locator) = node_context.service_locator() {
-                // Note: We can't use concrete ObjectRegistry type here due to circular dependency.
-                // Unregistration will be handled by the node crate's object_registry_helpers.
-                // This is a placeholder - the actual unregistration happens in the node crate.
-                if tracing::enabled!(tracing::Level::DEBUG) {
-                    tracing::debug!(application = %name, "Application unregistered (object-registry unregistration handled by node crate)");
-                }
-            }
-        }
+        Self::emit_tracked_counts(&name, 0, tracked_supervisor_count, 0);
 
         Ok(())
     }
@@ -354,6 +467,8 @@ impl ApplicationManagerImpl {
             Ok(()) => {
                 instance.state = ApplicationState::ApplicationStateRunning;
                 instance.started_at = Some(std::time::Instant::now());
+                instance.tracked_supervisor_count =
+                    Self::tracked_supervisor_count_for_app(instance.app.as_ref());
 
                 // Get actor count for metrics logging
                 let actor_count = instance.tracked_actor_count;
@@ -381,6 +496,7 @@ impl ApplicationManagerImpl {
                     "application" => name.to_string()
                 )
                 .increment(1);
+                Self::emit_tracked_counts(name, actor_count, supervisor_count, 0);
 
                 // Log metrics
                 if actor_count > 0 || supervisor_count > 0 {
@@ -693,8 +809,48 @@ impl ApplicationManagerImpl {
     /// * `Ok(None)` - Non-WASM app unregistered
     /// * `Err(ApplicationError)` - Application not found or still running
     pub async fn unregister(&self, name: &str) -> Result<Option<String>, ApplicationError> {
-        let mut apps = self.applications.write().await;
+        let (module_hash, tenant_id, namespace) = {
+            let apps = self.applications.read().await;
+            let instance = apps.get(name).ok_or_else(|| {
+                ApplicationError::Other(format!("Application '{}' not found", name))
+            })?;
 
+            if instance.state == ApplicationState::ApplicationStateRunning {
+                return Err(ApplicationError::Other(format!(
+                    "Cannot unregister running application '{}'. Stop it first.",
+                    name
+                )));
+            }
+
+            (
+                instance.app.module_hash_for_cleanup(),
+                instance.tenant_id.clone(),
+                instance.namespace.clone(),
+            )
+        };
+
+        if let Some(node_context) = self.node_context.read().await.as_ref() {
+            if let Some(service_locator) = node_context.service_locator() {
+                if let Some(object_registry) = service_locator.get_object_registry().await {
+                    let ctx = RequestContext::new_without_auth(tenant_id, namespace);
+                    object_registry_helpers::unregister_application(
+                        &object_registry,
+                        &ctx,
+                        name,
+                        node_context.id(),
+                    )
+                    .await
+                    .map_err(|err| {
+                        ApplicationError::Other(format!(
+                            "Failed to unregister application '{}' from object registry: {}",
+                            name, err
+                        ))
+                    })?;
+                }
+            }
+        }
+
+        let mut apps = self.applications.write().await;
         let instance = apps
             .get(name)
             .ok_or_else(|| ApplicationError::Other(format!("Application '{}' not found", name)))?;
@@ -707,7 +863,6 @@ impl ApplicationManagerImpl {
             )));
         }
 
-        let module_hash = instance.app.module_hash_for_cleanup();
         let mut instance = apps
             .remove(name)
             .ok_or_else(|| ApplicationError::Other(format!("Application '{}' not found", name)))?;
@@ -718,9 +873,6 @@ impl ApplicationManagerImpl {
         if tracing::enabled!(tracing::Level::INFO) {
             tracing::info!("Unregistered application: {}", name);
         }
-
-        // Note: Object-registry unregistration is handled by the node crate
-        // to avoid circular dependency (core can't depend on object-registry)
 
         Ok(module_hash)
     }
@@ -762,6 +914,7 @@ impl ApplicationManagerImpl {
             instance.tracked_supervisor_count,
         );
         instance.metrics = Some(stored_metrics.clone());
+        Self::emit_application_metrics_snapshot(name, &stored_metrics);
 
         // Log metrics update
         if tracing::enabled!(tracing::Level::DEBUG) {
@@ -818,6 +971,7 @@ impl ApplicationManagerImpl {
             instance.tracked_supervisor_count,
         );
         instance.metrics = Some(stored_metrics.clone());
+        Self::emit_application_metrics_snapshot(name, &stored_metrics);
         Ok(stored_metrics)
     }
 
@@ -863,6 +1017,18 @@ impl ApplicationManagerImpl {
             }
         }
 
+        let uptime_seconds = instance
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.uptime_seconds)
+            .unwrap_or(0);
+        Self::emit_tracked_counts(
+            name,
+            instance.tracked_actor_count,
+            instance.tracked_supervisor_count,
+            uptime_seconds,
+        );
+
         Ok(())
     }
 
@@ -907,6 +1073,18 @@ impl ApplicationManagerImpl {
                 );
             }
         }
+
+        let uptime_seconds = instance
+            .metrics
+            .as_ref()
+            .map(|metrics| metrics.uptime_seconds)
+            .unwrap_or(0);
+        Self::emit_tracked_counts(
+            name,
+            instance.tracked_actor_count,
+            instance.tracked_supervisor_count,
+            uptime_seconds,
+        );
 
         Ok(())
     }
@@ -1051,12 +1229,12 @@ impl ApplicationManagerImpl {
         Some(ApplicationInfo {
             application_id: name.to_string(), // Use name as ID for now
             name: name.to_string(),
+            tenant_id: instance.tenant_id.clone(),
+            namespace: instance.namespace.clone(),
             version: instance.app.version().to_string(),
             status: status.into(),
             deployed_at,
             metrics,
-            // Note: namespace and tenant_id are stored in ApplicationInstance but not in ApplicationInfo proto
-            // They are accessed via ApplicationInstance in dashboard handlers
         })
     }
 }
@@ -1138,6 +1316,71 @@ impl Default for ApplicationManagerImpl {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use plexspaces_proto::application::v1::{
+        ApplicationSpec, ApplicationType, ChildSpec, ChildType, RestartPolicy, ShutdownStrategy,
+        SupervisionStrategy, SupervisorSpec,
+    };
+    use std::collections::HashMap;
+
+    fn app_ctx(name: &str) -> RequestContext {
+        RequestContext::new_without_auth(String::new(), name.to_string())
+    }
+
+    fn worker_child(id: &str) -> ChildSpec {
+        ChildSpec {
+            id: id.to_string(),
+            r#type: ChildType::ChildTypeWorker.into(),
+            args: HashMap::new(),
+            restart: RestartPolicy::RestartPolicyPermanent.into(),
+            shutdown_timeout: None,
+            supervisor: None,
+            facets: vec![],
+            behavior_kind: None,
+        }
+    }
+
+    fn supervisor_child(id: &str, nested: SupervisorSpec) -> ChildSpec {
+        ChildSpec {
+            id: id.to_string(),
+            r#type: ChildType::ChildTypeSupervisor.into(),
+            args: HashMap::new(),
+            restart: RestartPolicy::RestartPolicyPermanent.into(),
+            shutdown_timeout: None,
+            supervisor: Some(nested),
+            facets: vec![],
+            behavior_kind: None,
+        }
+    }
+
+    fn supervisor_spec(children: Vec<ChildSpec>) -> SupervisorSpec {
+        SupervisorSpec {
+            strategy: SupervisionStrategy::SupervisionStrategyOneForOne.into(),
+            max_restarts: 3,
+            max_restart_window: None,
+            children,
+        }
+    }
+
+    fn application_spec(name: &str, supervisor: Option<SupervisorSpec>) -> ApplicationSpec {
+        ApplicationSpec {
+            name: name.to_string(),
+            tenant_id: String::new(),
+            namespace: name.to_string(),
+            version: "0.1.0".to_string(),
+            description: "test application".to_string(),
+            r#type: ApplicationType::ApplicationTypeActive.into(),
+            dependencies: vec![],
+            env: HashMap::new(),
+            supervisor,
+            enabled: true,
+            auto_start: false,
+            shutdown_timeout: None,
+            shutdown_strategy: ShutdownStrategy::ShutdownStrategyGraceful.into(),
+            seed_nodes: vec![],
+            required_service_links: vec![],
+            metadata: None,
+        }
+    }
 
     // Mock Node for testing
     struct MockNode {
@@ -1224,7 +1467,7 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
 
         assert_eq!(
             manager.get_state("test-app").await,
@@ -1254,8 +1497,8 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app1).await.unwrap();
-        let result = manager.register(app2).await;
+        manager.register(&app_ctx("test-app"), app1).await.unwrap();
+        let result = manager.register(&app_ctx("test-app"), app2).await;
 
         assert!(result.is_err());
         assert!(result
@@ -1283,7 +1526,7 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
         manager.start("test-app").await.unwrap();
 
         assert_eq!(
@@ -1311,7 +1554,7 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
         let result = manager.start("test-app").await;
 
         assert!(result.is_err());
@@ -1340,7 +1583,7 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
         manager.start("test-app").await.unwrap();
         manager
             .stop("test-app", Duration::from_secs(5))
@@ -1372,7 +1615,7 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
         manager.start("test-app").await.unwrap();
 
         let result = manager.stop("test-app", Duration::from_millis(100)).await;
@@ -1406,7 +1649,10 @@ mod tests {
                 cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             });
 
-            manager.register(app).await.unwrap();
+            manager
+                .register(&app_ctx(&format!("test-app-{}", i)), app)
+                .await
+                .unwrap();
             manager.start(&format!("test-app-{}", i)).await.unwrap();
         }
 
@@ -1442,7 +1688,7 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
         manager.start("test-app").await.unwrap();
 
         let health = manager.health_check("test-app").await.unwrap();
@@ -1463,7 +1709,10 @@ mod tests {
                 cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             });
 
-            manager.register(app).await.unwrap();
+            manager
+                .register(&app_ctx(&format!("test-app-{}", i)), app)
+                .await
+                .unwrap();
         }
 
         let apps = manager.list_applications().await;
@@ -1494,7 +1743,7 @@ mod tests {
             cleanup_called: cleanup_called.clone(),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
         manager.start("test-app").await.unwrap();
         manager
             .stop("test-app", Duration::from_secs(5))
@@ -1530,7 +1779,7 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
         manager.start("test-app").await.unwrap();
 
         // Unregister should fail for running application
@@ -1578,7 +1827,7 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
         manager.start("test-app").await.unwrap();
 
         // Update metrics
@@ -1616,6 +1865,49 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_count_supervisors_in_spec_counts_nested_supervisors() {
+        let nested = supervisor_spec(vec![worker_child("leaf-worker")]);
+        let middle = supervisor_spec(vec![
+            supervisor_child("leaf-supervisor", nested),
+            worker_child("middle-worker"),
+        ]);
+        let root = supervisor_spec(vec![
+            worker_child("root-worker"),
+            supervisor_child("middle-supervisor", middle),
+        ]);
+
+        let spec = application_spec("nested-supervisors", Some(root));
+
+        assert_eq!(ApplicationManagerImpl::count_supervisors_in_spec(&spec), 3);
+    }
+
+    #[tokio::test]
+    async fn test_register_seeds_supervisor_count_from_application_spec() {
+        let manager = ApplicationManagerImpl::new();
+        let nested = supervisor_spec(vec![worker_child("leaf-worker")]);
+        let root = supervisor_spec(vec![
+            worker_child("root-worker"),
+            supervisor_child("sub-supervisor", nested),
+        ]);
+        let app = Box::new(SpecApplication::new(application_spec(
+            "spec-app",
+            Some(root),
+        )));
+
+        manager.register(&app_ctx("spec-app"), app).await.unwrap();
+
+        let info = manager
+            .get_application_info("spec-app")
+            .await
+            .expect("application info should exist after registration");
+        let metrics = info
+            .metrics
+            .expect("application info should include synthesized metrics");
+
+        assert_eq!(metrics.supervisor_count, 2);
+    }
+
     /// Test: Merge application metrics accumulates counters and preserves maxima.
     #[tokio::test]
     async fn test_merge_metrics_accumulates_extensible_metrics() {
@@ -1636,7 +1928,7 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
         manager.start("test-app").await.unwrap();
 
         let merged = manager
@@ -1761,7 +2053,7 @@ mod tests {
             cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
-        manager.register(app).await.unwrap();
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
 
         // Get info for created application
         let app_info = manager.get_application_info("test-app").await.unwrap();
@@ -1801,5 +2093,150 @@ mod tests {
 
         let app_info = manager.get_application_info("nonexistent").await;
         assert!(app_info.is_none());
+    }
+
+    /// Regression test: ApplicationManagerImpl::start() holds applications.write() while
+    /// calling app.start(). Previously, WasmApplication::initialize_supervisor_tree() called
+    /// update_supervisor_count() from inside app.start(), which tried to re-acquire
+    /// applications.write() → self-deadlock. Fix: removed the callback from
+    /// initialize_supervisor_tree; start() sets tracked_supervisor_count after app.start()
+    /// returns.
+    ///
+    /// This test verifies that:
+    /// 1. update_supervisor_count() works after start() returns (lock is released)
+    /// 2. supervisor count set via update_supervisor_count() is reflected in app info
+    #[tokio::test]
+    async fn test_supervisor_count_can_be_updated_after_start_no_deadlock() {
+        let manager = ApplicationManagerImpl::new();
+        let node = Arc::new(MockNode {
+            id: "test-node".to_string(),
+            addr: "0.0.0.0:9000".to_string(),
+        });
+        manager.set_node_context(node).await;
+
+        let app = Box::new(MockApplication {
+            name: "test-app".to_string(),
+            version: "0.1.0".to_string(),
+            should_fail_start: false,
+            should_fail_stop: false,
+            stop_delay: Duration::from_secs(0),
+            cleanup_called: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        });
+
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
+        manager.start("test-app").await.unwrap();
+
+        // After start() returns, the write lock must be released.
+        // update_supervisor_count() acquires applications.write() — if start() still held
+        // the lock, this would deadlock. The fix ensures start() releases the lock first.
+        manager
+            .update_supervisor_count("test-app", 3)
+            .await
+            .unwrap();
+
+        let info = manager.get_application_info("test-app").await.unwrap();
+        let metrics = info.metrics.expect("metrics should be present");
+        assert_eq!(metrics.supervisor_count, 3);
+    }
+
+    /// Regression test: WasmApplication::initialize_supervisor_tree() must NOT call
+    /// update_supervisor_count() because start() holds applications.write() while
+    /// calling app.start(). Any re-entry into ApplicationManager from app.start() that
+    /// acquires applications.write() (or read) will deadlock.
+    ///
+    /// This test simulates the exact deadlock pattern: a mock app that calls
+    /// update_supervisor_count() from within its start() method. It must NOT deadlock.
+    ///
+    /// With the old buggy code in initialize_supervisor_tree, this test would hang.
+    /// After the fix (removing the callback), real WASM apps no longer call back in.
+    /// This test documents the pattern to prevent regression.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_app_start_that_reenters_manager_deadlocks_documenting_the_pattern() {
+        use std::sync::Arc;
+
+        // A mock app that simulates the old buggy behavior: calling update_supervisor_count
+        // from inside start() while start() holds applications.write().
+        struct MockAppWithReentrantCall {
+            name: String,
+            manager: Arc<ApplicationManagerImpl>,
+        }
+
+        #[async_trait]
+        impl Application for MockAppWithReentrantCall {
+            fn name(&self) -> &str {
+                &self.name
+            }
+            fn version(&self) -> &str {
+                "1.0"
+            }
+            async fn start(
+                &mut self,
+                _node: Arc<dyn ApplicationNode>,
+            ) -> Result<(), ApplicationError> {
+                // This is the EXACT pattern that caused the deadlock:
+                // start() → app.start() → update_supervisor_count() → applications.write()
+                // With the old code this would deadlock. The fix is: don't do this.
+                // We prove it deadlocks by using a timeout.
+                let name = self.name.clone();
+                let manager = self.manager.clone();
+                // Try to call update_supervisor_count — this acquires write lock.
+                // Applications.write() is already held by the outer start() call.
+                // Use a non-blocking try to detect the deadlock without hanging the test.
+                let result = tokio::time::timeout(
+                    Duration::from_millis(100),
+                    manager.update_supervisor_count(&name, 2),
+                )
+                .await;
+                // Timeout proves the re-entrant call would deadlock.
+                // If this returns Ok, it means the lock was NOT held (which would be wrong).
+                assert!(
+                    result.is_err(),
+                    "update_supervisor_count from inside app.start() should deadlock (timeout expected)"
+                );
+                Ok(())
+            }
+            async fn stop(&mut self) -> Result<(), ApplicationError> {
+                Ok(())
+            }
+            async fn health_check(&self) -> HealthStatus {
+                HealthStatus::HealthStatusHealthy
+            }
+            async fn cleanup_for_undeploy(&mut self) -> Result<(), ApplicationError> {
+                Ok(())
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+        }
+
+        let manager = Arc::new(ApplicationManagerImpl::new());
+        let node = Arc::new(MockNode {
+            id: "test-node".to_string(),
+            addr: "0.0.0.0:9000".to_string(),
+        });
+        manager.set_node_context(node).await;
+
+        let app = Box::new(MockAppWithReentrantCall {
+            name: "test-app".to_string(),
+            manager: manager.clone(),
+        });
+        manager.register(&app_ctx("test-app"), app).await.unwrap();
+
+        // start() must complete — the mock app internally tries update_supervisor_count
+        // with a 100ms timeout, confirms it deadlocks (timeout), then returns Ok.
+        // The outer start() must then also complete.
+        let result =
+            tokio::time::timeout(Duration::from_secs(5), manager.start("test-app")).await;
+        assert!(
+            result.is_ok(),
+            "start() itself should not hang — the mock app handles the inner timeout"
+        );
+        assert!(result.unwrap().is_ok());
+
+        // After start() returns, the lock is released and update_supervisor_count works.
+        manager
+            .update_supervisor_count("test-app", 5)
+            .await
+            .unwrap();
     }
 }

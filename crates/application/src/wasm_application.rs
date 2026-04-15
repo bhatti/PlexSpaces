@@ -88,7 +88,9 @@ fn parse_behavior_kind(s: Option<&str>) -> plexspaces_core::BehaviorType {
             plexspaces_core::BehaviorType::GenEvent
         }
         Some("GenServer") | Some("genserver") => plexspaces_core::BehaviorType::GenServer,
-        Some("GenStateMachine") | Some("fsm") => plexspaces_core::BehaviorType::GenStateMachine,
+        Some("GenStateMachine") | Some("GenFSM") | Some("fsm") => {
+            plexspaces_core::BehaviorType::GenStateMachine
+        }
         Some("Workflow") | Some("workflow") => plexspaces_core::BehaviorType::Workflow,
         _ => plexspaces_core::BehaviorType::GenServer,
     }
@@ -523,11 +525,16 @@ impl WasmApplication {
 
         use plexspaces_journaling::JournalStorage;
         let journal_storage: Option<Arc<dyn JournalStorage>> = {
-            let journal_db_path = std::env::var("PLEXSPACES_DATABASE_URL")
-                .or_else(|_| std::env::var("PLEXSPACES_JOURNAL_DB"))
-                .unwrap_or_else(|_| {
-                    let node_id = node.id().replace(['@', '/', '\\', ':'], "-");
-                    format!("/tmp/plexspaces-journal-{}.db", node_id)
+            let journal_db_path = service_locator
+                .get_runtime_config()
+                .await
+                .and_then(|runtime| runtime.db.map(|db| db.connection_string))
+                .filter(|value| !value.is_empty())
+                .or_else(|| std::env::var("PLEXSPACES_DATABASE_URL").ok())
+                .or_else(|| std::env::var("PLEXSPACES_JOURNAL_DB").ok())
+                .unwrap_or_else(|| {
+                    let base_dir = plexspaces_common::config_manager::get_default_base_dir();
+                    plexspaces_common::config_manager::default_shared_db_url(&base_dir)
                 });
 
             if journal_db_path == ":memory:" || journal_db_path.contains(":memory:") {
@@ -1010,13 +1017,13 @@ impl WasmApplication {
             &supervisor_namespace,
             node.id(),
         )
-                .map_err(|e| {
-                    ApplicationError::Other(format!(
-                        "Failed to construct supervisor actor ID for '{}': {}",
-                        self.name, e
-                    ))
-                })?
-                .to_string();
+        .map_err(|e| {
+            ApplicationError::Other(format!(
+                "Failed to construct supervisor actor ID for '{}': {}",
+                self.name, e
+            ))
+        })?
+        .to_string();
         let (supervisor, mut event_rx) =
             Supervisor::new(supervisor_id.clone(), strategy, service_locator.clone());
 
@@ -1158,6 +1165,11 @@ impl WasmApplication {
             actor_count = actor_ids.len(),
             "Supervisor tree initialized successfully"
         );
+
+        // NOTE: supervisor count is set by ApplicationManagerImpl::start() after this returns,
+        // via tracked_supervisor_count_for_app(). Do NOT call update_supervisor_count() here —
+        // start() holds applications.write() and calling back into the ApplicationManager would
+        // cause a self-deadlock on that RwLock.
 
         Ok(actor_ids)
     }
@@ -1740,7 +1752,11 @@ impl WasmApplication {
                     format!("Invalid canonical actor ID for shutdown: {}", e),
                 )
             })?;
-            match timeout(timeout_duration, actor_factory.stop_actor(&ctx, &actor_id_typed)).await
+            match timeout(
+                timeout_duration,
+                actor_factory.stop_actor(&ctx, &actor_id_typed),
+            )
+            .await
             {
                 Ok(Ok(())) => {
                     if tracing::enabled!(tracing::Level::INFO) {
@@ -2126,7 +2142,11 @@ impl Application for WasmApplication {
                 }
             }
         }
-        actor_ids.extend(live_actor_ids.into_iter().map(|actor_id| actor_id.to_string()));
+        actor_ids.extend(
+            live_actor_ids
+                .into_iter()
+                .map(|actor_id| actor_id.to_string()),
+        );
 
         let virtual_cleanup = if let Some(manager) = service_locator.virtual_actor_manager().await {
             manager.unregister_namespace(&namespace).await

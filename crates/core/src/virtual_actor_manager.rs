@@ -1432,8 +1432,8 @@ mod tests {
 
         // Check if actor ID matching the type is virtual
         // Format: {id}//{actor_type}::{namespace}@{node_id}
-        let actor_id = ActorId::new("user-123", "read-state-tracker", "namespace", "node-1")
-            .unwrap();
+        let actor_id =
+            ActorId::new("user-123", "read-state-tracker", "namespace", "node-1").unwrap();
 
         assert!(manager.is_virtual(&actor_id).await);
     }
@@ -1622,7 +1622,9 @@ mod tests {
             .unwrap();
 
         let metadata = manager
-            .get_metadata(&ActorId::new("cart-1", "durable-counter", "test-ns", "test-node").unwrap())
+            .get_metadata(
+                &ActorId::new("cart-1", "durable-counter", "test-ns", "test-node").unwrap(),
+            )
             .await
             .expect("instance metadata should exist");
         assert_eq!(metadata.facet_config, Some(facet_config));
@@ -1639,11 +1641,7 @@ mod tests {
         let manager = create_test_manager().await;
 
         let result = manager
-            .update_metadata(
-                &test_actor_id("nonexistent"),
-                "NewType".to_string(),
-                None,
-            )
+            .update_metadata(&test_actor_id("nonexistent"), "NewType".to_string(), None)
             .await;
 
         assert!(result.is_err());
@@ -1772,8 +1770,7 @@ mod tests {
 
         // Try to get facet for type-level registration - should fail
         // (type-level registrations don't have facet instances, only config)
-        let actor_id = ActorId::new("instance-1", "test-type", "namespace", "node-1")
-            .unwrap();
+        let actor_id = ActorId::new("instance-1", "test-type", "namespace", "node-1").unwrap();
 
         // This actor_id is virtual (type-level) but has no facet instance
         assert!(manager.is_virtual(&actor_id).await);

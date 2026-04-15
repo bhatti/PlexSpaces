@@ -1346,6 +1346,15 @@ class SendMessageRequest(betterproto.Message):
     message_id: str = betterproto.string_field(13)
     """Optional client-provided message id."""
 
+    actor_name: str = betterproto.string_field(20)
+    """
+    Optional actor instance name. When set together with actor_type and namespace,
+     the handler constructs the canonical actor ID directly:
+       actor_name//actor_type::namespace@node_id
+     This avoids ambiguous lookups and makes addressing explicit.
+     If empty, falls back to registry lookup by actor_type within the namespace.
+    """
+
 
 @dataclass(eq=False, repr=False)
 class SendMessageResponse(betterproto.Message):
@@ -1945,6 +1954,14 @@ class AskReplyRequest(betterproto.Message):
     Optional timeout for request-reply (ask) operations.
      Defaults to 5 seconds if not specified. Use for long-running operations like training.
      HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
+    """
+
+    actor_name: str = betterproto.string_field(20)
+    """
+    Optional actor instance name. When set together with actor_type and namespace,
+     the handler constructs the canonical actor ID directly:
+       actor_name//actor_type::namespace@node_id
+     If empty, falls back to registry lookup by actor_type within the namespace.
     """
 
 

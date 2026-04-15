@@ -1,0 +1,105 @@
+name = "go-resource-aware-inference"
+version = "1.0.0"
+namespace = "go-resource-aware-inference"
+seed_nodes = ["localhost:8091", "localhost:8093"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "model_registry"
+type = "model_registry"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "model_registry" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+id = "inference_worker_small"
+type = "inference_worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "inference_worker", model_name = "gpt-nano", model_tier = "small", gpu_capable = "false", memory_gb = "2" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+id = "inference_worker_medium"
+type = "inference_worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "inference_worker", model_name = "gpt-base", model_tier = "medium", gpu_capable = "false", memory_gb = "8" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+id = "inference_worker_large"
+type = "inference_worker"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "inference_worker", model_name = "gpt-large", model_tier = "large", gpu_capable = "true", memory_gb = "32" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+id = "budget_manager"
+type = "budget_manager"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "budget_manager" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } },
+  { type = "metrics", priority = 80 }
+]
+
+[[supervisor.children]]
+id = "routing_workflow"
+type = "routing_workflow"
+restart = "permanent"
+shutdown_timeout_seconds = 30
+behavior_kind = "Workflow"
+args = { role = "routing_workflow" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+id = "inference_event"
+type = "inference_event"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenEvent"
+args = { role = "inference_event" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+id = "budget_fsm"
+type = "budget_fsm"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenFSM"
+args = { role = "budget_fsm", tenant_id = "default", limit_usd = "10.0" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } }
+]

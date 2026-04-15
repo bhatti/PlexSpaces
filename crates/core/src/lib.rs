@@ -78,18 +78,23 @@ pub use actor_state_checker::ActorStateHandle;
 pub mod facet_service_wrapper;
 pub use facet_service_wrapper::{FacetManagerServiceWrapper, FacetRegistryServiceWrapper};
 pub mod message_metrics;
-pub mod monitoring;
 pub mod metrics_renderer;
 pub mod metrics_service_access;
+pub mod monitoring;
+pub mod process_metrics;
 pub mod prometheus_text;
 pub mod reply_waiter;
 pub use message_metrics::ActorMetrics;
 pub use metrics_renderer::MetricsPrometheusRenderer;
 pub use metrics_service_access::MetricsServiceAccess;
 pub use monitoring::NodeConnectionInfo;
+pub use process_metrics::{ProcessResourceSampler, ProcessResourceSnapshot};
 pub use prometheus_text::{
-    actor_metrics_from_exposition_for_namespace, overlay_node_operational_counters_from_exposition,
-    sum_counter_all_label_sets, sum_counter_for_labels,
+    actor_metrics_from_exposition_for_namespace, local_prometheus_recorder_chart_summary,
+    max_histogram_bucket_upper_bound_for_labels,
+    overlay_node_operational_counters_from_exposition, sum_counter_all_label_sets,
+    sum_counter_for_labels, sum_sample_values_all_series, sum_sample_values_for_labels,
+    LocalPrometheusRecorderChartSummary,
 };
 pub mod journal_storage;
 pub use journal_storage::{JournalError, JournalResult, JournalStorage};

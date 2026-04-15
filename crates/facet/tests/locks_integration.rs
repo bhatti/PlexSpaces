@@ -318,9 +318,13 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
             );
 
             let actor_name1 = format!("lock-tbl-1-{}", ulid::Ulid::new());
-            let actor_id1 =
-                ActorId::new(&actor_name1, "GenServer", "test-namespace", node_id.as_str())
-                    .expect("test actor id should be valid");
+            let actor_id1 = ActorId::new(
+                &actor_name1,
+                "GenServer",
+                "test-namespace",
+                node_id.as_str(),
+            )
+            .expect("test actor id should be valid");
             let ctx1 = plexspaces_core::RequestContext::new_without_auth(
                 "test-tenant".to_string(),
                 "test-namespace".to_string(),
@@ -379,9 +383,13 @@ async fn run_lock_facet_case(node: &Arc<Node>, case: LockFacetCase, run_id: &str
             );
 
             let actor_name2 = format!("lock-tbl-2-{}", ulid::Ulid::new());
-            let actor_id2 =
-                ActorId::new(&actor_name2, "GenServer", "test-namespace", node_id.as_str())
-                    .expect("test actor id should be valid");
+            let actor_id2 = ActorId::new(
+                &actor_name2,
+                "GenServer",
+                "test-namespace",
+                node_id.as_str(),
+            )
+            .expect("test actor id should be valid");
             let ctx2 = plexspaces_core::RequestContext::new_without_auth(
                 "test-tenant".to_string(),
                 "test-namespace".to_string(),

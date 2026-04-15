@@ -33,7 +33,7 @@ TRANSITIONS = {
 }
 
 
-@fsm_actor
+@fsm_actor(states=["idle", "pending", "processing", "shipped", "delivered", "cancelled"], initial="idle")
 class OrderFSM:
     """Order FSM actor with state machine pattern."""
     

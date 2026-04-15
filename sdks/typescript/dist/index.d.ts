@@ -5,3 +5,4 @@ export { Host, ProcessGroups, TupleSpace, host, ServiceHttpClient } from "./host
 export { ActorRouter } from "./router.js";
 export { defaultRetryConfig, withRetry, type RetryConfig, } from "./workflow.js";
 export { LeaderWorkerClient, listWorkerNodeIds, } from "./leader_worker.js";
+export { ActorID } from "./actor_id.js";

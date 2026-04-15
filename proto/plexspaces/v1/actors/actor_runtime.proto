@@ -1934,6 +1934,13 @@ message SendMessageRequest {
 
   // Optional client-provided message id.
   string message_id = 13 [(buf.validate.field).string.max_len = 255];
+
+  // Optional actor instance name. When set together with actor_type and namespace,
+  // the handler constructs the canonical actor ID directly:
+  //   actor_name//actor_type::namespace@node_id
+  // This avoids ambiguous lookups and makes addressing explicit.
+  // If empty, falls back to registry lookup by actor_type within the namespace.
+  string actor_name = 20 [(buf.validate.field).string.max_len = 255];
 }
 
 message SendMessageResponse {
@@ -3232,6 +3239,12 @@ message AskReplyRequest {
     (google.api.field_behavior) = OPTIONAL,
     (buf.validate.field).duration.lte.seconds = 3600 // Max 1 hour
   ];
+
+  // Optional actor instance name. When set together with actor_type and namespace,
+  // the handler constructs the canonical actor ID directly:
+  //   actor_name//actor_type::namespace@node_id
+  // If empty, falls back to registry lookup by actor_type within the namespace.
+  string actor_name = 20 [(buf.validate.field).string.max_len = 255];
 }
 
 // Response from asking an actor

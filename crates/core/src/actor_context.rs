@@ -283,6 +283,7 @@ pub trait ActorService: Send + Sync {
     /// Spawn a new actor (local or remote)
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
     /// * `actor_id` - Actor ID in format "actor_name@node_id" (or just "actor_name" for local)
     /// * `actor_type` - Type of actor to spawn
     /// * `initial_state` - Initial state bytes
@@ -291,6 +292,7 @@ pub trait ActorService: Send + Sync {
     /// ActorRef for the spawned actor
     async fn spawn_actor(
         &self,
+        ctx: &RequestContext,
         actor_id: &str,
         actor_type: &str,
         initial_state: Vec<u8>,
@@ -299,6 +301,7 @@ pub trait ActorService: Send + Sync {
     /// Send a message to an actor (local or remote)
     ///
     /// ## Arguments
+    /// * `ctx` - RequestContext for tenant/namespace isolation
     /// * `actor_id` - Actor ID in format "actor_name@node_id"
     /// * `message` - Message to send
     ///
@@ -306,6 +309,7 @@ pub trait ActorService: Send + Sync {
     /// Message ID if successful
     async fn send(
         &self,
+        ctx: &RequestContext,
         actor_id: &str,
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
@@ -316,6 +320,7 @@ pub trait ActorService: Send + Sync {
     /// actor ID and preserve normal reply semantics.
     async fn send_and_wait(
         &self,
+        _ctx: &RequestContext,
         _actor_id: &str,
         _message: Message,
         _timeout: Option<std::time::Duration>,
@@ -633,6 +638,48 @@ pub trait ObjectRegistry: Send + Sync {
         limit: usize,
     ) -> Result<Vec<ObjectRegistration>, Box<dyn std::error::Error + Send + Sync>>;
 
+    /// List distinct tenant ids that own registrations for the given object type.
+    ///
+    /// ## Purpose
+    /// Exposes storage-backed tenant discovery so higher layers can enumerate tenants
+    /// without reconstructing them from dashboard projections.
+    async fn list_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let registrations = self
+            .discover(ctx, Some(object_type), None, None, None, None, 0, 10_000)
+            .await?;
+        let mut tenant_ids = std::collections::BTreeSet::new();
+        for registration in registrations {
+            if !registration.tenant_id.is_empty() {
+                tenant_ids.insert(registration.tenant_id);
+            }
+        }
+        Ok(tenant_ids.into_iter().skip(offset).take(limit).collect())
+    }
+
+    /// Count distinct tenant ids that own registrations for the given object type.
+    async fn count_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: plexspaces_proto::object_registry::v1::ObjectType,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        let registrations = self
+            .discover(ctx, Some(object_type), None, None, None, None, 0, 10_000)
+            .await?;
+        let mut tenant_ids = std::collections::BTreeSet::new();
+        for registration in registrations {
+            if !registration.tenant_id.is_empty() {
+                tenant_ids.insert(registration.tenant_id);
+            }
+        }
+        Ok(tenant_ids.len())
+    }
+
     /// Unregister an object
     ///
     /// ## Arguments
@@ -946,8 +993,9 @@ impl ActorContext {
             .await
             .ok_or_else(|| "ActorService not available in ServiceLocator".to_string())?;
 
+        let ctx = RequestContext::new_without_auth(self.tenant_id.clone(), self.namespace.clone());
         let result = actor_service
-            .send(sender_id, reply_message)
+            .send(&ctx, sender_id, reply_message)
             .await
             .map(|_| ()); // Ignore message_id return value
 
@@ -1071,6 +1119,7 @@ struct StubActorService;
 impl ActorService for StubActorService {
     async fn spawn_actor(
         &self,
+        _ctx: &RequestContext,
         _actor_id: &str,
         _actor_type: &str,
         _initial_state: Vec<u8>,
@@ -1080,6 +1129,7 @@ impl ActorService for StubActorService {
 
     async fn send(
         &self,
+        _ctx: &RequestContext,
         _actor_id: &str,
         _message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {

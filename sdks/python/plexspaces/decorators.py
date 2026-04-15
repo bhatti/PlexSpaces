@@ -376,35 +376,47 @@ def gen_server_actor(
 def fsm_actor(
     cls: Type[T] = None,
     *,
-    facets: Optional[List[str]] = None
+    facets: Optional[List[str]] = None,
+    states: Optional[List[str]] = None,
+    initial: Optional[str] = None,
 ) -> Union[Type[T], Callable[[Type[T]], Type[T]]]:
     """
     Decorator for FSM-style actors (GenStateMachine).
-    
+
     Like Erlang gen_statem: stateful transitions; handlers can return next state.
-    
+
     Use this decorator for actors with well-defined state transitions. Define
     valid transitions and use @handler for each transition trigger.
-    
+
     Args:
         cls: The class to transform into an actor
         facets: Optional list of facets this actor expects (e.g., ["durability"])
-    
+        states: Optional list of valid state names for self-documentation and startup validation
+        initial: Optional initial state name; sets fsm_state field on construction if provided
+
     Example:
-        @fsm_actor
+        @fsm_actor(states=["idle", "pending", "complete"], initial="idle")
         class OrderFSM:
-            current_state: str = state(default="idle")
-            
+            fsm_state: str = "idle"
+
             @handler("create")
             def create_order(self, order_id: str) -> dict:
-                if self.current_state != "idle":
+                if self.fsm_state != "idle":
                     return {"error": "must_be_idle"}
-                self.current_state = "pending"
+                self.fsm_state = "pending"
                 return {"state": "pending"}
     """
     def decorator(cls: Type[T]) -> Type[T]:
-        return _actor_with_behavior(cls, BEHAVIOR_GEN_STATE_MACHINE, facets)
-    
+        decorated = _actor_with_behavior(cls, BEHAVIOR_GEN_STATE_MACHINE, facets)
+        if states is not None:
+            decorated.__fsm_states__ = list(states)
+        if initial is not None:
+            decorated.__fsm_initial__ = initial
+            # Set fsm_state default if not already defined on the class
+            if not hasattr(decorated, 'fsm_state'):
+                decorated.fsm_state = initial
+        return decorated
+
     if cls is not None:
         return decorator(cls)
     return decorator

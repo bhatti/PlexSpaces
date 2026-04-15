@@ -5468,7 +5468,15 @@ type SendMessageRequest struct {
 	// Optional reply_to preserved for remoting.
 	ReplyTo string `protobuf:"bytes,12,opt,name=reply_to,json=replyTo,proto3" json:"reply_to,omitempty"`
 	// Optional client-provided message id.
-	MessageId     string `protobuf:"bytes,13,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	MessageId string `protobuf:"bytes,13,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	// Optional actor instance name. When set together with actor_type and namespace,
+	// the handler constructs the canonical actor ID directly:
+	//
+	//	actor_name//actor_type::namespace@node_id
+	//
+	// This avoids ambiguous lookups and makes addressing explicit.
+	// If empty, falls back to registry lookup by actor_type within the namespace.
+	ActorName     string `protobuf:"bytes,20,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5590,6 +5598,13 @@ func (x *SendMessageRequest) GetReplyTo() string {
 func (x *SendMessageRequest) GetMessageId() string {
 	if x != nil {
 		return x.MessageId
+	}
+	return ""
+}
+
+func (x *SendMessageRequest) GetActorName() string {
+	if x != nil {
+		return x.ActorName
 	}
 	return ""
 }
@@ -7433,7 +7448,14 @@ type AskReplyRequest struct {
 	// Optional timeout for request-reply (ask) operations.
 	// Defaults to 5 seconds if not specified. Use for long-running operations like training.
 	// HTTP gateway extracts from ?timeout=30 query parameter (in seconds).
-	Timeout       *durationpb.Duration `protobuf:"bytes,14,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	Timeout *durationpb.Duration `protobuf:"bytes,14,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	// Optional actor instance name. When set together with actor_type and namespace,
+	// the handler constructs the canonical actor ID directly:
+	//
+	//	actor_name//actor_type::namespace@node_id
+	//
+	// If empty, falls back to registry lookup by actor_type within the namespace.
+	ActorName     string `protobuf:"bytes,20,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7564,6 +7586,13 @@ func (x *AskReplyRequest) GetTimeout() *durationpb.Duration {
 		return x.Timeout
 	}
 	return nil
+}
+
+func (x *AskReplyRequest) GetActorName() string {
+	if x != nil {
+		return x.ActorName
+	}
+	return ""
 }
 
 // Response from asking an actor
@@ -8700,7 +8729,7 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"<*\x13List Actors Request2%Request to list actors with filtering\"\x91\x01\n" +
 	"\x12ListActorsResponse\x122\n" +
 	"\x06actors\x18\x01 \x03(\v2\x1a.plexspaces.actor.v1.ActorR\x06actors\x12G\n" +
-	"\rpage_response\x18\x02 \x01(\v2\".plexspaces.common.v1.PageResponseR\fpageResponse\"\xfd\x06\n" +
+	"\rpage_response\x18\x02 \x01(\v2\".plexspaces.common.v1.PageResponseR\fpageResponse\"\xa6\a\n" +
 	"\x12SendMessageRequest\x12)\n" +
 	"\tnamespace\x18\x01 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace\x12,\n" +
 	"\n" +
@@ -8718,7 +8747,9 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\x0ecorrelation_id\x18\v \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\rcorrelationId\x12#\n" +
 	"\breply_to\x18\f \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\areplyTo\x12'\n" +
 	"\n" +
-	"message_id\x18\r \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tmessageId\x1a:\n" +
+	"message_id\x18\r \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tmessageId\x12'\n" +
+	"\n" +
+	"actor_name\x18\x14 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tactorName\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a>\n" +
@@ -8846,7 +8877,7 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\tis_active\x18\x02 \x01(\bR\bisActive\x12\x1d\n" +
 	"\n" +
 	"is_virtual\x18\x03 \x01(\bR\tisVirtual:U\x92AR\n" +
-	"P*\x1bCheck Actor Exists Response21Response indicating if actor exists and is active\"\xfb\x06\n" +
+	"P*\x1bCheck Actor Exists Response21Response indicating if actor exists and is active\"\xa4\a\n" +
 	"\x0fAskReplyRequest\x12)\n" +
 	"\tnamespace\x18\x01 \x01(\tB\v\xe0A\x01\xbaH\x05r\x03\x18\x80\x01R\tnamespace\x12,\n" +
 	"\n" +
@@ -8865,7 +8896,9 @@ const file_plexspaces_v1_actors_actor_runtime_proto_rawDesc = "" +
 	"\breply_to\x18\f \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\areplyTo\x12'\n" +
 	"\n" +
 	"message_id\x18\r \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tmessageId\x12C\n" +
-	"\atimeout\x18\x0e \x01(\v2\x19.google.protobuf.DurationB\x0e\xe0A\x01\xbaH\b\xaa\x01\x05\"\x03\b\x90\x1cR\atimeout\x1a:\n" +
+	"\atimeout\x18\x0e \x01(\v2\x19.google.protobuf.DurationB\x0e\xe0A\x01\xbaH\b\xaa\x01\x05\"\x03\b\x90\x1cR\atimeout\x12'\n" +
+	"\n" +
+	"actor_name\x18\x14 \x01(\tB\b\xbaH\x05r\x03\x18\xff\x01R\tactorName\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a>\n" +

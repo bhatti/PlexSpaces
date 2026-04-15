@@ -24,7 +24,7 @@
 //! 3. All metrics are populated correctly
 //! 4. Both home page and node page show actors correctly
 
-use plexspaces_core::{ApplicationManager, RequestContext, ServiceLocator};
+use plexspaces_core::ApplicationManager;
 use plexspaces_dashboard::{DashboardServiceImpl, HealthReporterAccess};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
@@ -68,9 +68,19 @@ async fn create_test_node(node_id: &str) -> Arc<Node> {
     static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _env_guard = TEST_ENV_LOCK.lock().unwrap();
     std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
-    let node = NodeBuilder::new(node_id).build().await;
+    let node = NodeBuilder::new(node_id)
+        .with_in_memory_backends()
+        .build()
+        .await;
     std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
-    Arc::new(node)
+    let node = Arc::new(node);
+    node.service_locator()
+        .register_security_config(plexspaces_proto::node::v1::SecurityConfig {
+            disable_auth: true,
+            ..Default::default()
+        })
+        .await;
+    node
 }
 
 /// Helper to create dashboard service from a node
@@ -409,6 +419,7 @@ async fn test_wasm_deployment_with_applicationspec_creates_actors() {
         status: String::new(),
         since: None,
         page: None,
+        behavior_kind: String::new(),
     });
     let actors_response = dashboard_service
         .get_actors(actors_req)

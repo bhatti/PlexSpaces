@@ -318,6 +318,9 @@ message GetActorsRequest {
 
   // Pagination
   plexspaces.common.v1.PageRequest page = 9;
+
+  // Filter by runtime behavior kind (optional)
+  string behavior_kind = 10 [(buf.validate.field).string.max_len = 255];
 }
 
 // Actor info with metrics
@@ -361,6 +364,9 @@ message ActorInfo {
 
   // Created timestamp
   google.protobuf.Timestamp created_at = 11;
+
+  // Runtime behavior kind (GenServer, GenEvent, GenStateMachine, Workflow, or custom)
+  string behavior_kind = 12;
 }
 
 // Get actors response

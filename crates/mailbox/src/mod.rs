@@ -57,7 +57,6 @@ use plexspaces_proto::common::v1::Message as ProtoMessage;
 use rand::Rng;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, VecDeque};
-use std::io::Write;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::sync::{mpsc, Notify, RwLock};
@@ -845,49 +844,18 @@ impl Mailbox {
         );
 
         async move {
-            tracing::trace!(
-                mailbox_id = %mailbox_id,
-                "Mailbox::dequeue_with_timeout: Starting dequeue operation"
-            );
-            // Try local receiver first (fast-path for InMemory backend)
-            // PERFORMANCE: Use try_recv in a loop to avoid holding Mutex lock while waiting
-            // This allows the processor to continue sending messages without blocking
-            let start_time = std::time::Instant::now();
-            let mut attempts = 0;
-            loop {
-                attempts += 1;
-
-                // Check if we have a receiver (brief lock - only for checking)
-                let has_receiver = {
-                    let receiver_opt = local_receiver.lock().await;
-                    receiver_opt.is_some()
+            tracing::trace!(mailbox_id = %mailbox_id, "Mailbox::dequeue_with_timeout: Starting dequeue operation");
+            let mut receiver_opt = local_receiver.lock().await;
+            if let Some(receiver) = receiver_opt.as_mut() {
+                let message = match timeout {
+                    Some(duration) => match tokio::time::timeout(duration, receiver.recv()).await {
+                        Ok(message) => message,
+                        Err(_) => return None,
+                    },
+                    None => receiver.recv().await,
                 };
 
-                if !has_receiver {
-                    if tracing::enabled!(tracing::Level::TRACE) {
-                        tracing::trace!("Mailbox::dequeue: local_receiver not available (attempt {}), falling back to channel backend", attempts);
-                    }
-                    // TODO(debug-mailbox): remove or downgrade after tracing why WASM ask messages stall (local_receiver vs channel path).
-                    tracing::info!(
-                        mailbox_id = %mailbox_id,
-                        is_in_memory,
-                        attempt = attempts,
-                        "mailbox dequeue_with_timeout: no local_receiver, using channel backend"
-                    );
-                    break; // Fall through to channel backend
-                }
-
-                // Try to receive without blocking (brief lock - only for try_recv)
-                let msg_opt = {
-                    let mut receiver_opt = local_receiver.lock().await;
-                    if let Some(ref mut receiver) = *receiver_opt {
-                        receiver.try_recv().ok()
-                    } else {
-                        None
-                    }
-                };
-
-                if let Some(msg) = msg_opt {
+                if let Some(msg) = message {
                     if tracing::enabled!(tracing::Level::DEBUG) {
                         tracing::debug!(
                             mailbox_id = %mailbox_id,
@@ -896,50 +864,19 @@ impl Mailbox {
                             sender_id = %msg.sender_id,
                             receiver_id = %msg.receiver_id,
                             correlation_id = %msg.correlation_id,
-                            attempts = attempts,
-                            "📬 Mailbox::dequeue: ✅ Received message from local_receiver (try_recv)"
+                            "Mailbox::dequeue: received message from local_receiver"
                         );
                     }
-                    // TODO(debug-mailbox): remove or downgrade to DEBUG after dequeue investigation.
-                    tracing::info!(
-                        mailbox_id = %mailbox_id,
-                        message_id = %msg.id,
-                        message_type = %message_type_str(&msg),
-                        correlation_id = %msg.correlation_id,
-                        receiver_id = %msg.receiver_id,
-                        source = "local_receiver",
-                        "mailbox dequeue_with_timeout delivered message"
-                    );
-
                     return Some(msg);
                 }
-
-                // Check timeout if specified
-                if let Some(duration) = timeout {
-                    if start_time.elapsed() >= duration {
-                        tracing::trace!(
-                            attempts = attempts,
-                            elapsed_ms = start_time.elapsed().as_millis(),
-                            "Mailbox::dequeue: Timeout waiting for message from local_receiver"
-                        );
-                        return None;
-                    }
-                }
-
-                // Log every 100 attempts to avoid spam (roughly every 1ms with 10μs sleep)
-                if attempts % 100 == 0 {
-                    tracing::trace!(
-                        attempts = attempts,
-                        elapsed_ms = start_time.elapsed().as_millis(),
-                        "Mailbox::dequeue: Still waiting for message from local_receiver..."
-                    );
-                }
-
-                // Yield to allow other tasks to run (processor can send messages)
-                // Use a very short sleep to avoid busy-waiting while still being responsive
-                tokio::task::yield_now().await;
-                tokio::time::sleep(std::time::Duration::from_micros(10)).await;
+            } else if tracing::enabled!(tracing::Level::TRACE) {
+                tracing::trace!(
+                    mailbox_id = %mailbox_id,
+                    is_in_memory,
+                    "Mailbox::dequeue: local_receiver unavailable, falling back to channel backend"
+                );
             }
+            drop(receiver_opt);
 
             // Fall back to channel backend (for durable backends like SQLite, Redis, Kafka)
             // Check shutdown flag before receiving (for non-memory channels)
@@ -976,16 +913,6 @@ impl Mailbox {
                                             "📬 Mailbox::dequeue: ✅ Received message from channel (receive)"
                                         );
                                     }
-                                    // TODO(debug-mailbox): remove or downgrade to DEBUG after dequeue investigation.
-                                    tracing::info!(
-                                        mailbox_id = %mailbox_id,
-                                        message_id = %channel_msg.id,
-                                        message_type = %message_type_str(channel_msg),
-                                        correlation_id = %channel_msg.correlation_id,
-                                        receiver_id = %channel_msg.receiver_id,
-                                        source = "channel_receive",
-                                        "mailbox dequeue_with_timeout delivered message"
-                                    );
                                     return Some(channel_msg.clone());
                                 }
                             }
@@ -1038,16 +965,6 @@ impl Mailbox {
                                             "📬 Mailbox::dequeue: ✅ Received message from channel (try_receive)"
                                         );
                                     }
-                                    // TODO(debug-mailbox): remove or downgrade to DEBUG after dequeue investigation.
-                                    tracing::info!(
-                                        mailbox_id = %mailbox_id,
-                                        message_id = %channel_msg.id,
-                                        message_type = %message_type_str(channel_msg),
-                                        correlation_id = %channel_msg.correlation_id,
-                                        receiver_id = %channel_msg.receiver_id,
-                                        source = "channel_try_receive",
-                                        "mailbox dequeue_with_timeout delivered message"
-                                    );
                                     return Some(channel_msg.clone());
                                 }
                             }

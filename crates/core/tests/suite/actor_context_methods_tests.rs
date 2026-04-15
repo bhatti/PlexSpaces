@@ -53,6 +53,7 @@ struct MockActorService;
 impl ActorService for MockActorService {
     async fn spawn_actor(
         &self,
+        _ctx: &plexspaces_core::RequestContext,
         _actor_id: &str,
         _actor_type: &str,
         _initial_state: Vec<u8>,
@@ -61,6 +62,7 @@ impl ActorService for MockActorService {
     }
     async fn send(
         &self,
+        _ctx: &plexspaces_core::RequestContext,
         _actor_id: &str,
         _message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {

@@ -1637,7 +1637,24 @@ impl NodeRegistryTrait for NodeRegistry {
             }
         }
 
-        let mut nodes: Vec<NodeRegistration> = nodes_by_id.into_values().collect();
+        let mut nodes_by_address: HashMap<String, NodeRegistration> = HashMap::new();
+        for registration in nodes_by_id.into_values() {
+            let address_key = canonical_node_address_key(&registration.node_address);
+            match nodes_by_address.get_mut(&address_key) {
+                Some(existing) => {
+                    let existing_unknown = Self::is_unknown_node_id(&existing.node_id);
+                    let registration_unknown = Self::is_unknown_node_id(&registration.node_id);
+                    if existing_unknown && !registration_unknown {
+                        *existing = registration;
+                    }
+                }
+                None => {
+                    nodes_by_address.insert(address_key, registration);
+                }
+            }
+        }
+
+        let mut nodes: Vec<NodeRegistration> = nodes_by_address.into_values().collect();
         nodes.sort_by(|left, right| left.node_id.cmp(&right.node_id));
 
         let limit = if page_size > 0 {

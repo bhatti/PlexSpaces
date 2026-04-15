@@ -11,10 +11,7 @@ fn actor_id(name: &str, node_id: &str) -> ActorId {
 fn actor_ref_exposes_structured_identity_fields() {
     let actor_ref = ActorRef::new(actor_id("counter", "node1")).unwrap();
 
-    assert_eq!(
-        actor_ref.id().as_str(),
-        "counter//worker::default@node1"
-    );
+    assert_eq!(actor_ref.id().as_str(), "counter//worker::default@node1");
     assert_eq!(actor_ref.actor_name(), "counter");
     assert_eq!(actor_ref.actor_type(), "worker");
     assert_eq!(actor_ref.namespace(), "default");

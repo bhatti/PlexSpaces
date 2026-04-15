@@ -134,6 +134,14 @@ pub trait MessageSender: Send + Sync + Any {
     /// Updates the actor type carried by this sender when supported.
     async fn set_actor_type(&self, _actor_type: Option<String>) {}
 
+    /// Returns the runtime behavior kind carried by this sender when available.
+    fn behavior_kind(&self) -> Option<String> {
+        None
+    }
+
+    /// Updates the runtime behavior kind carried by this sender when supported.
+    async fn set_behavior_kind(&self, _behavior_kind: Option<String>) {}
+
     /// Returns local lifecycle/state access when this sender points to a local actor runtime.
     ///
     /// Remote senders always return `None`.

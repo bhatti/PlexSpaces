@@ -302,7 +302,9 @@ Finite state machine. `GenStateMachineBehavior<S, E>` with `transition(ctx, even
 
 **SDK Usage**:
 ```rust
-#[fsm_actor]
+// Declare valid states and initial state for self-documentation and startup validation.
+// Generates FSM_STATES and FSM_INITIAL consts on the struct.
+#[fsm_actor(states = ["idle", "processing", "done", "error"], initial = "idle")]
 struct OrderWorkflow { state: OrderState }
 
 #[plexspaces_handlers(fsm)]
@@ -315,6 +317,50 @@ impl OrderWorkflow {
     }
 }
 ```
+
+**Python**:
+```python
+@fsm_actor(states=["idle", "processing", "done", "error"], initial="idle")
+class OrderFSM:
+    fsm_state: str = "idle"   # auto-set to initial if omitted
+
+    @handler("submit")
+    def on_submit(self, payload: dict) -> dict:
+        self.fsm_state = "processing"
+        return {"state": self.fsm_state}
+```
+
+**Go**:
+```go
+router.RouteDefinition("order_fsm", plexspaces.FSMActorDef(
+    NewOrderFSM,
+    plexspaces.FSMOpts{
+        States:  []string{"idle", "processing", "done", "error"},
+        Initial: "idle",
+    },
+))
+```
+
+**TypeScript**:
+```typescript
+@fsm_actor({ states: ["idle", "processing", "done", "error"], initial: "idle" })
+class OrderFSMActor { ... }
+// Or class-based without decorator:
+class OrderFSMActor extends PlexSpacesActor<State> {
+  static readonly FSM_STATES = ["idle", "processing", "done", "error"] as const;
+  static readonly FSM_INITIAL = "idle";
+}
+```
+
+**Parameters**:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `states` | `string[]` | Valid state names — for self-documentation, observability, and startup validation |
+| `initial` | `string` | Initial state name — runtime sets `fsm_state` to this on first activation |
+| `facets` | `string[]` | Optional PlexSpaces facets (e.g., `"durability"`, `"timer"`) |
+
+All parameters are optional and backward-compatible — bare `@fsm_actor` continues to work unchanged.
 
 ### Workflow
 

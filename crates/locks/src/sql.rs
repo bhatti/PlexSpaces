@@ -82,7 +82,9 @@ impl SqliteLockManager {
     /// - `sqlite://locks.db`
     #[instrument(skip(database_url))]
     pub async fn new(database_url: &str) -> LockResult<Self> {
-        let pool = SqlitePool::connect(database_url)
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(database_url)
             .await
             .map_err(|e| LockError::BackendError(format!("failed to connect SQLite: {e}")))?;
 

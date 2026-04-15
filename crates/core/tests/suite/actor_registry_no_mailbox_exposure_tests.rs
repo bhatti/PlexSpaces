@@ -25,8 +25,8 @@
 //! 4. is_actor_activated() checks MessageSender, not mailbox
 
 use plexspaces_core::{
-    actor_context::ObjectRegistry, ActorId, ActorRegistry, Message, MessageSender,
-    RequestContext, VirtualActorManager,
+    actor_context::ObjectRegistry, ActorId, ActorRegistry, Message, MessageSender, RequestContext,
+    VirtualActorManager,
 };
 use plexspaces_object_registry::{ObjectRegistryImpl, SqliteObjectRegistryRepository};
 use std::sync::atomic::{AtomicU64, Ordering};

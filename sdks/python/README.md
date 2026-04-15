@@ -167,6 +167,7 @@ class ChatRoom:
 | `@actor(facets=["..."])` | Actor with facet declaration (e.g., `facets=["durability"]`) |
 | `@event_actor` | Event-handler actor (GenEvent behavior) |
 | `@fsm_actor` | Finite state machine actor (GenStateMachine behavior) |
+| `@fsm_actor(states=[...], initial="...")` | FSM actor with explicit state list and initial state |
 | `@gen_server_actor` | Explicit GenServer actor (same as `@actor`) |
 | `@workflow_actor` | Workflow/orchestration actor |
 | `@run_handler` | Workflow run entrypoint |
@@ -184,6 +185,7 @@ class ChatRoom:
 | `@gen_server_actor` | GenServer | Explicit GenServer | Auto `call` |
 | `@event_actor` | GenEvent | Fire-and-forget event handlers | `cast` |
 | `@fsm_actor` | GenStateMachine | State machine workflows | Auto `call` |
+| `@fsm_actor(states=[...], initial="...")` | GenStateMachine | FSM with documented states | Auto `call` |
 | `@workflow_actor` | Workflow | Long-running orchestrations | Auto `call` |
 
 **GenServer Request-Reply Default**: When using `@actor` or `@gen_server_actor`, handlers default to the `call` invocation automatically. You do not need to specify that in `@handler()`.

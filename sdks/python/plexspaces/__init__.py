@@ -54,8 +54,10 @@ from .decorators import (
 from .host import host, ServiceHttpClient
 from .workflow import default_retry_config, with_retry
 from .leader_worker import LeaderWorkerClient, list_worker_node_ids
+from .actor_id import ActorID
 
 __all__ = [
+    "ActorID",
     "actor",
     "default_retry_config",
     "event_actor",

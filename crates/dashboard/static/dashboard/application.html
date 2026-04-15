@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="https://unpkg.com/uplot@1.6.24/dist/uPlot.iife.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/uplot@1.6.24/dist/uPlot.min.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header class="dashboard-header">
+            <h1>Application Dashboard</h1>
+            <a class="back-link" href="/dashboard">Back to Home</a>
+        </header>
+
+        <section class="widgets-section">
+            <div class="widget">
+                <div class="widget-header">Application</div>
+                <div class="widget-value" id="application-name">:application_id</div>
+                <div class="widget-content" id="application-registration-id">Registration ID: -</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Tenant</div>
+                <div class="widget-value" id="tenant-id">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Namespace</div>
+                <div class="widget-value" id="namespace-id">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Actors</div>
+                <div class="widget-value" id="actor-count">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Actor Messages</div>
+                <div class="widget-value" id="message-count">-</div>
+            </div>
+            <div class="widget">
+                <div class="widget-header">Errors</div>
+                <div class="widget-value" id="error-count">-</div>
+            </div>
+        </section>
+
+        <section class="widgets-section">
+            <div class="widget widget-chart">
+                <div class="widget-header">Actors</div>
+                <div id="application-actors-chart"></div>
+            </div>
+            <div class="widget widget-chart">
+                <div class="widget-header">Messages And Errors</div>
+                <div id="application-messages-chart"></div>
+            </div>
+            <div class="widget widget-chart">
+                <div class="widget-header">Message Latency</div>
+                <div id="application-latency-chart"></div>
+            </div>
+            <div class="widget widget-chart">
+                <div class="widget-header">Supervisors</div>
+                <div id="application-supervisors-chart"></div>
+            </div>
+        </section>
+
+        <section class="table-section">
+            <h2>Actors</h2>
+            <div class="search-filters">
+                <input id="actor-pattern" type="text" placeholder="Actor ID">
+                <select id="behavior-filter">
+                    <option value="">All behaviors</option>
+                    <option value="builtin">Built-in behaviors</option>
+                    <option value="custom">Custom behaviors</option>
+                    <option value="gen_server">GenServer</option>
+                    <option value="gen_event">GenEvent</option>
+                    <option value="gen_state_machine">GenStateMachine</option>
+                    <option value="workflow">Workflow</option>
+                </select>
+                <input id="actor-type-filter" type="text" placeholder="Actor type">
+                <select id="current-status-filter">
+                    <option value="">All current statuses</option>
+                    <option value="creating">Creating</option>
+                    <option value="activating">Activating</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="deactivating">Deactivating</option>
+                    <option value="stopping">Stopping</option>
+                    <option value="failed">Failed</option>
+                    <option value="terminated">Terminated</option>
+                </select>
+                <select id="exit-status-filter">
+                    <option value="">All exit statuses</option>
+                    <option value="failed">Failed</option>
+                    <option value="terminated">Terminated</option>
+                </select>
+            </div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Actor ID</th>
+                            <th>Behavior</th>
+                            <th>Type</th>
+                            <th>Current Status</th>
+                            <th>Exit Status</th>
+                            <th>Messages</th>
+                            <th>Errors</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="actors-table-body">
+                        <tr><td colspan="8">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="table-pagination" id="actors-pagination"></div>
+        </section>
+    </div>
+
+    <div class="modal" id="actor-detail-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="actor-detail-title">Actor Detail</h2>
+                <button type="button" class="modal-close" id="actor-detail-close" aria-label="Close">×</button>
+            </div>
+            <div class="modal-body" id="actor-detail-body">
+                <p>Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <footer class="dashboard-footer">
+        <div id="build-version">PlexSpaces -</div>
+        <div id="last-updated">Last updated -</div>
+    </footer>
+
+    <script>
+        const applicationId = ':application_id';
+        let applicationDetails = null;
+        const actorTableState = { offset: 0, limit: 10 };
+        const metricHistory = {
+            time: [],
+            actors: [],
+            messages: [],
+            errors: [],
+            supervisors: [],
+            avgLatency: [],
+            maxLatency: [],
+        };
+        const charts = {
+            actors: null,
+            messages: null,
+            latency: null,
+            supervisors: null,
+        };
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        async function fetchJson(url, options = {}) {
+            const response = await fetch(url, {
+                headers: { 'Accept': 'application/json' },
+                ...options,
+            });
+            if (!response.ok) {
+                throw new Error(`Request failed: ${response.status}`);
+            }
+            return response.json();
+        }
+
+        function renderPagination(page, onPageChange) {
+            const container = document.getElementById('actors-pagination');
+            if (!container || !page) {
+                return;
+            }
+            const offset = Number(page.offset || 0);
+            const limit = Number(page.limit || 0);
+            const totalSize = Number(page.total_size || 0);
+            const shownFrom = totalSize === 0 ? 0 : offset + 1;
+            const shownTo = Math.min(offset + limit, totalSize);
+            container.innerHTML = `
+                <span class="table-pagination-summary">Showing ${shownFrom}-${shownTo} of ${totalSize}</span>
+                <button type="button" data-direction="prev" ${offset <= 0 ? 'disabled' : ''}>Previous</button>
+                <button type="button" data-direction="next" ${page.has_next ? '' : 'disabled'}>Next</button>
+            `;
+            container.querySelector('[data-direction="prev"]')?.addEventListener('click', () => onPageChange('prev'));
+            container.querySelector('[data-direction="next"]')?.addEventListener('click', () => onPageChange('next'));
+        }
+
+        function actorStatusRequestValue() {
+            const currentStatus = document.getElementById('current-status-filter').value || '';
+            const exitStatusValue = document.getElementById('exit-status-filter').value || '';
+            if (currentStatus && exitStatusValue && currentStatus !== exitStatusValue) {
+                return '__none__';
+            }
+            return currentStatus || exitStatusValue;
+        }
+
+        function averageLatency(metrics) {
+            const totals = metrics.latency_totals_ms || {};
+            const samples = metrics.latency_samples || {};
+            const totalMs = Object.values(totals).reduce((sum, value) => sum + Number(value || 0), 0);
+            const sampleCount = Object.values(samples).reduce((sum, value) => sum + Number(value || 0), 0);
+            return sampleCount > 0 ? totalMs / sampleCount : 0;
+        }
+
+        function maxLatency(metrics) {
+            return Math.max(0, ...Object.values(metrics.latency_max_ms || {}).map(value => Number(value || 0)));
+        }
+
+        function renderSingleChart(targetId, key, yLabel, seriesKeys, lines) {
+            const target = document.getElementById(targetId);
+            if (!target || metricHistory.time.length < 2 || typeof uPlot === 'undefined') {
+                return;
+            }
+            const width = Math.max(target.clientWidth || 420, 420);
+            const height = 220;
+            const data = [metricHistory.time, ...seriesKeys.map(seriesKey => metricHistory[seriesKey])];
+            const options = {
+                width,
+                height,
+                legend: { show: true },
+                scales: { x: { time: true } },
+                axes: [{ label: 'Time' }, { label: yLabel }],
+                series: [{}, ...lines],
+            };
+            if (charts[key]) {
+                charts[key].setData(data);
+                charts[key].setSize({ width, height });
+            } else {
+                charts[key] = new uPlot(options, data, target);
+            }
+        }
+
+        function renderCharts() {
+            renderSingleChart('application-actors-chart', 'actors', 'Actors', ['actors'], [
+                { label: 'Actors', stroke: '#5B8C5A', width: 2 },
+            ]);
+            renderSingleChart('application-messages-chart', 'messages', 'Count', ['messages', 'errors'], [
+                { label: 'Messages', stroke: '#2E86AB', width: 2 },
+                { label: 'Errors', stroke: '#A23B72', width: 2 },
+            ]);
+            renderSingleChart('application-latency-chart', 'latency', 'ms', ['avgLatency', 'maxLatency'], [
+                { label: 'Average', stroke: '#7D6608', width: 2 },
+                { label: 'Max', stroke: '#C0392B', width: 2 },
+            ]);
+            renderSingleChart('application-supervisors-chart', 'supervisors', 'Supervisors', ['supervisors'], [
+                { label: 'Supervisors', stroke: '#F18F01', width: 2 },
+            ]);
+        }
+
+        function trackAppMetrics(metrics) {
+            const actorCount = metrics.actor_counts ? Object.values(metrics.actor_counts).reduce((sum, value) => sum + Number(value || 0), 0) : 0;
+            metricHistory.time.push(Date.now() / 1000);
+            metricHistory.actors.push(actorCount);
+            metricHistory.messages.push(Number(metrics.message_count || 0));
+            metricHistory.errors.push(Number(metrics.error_count || 0));
+            metricHistory.supervisors.push(Number(metrics.supervisor_count || 0));
+            metricHistory.avgLatency.push(averageLatency(metrics));
+            metricHistory.maxLatency.push(maxLatency(metrics));
+            while (metricHistory.time.length > 24) {
+                Object.values(metricHistory).forEach(series => series.shift());
+            }
+            renderCharts();
+        }
+
+        function updateFooter(systemInfo) {
+            const version = systemInfo.git_commit && systemInfo.git_commit !== 'unknown'
+                ? `${systemInfo.version} (${systemInfo.git_commit})`
+                : `${systemInfo.version}`;
+            const buildDate = systemInfo.build_date && systemInfo.build_date !== 'unknown'
+                ? ` • built ${new Date(systemInfo.build_date).toLocaleString()}`
+                : '';
+            document.getElementById('build-version').textContent = `PlexSpaces ${version}${buildDate}`;
+            document.getElementById('last-updated').textContent = `Last updated ${new Date().toLocaleString()}`;
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp || typeof timestamp.seconds === 'undefined') {
+                return 'Not yet recorded';
+            }
+            return new Date((Number(timestamp.seconds) * 1000) + Math.floor(Number(timestamp.nanos || 0) / 1_000_000)).toLocaleString();
+        }
+
+        function metricTable(rows) {
+            return `
+                <table class="modal-metrics-table">
+                    <tbody>
+                        ${rows.map(([label, value]) => `
+                            <tr>
+                                <th>${escapeHtml(label)}</th>
+                                <td>${escapeHtml(value)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function renderActors(actors) {
+            const body = document.getElementById('actors-table-body');
+            if (!actors.length) {
+                body.innerHTML = '<tr><td colspan="8">No actors found.</td></tr>';
+                return;
+            }
+            body.innerHTML = actors.map(actor => `
+                <tr>
+                    <td>${escapeHtml(actor.actor_id)}</td>
+                    <td>${escapeHtml(actor.behavior_kind || '-')}</td>
+                    <td>${escapeHtml(actor.actor_type || '-')}</td>
+                    <td>${escapeHtml(actor.current_status || actor.status || '-')}</td>
+                    <td>${escapeHtml(actor.exit_status || '-')}</td>
+                    <td>${Number((actor.metrics || {}).messages_routed || 0)}</td>
+                    <td>${Number((actor.metrics || {}).error_total || 0)}</td>
+                    <td class="action-group">
+                        <button type="button" class="action-button secondary" data-view-actor="${escapeHtml(actor.actor_id)}">View</button>
+                        <button type="button" class="action-button danger" data-stop-actor="${escapeHtml(actor.actor_id)}">Stop</button>
+                    </td>
+                </tr>
+            `).join('');
+            body.querySelectorAll('[data-view-actor]').forEach(button => {
+                button.addEventListener('click', () => showActorDetail(button.getAttribute('data-view-actor')));
+            });
+            body.querySelectorAll('[data-stop-actor]').forEach(button => {
+                button.addEventListener('click', () => stopActor(button.getAttribute('data-stop-actor')));
+            });
+        }
+
+        async function showActorDetail(actorId) {
+            const modal = document.getElementById('actor-detail-modal');
+            const title = document.getElementById('actor-detail-title');
+            const body = document.getElementById('actor-detail-body');
+            title.textContent = actorId;
+            body.innerHTML = '<p>Loading...</p>';
+            modal.style.display = 'block';
+            try {
+                const data = await fetchJson(`/api/v1/dashboard/actor/${encodeURIComponent(actorId)}`);
+                const actor = data.actor || {};
+                const metrics = actor.metrics || {};
+                const identityRows = [
+                    ['Actor ID', actor.actor_id || '-'],
+                    ['Behavior', actor.behavior_kind || '-'],
+                    ['Type', actor.actor_type || '-'],
+                    ['Namespace', actor.namespace || '-'],
+                    ['Tenant', actor.tenant_id || '-'],
+                    ['Node', actor.node_id || '-'],
+                    ['Status', actor.status || '-'],
+                ];
+                const messageRows = [
+                    ['Messages routed', String(Number(metrics.messages_routed || 0))],
+                    ['Local deliveries', String(Number(metrics.local_deliveries || 0))],
+                    ['Remote deliveries', String(Number(metrics.remote_deliveries || 0))],
+                    ['Failed deliveries', String(Number(metrics.failed_deliveries || 0))],
+                    ['Errors', String(Number(metrics.error_total || 0))],
+                ];
+                const lifecycleRows = [
+                    ['Spawn total', String(Number(metrics.spawn_total || 0))],
+                    ['Created at', formatTimestamp(actor.created_at)],
+                    ['Last checkpoint', formatTimestamp(actor.last_checkpoint)],
+                    ['Journal size bytes', String(Number(actor.journal_size_bytes || 0))],
+                ];
+                body.innerHTML = `
+                    <div class="modal-section">
+                        <h3>Identity</h3>
+                        ${metricTable(identityRows)}
+                    </div>
+                    <div class="modal-section">
+                        <h3>Message Metrics</h3>
+                        ${metricTable(messageRows)}
+                    </div>
+                    <div class="modal-section">
+                        <h3>Lifecycle</h3>
+                        ${metricTable(lifecycleRows)}
+                    </div>
+                `;
+            } catch (error) {
+                body.innerHTML = `<p>Failed to load actor detail: ${escapeHtml(error.message)}</p>`;
+            }
+        }
+
+        async function stopActor(actorId) {
+            if (!actorId || !window.confirm(`Stop actor ${actorId}?`)) {
+                return;
+            }
+            try {
+                await fetchJson(`/api/v1/dashboard/actor/${encodeURIComponent(actorId)}/stop`, {
+                    method: 'POST',
+                });
+                await loadActors();
+                await loadApplication();
+            } catch (error) {
+                window.alert(`Failed to stop actor ${actorId}: ${error.message}`);
+            }
+        }
+
+        async function loadApplication() {
+            const data = await fetchJson(`/api/v1/dashboard/application/${encodeURIComponent(applicationId)}`);
+            applicationDetails = data.application || {};
+            const metrics = applicationDetails.metrics || {};
+            const displayName = applicationDetails.namespace || applicationDetails.name || applicationId;
+            document.getElementById('application-name').textContent = displayName;
+            document.getElementById('application-registration-id').textContent = `Registration ID: ${applicationDetails.application_id || applicationId}`;
+            document.getElementById('tenant-id').textContent = applicationDetails.tenant_id || '-';
+            document.getElementById('namespace-id').textContent = applicationDetails.namespace || '-';
+            document.getElementById('actor-count').textContent = metrics.actor_counts
+                ? Object.values(metrics.actor_counts).reduce((sum, value) => sum + Number(value || 0), 0)
+                : 0;
+            document.getElementById('message-count').textContent = Number(metrics.message_count || 0);
+            document.getElementById('error-count').textContent = Number(metrics.error_count || 0);
+            trackAppMetrics(metrics);
+        }
+
+        async function loadActors() {
+            if (!applicationDetails) {
+                return;
+            }
+            const status = actorStatusRequestValue();
+            if (status === '__none__') {
+                document.getElementById('actor-count').textContent = '0';
+                renderActors([]);
+                renderPagination({ offset: 0, limit: actorTableState.limit, total_size: 0, has_next: false }, () => {});
+                return;
+            }
+            const params = new URLSearchParams({
+                tenant_id: applicationDetails.tenant_id || '',
+                namespace: applicationDetails.namespace || applicationDetails.application_id || applicationId,
+                actor_id_pattern: document.getElementById('actor-pattern').value || '',
+                behavior_kind: document.getElementById('behavior-filter').value || '',
+                actor_type: document.getElementById('actor-type-filter').value || '',
+                status,
+                offset: String(actorTableState.offset),
+                limit: String(actorTableState.limit),
+            });
+            const data = await fetchJson(`/api/v1/dashboard/actors?${params.toString()}`);
+            document.getElementById('actor-count').textContent = Number((data.page || {}).total_size || (data.actors || []).length);
+            renderActors(data.actors || []);
+            renderPagination(data.page, direction => {
+                actorTableState.offset = direction === 'next'
+                    ? actorTableState.offset + actorTableState.limit
+                    : Math.max(0, actorTableState.offset - actorTableState.limit);
+                loadActors();
+            });
+        }
+
+        async function refreshPage() {
+            try {
+                const systemInfoPromise = fetchJson('/api/v1/dashboard/system-info');
+                await loadApplication();
+                await loadActors();
+                updateFooter(await systemInfoPromise);
+            } catch (error) {
+                console.error('Failed to refresh application dashboard', error);
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('actor-detail-close').addEventListener('click', () => {
+                document.getElementById('actor-detail-modal').style.display = 'none';
+            });
+            document.getElementById('actor-detail-modal').addEventListener('click', event => {
+                if (event.target.id === 'actor-detail-modal') {
+                    event.currentTarget.style.display = 'none';
+                }
+            });
+            document.querySelectorAll('.search-filters input, .search-filters select').forEach(element => {
+                element.addEventListener('input', () => {
+                    actorTableState.offset = 0;
+                    loadActors();
+                });
+                element.addEventListener('change', () => {
+                    actorTableState.offset = 0;
+                    loadActors();
+                });
+            });
+            refreshPage();
+            setInterval(refreshPage, 5000);
+            window.addEventListener('resize', renderCharts);
+        });
+    </script>
+</body>
+</html>

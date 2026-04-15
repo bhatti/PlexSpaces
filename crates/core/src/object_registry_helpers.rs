@@ -357,15 +357,12 @@ pub async fn register_application<T: ObjectRegistryTrait + ?Sized>(
 ///
 /// ## Returns
 /// Result indicating success or failure
-pub async fn unregister_application(
-    _object_registry: &Arc<dyn ObjectRegistryTrait>,
+pub async fn unregister_application<T: ObjectRegistryTrait + ?Sized>(
+    object_registry: &Arc<T>,
     ctx: &RequestContext,
     app_name: &str,
     node_id: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let _object_id = format!("{}@{}", app_name, node_id);
-    // Use lookup_full to get the registration, then we'd need to call unregister
-    // For now, this is a placeholder - unregister would need to be added to the trait
     // Invalidate all application cache entries for this tenant/namespace to prevent stale data
     // Cache key format: "application:{app_name}:{tenant_id}:{namespace}"
     let tenant_ns_suffix = format!(":{}:{}", ctx.tenant_id(), ctx.namespace());
@@ -373,10 +370,19 @@ pub async fn unregister_application(
     cache
         .remove_matching(|key| key.starts_with("application:") && key.ends_with(&tenant_ns_suffix));
 
-    Err(Box::new(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "Unregister not yet implemented via trait",
-    )))
+    object_registry
+        .unregister(
+            ctx,
+            ObjectType::ObjectTypeApplication,
+            &format!("{app_name}@{node_id}"),
+        )
+        .await
+        .map_err(|e| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )) as Box<dyn std::error::Error + Send + Sync>
+        })
 }
 
 /// Register a workflow in object-registry

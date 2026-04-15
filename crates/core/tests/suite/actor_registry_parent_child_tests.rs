@@ -300,8 +300,12 @@ async fn test_get_subtree_single_level() {
 
     let subtree = registry.get_subtree(&parent_id).await;
     assert_eq!(subtree.len(), 2);
-    assert!(subtree.iter().any(|actor_id| actor_id.name() == child1.name()));
-    assert!(subtree.iter().any(|actor_id| actor_id.name() == child2.name()));
+    assert!(subtree
+        .iter()
+        .any(|actor_id| actor_id.name() == child1.name()));
+    assert!(subtree
+        .iter()
+        .any(|actor_id| actor_id.name() == child2.name()));
 }
 
 #[tokio::test]
@@ -331,11 +335,21 @@ async fn test_get_subtree_nested() {
 
     let subtree = registry.get_subtree(&root).await;
     assert_eq!(subtree.len(), 5); // worker1, worker2, nested, worker3, worker4
-    assert!(subtree.iter().any(|actor_id| actor_id.name() == worker1.name()));
-    assert!(subtree.iter().any(|actor_id| actor_id.name() == worker2.name()));
-    assert!(subtree.iter().any(|actor_id| actor_id.name() == nested.name()));
-    assert!(subtree.iter().any(|actor_id| actor_id.name() == worker3.name()));
-    assert!(subtree.iter().any(|actor_id| actor_id.name() == worker4.name()));
+    assert!(subtree
+        .iter()
+        .any(|actor_id| actor_id.name() == worker1.name()));
+    assert!(subtree
+        .iter()
+        .any(|actor_id| actor_id.name() == worker2.name()));
+    assert!(subtree
+        .iter()
+        .any(|actor_id| actor_id.name() == nested.name()));
+    assert!(subtree
+        .iter()
+        .any(|actor_id| actor_id.name() == worker3.name()));
+    assert!(subtree
+        .iter()
+        .any(|actor_id| actor_id.name() == worker4.name()));
 }
 
 #[tokio::test]
@@ -455,7 +469,13 @@ async fn test_deeply_nested_subtree() {
 
     let subtree = registry.get_subtree(&level1).await;
     assert_eq!(subtree.len(), 3); // level2, level3, worker
-    assert!(subtree.iter().any(|actor_id| actor_id.name() == level2.name()));
-    assert!(subtree.iter().any(|actor_id| actor_id.name() == level3.name()));
-    assert!(subtree.iter().any(|actor_id| actor_id.name() == worker.name()));
+    assert!(subtree
+        .iter()
+        .any(|actor_id| actor_id.name() == level2.name()));
+    assert!(subtree
+        .iter()
+        .any(|actor_id| actor_id.name() == level3.name()));
+    assert!(subtree
+        .iter()
+        .any(|actor_id| actor_id.name() == worker.name()));
 }

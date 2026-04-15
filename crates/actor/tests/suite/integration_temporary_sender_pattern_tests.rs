@@ -350,9 +350,9 @@ async fn register_test_actor(
         "internal".to_string(),
         "system".to_string(),
     );
-        actor_registry
-            .register_actor(
-                &ctx,
+    actor_registry
+        .register_actor(
+            &ctx,
             actor_id,
             sender,
             "TestActor".to_string(),
@@ -469,9 +469,7 @@ async fn test_outside_sender_calling_ask() {
     // Test: Outside sender (not an actor) calling ask() on a local actor
     // Expected: Temporary sender ID should be created and used
 
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("warn")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
     // Create node
     let node = NodeBuilder::new("test-node-outside-ask")
@@ -524,9 +522,7 @@ async fn test_local_actor_calling_ask_of_local_actor() {
     // Test: Local actor calling ask() on another local actor
     // Expected: Temporary sender is always created for ask(), but sender ID is set to actor's own ID
 
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("warn")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
     // Create node
     let node = NodeBuilder::new("test-node-local-ask")
@@ -591,9 +587,7 @@ async fn test_local_actor_calling_ask_of_local_actor() {
 /// 4. Verify reply received correctly via "local via remote" path
 #[tokio::test]
 async fn test_local_actor_calling_ask_of_remote_actor() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("warn")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
     // ARRANGE: Create node1 (local) - reuse same pattern as test_ask_with_simulated_remote
     let node1 = Arc::new(
@@ -680,10 +674,11 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
                         // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
                         // This ensures proper routing to ReplyWaiter
                         if let Ok(sender_id) = ActorId::from_canonical(sender) {
-                            if let Some(sender_ref) = actor_registry1_clone.lookup_actor(&sender_id).await
-                        {
-                            let _ = sender_ref.tell(reply_msg).await;
-                        }
+                            if let Some(sender_ref) =
+                                actor_registry1_clone.lookup_actor(&sender_id).await
+                            {
+                                let _ = sender_ref.tell(reply_msg).await;
+                            }
                         }
                     }
                 }
@@ -742,9 +737,7 @@ async fn test_local_actor_calling_ask_of_remote_actor() {
 /// 6. Verify both replies received correctly via "local via remote" path
 #[tokio::test]
 async fn test_chained_asks_multi_node() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter("warn")
-        .try_init();
+    let _ = tracing_subscriber::fmt().with_env_filter("warn").try_init();
 
     // ARRANGE: Create node1 (local) - reuse same pattern as test_ask_with_simulated_remote
     let node1 = Arc::new(
@@ -828,10 +821,11 @@ async fn test_chained_asks_multi_node() {
                         // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
                         // This ensures proper routing to ReplyWaiter
                         if let Ok(sender_id) = ActorId::from_canonical(sender) {
-                            if let Some(sender_ref) = actor_registry1_clone.lookup_actor(&sender_id).await
-                        {
-                            let _ = sender_ref.tell(reply_msg).await;
-                        }
+                            if let Some(sender_ref) =
+                                actor_registry1_clone.lookup_actor(&sender_id).await
+                            {
+                                let _ = sender_ref.tell(reply_msg).await;
+                            }
                         }
                     }
                 }
@@ -972,10 +966,11 @@ async fn test_concurrent_asks_multi_node() {
                         // Use ActorRegistry to get temporary sender's ActorRef and call tell() directly
                         // This ensures proper routing to ReplyWaiter
                         if let Ok(sender_id) = ActorId::from_canonical(sender) {
-                            if let Some(sender_ref) = actor_registry1_clone.lookup_actor(&sender_id).await
-                        {
-                            let _ = sender_ref.tell(reply_msg).await;
-                        }
+                            if let Some(sender_ref) =
+                                actor_registry1_clone.lookup_actor(&sender_id).await
+                            {
+                                let _ = sender_ref.tell(reply_msg).await;
+                            }
                         }
                     }
                 }
@@ -996,7 +991,7 @@ async fn test_concurrent_asks_multi_node() {
     let mut handles = vec![];
     for i in 0..10 {
         let counter_ref_clone = counter_ref.clone();
-            let counter_id_clone = counter_id.clone();
+        let counter_id_clone = counter_id.clone();
         let handle = tokio::spawn(async move {
             let request = CounterMessage::Increment;
             let mut msg = create_test_message(serde_json::to_vec(&request).unwrap());

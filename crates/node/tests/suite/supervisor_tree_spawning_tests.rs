@@ -27,7 +27,7 @@
 //! 6. The entire tree is spawned when an application is deployed
 
 use super::test_helpers::app_request_with_tenant;
-use plexspaces_core::{service_names, ActorId, ApplicationManager, ServiceLocator};
+use plexspaces_core::{service_names, ActorId, ApplicationManager, RequestContext, ServiceLocator};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
     application_service_server::ApplicationService, ApplicationSpec, ApplicationType, ChildSpec,
@@ -47,6 +47,10 @@ use tokio::task::yield_now;
 use tokio::time::{sleep, timeout, Duration};
 use tonic::Request;
 use wat;
+
+fn app_ctx(name: &str) -> RequestContext {
+    RequestContext::new_without_auth(String::new(), name.to_string())
+}
 
 /// Shared minimal WASM module for all tests (loaded once, reused)
 ///
@@ -471,7 +475,7 @@ async fn deploy_application_mock(
 
     // Register application
     node.application_manager()
-        .register(app)
+        .register(&app_ctx(app_name), app)
         .await
         .map_err(|e| format!("Failed to register application: {}", e))?;
 

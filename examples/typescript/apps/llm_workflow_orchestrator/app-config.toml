@@ -1,0 +1,79 @@
+name = "typescript-llm-workflow-orchestrator"
+version = "1.0.0"
+namespace = "typescript-llm-workflow-orchestrator"
+seed_nodes = ["localhost:8091", "localhost:8093"]
+
+[supervisor]
+strategy = "one_for_one"
+max_restarts = 10
+max_restart_window_seconds = 60
+
+[[supervisor.children]]
+id = "router"
+type = "router"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "router" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+id = "chain"
+type = "chain"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "chain" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 10 } }
+]
+
+[[supervisor.children]]
+id = "judge"
+type = "judge"
+restart = "permanent"
+shutdown_timeout_seconds = 10
+behavior_kind = "GenServer"
+args = { role = "judge" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 10 } }
+]
+
+[[supervisor.children]]
+id = "orchestrator"
+type = "orchestrator"
+restart = "permanent"
+shutdown_timeout_seconds = 60
+behavior_kind = "Workflow"
+args = { role = "orchestrator" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "10m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 5 } }
+]
+
+[[supervisor.children]]
+id = "pipeline_audit"
+type = "pipeline_audit"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenEvent"
+args = { role = "pipeline_audit" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } }
+]
+
+[[supervisor.children]]
+id = "quality_fsm"
+type = "quality_fsm"
+restart = "permanent"
+shutdown_timeout_seconds = 5
+behavior_kind = "GenFSM"
+args = { role = "quality_fsm" }
+facets = [
+  { type = "virtual_actor", priority = 100, config = { idle_timeout = "30m", activation_strategy = "lazy" } },
+  { type = "durability", priority = 90, config = { checkpoint_interval = 1 } }
+]

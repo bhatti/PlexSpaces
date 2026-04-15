@@ -143,7 +143,7 @@ impl SqliteKVStore {
         };
 
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(1)
             .connect(&url)
             .await?;
 

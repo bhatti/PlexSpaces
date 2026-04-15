@@ -67,7 +67,7 @@ impl SqliteObjectRegistryRepository {
         };
 
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(1)
             .connect(&url)
             .await
             .map_err(|e| RepositoryError::Connection(e.to_string()))?;
@@ -250,9 +250,17 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
         limit: usize,
     ) -> RepositoryResult<Vec<ObjectRegistration>> {
         // Build dynamic WHERE clause
-        let mut conditions = vec!["tenant_id = ?".to_string(), "namespace = ?".to_string()];
-        let mut bindings: Vec<String> =
-            vec![ctx.tenant_id().to_string(), ctx.namespace().to_string()];
+        let mut conditions = Vec::new();
+        let mut bindings: Vec<String> = Vec::new();
+
+        if !ctx.is_admin() || !ctx.tenant_id().is_empty() {
+            conditions.push("tenant_id = ?".to_string());
+            bindings.push(ctx.tenant_id().to_string());
+        }
+        if !ctx.is_admin() || !ctx.namespace().is_empty() {
+            conditions.push("namespace = ?".to_string());
+            bindings.push(ctx.namespace().to_string());
+        }
 
         if let Some(obj_type) = filter.object_type.as_ref() {
             conditions.push("object_type = ?".to_string());
@@ -284,7 +292,11 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
             bindings.push(after.to_string());
         }
 
-        let where_clause = conditions.join(" AND ");
+        let where_clause = if conditions.is_empty() {
+            "1 = 1".to_string()
+        } else {
+            conditions.join(" AND ")
+        };
         let query = format!(
             r#"
             SELECT registration_blob FROM object_registrations
@@ -406,9 +418,17 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
         filter: &DiscoverFilter,
     ) -> RepositoryResult<usize> {
         // Build dynamic WHERE clause (same as discover, including heartbeat filters)
-        let mut conditions = vec!["tenant_id = ?".to_string(), "namespace = ?".to_string()];
-        let mut bindings: Vec<String> =
-            vec![ctx.tenant_id().to_string(), ctx.namespace().to_string()];
+        let mut conditions = Vec::new();
+        let mut bindings: Vec<String> = Vec::new();
+
+        if !ctx.is_admin() || !ctx.tenant_id().is_empty() {
+            conditions.push("tenant_id = ?".to_string());
+            bindings.push(ctx.tenant_id().to_string());
+        }
+        if !ctx.is_admin() || !ctx.namespace().is_empty() {
+            conditions.push("namespace = ?".to_string());
+            bindings.push(ctx.namespace().to_string());
+        }
 
         if let Some(obj_type) = filter.object_type.as_ref() {
             conditions.push("object_type = ?".to_string());
@@ -441,7 +461,11 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
             bindings.push(after.to_string());
         }
 
-        let where_clause = conditions.join(" AND ");
+        let where_clause = if conditions.is_empty() {
+            "1 = 1".to_string()
+        } else {
+            conditions.join(" AND ")
+        };
         let query = format!(
             "SELECT COUNT(*) as cnt FROM object_registrations WHERE {}",
             where_clause
@@ -461,6 +485,102 @@ impl ObjectRegistryRepository for SqliteObjectRegistryRepository {
             .try_get("cnt")
             .map_err(|e| RepositoryError::Storage(e.to_string()))?;
 
+        Ok(count as usize)
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), object_type = ?object_type))]
+    async fn list_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+        offset: usize,
+        limit: usize,
+    ) -> RepositoryResult<Vec<String>> {
+        if ctx.auth_enabled && !ctx.is_admin() {
+            return Ok((!ctx.tenant_id().is_empty())
+                .then(|| ctx.tenant_id().to_string())
+                .into_iter()
+                .collect());
+        }
+
+        let mut conditions = vec!["object_type = ?".to_string()];
+        let mut bindings = vec![(object_type as i32).to_string()];
+
+        if !ctx.tenant_id().is_empty() {
+            conditions.push("tenant_id = ?".to_string());
+            bindings.push(ctx.tenant_id().to_string());
+        }
+        if !ctx.should_skip_namespace_filter() && !ctx.namespace().is_empty() {
+            conditions.push("namespace = ?".to_string());
+            bindings.push(ctx.namespace().to_string());
+        }
+
+        let query = format!(
+            r#"
+            SELECT DISTINCT tenant_id FROM object_registrations
+            WHERE {}
+            ORDER BY tenant_id ASC
+            LIMIT ? OFFSET ?
+            "#,
+            conditions.join(" AND ")
+        );
+
+        let mut query_builder = sqlx::query(&query);
+        for binding in &bindings {
+            query_builder = query_builder.bind(binding);
+        }
+        query_builder = query_builder.bind(limit as i64).bind(offset as i64);
+
+        let rows = query_builder
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+        rows.into_iter()
+            .map(|row| {
+                row.try_get("tenant_id")
+                    .map_err(|e| RepositoryError::Storage(e.to_string()))
+            })
+            .collect()
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), object_type = ?object_type))]
+    async fn count_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+    ) -> RepositoryResult<usize> {
+        if ctx.auth_enabled && !ctx.is_admin() {
+            return Ok((!ctx.tenant_id().is_empty()) as usize);
+        }
+
+        let mut conditions = vec!["object_type = ?".to_string()];
+        let mut bindings = vec![(object_type as i32).to_string()];
+
+        if !ctx.tenant_id().is_empty() {
+            conditions.push("tenant_id = ?".to_string());
+            bindings.push(ctx.tenant_id().to_string());
+        }
+        if !ctx.should_skip_namespace_filter() && !ctx.namespace().is_empty() {
+            conditions.push("namespace = ?".to_string());
+            bindings.push(ctx.namespace().to_string());
+        }
+
+        let query = format!(
+            "SELECT COUNT(DISTINCT tenant_id) AS cnt FROM object_registrations WHERE {}",
+            conditions.join(" AND ")
+        );
+        let mut query_builder = sqlx::query(&query);
+        for binding in &bindings {
+            query_builder = query_builder.bind(binding);
+        }
+        let row = query_builder
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        let count: i64 = row
+            .try_get("cnt")
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
         Ok(count as usize)
     }
 
@@ -940,6 +1060,115 @@ impl ObjectRegistryRepository for PostgresObjectRegistryRepository {
         Ok(count as usize)
     }
 
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), object_type = ?object_type))]
+    async fn list_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+        offset: usize,
+        limit: usize,
+    ) -> RepositoryResult<Vec<String>> {
+        if ctx.auth_enabled && !ctx.is_admin() {
+            return Ok((!ctx.tenant_id().is_empty())
+                .then(|| ctx.tenant_id().to_string())
+                .into_iter()
+                .collect());
+        }
+
+        let mut conditions = vec!["object_type = $1".to_string()];
+        let mut next_param = 1;
+        let mut tenant_filter_index = None;
+        let mut namespace_filter_index = None;
+
+        if !ctx.tenant_id().is_empty() {
+            next_param += 1;
+            tenant_filter_index = Some(next_param);
+            conditions.push(format!("tenant_id = ${next_param}"));
+        }
+        if !ctx.should_skip_namespace_filter() && !ctx.namespace().is_empty() {
+            next_param += 1;
+            namespace_filter_index = Some(next_param);
+            conditions.push(format!("namespace = ${next_param}"));
+        }
+
+        let query = format!(
+            "SELECT DISTINCT tenant_id FROM object_registrations WHERE {} ORDER BY tenant_id ASC LIMIT ${} OFFSET ${}",
+            conditions.join(" AND ")
+            ,
+            next_param + 1,
+            next_param + 2
+        );
+
+        let mut query_builder = sqlx::query(&query).bind(object_type as i32);
+        if tenant_filter_index.is_some() {
+            query_builder = query_builder.bind(ctx.tenant_id());
+        }
+        if namespace_filter_index.is_some() {
+            query_builder = query_builder.bind(ctx.namespace());
+        }
+        query_builder = query_builder.bind(limit as i64).bind(offset as i64);
+
+        let rows = query_builder
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+
+        rows.into_iter()
+            .map(|row| {
+                row.try_get("tenant_id")
+                    .map_err(|e| RepositoryError::Storage(e.to_string()))
+            })
+            .collect()
+    }
+
+    #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), object_type = ?object_type))]
+    async fn count_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+    ) -> RepositoryResult<usize> {
+        if ctx.auth_enabled && !ctx.is_admin() {
+            return Ok((!ctx.tenant_id().is_empty()) as usize);
+        }
+
+        let mut conditions = vec!["object_type = $1".to_string()];
+        let mut next_param = 1;
+        let mut has_tenant_filter = false;
+        let mut has_namespace_filter = false;
+
+        if !ctx.tenant_id().is_empty() {
+            next_param += 1;
+            has_tenant_filter = true;
+            conditions.push(format!("tenant_id = ${next_param}"));
+        }
+        if !ctx.should_skip_namespace_filter() && !ctx.namespace().is_empty() {
+            next_param += 1;
+            has_namespace_filter = true;
+            conditions.push(format!("namespace = ${next_param}"));
+        }
+
+        let query = format!(
+            "SELECT COUNT(DISTINCT tenant_id) AS cnt FROM object_registrations WHERE {}",
+            conditions.join(" AND ")
+        );
+        let mut query_builder = sqlx::query(&query).bind(object_type as i32);
+        if has_tenant_filter {
+            query_builder = query_builder.bind(ctx.tenant_id());
+        }
+        if has_namespace_filter {
+            query_builder = query_builder.bind(ctx.namespace());
+        }
+
+        let row = query_builder
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        let count: i64 = row
+            .try_get("cnt")
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        Ok(count as usize)
+    }
+
     #[instrument(skip(self, ctx), fields(tenant_id = %ctx.tenant_id(), object_id = %object_id))]
     async fn exists(&self, ctx: &RequestContext, object_id: &str) -> RepositoryResult<bool> {
         let row = sqlx::query(
@@ -1044,6 +1273,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_sqlite_discover_admin_without_namespace_returns_cross_namespace_results() {
+        let repo = SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap();
+        let ctx_a = RequestContext::new_without_auth("tenant-a".to_string(), "ns-a".to_string());
+        let ctx_b = RequestContext::new_without_auth("tenant-b".to_string(), "ns-b".to_string());
+        let admin_ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+
+        repo.put(
+            &ctx_a,
+            &create_test_registration("actor-a", ObjectType::ObjectTypeActor),
+        )
+        .await
+        .unwrap();
+        repo.put(
+            &ctx_b,
+            &create_test_registration("actor-b", ObjectType::ObjectTypeActor),
+        )
+        .await
+        .unwrap();
+
+        let results = repo
+            .discover(
+                &admin_ctx,
+                &DiscoverFilter {
+                    object_type: Some(ObjectType::ObjectTypeActor),
+                    ..Default::default()
+                },
+                0,
+                100,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
     async fn test_sqlite_update_heartbeat() {
         let repo = SqliteObjectRegistryRepository::new(":memory:")
             .await
@@ -1089,5 +1357,42 @@ mod tests {
         // Should still be only one entry
         let count = repo.count(&ctx, &DiscoverFilter::default()).await.unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_count_admin_without_namespace_counts_cross_namespace_results() {
+        let repo = SqliteObjectRegistryRepository::new(":memory:")
+            .await
+            .unwrap();
+        let ctx_a = RequestContext::new_without_auth("tenant-a".to_string(), "ns-a".to_string());
+        let ctx_b = RequestContext::new_without_auth("tenant-b".to_string(), "ns-b".to_string());
+        let admin_ctx =
+            RequestContext::new_without_auth(String::new(), String::new()).with_admin(true);
+
+        repo.put(
+            &ctx_a,
+            &create_test_registration("actor-a", ObjectType::ObjectTypeActor),
+        )
+        .await
+        .unwrap();
+        repo.put(
+            &ctx_b,
+            &create_test_registration("actor-b", ObjectType::ObjectTypeActor),
+        )
+        .await
+        .unwrap();
+
+        let count = repo
+            .count(
+                &admin_ctx,
+                &DiscoverFilter {
+                    object_type: Some(ObjectType::ObjectTypeActor),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(count, 2);
     }
 }

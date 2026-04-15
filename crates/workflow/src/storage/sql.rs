@@ -245,7 +245,7 @@ impl WorkflowStorage {
             }
         }
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(1)
             .connect(&conn_str)
             .await
             .map_err(|e| {

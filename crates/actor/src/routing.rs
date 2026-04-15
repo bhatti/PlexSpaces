@@ -177,9 +177,7 @@ pub fn ask_helper(
             .await
         {
             Some(_) => true,
-            None => {
-                target_actor_id.node_id() == registry.local_node_id()
-            }
+            None => target_actor_id.node_id() == registry.local_node_id(),
         };
 
         if !is_local {
@@ -310,6 +308,11 @@ pub fn route_local(
                 Ok(_) => {
                     record_node_messages_routed(&local_node_id);
                     record_node_local_delivery(&local_node_id);
+                    metrics::counter!(
+                        "plexspaces_local_deliveries_total",
+                        "namespace" => ctx.namespace().to_string()
+                    )
+                    .increment(1);
                     metrics::counter!("plexspaces_routing_local_route_success_total",
                         "pattern" => "ask"
                     )
@@ -348,6 +351,11 @@ pub fn route_local(
             record_node_messages_routed(&local_node_id);
             if result.is_ok() {
                 record_node_local_delivery(&local_node_id);
+                metrics::counter!(
+                    "plexspaces_local_deliveries_total",
+                    "namespace" => ctx.namespace().to_string()
+                )
+                .increment(1);
             } else {
                 record_node_failed_delivery(&local_node_id);
             }
@@ -432,6 +440,7 @@ pub fn route_remote(
                 .ask_reply(tonic::Request::new(AskReplyRequest {
                     namespace: ctx.namespace().to_string(),
                     actor_type: actor_id.clone(),
+                    actor_name: String::new(),
                     http_method: method,
                     payload: proto_message.payload.clone(),
                     headers: proto_message.headers.clone(),
@@ -455,6 +464,7 @@ pub fn route_remote(
                 .send_message(tonic::Request::new(SendMessageRequest {
                     namespace: ctx.namespace().to_string(),
                     actor_type: actor_id.clone(),
+                    actor_name: String::new(),
                     http_method: method,
                     payload: proto_message.payload.clone(),
                     headers: proto_message.headers.clone(),
@@ -511,6 +521,11 @@ pub fn route_remote(
 
         record_node_messages_routed(&local_node_id);
         record_node_remote_delivery(&local_node_id);
+        metrics::counter!(
+            "plexspaces_remote_deliveries_total",
+            "namespace" => ctx.namespace().to_string()
+        )
+        .increment(1);
 
         if wait_for_response {
             let (resolved_actor_id, payload, headers, _) = response;

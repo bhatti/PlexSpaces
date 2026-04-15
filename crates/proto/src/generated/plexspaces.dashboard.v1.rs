@@ -174,6 +174,9 @@ pub struct GetActorsRequest {
     /// Pagination
     #[prost(message, optional, tag="9")]
     pub page: ::core::option::Option<super::super::common::v1::PageRequest>,
+    /// Filter by runtime behavior kind (optional)
+    #[prost(string, tag="10")]
+    pub behavior_kind: ::prost::alloc::string::String,
 }
 /// Actor info with metrics
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -212,6 +215,9 @@ pub struct ActorInfo {
     /// Created timestamp
     #[prost(message, optional, tag="11")]
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Runtime behavior kind (GenServer, GenEvent, GenStateMachine, Workflow, or custom)
+    #[prost(string, tag="12")]
+    pub behavior_kind: ::prost::alloc::string::String,
 }
 /// Get actors response
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -314,14 +320,6 @@ pub struct GetDashboardMetricsResponse {
     #[prost(string, tag="3")]
     pub prometheus_text: ::prost::alloc::string::String,
 }
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
-#[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 #[cfg(feature = "grpc")]
 include!("plexspaces.dashboard.v1.tonic.rs");

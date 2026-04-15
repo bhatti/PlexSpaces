@@ -36,7 +36,7 @@ use async_trait::async_trait;
 use plexspaces_application::{
     Application, ApplicationError, ApplicationManagerImpl, ApplicationNode,
 };
-use plexspaces_core::{ActorId, ApplicationManager, ServiceLocator};
+use plexspaces_core::{ActorId, ApplicationManager, RequestContext, ServiceLocator};
 use plexspaces_facet::{Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
@@ -49,6 +49,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+
+fn app_ctx(name: &str) -> RequestContext {
+    RequestContext::new_without_auth(String::new(), name.to_string())
+}
 
 /// Facet factory for TimerFacet
 struct TimerFacetFactory {
@@ -229,7 +233,7 @@ async fn test_application_deploy_with_multiple_facet_types() {
 
     // Register application
     app_manager
-        .register(app)
+        .register(&app_ctx("test-app"), app)
         .await
         .expect("Failed to register application");
 
@@ -306,7 +310,7 @@ async fn test_application_undeploy_with_multiple_facets_cleanup() {
 
     // Register application
     app_manager
-        .register(app)
+        .register(&app_ctx("test-app-multi"), app)
         .await
         .expect("Failed to register application");
 
@@ -405,7 +409,7 @@ async fn test_application_with_timer_facet_only() {
     let app: Box<dyn Application> = Box::new(spec_app);
 
     app_manager
-        .register(app)
+        .register(&app_ctx("test-app-undeploy-multi"), app)
         .await
         .expect("Failed to register application");
 
@@ -497,7 +501,7 @@ async fn test_application_with_reminder_facet_only() {
     let app: Box<dyn Application> = Box::new(spec_app);
 
     app_manager
-        .register(app)
+        .register(&app_ctx("test-app-facet-combinations"), app)
         .await
         .expect("Failed to register application");
 
@@ -579,7 +583,7 @@ async fn test_application_with_durability_facet_only() {
     let app: Box<dyn Application> = Box::new(spec_app);
 
     app_manager
-        .register(app)
+        .register(&app_ctx("test-app-shutdown"), app)
         .await
         .expect("Failed to register application");
 
@@ -664,7 +668,7 @@ async fn test_application_with_virtual_actor_facet_only() {
     let app: Box<dyn Application> = Box::new(spec_app);
 
     app_manager
-        .register(app)
+        .register(&app_ctx("test-app-observability"), app)
         .await
         .expect("Failed to register application");
 
@@ -914,7 +918,7 @@ async fn test_observability_metrics_for_facet_lifecycle() {
     let app: Box<dyn Application> = Box::new(spec_app);
 
     app_manager
-        .register(app)
+        .register(&app_ctx("test-app-metrics"), app)
         .await
         .expect("Failed to register application");
 
@@ -1004,7 +1008,7 @@ async fn test_application_metrics_for_deploy_undeploy() {
     let app: Box<dyn Application> = Box::new(spec_app);
 
     app_manager
-        .register(app)
+        .register(&app_ctx("test-app-error-handling"), app)
         .await
         .expect("Failed to register application");
 

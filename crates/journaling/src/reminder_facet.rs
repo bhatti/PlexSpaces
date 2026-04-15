@@ -432,7 +432,11 @@ impl ReminderFacet {
                         };
 
                         // Use ActorService to send message (handles local/remote routing)
-                        if let Err(e) = actor_service.send(&actor_id_str, message).await {
+                        let ctx = plexspaces_core::RequestContext::new_without_auth(
+                            String::new(),
+                            String::new(),
+                        );
+                        if let Err(e) = actor_service.send(&ctx, &actor_id_str, message).await {
                             tracing::warn!("Failed to send reminder message: {}", e);
                         }
                     } else {
@@ -750,6 +754,7 @@ mod tests {
     impl ActorService for MockActorService {
         async fn spawn_actor(
             &self,
+            _ctx: &plexspaces_core::RequestContext,
             _actor_id: &str,
             _actor_type: &str,
             _initial_state: Vec<u8>,
@@ -759,6 +764,7 @@ mod tests {
 
         async fn send(
             &self,
+            _ctx: &plexspaces_core::RequestContext,
             _actor_id: &str,
             _message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {

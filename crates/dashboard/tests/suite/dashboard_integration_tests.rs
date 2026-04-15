@@ -23,6 +23,7 @@
 //! To run:
 //!   cargo test -p plexspaces-dashboard --test dashboard_integration_tests -- --test-threads=1
 
+use plexspaces_actor::ActorBuilder;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
 use plexspaces_core::RequestContext;
 use plexspaces_dashboard::{DashboardServiceImpl, HealthReporterAccess};
@@ -32,6 +33,10 @@ use plexspaces_proto::dashboard::v1::{
     GetDependencyHealthRequest, GetNodeDashboardRequest, GetNodesRequest, GetSummaryRequest,
     GetWorkflowsRequest,
 };
+use plexspaces_proto::node::v1::{ReleaseSpec, RuntimeConfig, SecurityConfig};
+use plexspaces_proto::storage::v1::SharedDbConfig;
+use plexspaces_workflow::storage::WorkflowStorage;
+use plexspaces_workflow::types::{ExecutionStatus, WorkflowDefinition};
 use std::sync::Arc;
 use tonic::Request;
 
@@ -52,6 +57,23 @@ impl plexspaces_core::Actor for NoopBehavior {
 
     fn behavior_type(&self) -> plexspaces_core::BehaviorType {
         plexspaces_core::BehaviorType::GenServer
+    }
+}
+
+struct NoopFsmBehavior;
+
+#[async_trait::async_trait]
+impl plexspaces_core::Actor for NoopFsmBehavior {
+    async fn handle_message(
+        &mut self,
+        _ctx: &plexspaces_core::ActorContext,
+        _message: plexspaces_proto::common::v1::Message,
+    ) -> Result<(), plexspaces_core::BehaviorError> {
+        Ok(())
+    }
+
+    fn behavior_type(&self) -> plexspaces_core::BehaviorType {
+        plexspaces_core::BehaviorType::GenStateMachine
     }
 }
 
@@ -106,8 +128,58 @@ impl Application for MockApplication {
 
 /// Helper to create a test node
 async fn create_test_node(node_id: &str) -> Arc<Node> {
-    let node = NodeBuilder::new(node_id).build().await;
-    Arc::new(node)
+    static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _env_guard = TEST_ENV_LOCK.lock().unwrap();
+    std::env::set_var("PLEXSPACES_DISABLE_AUTH", "1");
+    let node = NodeBuilder::new(node_id)
+        .with_in_memory_backends()
+        .build()
+        .await;
+    std::env::remove_var("PLEXSPACES_DISABLE_AUTH");
+    let node = Arc::new(node);
+    node.service_locator()
+        .register_security_config(SecurityConfig {
+            disable_auth: true,
+            ..Default::default()
+        })
+        .await;
+    node
+}
+
+async fn create_file_backed_test_node(node_id: &str) -> (Arc<Node>, String) {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let db_path = std::env::temp_dir().join(format!("plexspaces-dashboard-{node_id}-{unique}.db"));
+    let connection_string = format!("sqlite://{}?mode=rwc", db_path.display());
+    let release_spec = ReleaseSpec {
+        name: format!("dashboard-{node_id}"),
+        version: "0.0.0".to_string(),
+        runtime: Some(RuntimeConfig {
+            db: Some(SharedDbConfig {
+                connection_string: connection_string.clone(),
+                auto_migrate: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let node = Arc::new(
+        NodeBuilder::new(node_id)
+            .with_release_spec(release_spec)
+            .build()
+            .await,
+    );
+    node.service_locator()
+        .register_security_config(SecurityConfig {
+            disable_auth: true,
+            ..Default::default()
+        })
+        .await;
+    (node, connection_string)
 }
 
 /// Helper to create dashboard service from a node
@@ -119,8 +191,6 @@ async fn create_dashboard_service(node: Arc<Node>) -> DashboardServiceImpl {
     // ApplicationManager is already registered in service_locator by NodeBuilder::build()
     // Do NOT create a new one here - that would overwrite the one apps are registered in
 
-    // Ensure ObjectRegistry is registered (needed for query_remote_nodes)
-    use plexspaces_object_registry::ObjectRegistry;
     // ObjectRegistry is already registered via ServiceLocator initialization
 
     // Create HealthReporterAccess implementation
@@ -156,11 +226,24 @@ async fn register_application(
     name: &str,
     version: &str,
 ) -> Result<(), ApplicationError> {
+    register_application_with_metadata(node, name, version, name, "").await
+}
+
+async fn register_application_with_metadata(
+    node: Arc<Node>,
+    name: &str,
+    version: &str,
+    namespace: &str,
+    tenant_id: &str,
+) -> Result<(), ApplicationError> {
     let app = Box::new(MockApplication {
         name: name.to_string(),
         version: version.to_string(),
     });
-    node.application_manager().register(app).await
+    let ctx = RequestContext::new_without_auth(tenant_id.to_string(), namespace.to_string());
+    node.application_manager().register(&ctx, app).await?;
+
+    Ok(())
 }
 
 // ============================================================================
@@ -583,6 +666,83 @@ async fn test_get_applications_with_name_pattern_filter() {
 }
 
 #[tokio::test]
+async fn test_get_applications_exposes_tenant_and_namespace_metadata() {
+    let node = create_test_node("test-node-app-metadata").await;
+    register_application_with_metadata(
+        node.clone(),
+        "tenant-aware-app",
+        "1.0.0",
+        "analytics",
+        "tenant-a",
+    )
+    .await
+    .unwrap();
+
+    let service = create_dashboard_service(node).await;
+    let response = service
+        .get_applications(Request::new(GetApplicationsRequest {
+            node_id: String::new(),
+            tenant_id: String::new(),
+            namespace: String::new(),
+            name_pattern: String::new(),
+            page: None,
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+
+    let app = response
+        .applications
+        .into_iter()
+        .find(|app| app.name == "tenant-aware-app")
+        .expect("application should be listed");
+    assert_eq!(app.tenant_id, "tenant-a");
+    assert_eq!(app.namespace, "analytics");
+}
+
+#[tokio::test]
+async fn test_get_applications_respects_authenticated_tenant_scope() {
+    let node = create_test_node("test-node-app-auth").await;
+    register_application_with_metadata(node.clone(), "app-a", "1.0.0", "ns-a", "tenant-a")
+        .await
+        .unwrap();
+    register_application_with_metadata(node.clone(), "app-b", "1.0.0", "ns-b", "tenant-b")
+        .await
+        .unwrap();
+
+    node.service_locator()
+        .register_security_config(plexspaces_proto::node::v1::SecurityConfig {
+            disable_auth: false,
+            ..Default::default()
+        })
+        .await;
+
+    let service = create_dashboard_service(node).await;
+    let mut request = Request::new(GetApplicationsRequest {
+        node_id: String::new(),
+        tenant_id: String::new(),
+        namespace: String::new(),
+        name_pattern: String::new(),
+        page: None,
+    });
+    request
+        .metadata_mut()
+        .insert("x-tenant-id", "tenant-a".parse().unwrap());
+    request
+        .metadata_mut()
+        .insert("x-admin", "false".parse().unwrap());
+
+    let response = service
+        .get_applications(request)
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(response.applications.len(), 1);
+    assert_eq!(response.applications[0].name, "app-a");
+    assert_eq!(response.applications[0].tenant_id, "tenant-a");
+}
+
+#[tokio::test]
 async fn test_get_actors_empty() {
     // ARRANGE
     let node = create_test_node("test-node-actors-empty").await;
@@ -599,6 +759,7 @@ async fn test_get_actors_empty() {
         status: String::new(),
         since: None,
         page: None,
+        behavior_kind: String::new(),
     });
 
     let response = service.get_actors(request).await.unwrap();
@@ -611,6 +772,73 @@ async fn test_get_actors_empty() {
         "Should have 0 actors initially"
     );
     assert!(actors_response.page.is_some(), "Should have pagination");
+}
+
+#[tokio::test]
+async fn test_get_actors_respects_authenticated_tenant_scope() {
+    use plexspaces_core::ActorId;
+
+    let node = create_test_node("test-node-actors-auth").await;
+    register_behavior_registry(node.as_ref(), &["worker"]).await;
+
+    let ctx_a = RequestContext::new_without_auth("tenant-a".to_string(), "ns-a".to_string());
+    let ctx_b = RequestContext::new_without_auth("tenant-b".to_string(), "ns-b".to_string());
+    let actor_a = ActorId::new("actor-a", "worker", "ns-a", node.id().as_str()).unwrap();
+    let actor_b = ActorId::new("actor-b", "worker", "ns-b", node.id().as_str()).unwrap();
+    node.spawn(
+        &ctx_a,
+        &actor_a,
+        "worker",
+        vec![],
+        None,
+        std::collections::HashMap::new(),
+        vec![],
+    )
+    .await
+    .unwrap();
+    node.spawn(
+        &ctx_b,
+        &actor_b,
+        "worker",
+        vec![],
+        None,
+        std::collections::HashMap::new(),
+        vec![],
+    )
+    .await
+    .unwrap();
+
+    node.service_locator()
+        .register_security_config(plexspaces_proto::node::v1::SecurityConfig {
+            disable_auth: false,
+            ..Default::default()
+        })
+        .await;
+
+    let service = create_dashboard_service(node).await;
+    let mut request = Request::new(GetActorsRequest {
+        node_id: String::new(),
+        tenant_id: String::new(),
+        namespace: String::new(),
+        actor_id_pattern: String::new(),
+        actor_group: String::new(),
+        actor_type: String::new(),
+        status: String::new(),
+        since: None,
+        page: None,
+        behavior_kind: String::new(),
+    });
+    request
+        .metadata_mut()
+        .insert("x-tenant-id", "tenant-a".parse().unwrap());
+    request
+        .metadata_mut()
+        .insert("x-admin", "false".parse().unwrap());
+
+    let response = service.get_actors(request).await.unwrap().into_inner();
+    assert_eq!(response.actors.len(), 1);
+    assert_eq!(response.actors[0].tenant_id, "tenant-a");
+    assert_eq!(response.actors[0].namespace, "ns-a");
 }
 
 #[tokio::test]
@@ -633,6 +861,95 @@ async fn test_get_workflows() {
 
     // ASSERT: Workflows may be empty if WorkflowService not registered (expected)
     assert!(workflows_response.page.is_some() || workflows_response.page.is_none());
+}
+
+#[tokio::test]
+async fn test_get_workflows_reads_shared_storage_and_filters() {
+    let (node, connection_string) =
+        create_file_backed_test_node("test-node-workflows-storage").await;
+    let storage = WorkflowStorage::new_sqlite(&connection_string)
+        .await
+        .unwrap();
+    storage
+        .save_definition(&WorkflowDefinition {
+            id: "order-approval".to_string(),
+            name: "Order Approval".to_string(),
+            version: "1.0.0".to_string(),
+            steps: Vec::new(),
+            timeout: None,
+            retry_policy: None,
+        })
+        .await
+        .unwrap();
+    let execution_id = storage
+        .create_execution_with_node(
+            "order-approval",
+            "1.0.0",
+            serde_json::json!({"order_id": "123"}),
+            std::collections::HashMap::new(),
+            Some(node.id().as_str()),
+        )
+        .await
+        .unwrap();
+    storage
+        .update_execution_status(&execution_id, ExecutionStatus::Running)
+        .await
+        .unwrap();
+
+    let service = create_dashboard_service(node.clone()).await;
+    let request = Request::new(GetWorkflowsRequest {
+        node_id: node.id().as_str().to_string(),
+        tenant_id: String::new(),
+        definition_id: "order-approval".to_string(),
+        status: plexspaces_proto::workflow::v1::ExecutionStatus::ExecutionStatusRunning as i32,
+        page: None,
+    });
+
+    let response = service.get_workflows(request).await.unwrap().into_inner();
+    assert_eq!(response.workflows.len(), 1);
+    let workflow = response.workflows.first().unwrap();
+    let execution = workflow.execution.as_ref().unwrap();
+    assert_eq!(execution.execution_id, execution_id);
+    assert_eq!(execution.definition_id, "order-approval");
+    assert_eq!(
+        execution.status,
+        plexspaces_proto::workflow::v1::ExecutionStatus::ExecutionStatusRunning as i32
+    );
+    assert_eq!(execution.node_id, node.id().as_str());
+    let definition = workflow.definition.as_ref().unwrap();
+    assert_eq!(definition.id, "order-approval");
+    assert_eq!(definition.name, "Order Approval");
+}
+
+#[tokio::test]
+async fn test_get_actors_reports_fsm_current_status() {
+    let node = create_test_node("test-node-fsm-status").await;
+    let ctx = RequestContext::new_without_auth(String::new(), "fsm".to_string());
+    ActorBuilder::new(Box::new(NoopFsmBehavior))
+        .with_name("fsm-actor")
+        .spawn(&ctx, node.service_locator())
+        .await
+        .unwrap();
+
+    let service = create_dashboard_service(node.clone()).await;
+    let request = Request::new(GetActorsRequest {
+        node_id: node.id().as_str().to_string(),
+        tenant_id: String::new(),
+        namespace: "fsm".to_string(),
+        actor_id_pattern: String::new(),
+        actor_group: String::new(),
+        actor_type: "gen_state_machine".to_string(),
+        status: "active".to_string(),
+        since: None,
+        page: None,
+        behavior_kind: "gen_state_machine".to_string(),
+    });
+
+    let response = service.get_actors(request).await.unwrap().into_inner();
+    assert_eq!(response.actors.len(), 1);
+    assert_eq!(response.actors[0].actor_type, "gen_state_machine");
+    assert_eq!(response.actors[0].behavior_kind, "gen_state_machine");
+    assert_eq!(response.actors[0].status, "active");
 }
 
 #[tokio::test]
@@ -832,6 +1149,7 @@ async fn test_empty_node_all_apis_return_valid_data() {
         status: String::new(),
         since: None,
         page: None,
+        behavior_kind: String::new(),
     });
     let actors_resp = service.get_actors(actors_req).await;
     assert!(
@@ -1066,6 +1384,7 @@ async fn test_get_actors_with_all_filters() {
             filter: String::new(),
             order_by: String::new(),
         }),
+        behavior_kind: String::new(),
     });
 
     let response = DashboardService::get_actors(&service, request).await;

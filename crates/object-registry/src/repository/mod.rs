@@ -244,6 +244,27 @@ pub trait ObjectRegistryRepository: Send + Sync + Debug {
     async fn count(&self, ctx: &RequestContext, filter: &DiscoverFilter)
         -> RepositoryResult<usize>;
 
+    /// List distinct tenant ids for registrations of the given object type.
+    ///
+    /// ## Purpose
+    /// Provides a storage-backed source of truth for administrative tenant discovery.
+    /// When auth is enabled for a non-admin caller, the current tenant is returned
+    /// directly instead of querying cross-tenant state.
+    async fn list_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+        offset: usize,
+        limit: usize,
+    ) -> RepositoryResult<Vec<String>>;
+
+    /// Count distinct tenant ids for registrations of the given object type.
+    async fn count_tenant_ids_by_object_type(
+        &self,
+        ctx: &RequestContext,
+        object_type: ObjectType,
+    ) -> RepositoryResult<usize>;
+
     /// Check if an object exists
     ///
     /// ## Arguments

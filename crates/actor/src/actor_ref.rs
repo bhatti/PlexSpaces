@@ -363,6 +363,9 @@ pub struct ActorRef {
     /// paths do not have a meaningful actor type.
     actor_type: Arc<RwLock<Option<String>>>,
 
+    /// Runtime behavior kind for behavior-aware discovery and dashboard filtering.
+    behavior_kind: Arc<RwLock<Option<String>>>,
+
     /// Local-only runtime lifecycle/state access.
     ///
     /// Present only for local actors. Remote refs never expose local runtime state.
@@ -442,6 +445,7 @@ impl ActorRef {
                 service_locator,
             },
             actor_type: Arc::new(RwLock::new(None)),
+            behavior_kind: Arc::new(RwLock::new(None)),
             local_state_handle: Arc::new(RwLock::new(None)),
             temporary_sender: Arc::new(RwLock::new(None)),
         }
@@ -490,6 +494,7 @@ impl ActorRef {
                 service_locator,
             },
             actor_type: Arc::new(RwLock::new(None)),
+            behavior_kind: Arc::new(RwLock::new(None)),
             local_state_handle: Arc::new(RwLock::new(None)),
             temporary_sender: Arc::new(RwLock::new(None)),
         }
@@ -666,6 +671,16 @@ impl ActorRef {
     /// Sets the registered actor type for this ref.
     pub async fn set_actor_type(&self, actor_type: Option<String>) {
         *self.actor_type.write().await = actor_type;
+    }
+
+    /// Returns the registered runtime behavior kind when known.
+    pub async fn behavior_kind(&self) -> Option<String> {
+        self.behavior_kind.read().await.clone()
+    }
+
+    /// Sets the runtime behavior kind for this ref.
+    pub async fn set_behavior_kind(&self, behavior_kind: Option<String>) {
+        *self.behavior_kind.write().await = behavior_kind;
     }
 
     /// Returns the local lifecycle/state handle when this is a local actor.
@@ -982,7 +997,8 @@ impl ActorRef {
                     // Create request
                     let request = tonic::Request::new(SendMessageRequest {
                         namespace: self.namespace().to_string(),
-                        actor_type: self.id.to_string(),
+                        actor_type: self.id.actor_type().to_string(),
+                        actor_name: self.id.name().to_string(),
                         http_method: "POST".to_string(),
                         payload: proto_message.payload,
                         headers: proto_message.headers,
@@ -1300,8 +1316,13 @@ impl ActorRef {
         if let Some(corr_id) = correlation_id {
             reply_msg.correlation_id = corr_id.to_string();
         }
+        // Build context from sender's canonical actor ID (namespace-aware)
+        use plexspaces_core::RequestContext;
+        let ctx = plexspaces_core::ActorId::from_canonical(&sender_id.to_string())
+            .map(|id| RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
+            .unwrap_or_else(|_| RequestContext::new_without_auth(String::new(), String::new()));
         actor_service
-            .send(&target_actor_id, reply_msg)
+            .send(&ctx, &target_actor_id.to_string(), reply_msg)
             .await
             .map(|_| ()) // Ignore message_id return value
             .map_err(|e| ActorRefError::SendFailed(format!("ActorService::send() failed: {}", e)))
@@ -1386,6 +1407,13 @@ impl MessageSender for ActorRef {
             .and_then(|guard| guard.clone())
     }
 
+    fn behavior_kind(&self) -> Option<String> {
+        self.behavior_kind
+            .try_read()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+
     fn local_state_handle(&self) -> Option<Arc<dyn ActorStateHandle>> {
         self.local_state_handle
             .try_read()
@@ -1395,6 +1423,10 @@ impl MessageSender for ActorRef {
 
     async fn set_actor_type(&self, actor_type: Option<String>) {
         ActorRef::set_actor_type(self, actor_type).await;
+    }
+
+    async fn set_behavior_kind(&self, behavior_kind: Option<String>) {
+        ActorRef::set_behavior_kind(self, behavior_kind).await;
     }
 
     async fn set_local_state_handle(&self, handle: Option<Arc<dyn ActorStateHandle>>) {
@@ -1413,8 +1445,8 @@ impl MessageSender for ActorRef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plexspaces_core::ActorId;
     use plexspaces_core::ActorContext;
+    use plexspaces_core::ActorId;
     use plexspaces_core::ActorStateHandle;
     use plexspaces_mailbox::MailboxConfig;
     use ulid::Ulid;
@@ -1617,6 +1649,7 @@ mod tests {
     impl plexspaces_core::ActorService for MockActorService {
         async fn spawn_actor(
             &self,
+            _ctx: &plexspaces_core::RequestContext,
             _actor_id: &str,
             _actor_type: &str,
             _initial_state: Vec<u8>,
@@ -1625,6 +1658,7 @@ mod tests {
         }
         async fn send(
             &self,
+            _ctx: &plexspaces_core::RequestContext,
             actor_id: &str,
             message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -1958,6 +1992,7 @@ mod tests {
         impl plexspaces_core::ActorService for TrackingActorService {
             async fn spawn_actor(
                 &self,
+                _ctx: &plexspaces_core::RequestContext,
                 _actor_id: &str,
                 _actor_type: &str,
                 _initial_state: Vec<u8>,
@@ -1967,6 +2002,7 @@ mod tests {
             }
             async fn send(
                 &self,
+                _ctx: &plexspaces_core::RequestContext,
                 actor_id: &str,
                 message: Message,
             ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -2169,6 +2205,7 @@ mod tests {
         impl plexspaces_core::ActorService for MockActorService {
             async fn spawn_actor(
                 &self,
+                _ctx: &plexspaces_core::RequestContext,
                 _actor_id: &str,
                 _actor_type: &str,
                 _initial_state: Vec<u8>,
@@ -2178,6 +2215,7 @@ mod tests {
             }
             async fn send(
                 &self,
+                _ctx: &plexspaces_core::RequestContext,
                 _actor_id: &str,
                 _message: Message,
             ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -2378,6 +2416,7 @@ mod tests {
         impl plexspaces_core::ActorService for TrackingActorService {
             async fn spawn_actor(
                 &self,
+                _ctx: &plexspaces_core::RequestContext,
                 _actor_id: &str,
                 _actor_type: &str,
                 _initial_state: Vec<u8>,
@@ -2387,6 +2426,7 @@ mod tests {
             }
             async fn send(
                 &self,
+                _ctx: &plexspaces_core::RequestContext,
                 actor_id: &str,
                 message: Message,
             ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {

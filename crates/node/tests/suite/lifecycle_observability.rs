@@ -81,8 +81,8 @@ async fn test_lifecycle_event_full_spawn_sequence() {
     let behavior = Box::new(MockBehavior::new());
     let actor_id = test_runtime_actor_id("spawn-test-actor", "test-node");
     let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-    .await
-    .unwrap();
+        .await
+        .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
         actor_id.clone(),
@@ -310,8 +310,8 @@ async fn test_lifecycle_event_multicast_to_multiple_subscribers() {
     let behavior = Box::new(MockBehavior::new());
     let actor_id = test_runtime_actor_id("multicast-actor", "test-node");
     let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-    .await
-    .unwrap();
+        .await
+        .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
         actor_id.clone(),
@@ -443,8 +443,8 @@ async fn test_lifecycle_event_timestamps() {
     let behavior = Box::new(MockBehavior::new());
     let actor_id = test_runtime_actor_id("timestamp-actor", "test-node");
     let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-    .await
-    .unwrap();
+        .await
+        .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
         actor_id.clone(),
@@ -512,8 +512,8 @@ async fn test_lifecycle_event_unsubscribe() {
     let behavior = Box::new(MockBehavior::new());
     let actor_id = test_runtime_actor_id("unsubscribe-actor", "test-node");
     let mailbox = Mailbox::new(MailboxConfig::default(), actor_id.to_string())
-    .await
-    .unwrap();
+        .await
+        .unwrap();
     let journal = Arc::new(MemoryJournal::new());
     let actor = Actor::new(
         actor_id.clone(),

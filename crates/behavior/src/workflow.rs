@@ -255,7 +255,10 @@ impl ExecutionContext {
 
         // Journal the sleep
         self.journal
-            .record_side_effect(&self.actor_id.to_string(), SideEffect::Sleep { duration_ms })
+            .record_side_effect(
+                &self.actor_id.to_string(),
+                SideEffect::Sleep { duration_ms },
+            )
             .await
             .map_err(|e| {
                 BehaviorError::ProcessingError(format!("Failed to journal sleep: {}", e))

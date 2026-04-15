@@ -737,7 +737,11 @@ pub trait Workflow: Actor {
                     // Set sender_id to this actor's ID
                     reply_msg.sender_id = msg.receiver_id.clone();
 
-                    actor_service.send(&target_id.to_string(), reply_msg).await
+                    let reply_ctx = plexspaces_core::RequestContext::new_without_auth(
+                        ctx.tenant_id.clone(),
+                        ctx.namespace.clone(),
+                    );
+                    actor_service.send(&reply_ctx, &target_id.to_string(), reply_msg).await
                         .map_err(|e| {
                             metrics::counter!("plexspaces_behavior_workflow_reply_errors_total", "behavior" => "workflow", "error" => "send_failed", "type" => "run").increment(1);
                             tracing::error!(error = %e, "Failed to send workflow run reply");
@@ -837,7 +841,11 @@ pub trait Workflow: Actor {
                     // Set sender_id to this actor's ID
                     reply_msg.sender_id = msg.receiver_id.clone();
 
-                    actor_service.send(&target_id.to_string(), reply_msg).await
+                    let reply_ctx = plexspaces_core::RequestContext::new_without_auth(
+                        ctx.tenant_id.clone(),
+                        ctx.namespace.clone(),
+                    );
+                    actor_service.send(&reply_ctx, &target_id.to_string(), reply_msg).await
                         .map_err(|e| {
                         metrics::counter!("plexspaces_behavior_workflow_reply_errors_total", "behavior" => "workflow", "error" => "send_failed", "type" => "query").increment(1);
                         tracing::error!(error = %e, query_name = %name, "Failed to send workflow query reply");

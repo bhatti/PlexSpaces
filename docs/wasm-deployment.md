@@ -147,7 +147,7 @@ impl CounterActor {
 - `application_id` (required): Unique application identifier (for tracking/debugging)
 - `wasm_file` (required): WASM module file (multipart file upload)
 - `config` (optional): ApplicationSpec TOML configuration file
-- `name` (required): Application name
+- `name` (required): Human-readable application name
 - `version` (required): Application version (e.g., "1.0.0")
 
 **Resource Limits**:
@@ -155,7 +155,7 @@ impl CounterActor {
 - For operations requiring heavy JSON serialization or complex computations, increase fuel limits
 - Fuel is consumed during execution (ops, memory access, calls)
 - Zero = unlimited (not recommended for untrusted code)
-- `name` (required): **Application name - used by ApplicationManager for storage and lookup** (use this for undeployment, not application_id)
+- `name` (required): Human-readable application name
 - `version` (required): Application version (e.g., "1.0.0")
 - `behavior_kind` (optional): OTP-style behavior for logging (e.g. `GenEvent` for event-handler actors; logs show `EventHandler`)
 - `wasm_file` (required): WASM file (multipart file upload, max 100MB)
@@ -163,7 +163,8 @@ impl CounterActor {
 
 **ApplicationSpec Auto-Generation**:
 If `config` is not provided, the HTTP handler automatically creates an `ApplicationSpec` from form fields:
-- `name`: From `name` form field → **Used as application identifier in ApplicationManager** (important for undeployment)
+- `name`: Set to `application_id` so runtime identity, application namespace, and undeploy all use the same key
+- `namespace`: Set to `application_id` so actor registration and dashboard queries use the same canonical scope
 - `version`: From `version` form field
 - `type`: `ApplicationTypeActive` (active application with processes)
 - `description`: Auto-generated as `"WASM application: {name}"`
@@ -178,7 +179,7 @@ If `config` is not provided, the HTTP handler automatically creates an `Applicat
 - Follows the Erlang-style application model where applications are the unit of deployment
 - Matches the pattern used by the `wasm-calculator` example, ensuring consistent application deployment
 
-**⚠️ Important**: The `name` field is critical - it's used by `ApplicationManager` for all operations (registration, starting, stopping, unregistering). Always use the `name` (not `application_id`) when undeploying applications.
+`ApplicationManager` stores the deployed application under `application_id`, and object-registry uses that same identifier for registration and cleanup.
 
 **Response**:
 ```json
@@ -317,28 +318,24 @@ wasm-opt -Oz --strip-debug greeter.wasm -o greeter_opt.wasm
 
 ### Method 3: Undeploy Application
 
-**⚠️ Critical**: Use the application **name** (not `application_id`) for undeployment, because `ApplicationManager` stores applications by name. This is a common source of errors.
+**Undeploy uses `application_id`**. The same identifier used during deployment is also used for runtime state and object-registry cleanup.
 
 **HTTP DELETE:**
 ```bash
-# Use application name (not application_id)
-# If you deployed with name="calculator", use:
-curl -X DELETE http://localhost:8001/api/v1/applications/calculator
-
-# NOT: curl -X DELETE http://localhost:8001/api/v1/applications/calculator-app
+# Use the canonical application_id
+curl -X DELETE http://localhost:8001/api/v1/applications/calculator-app
 ```
 
 **CLI:**
 ```bash
 cargo run --release --bin plexspaces -- application undeploy \
   --node localhost:8000 \
-  --name calculator
+  --name calculator-app
 ```
 
-**Why Name vs Application ID?**
-- `application_id`: Used for tracking/debugging, can be any unique identifier
-- `name`: Used by `ApplicationManager` for internal storage, registration, starting, stopping, and unregistering
-- The HTTP handler uses the `name` from the ApplicationSpec for all ApplicationManager operations
+**Identity Model**
+- `application_id`: Canonical runtime identity for deploy, undeploy, namespace derivation, and object-registry registration
+- `name`: Human-readable label supplied by the client
 
 **Response**:
 ```json
@@ -485,14 +482,14 @@ Without the timeout parameter, the default HTTP timeout applies. Use this when i
 
 ### HTTP Undeploy
 
-**Endpoint**: `DELETE /api/v1/applications/{application_name}`
+**Endpoint**: `DELETE /api/v1/applications/{application_id}`
 
-**Important**: Use the application **name** (not `application_id`) because `ApplicationManager` stores applications by name.
+**Important**: Use `application_id` for undeployment and dashboard correlation.
 
 **Example**:
 ```bash
-# Use application name (not application_id)
-curl -X DELETE http://localhost:8001/api/v1/applications/calculator
+# Use application_id
+curl -X DELETE http://localhost:8001/api/v1/applications/calculator-app
 ```
 
 ### gRPC / CLI
@@ -860,12 +857,12 @@ See [DEPLOY_EMPTY_NODE_GUIDE.md](../DEPLOY_EMPTY_NODE_GUIDE.md) for the complete
 
 ### 5. Undeploy Application
 
-**Important**: Use the application **name** (not `application_id`) for undeployment, because `ApplicationManager` stores applications by name.
+**Important**: Use `application_id` for undeployment and dashboard correlation.
 
 **HTTP:**
 ```bash
-# Use application name (not application_id)
-curl -X DELETE http://localhost:8001/api/v1/applications/calculator
+# Use application_id
+curl -X DELETE http://localhost:8001/api/v1/applications/calculator-app
 ```
 
 **CLI:**

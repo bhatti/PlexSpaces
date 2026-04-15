@@ -1285,7 +1285,12 @@ async fn test_virtual_actor_activation_with_http_format() {
     };
 
     // Build proper actor ID format
-    let actor_id = canonical_actor_id(&instance_id, base_actor_type, namespace, "test-node-http-fmt");
+    let actor_id = canonical_actor_id(
+        &instance_id,
+        base_actor_type,
+        namespace,
+        "test-node-http-fmt",
+    );
 
     // Verify format is correct (not //orbit-tracker::...)
     assert!(

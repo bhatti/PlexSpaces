@@ -89,6 +89,7 @@ Actor annotations define the behavior type and optional facets:
 | `#[gen_server_actor(facets = ["timer", "durability"])]` | GenServer with facets | Request-reply with capabilities | call |
 | `#[event_actor]` | GenEvent | Fire-and-forget events | cast |
 | `#[fsm_actor]` | GenStateMachine | State machine workflows | call |
+| `#[fsm_actor(states = ["a","b"], initial = "a")]` | GenStateMachine | FSM with documented states; generates `FSM_STATES` and `FSM_INITIAL` consts | call |
 | `#[workflow_actor]` | Workflow | Durable orchestrations | call |
 | `#[actor]` | Custom | User-defined behavior | varies |
 

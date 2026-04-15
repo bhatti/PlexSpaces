@@ -49,7 +49,7 @@ use tracing::{debug, info, trace, warn};
 
 use plexspaces_core::{
     mask_release_spec, overlay_node_operational_counters_from_exposition, ConnectNodesResult,
-    NodeConnectivity, NodeRegistryTrait, RequestContext, ServiceLocator,
+    NodeConnectivity, NodeRegistryTrait, ProcessResourceSampler, RequestContext, ServiceLocator,
 };
 use plexspaces_proto::node::v1::{
     node_service_client::NodeServiceClient, node_service_server::NodeService as NodeServiceTrait,
@@ -73,25 +73,12 @@ pub async fn snapshot_local_node_metrics(
     service_locator: Arc<dyn ServiceLocator>,
     local_node_id: String,
     uptime_seconds: u64,
+    process_sampler: Arc<std::sync::Mutex<ProcessResourceSampler>>,
 ) -> NodeMetrics {
-    use sysinfo::System;
-
-    let mut system = System::new();
-    system.refresh_all();
-
-    let used_memory = system.used_memory();
-    let available_memory = system.available_memory();
-    let cpu_count = system.cpus().len() as u32;
-    let cpu_usage = if cpu_count > 0 {
-        system
-            .cpus()
-            .iter()
-            .map(|cpu| cpu.cpu_usage() as f64)
-            .sum::<f64>()
-            / cpu_count as f64
-    } else {
-        0.0
-    };
+    let process_snapshot = process_sampler
+        .lock()
+        .expect("process metrics sampler lock poisoned")
+        .sample();
 
     let active_actors = if let Some(actor_registry) = service_locator.actor_registry().await {
         actor_registry.live_actor_count().await as u32
@@ -118,9 +105,9 @@ pub async fn snapshot_local_node_metrics(
     };
 
     let mut m = NodeMetrics {
-        memory_used_bytes: used_memory,
-        memory_available_bytes: available_memory,
-        cpu_usage_percent: cpu_usage,
+        memory_used_bytes: process_snapshot.memory_used_bytes,
+        memory_available_bytes: 0,
+        cpu_usage_percent: process_snapshot.cpu_usage_percent,
         uptime_seconds,
         messages_routed: 0,
         local_deliveries: 0,
@@ -165,6 +152,8 @@ pub struct NodeServiceImpl {
     connectivity: Arc<RwLock<Option<Arc<dyn NodeConnectivity>>>>,
     /// Service start instant (uptime; distinct from Node process uptime when embedded in tests)
     started_at: Instant,
+    /// Reused process sampler so CPU metrics are based on consecutive observations.
+    process_sampler: Arc<std::sync::Mutex<ProcessResourceSampler>>,
 }
 
 impl NodeServiceImpl {
@@ -181,6 +170,10 @@ impl NodeServiceImpl {
             release_spec: Arc::new(RwLock::new(None)),
             connectivity: Arc::new(RwLock::new(None)),
             started_at: Instant::now(),
+            process_sampler: Arc::new(std::sync::Mutex::new(
+                ProcessResourceSampler::new()
+                    .expect("process metrics sampler must initialize for current process"),
+            )),
         }
     }
 
@@ -207,6 +200,10 @@ impl NodeServiceImpl {
             release_spec: Arc::new(RwLock::new(Some(release_spec))),
             connectivity: Arc::new(RwLock::new(None)),
             started_at: Instant::now(),
+            process_sampler: Arc::new(std::sync::Mutex::new(
+                ProcessResourceSampler::new()
+                    .expect("process metrics sampler must initialize for current process"),
+            )),
         }
     }
 
@@ -258,6 +255,7 @@ impl NodeServiceImpl {
             self.service_locator.clone(),
             self.local_node_id.clone(),
             self.uptime_seconds(),
+            self.process_sampler.clone(),
         )
         .await
     }

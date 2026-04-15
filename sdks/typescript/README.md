@@ -19,7 +19,7 @@ The SDK now supports decorator-based authoring metadata in addition to the exist
 - `@actor`
 - `@gen_server_actor`
 - `@event_actor`
-- `@fsm_actor`
+- `@fsm_actor` / `@fsm_actor({ states: [...], initial: "..." })` — FSM actor with optional state list and initial state
 - `@workflow_actor`
 - `@run_handler`
 - `@signal_handler("name")`

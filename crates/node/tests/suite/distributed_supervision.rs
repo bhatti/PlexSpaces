@@ -79,9 +79,7 @@ async fn test_monitor_local_actor() {
     let (tx, mut rx) = mpsc::channel(1);
 
     // Act: Monitor the local actor
-    let monitor_ref = node
-        .monitor(&worker_id, &supervisor_id, tx)
-        .await;
+    let monitor_ref = node.monitor(&worker_id, &supervisor_id, tx).await;
 
     // Assert: Monitor established successfully
     assert!(monitor_ref.is_ok(), "Monitoring local actor should succeed");
@@ -144,9 +142,8 @@ async fn test_monitor_remote_actor() {
     let (tx, mut rx) = mpsc::channel(1);
 
     // Act: Monitor remote actor from node1 (supervisor on node1, actor on node2)
-    let monitor_ref: Result<plexspaces_node::MonitorRef, plexspaces_node::NodeError> = node1
-        .monitor(&worker_id, &supervisor_id, tx)
-        .await;
+    let monitor_ref: Result<plexspaces_node::MonitorRef, plexspaces_node::NodeError> =
+        node1.monitor(&worker_id, &supervisor_id, tx).await;
 
     // Assert: Remote monitoring established successfully
     assert!(
@@ -316,9 +313,15 @@ async fn test_monitor_ref_uniqueness() {
     let (tx2, _rx2) = mpsc::channel(1);
 
     // Act: Create two monitors
-    let mon1 = node.monitor(&worker_id, &supervisor1_id, tx1).await.unwrap();
+    let mon1 = node
+        .monitor(&worker_id, &supervisor1_id, tx1)
+        .await
+        .unwrap();
 
-    let mon2 = node.monitor(&worker_id, &supervisor2_id, tx2).await.unwrap();
+    let mon2 = node
+        .monitor(&worker_id, &supervisor2_id, tx2)
+        .await
+        .unwrap();
 
     // Assert: Monitor refs are different (unique)
     assert_ne!(mon1, mon2, "Monitor refs should be unique");

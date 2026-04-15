@@ -54,6 +54,38 @@ Machine learning training and inference:
 
 **Examples**: [Parameter sweep (migrating_merlin)](../examples/python/apps/migrating_merlin/README.md) (Python, Go, TypeScript, Rust) — elastic pool + tuple space work queue; [Ray Comparison](../examples/comparison/ray/) for Ray-style patterns.
 
+## AI Agents and Workloads
+
+Production AI agent systems with stateful, fault-tolerant, and multi-tenant execution:
+
+- **Agentic RAG Pipelines**: Retrieve → Generate → Validate → Retry loops as durable workflows, with sharded indexing and guardrail validation
+- **MCP Tool Calling**: Actors as Model Context Protocol (MCP) tool servers — tool discovery (`tools/list`), validated execution (`tools/call`), JSON-RPC 2.0 gateway with tenant isolation
+- **Multi-Agent A2A Collaboration**: Orchestrator decomposes tasks, discovers specialist agents by capability, delegates via message passing, coordinates results via TupleSpace
+- **LLM Orchestration**: Prompt chaining, routing (classify → dispatch), reflection loops (generate → judge → refine), LLM-as-Judge quality gates, and Evol-Instruct prompt mutation
+- **Parallel Inference**: Shard-group scatter-gather, elastic pool checkout/checkin, MPI collectives (broadcast, reduce, allreduce, barrier) for distributed model serving and training
+- **Resource-Aware Inference**: Label-based model routing (GPU/memory tier), per-tenant budget enforcement, cost-aware tier selection with GenFSM budget state machine
+- **Circuit Breakers**: GenFSM-based resilience for LLM call failures — closed/open/half-open with automatic recovery via `send_after`
+
+**Key Features**:
+- Actor-per-agent isolation — each agent has dedicated state, mailbox, and failure boundary
+- `virtual_actor` facet — agents activate on demand, deactivate when idle (zero cost at rest)
+- `durability` facet — agents survive node restarts with per-stage checkpointing
+- `timer` facet — scheduled retries, heartbeats, circuit-breaker timeouts
+- `metrics` facet — every agent interaction auto-instrumented in Prometheus
+- All four behavior types: GenServer (stateful tools), GenEvent (fire-and-forget audit), GenFSM (quality/budget gates), WorkflowActor (durable orchestration)
+- Multi-tenant JWT isolation — tenant namespace enforced at every `host.Ask()` boundary
+- Polyglot — Python, Go, TypeScript, Rust agents on the same runtime
+
+**Examples**:
+- [parallel_ai_inference](../examples/python/apps/parallel_ai_inference/README.md) — all 4 parallelization mechanisms + MPI collectives (Python)
+- [mcp_tool_server](../examples/python/apps/mcp_tool_server/README.md) — MCP tool discovery and execution (Python)
+- [agentic_rag_pipeline](../examples/go/apps/agentic_rag_pipeline/README.md) — durable RAG with guardrails (Go)
+- [a2a_multi_agent](../examples/go/apps/a2a_multi_agent/README.md) — multi-agent A2A collaboration (Go)
+- [resource_aware_inference](../examples/go/apps/resource_aware_inference/README.md) — cost-aware model routing (Go)
+- [llm_workflow_orchestrator](../examples/typescript/apps/llm_workflow_orchestrator/README.md) — prompt chaining, routing, reflection, LLM-as-Judge (TypeScript)
+
+See also: [AI Agents at Scale: 20 Production Patterns with PlexSpaces](../blog/ai-agents-at-scale-with-plexspaces.md)
+
 ## Event Processing
 
 Real-time stream processing with exactly-once semantics:
@@ -206,6 +238,10 @@ Low-latency real-time applications:
 
 | Use Case | Traditional Solution | PlexSpaces Advantage |
 |----------|---------------------|---------------------|
+| AI Agents / MCP | LangChain, AutoGen, standalone MCP servers | Stateful agents, durable workflows, multi-tenancy, MPI collectives, polyglot — all in one framework |
+| LLM Orchestration | LangGraph, Temporal | Four behavior types (GenServer/GenEvent/GenFSM/Workflow) composable via config; per-stage checkpointing |
+| Parallel Inference | Ray, Triton | Native MPI collectives, shard-group scatter-gather, elastic pool — ~50μs WASM cold start vs ~100ms Ray |
+| Distributed Training | Horovod, PyTorch DDP | Ring AllReduce native, parameter server built-in, no separate training cluster |
 | Workflows | Temporal, AWS Step Functions | Unified with actors, better integration |
 | Stateful Services | Redis, Memcached | Automatic persistence, fault tolerance |
 | ML Workloads | Ray, Spark | Better resource scheduling, fault tolerance |

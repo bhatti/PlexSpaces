@@ -177,6 +177,10 @@ crates/object-registry/migrations/
 
 Migrations run automatically when creating a SQL repository.
 
+The registry also supports distinct tenant discovery for a given object type. Dashboard tenant
+inventory uses application registrations as the source of truth, with repository-backed offset/limit
+pagination and total-count queries so tenant listing does not depend on higher-level response merges.
+
 ## Dependencies
 
 This crate depends on:

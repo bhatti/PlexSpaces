@@ -90,8 +90,7 @@ async fn test_node_spawns_actor_with_full_context() {
     let mut mailbox_config = MailboxConfig::default();
     mailbox_config.capacity = 1000;
     let actor_name = "test-actor";
-    let actor_id =
-        ActorId::new(actor_name, "gen_server", "default", node.id().as_str()).unwrap();
+    let actor_id = ActorId::new(actor_name, "gen_server", "default", node.id().as_str()).unwrap();
     let mailbox = Mailbox::new(mailbox_config, actor_id.to_string())
         .await
         .unwrap();
@@ -161,10 +160,7 @@ async fn test_node_spawns_actor_with_full_context() {
         .expect("Message processing should complete quickly");
 
     // Verify actor was spawned - the ID should match the node ID
-    assert_eq!(
-        actor_ref.id(),
-        &actor_id
-    );
+    assert_eq!(actor_ref.id(), &actor_id);
 }
 
 #[tokio::test]

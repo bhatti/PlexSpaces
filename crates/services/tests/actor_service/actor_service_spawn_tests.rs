@@ -199,14 +199,12 @@ async fn test_spawn_actor_always_uses_local_node_id() {
     // into a canonical ActorId with the request namespace and local node id.
     if let Ok(actor_ref) = result {
         assert!(
-            actor_ref
-                .id()
-                .contains(&canonical_actor_id(
-                    "test-actor",
-                    "test-type",
-                    "test-namespace",
-                    "local-node"
-                )),
+            actor_ref.id().contains(&canonical_actor_id(
+                "test-actor",
+                "test-type",
+                "test-namespace",
+                "local-node"
+            )),
             "spawn should normalize a base actor id into a canonical actor id"
         );
     } else {

@@ -205,6 +205,9 @@ class GetActorsRequest(betterproto.Message):
     page: "__common_v1__.PageRequest" = betterproto.message_field(9)
     """Pagination"""
 
+    behavior_kind: str = betterproto.string_field(10)
+    """Filter by runtime behavior kind (optional)"""
+
 
 @dataclass(eq=False, repr=False)
 class ActorInfo(betterproto.Message):
@@ -242,6 +245,11 @@ class ActorInfo(betterproto.Message):
 
     created_at: datetime = betterproto.message_field(11)
     """Created timestamp"""
+
+    behavior_kind: str = betterproto.string_field(12)
+    """
+    Runtime behavior kind (GenServer, GenEvent, GenStateMachine, Workflow, or custom)
+    """
 
 
 @dataclass(eq=False, repr=False)

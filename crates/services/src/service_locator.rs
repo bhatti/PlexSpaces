@@ -1991,18 +1991,15 @@ async fn initialize_services_impl(
     if final_node_config.id.is_empty() {
         final_node_config.id = "test-node".to_string();
     }
-
     let node_id_str = final_node_config.id.clone();
-    let sanitized_node_id = node_id_str.replace(['@', '/', '\\', ':'], "-");
 
     let final_runtime_config = release_config
         .as_ref()
         .and_then(|r| r.runtime.clone())
         .unwrap_or_else(|| plexspaces_proto::node::v1::RuntimeConfig {
             db: Some(plexspaces_proto::storage::v1::SharedDbConfig {
-                connection_string: format!(
-                    "sqlite:///tmp/plexspaces-{}.db?mode=rwc",
-                    sanitized_node_id
+                connection_string: plexspaces_common::config_manager::default_shared_db_url(
+                    &plexspaces_common::config_manager::get_default_base_dir(),
                 ),
                 auto_migrate: true,
                 ..Default::default()

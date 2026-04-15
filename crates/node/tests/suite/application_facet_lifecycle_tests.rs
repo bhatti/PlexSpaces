@@ -27,7 +27,7 @@
 
 use async_trait::async_trait;
 use plexspaces_application::{Application, ApplicationError, ApplicationNode};
-use plexspaces_core::{ActorId, ApplicationManager, ServiceLocator};
+use plexspaces_core::{ActorId, ApplicationManager, RequestContext, ServiceLocator};
 use plexspaces_facet::{ExitReason, Facet, FacetError, FacetFactory, FacetMetadata};
 use plexspaces_node::{Node, NodeBuilder};
 use plexspaces_proto::application::v1::{
@@ -41,6 +41,10 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+
+fn app_ctx(name: &str) -> RequestContext {
+    RequestContext::new_without_auth(String::new(), name.to_string())
+}
 
 /// Test facet that tracks lifecycle calls
 struct TestLifecycleFacet {
@@ -179,7 +183,7 @@ async fn test_application_deploy_with_facets() {
 
     // Register application
     app_manager
-        .register(app)
+        .register(&app_ctx("test-app"), app)
         .await
         .expect("Failed to register application");
 
@@ -265,7 +269,7 @@ async fn test_application_undeploy_with_facets() {
 
     // Register application
     app_manager
-        .register(app)
+        .register(&app_ctx("test-app-multi"), app)
         .await
         .expect("Failed to register application");
 

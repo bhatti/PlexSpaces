@@ -179,6 +179,7 @@ Client code should usually provide only the actor name or logical key and let th
 | `@actor(facets=[...])` | Actor with facet declaration | `@actor(facets=["durability"]) class DurableActor:` |
 | `@event_actor` | Event-handler (GenEvent): fire-and-forget, no request-reply; ideal for channel-style consumers | `@event_actor class AuditLog:` |
 | `@fsm_actor` | FSM actor (GenStateMachine): stateful transitions | `@fsm_actor class OrderFSM:` |
+| `@fsm_actor(states=[...], initial="...")` | FSM actor with explicit state list and initial state | `@fsm_actor(states=["idle","running","done"], initial="idle") class OrderFSM:` |
 | `@gen_server_actor` | Explicit GenServer (same as `@actor`) | `@gen_server_actor class Worker:` |
 | `@workflow_actor` | Workflow/orchestration actor | `@workflow_actor class Pipeline:` |
 | `@handler(*msg_types)` | Route messages to this method | `@handler("deposit")` |
@@ -217,9 +218,10 @@ Facets declare what capabilities an actor expects. Use the `facets` parameter on
 class DurableAccount:
     balance: int = state(default=0)
 
-@fsm_actor(facets=["durability", "registry"])
+@fsm_actor(states=["idle", "processing", "done", "error"], initial="idle",
+           facets=["durability", "registry"])
 class OrderWorkflow:
-    current_state: str = state(default="idle")
+    fsm_state: str = state(default="idle")  # auto-initialised from initial= if omitted
 ```
 
 | Facet | WASM Behavior | Rust Behavior |
@@ -724,6 +726,24 @@ The `--disable all` flag ensures the component only imports `plexspaces:actor/ho
 | `protected state: TState` | Current state; read/write in handlers. |
 | `protected encode(message)`, `decode(bytes, ctor)` | Helpers for protobuf-backed actor-world payloads. |
 
+**FSM Actors (TypeScript)**: The TypeScript SDK offers two patterns for FSM actors. The decorator form requires `experimentalDecorators` in tsconfig; the class-based form uses static properties:
+
+```typescript
+// Decorator form (requires experimentalDecorators: true in tsconfig)
+@fsm_actor({ states: ["idle", "processing", "done", "error"], initial: "idle" })
+class OrderFSMActor { /* ... */ }
+
+// Class-based form (no decorator required)
+class OrderFSMActor extends PlexSpacesActor<State> {
+  static readonly FSM_STATES = ["idle", "processing", "done", "error"] as const;
+  static readonly FSM_INITIAL = "idle";
+
+  getDefaultState(): State { return { fsmState: OrderFSMActor.FSM_INITIAL, ... }; }
+}
+```
+
+Both forms document valid states and the initial state for observability and tooling.
+
 **Host Functions**: The TypeScript SDK uses WIT virtual imports for host functions. jco componentize wires up `plexspaces:actor/host@0.1.0` imports at build time. The SDK uses generated protobuf models for shared contracts and keeps actor-world encoding at the decorator layer. See [TypeScript SDK README](../sdks/typescript/README.md#host-functions) for details.
 
 **Serialization**: The actor-world boundary is protobuf-first. SDK decorators marshal generated protobuf messages to bytes and unmarshal replies so application code stays typed while the runtime stays aligned with the shared host contract.
@@ -776,6 +796,7 @@ The Rust SDK provides **Python-style annotations** to eliminate boilerplate. Use
 | `#[event_actor]` | `@event_actor` | `impl Actor` with GenEvent behavior |
 | `#[event_actor(name = "audit")]` | N/A | Custom type name for routing |
 | `#[fsm_actor]` | `@fsm_actor` | `impl Actor` with GenStateMachine behavior |
+| `#[fsm_actor(states = ["a","b"], initial = "a")]` | `@fsm_actor(states=[...], initial="...")` | Same + `FSM_STATES` and `FSM_INITIAL` consts |
 | `#[workflow_actor]` | `@workflow_actor` | `impl Actor` with Workflow behavior |
 | `#[gen_server_actor(wasm)]` | `@gen_server_actor` for Rust WASM apps | Marks a deployable Rust WASM request-reply handler |
 
@@ -1546,6 +1567,31 @@ func init() {
 ```
 
 The router selects the actor by longest-prefix match on the actor ID. For example, `"chat-room-lobby:default"` matches `"chat-room"`.
+
+**Actor Definition Helpers**
+
+Use `RouteDefinition` with typed definition builders when you need explicit behavior metadata (e.g., FSM state lists, facets):
+
+| Helper | Behavior | Description |
+|--------|----------|-------------|
+| `DefineActor(factory, facets...)` | GenServer | Default actor with optional facets |
+| `GenServerActor(factory, facets...)` | GenServer | Explicit GenServer |
+| `EventActor(factory, facets...)` | GenEvent | Fire-and-forget event handler |
+| `FSMActor(factory, facets...)` | GenStateMachine | FSM actor |
+| `FSMActorDef(factory, FSMOpts{...})` | GenStateMachine | FSM actor with state list and initial state |
+| `WorkflowActorDefinition(factory, facets...)` | Workflow | Durable workflow actor |
+
+```go
+// Register FSM actor with explicit state metadata
+router.RouteDefinition("order_fsm", plexspaces.FSMActorDef(
+    NewOrderFSM,
+    plexspaces.FSMOpts{
+        States:  []string{"idle", "processing", "done", "error"},
+        Initial: "idle",
+        Facets:  []string{"durability"},
+    },
+))
+```
 
 ### Host Functions
 

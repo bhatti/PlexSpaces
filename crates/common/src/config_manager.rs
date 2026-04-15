@@ -431,9 +431,17 @@ impl EnvConfig {
 
     /// Get database URL with fallback to default SQLite path
     pub fn database_url_or_default(&self, node_id: &str, component: &str) -> String {
-        self.database_url
+        let base_dir = self
+            .base_dir
             .clone()
-            .unwrap_or_else(|| format!("/tmp/plexspaces-{}-{}.db", component, node_id))
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(get_default_base_dir);
+        self.database_url.clone().unwrap_or_else(|| {
+            format!(
+                "sqlite://{}/db/plexspaces-{}-{}.db?mode=rwc",
+                base_dir, component, node_id
+            )
+        })
     }
 
     /// Get mTLS cert directory with default
@@ -456,7 +464,7 @@ impl Default for EnvConfig {
 
 /// Get the default base directory for PlexSpaces data.
 /// Priority: env var > home_dir/plexspaces > /tmp/plexspaces
-fn get_default_base_dir() -> String {
+pub fn get_default_base_dir() -> String {
     if let Some(base_dir) = get_env(ENV_BASE_DIR) {
         return base_dir;
     }
@@ -466,6 +474,11 @@ fn get_default_base_dir() -> String {
     }
 
     "/tmp/plexspaces".to_string()
+}
+
+/// Default shared SQLite database URL rooted under the runtime base directory.
+pub fn default_shared_db_url(base_dir: &str) -> String {
+    format!("sqlite://{}/db/plexspaces.db?mode=rwc", base_dir)
 }
 
 /// Mask sensitive parts of a database URL for logging
@@ -577,7 +590,7 @@ pub fn initialize(spec: &mut plexspaces_proto::node::v1::ReleaseSpec) {
                 .map(|db| db.connection_string.clone())
                 .filter(|s| !s.is_empty())
         })
-        .unwrap_or_else(|| format!("sqlite://{}/plexspaces.db?mode=rwc", db_dir));
+        .unwrap_or_else(|| default_shared_db_url(&base_dir));
 
     if runtime.db.is_none() {
         runtime.db = Some(SharedDbConfig::default());
@@ -887,9 +900,17 @@ mod tests {
     #[serial]
     fn test_env_config_database_url_default() {
         env::remove_var("PLEXSPACES_DATABASE_URL");
+        env::remove_var("PLEXSPACES_BASE_DIR");
         let config = EnvConfig::from_env();
         let url = config.database_url_or_default("node-1", "journal");
-        assert_eq!(url, "/tmp/plexspaces-journal-node-1.db");
+        let expected_base_dir = get_default_base_dir();
+        assert_eq!(
+            url,
+            format!(
+                "sqlite://{}/db/plexspaces-journal-node-1.db?mode=rwc",
+                expected_base_dir
+            )
+        );
     }
 
     #[test]

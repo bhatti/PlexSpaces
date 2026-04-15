@@ -177,7 +177,7 @@ async fn test_virtual_actor_type_registration_on_spawn() {
         "test-namespace",
         node.id().to_string(),
     )
-        .expect("invalid actor_id");
+    .expect("invalid actor_id");
     let actor_ref3 = plexspaces_sdk::ActorRef::remote(
         actor_id3.clone(),
         "test-tenant".to_string(),

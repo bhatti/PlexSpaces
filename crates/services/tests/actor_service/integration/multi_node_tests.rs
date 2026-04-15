@@ -245,10 +245,10 @@ async fn create_test_registry_with_remote_actors(
             .split_once('@')
             .map(|(name, node)| (name, node))
             .unwrap_or((actor_id_with_node, remote_node_id));
-        let local_actor_id =
-            ActorId::new(actor_name, "TestActor", "default", local_node_id).expect("valid actor id");
-        let alias_actor_id =
-            ActorId::new(actor_name, "TestActor", "default", alias_node_id).expect("valid actor id");
+        let local_actor_id = ActorId::new(actor_name, "TestActor", "default", local_node_id)
+            .expect("valid actor id");
+        let alias_actor_id = ActorId::new(actor_name, "TestActor", "default", alias_node_id)
+            .expect("valid actor id");
 
         // Create actor using ActorBuilder
         let echo_actor = EchoActor::new();

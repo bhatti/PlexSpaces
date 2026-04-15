@@ -518,7 +518,9 @@ impl ActorServiceImpl {
                 type_candidates.push(requested_actor_type.to_string());
 
                 if requested_actor_type.contains('@') {
-                    if let Some(actor_type) = self.actor_type_from_client_target(requested_actor_type) {
+                    if let Some(actor_type) =
+                        self.actor_type_from_client_target(requested_actor_type)
+                    {
                         if actor_type != requested_actor_type {
                             type_candidates.push(actor_type);
                         }
@@ -653,8 +655,13 @@ impl ActorServiceImpl {
             )
             .map_err(|e| e.to_string())?
         } else {
-            self.build_canonical_actor_id(actor_id, actor_type, ctx.namespace(), &self.local_node_id)
-                .map_err(|e| e.to_string())?
+            self.build_canonical_actor_id(
+                actor_id,
+                actor_type,
+                ctx.namespace(),
+                &self.local_node_id,
+            )
+            .map_err(|e| e.to_string())?
         };
 
         // Use ActorFactory from ServiceLocatorImpl (direct access to inherent method)
@@ -767,7 +774,8 @@ impl ActorServiceImpl {
                 // ask() timeout).  Try ReplyWaiterRegistry directly using correlation_id
                 // so the reply still reaches the waiter if it is still active.
                 if actor_id_full.is_temporary_sender() {
-                    if let Some(waiter_registry) = self.service_locator.reply_waiter_registry().await
+                    if let Some(waiter_registry) =
+                        self.service_locator.reply_waiter_registry().await
                     {
                         let message_id = message.id.to_string();
                         if waiter_registry.notify(&correlation_id, message).await {
@@ -791,10 +799,15 @@ impl ActorServiceImpl {
             }
         }
 
-        // Normal message routing (no correlation_id or remote actor)
-        // Note: send_message is called from ActorContext which should provide RequestContext
-        // For now, create empty context - this should be fixed to pass ctx from caller
-        let ctx = RequestContext::new_without_auth(String::new(), String::new());
+        // Normal message routing (no correlation_id or remote actor).
+        // `actor_id` MUST be a full canonical ID. gRPC handlers resolve type names to canonical
+        // IDs at the transport boundary; WASM actors must supply canonical IDs from PGs or config.
+        // Derive namespace from sender's canonical ID so route_message can build a valid
+        // temporary-sender ActorId when needed.
+        let ctx = ActorId::from_canonical(&message.sender_id)
+            .map(|id| RequestContext::new_without_auth(String::new(), id.namespace().to_string()))
+            .unwrap_or_else(|_| RequestContext::new_without_auth(String::new(), String::new()));
+
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
                 "🟪 [ACTOR_SERVICE::send_message] NORMAL ROUTING: message_id={}, actor_id={}, calling route_message",
@@ -815,24 +828,18 @@ impl ActorServiceImpl {
         Ok(msg_id)
     }
 
-    /// Send a message and wait for reply (request-reply pattern) - Public API for ActorContext
+    /// Send a message to a canonical actor ID and wait for the reply.
     ///
-    /// ## Design
-    /// Uses ActorRef::ask() directly instead of route_message with wait_for_response=true.
-    /// This ensures proper routing, metrics, and virtual actor activation.
-    ///
-    /// ## Arguments
-    /// * `actor_id` - Canonical actor ID in format `name//actor_type::namespace@node_id`
-    /// * `message` - Request message
-    /// * `timeout` - Optional timeout
-    ///
-    /// ## Returns
-    /// Reply message
+    /// `actor_id` **must** be a full canonical ID (`name//type::namespace@node`).
+    /// gRPC API handlers (`ask_reply`, `send_message`) resolve type names to canonical IDs
+    /// at the transport boundary via `route_actor_request`.  WASM actors must always supply
+    /// canonical IDs obtained from Process Groups, TupleSpace, or explicit configuration.
     pub async fn send_message_and_wait(
         &self,
         actor_id: &str,
         message: Message,
         timeout: Option<std::time::Duration>,
+        ctx: RequestContext,
     ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!(
@@ -849,7 +856,6 @@ impl ActorServiceImpl {
         if node_id == self.local_node_id {
             // LOCAL: use ActorRegistry ask() so virtual activation stays inside the registry.
             let registry = self.get_actor_registry().await;
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
             let timeout_duration = timeout.unwrap_or(std::time::Duration::from_secs(5));
             if tracing::enabled!(tracing::Level::TRACE) {
                 tracing::trace!(
@@ -883,9 +889,6 @@ impl ActorServiceImpl {
                     message.id, actor_id
                 );
             }
-            // Note: send_message_and_wait should receive RequestContext from caller
-            // For now, create empty context - this should be fixed to pass ctx from ActorContext
-            let ctx = RequestContext::new_without_auth(String::new(), String::new());
             let (_, response) = self
                 .route_message(ctx, actor_id, message, true, timeout)
                 .await
@@ -965,9 +968,7 @@ impl ActorServiceImpl {
             plexspaces_actor::ActorRefError::ActorNotFound(id) => {
                 Status::not_found(format!("Actor not found: {}", id))
             }
-            plexspaces_actor::ActorRefError::InvalidActorId(msg) => {
-                Status::invalid_argument(msg)
-            }
+            plexspaces_actor::ActorRefError::InvalidActorId(msg) => Status::invalid_argument(msg),
             plexspaces_actor::ActorRefError::SendFailed(msg) => {
                 Status::internal(format!("Failed to send message: {}", msg))
             }
@@ -1029,16 +1030,14 @@ impl ActorServiceImpl {
 impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
     async fn spawn_actor(
         &self,
+        ctx: &RequestContext,
         actor_id: &str,
         actor_type: &str,
         initial_state: Vec<u8>,
     ) -> Result<plexspaces_core::ActorRef, Box<dyn std::error::Error + Send + Sync>> {
-        // Create RequestContext - tenant comes from auth, not config
-        use plexspaces_core::RequestContext;
-        let ctx = RequestContext::new_without_auth(String::new(), String::new());
         let actor_ref_impl = self
             .spawn_actor(
-                &ctx,
+                ctx,
                 actor_id,
                 actor_type,
                 initial_state,
@@ -1053,6 +1052,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
 
     async fn send(
         &self,
+        _ctx: &RequestContext,
         actor_id: &str,
         message: Message,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -1061,11 +1061,12 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
 
     async fn send_and_wait(
         &self,
+        ctx: &RequestContext,
         actor_id: &str,
         message: Message,
         timeout: Option<std::time::Duration>,
     ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
-        self.send_message_and_wait(actor_id, message, timeout).await
+        self.send_message_and_wait(actor_id, message, timeout, ctx.clone()).await
     }
 
     async fn create_shard_group(
@@ -1257,6 +1258,7 @@ impl plexspaces_core::actor_context::ActorService for ActorServiceImpl {
         }
         Ok(plexspaces_proto::actor::v1::SpawnActorsResponse { results })
     }
+
 }
 
 /// Implement Service trait for ActorServiceImpl (for ServiceLocator registration)
@@ -1297,6 +1299,20 @@ impl ActorServiceTrait for ActorServiceImpl {
             return Err(Status::invalid_argument("Missing actor_type"));
         }
 
+        // If actor_name is provided together with actor_type and a non-empty namespace,
+        // construct the canonical actor ID directly to avoid ambiguous registry lookups.
+        let actor_target = if !req.actor_name.is_empty() && !routing_ctx.namespace().is_empty() {
+            self.build_canonical_actor_id(
+                &req.actor_name,
+                &actor_type,
+                routing_ctx.namespace(),
+                &self.local_node_id,
+            )?
+            .to_string()
+        } else {
+            actor_type.clone()
+        };
+
         let http_method = if req.http_method.is_empty() {
             "POST".to_string()
         } else {
@@ -1321,7 +1337,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 req.message_id.clone()
             },
             sender_id: req.sender_id.clone(),
-            receiver_id: actor_type.clone(),
+            receiver_id: actor_target.clone(),
             message_type: if req.message_type.is_empty() {
                 "cast".to_string()
             } else {
@@ -1343,6 +1359,7 @@ impl ActorServiceTrait for ActorServiceImpl {
             tenant_id = %routing_ctx.tenant_id(),
             namespace = %routing_ctx.namespace(),
             actor_type = %actor_type,
+            actor_target = %actor_target,
             method = %http_method,
             path = %full_path,
             "send_message tell request started"
@@ -1350,7 +1367,7 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         let start = Instant::now();
         let result = self
-            .route_actor_request(routing_ctx, &actor_type, message, false, None)
+            .route_actor_request(routing_ctx, &actor_target, message, false, None)
             .await;
 
         match result {
@@ -1701,6 +1718,20 @@ impl ActorServiceTrait for ActorServiceImpl {
             return Err(Status::invalid_argument("Missing actor_type"));
         }
 
+        // If actor_name is provided together with actor_type and a non-empty namespace,
+        // construct the canonical actor ID directly to avoid ambiguous registry lookups.
+        let actor_target = if !req.actor_name.is_empty() && !routing_ctx.namespace().is_empty() {
+            self.build_canonical_actor_id(
+                &req.actor_name,
+                &actor_type,
+                routing_ctx.namespace(),
+                &self.local_node_id,
+            )?
+            .to_string()
+        } else {
+            actor_type.clone()
+        };
+
         let http_method = if req.http_method.is_empty() {
             "GET".to_string()
         } else {
@@ -1719,7 +1750,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 req.message_id.clone()
             },
             sender_id: req.sender_id.clone(),
-            receiver_id: actor_type.clone(),
+            receiver_id: actor_target.clone(),
             message_type: if req.message_type.is_empty() {
                 "call".to_string()
             } else {
@@ -1741,6 +1772,7 @@ impl ActorServiceTrait for ActorServiceImpl {
                 tenant_id = %routing_ctx.tenant_id(),
                 namespace = %routing_ctx.namespace(),
                 actor_type = %actor_type,
+                actor_target = %actor_target,
                 method = %http_method,
                 path = %full_path,
                 "ask_reply request started"
@@ -1749,7 +1781,7 @@ impl ActorServiceTrait for ActorServiceImpl {
 
         let start = Instant::now();
         let result = self
-            .route_actor_request(routing_ctx, &actor_type, message, true, timeout)
+            .route_actor_request(routing_ctx, &actor_target, message, true, timeout)
             .await;
 
         match result {
@@ -2787,9 +2819,16 @@ impl ActorServiceImpl {
 
             let handle = tokio::spawn(async move {
                 use plexspaces_actor::routing::ask_helper;
-                let result =
-                    ask_helper(ctx_task, sl, sid.clone(), msg, tid.to_string(), cid.clone(), t)
-                        .await;
+                let result = ask_helper(
+                    ctx_task,
+                    sl,
+                    sid.clone(),
+                    msg,
+                    tid.to_string(),
+                    cid.clone(),
+                    t,
+                )
+                .await;
                 (shard_id as u32, sid, request_start, result)
             });
             handles.push(handle);
@@ -3538,14 +3577,14 @@ impl ActorServiceImpl {
                             let actor_registry: Option<Arc<plexspaces_core::ActorRegistry>> =
                                 service_locator.actor_registry().await;
                             if let Some(registry) = actor_registry {
-                                let receiver_id = match ActorId::from_canonical(&message.receiver_id)
-                                {
-                                    Ok(receiver_id) => receiver_id,
-                                    Err(_) => {
-                                        failed += 1;
-                                        continue;
-                                    }
-                                };
+                                let receiver_id =
+                                    match ActorId::from_canonical(&message.receiver_id) {
+                                        Ok(receiver_id) => receiver_id,
+                                        Err(_) => {
+                                            failed += 1;
+                                            continue;
+                                        }
+                                    };
                                 if wait_for_responses {
                                     let ask_ctx = RequestContext::new_without_auth(
                                         String::new(),
@@ -3911,6 +3950,7 @@ mod tests {
     fn create_test_send_message_request(message: Message) -> SendMessageRequest {
         SendMessageRequest {
             namespace: String::new(),
+            actor_name: String::new(),
             actor_type: message.receiver_id.clone(),
             http_method: "POST".to_string(),
             payload: message.payload,
@@ -4463,10 +4503,7 @@ mod tests {
         }
 
         // ACT: Unregister actor
-        actor_registry
-            .unregister(&actor_id)
-            .await
-            .unwrap();
+        actor_registry.unregister(&actor_id).await.unwrap();
 
         // ASSERT: Actor is removed from cache
         {
@@ -4620,6 +4657,7 @@ mod tests {
 
         let request = tonic::Request::new(SendMessageRequest {
             namespace: String::new(),
+            actor_name: String::new(),
             actor_type: String::new(),
             http_method: "POST".to_string(),
             payload: Vec::new(),

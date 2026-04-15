@@ -690,17 +690,23 @@ message ApplicationInfo {
   // Application name
   string name = 2;
 
+  // Tenant ID for visibility and isolation.
+  string tenant_id = 3;
+
+  // Namespace for application-scoped actors and filters.
+  string namespace = 4;
+
   // Application version
-  string version = 3;
+  string version = 5;
 
   // Current status
-  ApplicationStatus status = 4;
+  ApplicationStatus status = 6;
 
   // When the application was deployed
-  google.protobuf.Timestamp deployed_at = 5;
+  google.protobuf.Timestamp deployed_at = 7;
 
   // Application metrics (optional)
-  optional ApplicationMetrics metrics = 6;
+  optional ApplicationMetrics metrics = 8;
 }
 
 // Application metrics

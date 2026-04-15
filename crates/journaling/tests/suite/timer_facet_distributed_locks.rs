@@ -44,6 +44,7 @@ mod distributed_lock_tests {
     impl ActorService for MockActorService {
         async fn spawn_actor(
             &self,
+            _ctx: &plexspaces_core::RequestContext,
             _actor_id: &str,
             _actor_type: &str,
             _initial_state: Vec<u8>,
@@ -53,6 +54,7 @@ mod distributed_lock_tests {
 
         async fn send(
             &self,
+            _ctx: &plexspaces_core::RequestContext,
             _actor_id: &str,
             message: Message,
         ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {

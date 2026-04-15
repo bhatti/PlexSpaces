@@ -32,7 +32,8 @@ use plexspaces_core::actor_context::ObjectRegistry;
 use plexspaces_core::LinkProvider;
 use plexspaces_core::{
     ActorId, ActorRegistry, ApplicationManager as ApplicationManagerTrait, ExitReason,
-    RequestContext, ServiceLocator as ServiceLocatorTrait, VirtualActorManager,
+    ProcessResourceSampler, RequestContext, ServiceLocator as ServiceLocatorTrait,
+    VirtualActorManager,
 };
 use plexspaces_journaling::VirtualActorFacet;
 use plexspaces_proto::actor::v1::ActorLink as ProtoActorLink;
@@ -106,6 +107,8 @@ pub struct Node {
     config: plexspaces_proto::node::v1::NodeConfig,
     /// Node metrics (combined resource and operational metrics)
     metrics: Arc<RwLock<NodeMetrics>>,
+    /// Reused process sampler so node metrics reflect the current process footprint.
+    process_sampler: Arc<std::sync::Mutex<ProcessResourceSampler>>,
     /// Start time for uptime calculation
     start_time: Arc<RwLock<Option<tokio::time::Instant>>>,
     /// Background scheduler (Phase 4: Resource-aware scheduling)
@@ -199,6 +202,10 @@ impl Node {
             service_locator,
             config,
             metrics: Arc::new(RwLock::new(default_node_metrics(&node_id_str, ""))),
+            process_sampler: Arc::new(std::sync::Mutex::new(
+                ProcessResourceSampler::new()
+                    .expect("process metrics sampler must initialize for current process"),
+            )),
             start_time: Arc::new(RwLock::new(None)), // Set in start()
             shutdown_tx: Arc::new(RwLock::new(None)), // Shutdown trigger (set in start())
             background_scheduler: Arc::new(RwLock::new(None)), // Phase 4: Background scheduler (created in start())
@@ -740,25 +747,11 @@ impl Node {
 
     /// Update metrics with current system info (CPU, memory, uptime, actors, connected nodes)
     pub async fn update_metrics_with_system_info(&self) {
-        use sysinfo::System;
-        let mut system = System::new();
-        system.refresh_all();
-
-        // Get system info
-        let _total_memory = system.total_memory();
-        let used_memory = system.used_memory();
-        let available_memory = system.available_memory();
-        let cpu_count = system.cpus().len() as u32;
-        let cpu_usage = if cpu_count > 0 {
-            system
-                .cpus()
-                .iter()
-                .map(|cpu| cpu.cpu_usage() as f64)
-                .sum::<f64>()
-                / cpu_count as f64
-        } else {
-            0.0
-        };
+        let process_snapshot = self
+            .process_sampler
+            .lock()
+            .expect("process metrics sampler lock poisoned")
+            .sample();
 
         // Calculate uptime (time since node started)
         let uptime_seconds = if let Some(start_time) = self.start_time.read().await.as_ref() {
@@ -797,9 +790,9 @@ impl Node {
 
         // Update metrics
         let mut metrics = self.metrics.write().await;
-        metrics.memory_used_bytes = used_memory;
-        metrics.memory_available_bytes = available_memory;
-        metrics.cpu_usage_percent = cpu_usage;
+        metrics.memory_used_bytes = process_snapshot.memory_used_bytes;
+        metrics.memory_available_bytes = 0;
+        metrics.cpu_usage_percent = process_snapshot.cpu_usage_percent;
         metrics.uptime_seconds = uptime_seconds;
         metrics.active_actors = active_actors;
         metrics.connected_nodes = connected_nodes;
@@ -1020,8 +1013,8 @@ impl Node {
         }
 
         // Fallback default if spec not initialized (shouldn't happen in normal flow)
-        let node_id = self.id.as_str().replace(['@', '/', '\\', ':'], "-");
-        format!("sqlite:///tmp/plexspaces-{}.db?mode=rwc", node_id)
+        let base_dir = plexspaces_common::config_manager::get_default_base_dir();
+        plexspaces_common::config_manager::default_shared_db_url(&base_dir)
     }
 
     /// Get the shared database config from ReleaseSpec config.
@@ -1037,9 +1030,10 @@ impl Node {
             }
         }
 
-        let node_id = self.id.as_str().replace(['@', '/', '\\', ':'], "-");
         plexspaces_proto::storage::v1::SharedDbConfig {
-            connection_string: format!("sqlite:///tmp/plexspaces-{}.db?mode=rwc", node_id),
+            connection_string: plexspaces_common::config_manager::default_shared_db_url(
+                &plexspaces_common::config_manager::get_default_base_dir(),
+            ),
             ..Default::default()
         }
     }
@@ -1049,8 +1043,6 @@ impl Node {
     /// Caller (start()) treats failure as optional: node starts without blob storage on error.
     async fn init_blob_service(&self) -> Result<Arc<plexspaces_blob::BlobService>, NodeError> {
         use plexspaces_blob::repository::sql::SqlBlobRepository;
-        use std::env;
-
         // Try to get blob config from ReleaseSpec or environment
         let blob_config = {
             let release_spec = self.release_spec.read().await;
@@ -1081,12 +1073,11 @@ impl Node {
         use sqlx::any::AnyPoolOptions;
 
         // For in-memory SQLite, use max_connections=1 to ensure all operations share the same database
-        let pool_options =
-            if db_url.starts_with("sqlite::memory:") || db_url.starts_with("sqlite://:memory:") {
-                AnyPoolOptions::new().max_connections(1)
-            } else {
-                AnyPoolOptions::new()
-            };
+        let pool_options = if db_url.starts_with("sqlite:") {
+            AnyPoolOptions::new().max_connections(1)
+        } else {
+            AnyPoolOptions::new()
+        };
 
         let any_pool = pool_options.connect(&db_url).await.map_err(|e| {
             NodeError::ConfigError(format!("Failed to connect to database '{}': {}", db_url, e))
@@ -2211,13 +2202,14 @@ impl Node {
                     mut req: axum::extract::Request,
                     next: axum::middleware::Next,
                 ) -> axum::response::Response {
-                    if !req.uri().path().starts_with("/api/v1/actors") {
+                    let path = req.uri().path().to_string();
+                    if !path.starts_with("/api/v1/actors") && !path.starts_with("/api/v1/dashboard")
+                    {
                         return next.run(req).await;
                     }
                     if auth_disabled {
                         return next.run(req).await;
                     }
-                    let path = req.uri().path().to_string();
                     let secret = match &jwt_secret {
                         Some(s) => s.as_str(),
                         None => {
@@ -2240,12 +2232,12 @@ impl Node {
                         .get("authorization")
                         .and_then(|v| v.to_str().ok())
                         .map(|s| s.to_string());
-                    let has_bearer = auth_header
-                        .as_ref()
-                        .map(|h| h.starts_with("Bearer "))
-                        .unwrap_or(false);
                     match crate::http_jwt::validate_bearer_token(secret, auth_header.as_deref()) {
                         Ok(claims) => {
+                            crate::http_gateway::apply_jwt_claim_headers(
+                                req.headers_mut(),
+                                &claims,
+                            );
                             req.extensions_mut().insert(claims);
                             next.run(req).await
                         }
@@ -3499,6 +3491,7 @@ impl Node {
     /// will be available for starting/stopping via the ApplicationManager.
     ///
     /// ## Arguments
+    /// * `ctx` - Request context carrying tenant scope; the application namespace is normalized to the application ID
     /// * `app` - Application implementation to register
     ///
     /// ## Returns
@@ -3508,7 +3501,8 @@ impl Node {
     /// ## Example
     /// ```ignore
     /// let app = Box::new(MyApplication::new());
-    /// node.application_manager().register(app).await?;
+    /// let ctx = plexspaces_common::RequestContext::new_without_auth(String::new(), "my-app".to_string());
+    /// node.application_manager().register(&ctx, app).await?;
     /// ```
 
     /// Gracefully shutdown the node and all applications
@@ -4215,8 +4209,7 @@ mod tests {
     use std::time::Duration;
 
     fn test_runtime_actor_id(name: &str, node_id: &str) -> ActorId {
-        ActorId::new(name, "gen_server", "default", node_id)
-            .expect("test actor IDs must be valid")
+        ActorId::new(name, "gen_server", "default", node_id).expect("test actor IDs must be valid")
     }
 
     // Helper functions for tests (defined inline since we can't import from tests/ directory)
@@ -4625,7 +4618,8 @@ mod tests {
 
         // Try to send to non-existent actor
         // lookup_actor_ref returns Ok(None) for local actors that don't exist
-        let result = lookup_actor_ref(&node, &test_runtime_actor_id("nonexistent", "test-node")).await;
+        let result =
+            lookup_actor_ref(&node, &test_runtime_actor_id("nonexistent", "test-node")).await;
         let result = match result {
             Ok(Some(actor_ref)) => actor_ref
                 .tell(message)
@@ -4881,13 +4875,7 @@ mod tests {
 
         // Establish monitoring link
         let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        node.monitor(
-            &actor_id,
-            &supervisor_id,
-            tx,
-        )
-        .await
-        .unwrap();
+        node.monitor(&actor_id, &supervisor_id, tx).await.unwrap();
 
         // Send message to actor
         // Note: In real usage, this would be done via Node::route_message() or ActorService
@@ -5145,7 +5133,8 @@ mod tests {
 
         // Try to send to node that's not in connections registry
         // This will fail when trying to lookup the actor (node not found)
-        let result = lookup_actor_ref(&node, &test_runtime_actor_id("test-actor", "unknown-node")).await;
+        let result =
+            lookup_actor_ref(&node, &test_runtime_actor_id("test-actor", "unknown-node")).await;
 
         // Should fail with ActorNotFound or similar (node not registered)
         assert!(result.is_err() || result.unwrap().is_none());
@@ -5358,35 +5347,20 @@ mod tests {
         let sup1_id = test_runtime_actor_id("sup1", "test-node");
         let sup2_id = test_runtime_actor_id("sup2", "test-node");
         let sup3_id = test_runtime_actor_id("sup3", "test-node");
-        node.monitor(
-            &watched_actor_id,
-            &sup1_id,
-            tx1,
-        )
-        .await
-        .unwrap();
-        node.monitor(
-            &watched_actor_id,
-            &sup2_id,
-            tx2,
-        )
-        .await
-        .unwrap();
-        node.monitor(
-            &watched_actor_id,
-            &sup3_id,
-            tx3,
-        )
-        .await
-        .unwrap();
+        node.monitor(&watched_actor_id, &sup1_id, tx1)
+            .await
+            .unwrap();
+        node.monitor(&watched_actor_id, &sup2_id, tx2)
+            .await
+            .unwrap();
+        node.monitor(&watched_actor_id, &sup3_id, tx3)
+            .await
+            .unwrap();
 
         // Notify actor down
         let actor_registry = node.actor_registry().await.unwrap();
         actor_registry
-            .handle_actor_termination(
-                &watched_actor_id,
-                ExitReason::Error("crashed".to_string()),
-            )
+            .handle_actor_termination(&watched_actor_id, ExitReason::Error("crashed".to_string()))
             .await;
 
         // All 3 monitors should receive notification
@@ -5566,13 +5540,9 @@ mod tests {
 
         let (tx, mut rx) = mpsc::channel(1);
         let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        node.monitor(
-            &monitored_actor_id,
-            &supervisor_id,
-            tx,
-        )
-        .await
-        .unwrap();
+        node.monitor(&monitored_actor_id, &supervisor_id, tx)
+            .await
+            .unwrap();
 
         // Create Terminated event
         let event = plexspaces_proto::ActorLifecycleEvent {
@@ -5684,13 +5654,9 @@ mod tests {
 
         let (tx, mut rx) = mpsc::channel(1);
         let supervisor_id = test_runtime_actor_id("supervisor", "test-node");
-        node.monitor(
-            &monitored_actor_id,
-            &supervisor_id,
-            tx,
-        )
-        .await
-        .unwrap();
+        node.monitor(&monitored_actor_id, &supervisor_id, tx)
+            .await
+            .unwrap();
 
         // Create Failed event
         let event = plexspaces_proto::ActorLifecycleEvent {
@@ -6555,7 +6521,12 @@ mod tests {
 
     use async_trait::async_trait;
     use plexspaces_application::{Application, ApplicationError, ApplicationNode};
+    use plexspaces_common::RequestContext;
     use plexspaces_proto::v1::application::{ApplicationState, HealthStatus};
+
+    fn app_ctx(name: &str) -> RequestContext {
+        RequestContext::new_without_auth(String::new(), name.to_string())
+    }
 
     // Mock application for testing
     struct MockTestApplication {
@@ -6650,7 +6621,10 @@ mod tests {
         let node = NodeBuilder::new("test-node").build().await;
 
         let app = Box::new(MockTestApplication::new("test-app"));
-        node.application_manager().register(app).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("test-app"), app)
+            .await
+            .unwrap();
 
         // Verify application is registered
         let state = node.application_manager().get_state("test-app").await;
@@ -6662,10 +6636,16 @@ mod tests {
         let node = NodeBuilder::new("test-node").build().await;
 
         let app1 = Box::new(MockTestApplication::new("test-app"));
-        node.application_manager().register(app1).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("test-app"), app1)
+            .await
+            .unwrap();
 
         let app2 = Box::new(MockTestApplication::new("test-app"));
-        let result = node.application_manager().register(app2).await;
+        let result = node
+            .application_manager()
+            .register(&app_ctx("test-app"), app2)
+            .await;
 
         // Should fail with duplicate error
         assert!(result.is_err());
@@ -6682,7 +6662,10 @@ mod tests {
         let app = Box::new(MockTestApplication::new("test-app"));
         let start_called = app.start_called.clone();
 
-        node.application_manager().register(app).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("test-app"), app)
+            .await
+            .unwrap();
         // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
@@ -6702,7 +6685,10 @@ mod tests {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
         let app = Box::new(MockTestApplication::new_failing_start("test-app"));
-        node.application_manager().register(app).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("test-app"), app)
+            .await
+            .unwrap();
 
         // node_arc removed - use node.clone() directly
         node.application_manager()
@@ -6725,7 +6711,10 @@ mod tests {
         let app = Box::new(MockTestApplication::new("test-app"));
         let stop_called = app.stop_called.clone();
 
-        node.application_manager().register(app).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("test-app"), app)
+            .await
+            .unwrap();
         // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
@@ -6749,7 +6738,10 @@ mod tests {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
         let app = Box::new(MockTestApplication::new_failing_stop("test-app"));
-        node.application_manager().register(app).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("test-app"), app)
+            .await
+            .unwrap();
         // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
@@ -6781,7 +6773,10 @@ mod tests {
         ];
 
         for app in apps {
-            node.application_manager().register(app).await.unwrap();
+            node.application_manager()
+                .register(&app_ctx(app.name()), app)
+                .await
+                .unwrap();
         }
 
         // node_arc removed - use node.clone() directly
@@ -6873,7 +6868,10 @@ mod tests {
         let stop_called = app.stop_called.clone();
 
         // Full lifecycle: register -> start -> stop
-        node.application_manager().register(app).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("lifecycle-test"), app)
+            .await
+            .unwrap();
         assert_eq!(
             node.application_manager().get_state("lifecycle-test").await,
             Some(ApplicationState::ApplicationStateCreated)
@@ -6913,8 +6911,14 @@ mod tests {
         let app2 =
             Box::new(MockTestApplication::new_failing_stop("bad-app")) as Box<dyn Application>;
 
-        node.application_manager().register(app1).await.unwrap();
-        node.application_manager().register(app2).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("good-app"), app1)
+            .await
+            .unwrap();
+        node.application_manager()
+            .register(&app_ctx("bad-app"), app2)
+            .await
+            .unwrap();
 
         // node_arc removed - use node.clone() directly
         node.application_manager()
@@ -6952,7 +6956,10 @@ mod tests {
 
         // Register and start an app
         let app = Box::new(MockTestApplication::new("test-app"));
-        node.application_manager().register(app).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("test-app"), app)
+            .await
+            .unwrap();
         // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
@@ -7000,7 +7007,10 @@ mod tests {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
         let app = Box::new(MockTestApplication::new("test-app"));
-        node.application_manager().register(app).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("test-app"), app)
+            .await
+            .unwrap();
 
         // First start succeeds
         // node_arc removed - use node.clone() directly
@@ -7028,7 +7038,10 @@ mod tests {
         let node = Arc::new(NodeBuilder::new("test-node").build().await);
 
         let app = Box::new(MockTestApplication::new("test-app"));
-        node.application_manager().register(app).await.unwrap();
+        node.application_manager()
+            .register(&app_ctx("test-app"), app)
+            .await
+            .unwrap();
         // node_arc removed - use node.clone() directly
         node.application_manager()
             .ensure_node_context(node.clone() as Arc<dyn plexspaces_application::ApplicationNode>)
@@ -7103,7 +7116,10 @@ mod tests {
                 name: format!("app{}", i),
                 stopped_apps: stopped_apps.clone(),
             }) as Box<dyn Application>;
-            node.application_manager().register(app).await.unwrap();
+            node.application_manager()
+                .register(&app_ctx(&format!("app{}", i)), app)
+                .await
+                .unwrap();
             // node_arc removed - use node.clone() directly
             node.application_manager()
                 .ensure_node_context(

@@ -32,8 +32,8 @@
 
 #[cfg(test)]
 mod tests {
-    use plexspaces_core::ActorId;
     use plexspaces_core::journal_storage::{Checkpoint, JournalStorage};
+    use plexspaces_core::ActorId;
     use plexspaces_journaling::sql::SqliteJournalStorage;
 
     fn canonical_actor_id(name: &str) -> String {
@@ -55,7 +55,10 @@ mod tests {
             metadata: std::collections::HashMap::new(),
         };
 
-        assert_eq!(checkpoint.actor_id, canonical_actor_id("bank-account-alice"));
+        assert_eq!(
+            checkpoint.actor_id,
+            canonical_actor_id("bank-account-alice")
+        );
         assert_eq!(checkpoint.sequence, 1);
         assert!(!checkpoint.state_data.is_empty());
     }
@@ -305,8 +308,8 @@ mod tests {
 /// Integration tests that simulate WASM actor restart scenarios
 #[cfg(test)]
 mod restart_scenario_tests {
-    use plexspaces_core::ActorId;
     use plexspaces_core::journal_storage::{Checkpoint, JournalStorage};
+    use plexspaces_core::ActorId;
     use plexspaces_journaling::sql::SqliteJournalStorage;
 
     fn canonical_actor_id(name: &str) -> String {

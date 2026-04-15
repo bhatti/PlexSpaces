@@ -17,6 +17,8 @@ export interface ActorDefinitionMetadata {
   runHandler?: string;
   signalHandlers: Record<string, string>;
   queryHandlers: Record<string, string>;
+  fsmStates?: string[];
+  fsmInitial?: string;
 }
 
 const ACTOR_METADATA = Symbol.for('plexspaces.actor.metadata');
@@ -57,8 +59,16 @@ export function event_actor(options: { facets?: string[] } = {}) {
   return actorDecorator('GenEvent', options.facets ?? []);
 }
 
-export function fsm_actor(options: { facets?: string[] } = {}) {
-  return actorDecorator('GenStateMachine', options.facets ?? []);
+export function fsm_actor(options: { facets?: string[]; states?: string[]; initial?: string } = {}) {
+  return function <T extends Function>(target: T): T {
+    const result = actorDecorator('GenStateMachine', options.facets ?? [])(target);
+    if (options.states !== undefined || options.initial !== undefined) {
+      const metadata = ensureMetadata(result);
+      if (options.states !== undefined) metadata.fsmStates = [...options.states];
+      if (options.initial !== undefined) metadata.fsmInitial = options.initial;
+    }
+    return result;
+  };
 }
 
 export function workflow_actor(options: { facets?: string[] } = {}) {

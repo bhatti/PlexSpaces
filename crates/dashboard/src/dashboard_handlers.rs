@@ -28,22 +28,26 @@
 
 use axum::{
     extract::{Path, Query},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{Html, Json, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use plexspaces_core::ServiceLocator;
+use plexspaces_core::{
+    local_prometheus_recorder_chart_summary, request_context_from_grpc_request, ActorId,
+    ServiceLocator,
+};
 use plexspaces_proto::application::v1::ApplicationMetrics;
 use plexspaces_proto::common::v1::PageRequest;
 use plexspaces_proto::dashboard::v1::{
     dashboard_service_server::DashboardService, GetActorsRequest, GetApplicationsRequest,
-    GetDependencyHealthRequest, GetNodeDashboardRequest, GetNodesRequest, GetSummaryRequest,
-    GetWorkflowsRequest,
+    GetDashboardMetricsRequest, GetDependencyHealthRequest, GetNodeDashboardRequest,
+    GetNodesRequest, GetSummaryRequest,
 };
+use plexspaces_proto::object_registry::v1::ObjectType;
 use plexspaces_services::actor_service::ActorServiceImpl;
 use plexspaces_services::dashboard_service::DashboardServiceImpl;
 use tonic::Request;
@@ -66,22 +70,27 @@ pub fn create_dashboard_router() -> Router<HttpGatewayState> {
         .route("/dashboard/node/:node_id", get(node_page))
         .route("/node/:node_id", get(node_page)) // Also support without /dashboard prefix
         .route("/dashboard/application/:name", get(application_page))
+        .route("/dashboard/tenant/:tenant_id", get(tenant_page))
         .route("/static/dashboard.css", get(serve_css))
         .route("/static/dashboard.js", get(serve_js))
         .route("/api/v1/dashboard/summary", get(api_summary))
         .route("/api/v1/dashboard/nodes", get(api_nodes))
         .route("/api/v1/dashboard/node/:node_id", get(api_node_dashboard))
+        .route(
+            "/api/v1/dashboard/local-recorder-summary",
+            get(api_local_recorder_summary),
+        )
         .route("/api/v1/dashboard/applications", get(api_applications))
+        .route("/api/v1/dashboard/tenants", get(api_tenants))
         .route(
             "/api/v1/dashboard/application/:name",
             get(api_application_detail),
         )
         .route("/api/v1/dashboard/actors", get(api_actors))
         .route("/api/v1/dashboard/actor/:actor_id", get(api_actor_detail))
-        .route("/api/v1/dashboard/workflows", get(api_workflows))
         .route(
-            "/api/v1/dashboard/workflow/:definition_id",
-            get(api_workflow_detail),
+            "/api/v1/dashboard/actor/:actor_id/stop",
+            post(api_actor_stop),
         )
         .route("/api/v1/dashboard/dependencies", get(api_dependencies))
         .route("/api/v1/dashboard/system-info", get(api_system_info))
@@ -99,12 +108,17 @@ async fn node_page(Path(node_id): Path<String>) -> Result<Html<String>, StatusCo
     Ok(Html(html))
 }
 
-/// Application detail page handler - redirects to home with modal
-async fn application_page(
-    Path(_name): Path<String>,
-) -> Result<axum::response::Redirect, StatusCode> {
-    // Redirect to home page - modals will handle the detail view
-    Ok(axum::response::Redirect::to("/"))
+/// Application detail page handler.
+async fn application_page(Path(name): Path<String>) -> Result<Html<String>, StatusCode> {
+    let html =
+        include_str!("../static/dashboard/application.html").replace(":application_id", &name);
+    Ok(Html(html))
+}
+
+/// Tenant detail page handler.
+async fn tenant_page(Path(tenant_id): Path<String>) -> Result<Html<String>, StatusCode> {
+    let html = include_str!("../static/dashboard/tenant.html").replace(":tenant_id", &tenant_id);
+    Ok(Html(html))
 }
 
 /// Serve CSS file
@@ -125,6 +139,173 @@ async fn serve_js() -> Response<String> {
         .unwrap()
 }
 
+fn dashboard_request<T>(payload: T, headers: &HeaderMap) -> Request<T> {
+    let mut request = Request::new(payload);
+    for header_name in [
+        "x-tenant-id",
+        "x-namespace",
+        "x-admin",
+        "x-user-role",
+        "x-user-roles",
+    ] {
+        if let Some(value) = headers.get(header_name) {
+            if let Ok(value) = value.to_str() {
+                if let Ok(metadata) = tonic::metadata::MetadataValue::try_from(value) {
+                    request.metadata_mut().insert(header_name, metadata);
+                }
+            }
+        }
+    }
+    request
+}
+
+fn node_metrics_to_json(metrics: &plexspaces_proto::node::v1::NodeMetrics) -> serde_json::Value {
+    serde_json::json!({
+        "node_id": metrics.node_id,
+        "cluster_name": metrics.cluster_name,
+        "memory_used_bytes": metrics.memory_used_bytes,
+        "memory_available_bytes": metrics.memory_available_bytes,
+        "cpu_usage_percent": metrics.cpu_usage_percent,
+        "uptime_seconds": metrics.uptime_seconds,
+        "messages_routed": metrics.messages_routed,
+        "local_deliveries": metrics.local_deliveries,
+        "remote_deliveries": metrics.remote_deliveries,
+        "failed_deliveries": metrics.failed_deliveries,
+        "active_actors": metrics.active_actors,
+        "connected_nodes": metrics.connected_nodes,
+        "shard_groups_created": metrics.shard_groups_created,
+        "shard_messages_sent": metrics.shard_messages_sent,
+        "shard_messages_received": metrics.shard_messages_received,
+        "shard_operations_total": metrics.shard_operations_total,
+        "shard_operations_failed": metrics.shard_operations_failed,
+    })
+}
+
+fn node_to_json(node: &plexspaces_proto::node::v1::Node) -> serde_json::Value {
+    let mut node_json = serde_json::Map::new();
+    node_json.insert("id".to_string(), serde_json::Value::String(node.id.clone()));
+    node_json.insert(
+        "cluster_name".to_string(),
+        serde_json::Value::String(node.cluster_name.clone()),
+    );
+    node_json.insert(
+        "status".to_string(),
+        serde_json::Value::Number(node.status.into()),
+    );
+    if let Some(last_heartbeat) = &node.last_heartbeat {
+        node_json.insert(
+            "last_heartbeat".to_string(),
+            serde_json::json!({
+                "seconds": last_heartbeat.seconds,
+                "nanos": last_heartbeat.nanos,
+            }),
+        );
+    }
+    if let Some(created_at) = &node.created_at {
+        node_json.insert(
+            "created_at".to_string(),
+            serde_json::json!({
+                "seconds": created_at.seconds,
+                "nanos": created_at.nanos,
+            }),
+        );
+    }
+    if let Some(metrics) = &node.metrics {
+        node_json.insert("metrics".to_string(), node_metrics_to_json(metrics));
+    }
+    serde_json::Value::Object(node_json)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{dashboard_request, node_to_json};
+    use axum::http::HeaderMap;
+    use plexspaces_proto::node::v1::{Node, NodeMetrics};
+
+    #[test]
+    fn dashboard_request_forwards_identity_and_scope_metadata() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-tenant-id", "tenant-a".parse().unwrap());
+        headers.insert("x-namespace", "ns-a".parse().unwrap());
+        headers.insert("x-admin", "true".parse().unwrap());
+        headers.insert("x-user-role", "admin".parse().unwrap());
+        headers.insert("x-user-roles", "admin,developer".parse().unwrap());
+
+        let request = dashboard_request((), &headers);
+
+        assert_eq!(
+            request
+                .metadata()
+                .get("x-tenant-id")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "tenant-a"
+        );
+        assert_eq!(
+            request
+                .metadata()
+                .get("x-namespace")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "ns-a"
+        );
+        assert_eq!(
+            request.metadata().get("x-admin").unwrap().to_str().unwrap(),
+            "true"
+        );
+        assert_eq!(
+            request
+                .metadata()
+                .get("x-user-role")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "admin"
+        );
+        assert_eq!(
+            request
+                .metadata()
+                .get("x-user-roles")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "admin,developer"
+        );
+    }
+
+    #[test]
+    fn node_to_json_includes_metrics_used_by_dashboard_tables() {
+        let node = Node {
+            id: "node-a".to_string(),
+            cluster_name: "cluster-a".to_string(),
+            status: 1,
+            metrics: Some(NodeMetrics {
+                node_id: "node-a".to_string(),
+                cluster_name: "cluster-a".to_string(),
+                cpu_usage_percent: 37.5,
+                memory_used_bytes: 256,
+                memory_available_bytes: 768,
+                messages_routed: 42,
+                failed_deliveries: 3,
+                active_actors: 9,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let value = node_to_json(&node);
+
+        assert_eq!(value["id"], "node-a");
+        assert_eq!(value["cluster_name"], "cluster-a");
+        assert_eq!(value["metrics"]["messages_routed"], 42);
+        assert_eq!(value["metrics"]["active_actors"], 9);
+        assert_eq!(value["metrics"]["failed_deliveries"], 3);
+        assert_eq!(value["metrics"]["cpu_usage_percent"], 37.5);
+    }
+}
+
 /// API: Get summary
 async fn api_summary(
     axum::extract::State((
@@ -135,6 +316,7 @@ async fn api_summary(
         dashboard_service_opt,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
@@ -144,12 +326,15 @@ async fn api_summary(
     let cluster_id = _params.get("cluster_id").cloned().unwrap_or_default();
 
     // Create gRPC request
-    let request = Request::new(GetSummaryRequest {
-        tenant_id,
-        node_id,
-        cluster_id,
-        since: None,
-    });
+    let request = dashboard_request(
+        GetSummaryRequest {
+            tenant_id,
+            node_id,
+            cluster_id,
+            since: None,
+        },
+        &headers,
+    );
 
     // Call DashboardService
     let response = DashboardService::get_summary(dashboard_service.as_ref(), request)
@@ -222,6 +407,7 @@ async fn api_nodes(
         dashboard_service_opt,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
@@ -245,11 +431,14 @@ async fn api_nodes(
         order_by: String::new(),
     });
 
-    let request = Request::new(GetNodesRequest {
-        tenant_id,
-        cluster_id,
-        page: page_request,
-    });
+    let request = dashboard_request(
+        GetNodesRequest {
+            tenant_id,
+            cluster_id,
+            page: page_request,
+        },
+        &headers,
+    );
 
     let response = DashboardService::get_nodes(dashboard_service.as_ref(), request)
         .await
@@ -258,23 +447,7 @@ async fn api_nodes(
     let nodes_response = response.into_inner();
 
     // Convert nodes to JSON manually
-    let nodes: Vec<serde_json::Value> = nodes_response
-        .nodes
-        .iter()
-        .map(|n| {
-            let mut node_json = serde_json::Map::new();
-            node_json.insert("id".to_string(), serde_json::Value::String(n.id.clone()));
-            node_json.insert(
-                "cluster_name".to_string(),
-                serde_json::Value::String(n.cluster_name.clone()),
-            );
-            node_json.insert(
-                "status".to_string(),
-                serde_json::Value::Number(n.status.into()),
-            );
-            serde_json::Value::Object(node_json)
-        })
-        .collect();
+    let nodes: Vec<serde_json::Value> = nodes_response.nodes.iter().map(node_to_json).collect();
 
     let mut json = serde_json::Map::new();
     json.insert("nodes".to_string(), serde_json::Value::Array(nodes));
@@ -315,13 +488,17 @@ async fn api_node_dashboard(
     )): axum::extract::State<HttpGatewayState>,
     Path(node_id): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
-    let request = Request::new(GetNodeDashboardRequest {
-        node_id,
-        since: None,
-    });
+    let request = dashboard_request(
+        GetNodeDashboardRequest {
+            node_id,
+            since: None,
+        },
+        &headers,
+    );
 
     let response = DashboardService::get_node_dashboard(dashboard_service.as_ref(), request)
         .await
@@ -334,63 +511,12 @@ async fn api_node_dashboard(
 
     // Convert node
     if let Some(node) = dashboard.node {
-        let mut node_json = serde_json::Map::new();
-        node_json.insert("id".to_string(), serde_json::Value::String(node.id));
-        node_json.insert(
-            "cluster_name".to_string(),
-            serde_json::Value::String(node.cluster_name),
-        );
-        node_json.insert(
-            "status".to_string(),
-            serde_json::Value::Number(node.status.into()),
-        );
-        json.insert("node".to_string(), serde_json::Value::Object(node_json));
+        json.insert("node".to_string(), node_to_json(&node));
     }
 
     // Convert node metrics
     if let Some(metrics) = dashboard.node_metrics {
-        let mut metrics_json = serde_json::Map::new();
-        metrics_json.insert(
-            "node_id".to_string(),
-            serde_json::Value::String(metrics.node_id),
-        );
-        metrics_json.insert(
-            "cluster_name".to_string(),
-            serde_json::Value::String(metrics.cluster_name),
-        );
-        metrics_json.insert(
-            "memory_used_bytes".to_string(),
-            serde_json::Value::Number(metrics.memory_used_bytes.into()),
-        );
-        metrics_json.insert(
-            "memory_available_bytes".to_string(),
-            serde_json::Value::Number(metrics.memory_available_bytes.into()),
-        );
-        metrics_json.insert(
-            "cpu_usage_percent".to_string(),
-            serde_json::Value::Number((metrics.cpu_usage_percent as u64).into()),
-        );
-        metrics_json.insert(
-            "uptime_seconds".to_string(),
-            serde_json::Value::Number(metrics.uptime_seconds.into()),
-        );
-        metrics_json.insert(
-            "messages_routed".to_string(),
-            serde_json::Value::Number(metrics.messages_routed.into()),
-        );
-        metrics_json.insert(
-            "active_actors".to_string(),
-            serde_json::Value::Number(metrics.active_actors.into()),
-        );
-        // actor_count field removed - use active_actors instead
-        metrics_json.insert(
-            "active_actors".to_string(),
-            serde_json::Value::Number(metrics.active_actors.into()),
-        );
-        json.insert(
-            "node_metrics".to_string(),
-            serde_json::Value::Object(metrics_json),
-        );
+        json.insert("node_metrics".to_string(), node_metrics_to_json(&metrics));
     }
 
     // Convert summary
@@ -422,6 +548,66 @@ async fn api_node_dashboard(
     Ok(Json(serde_json::Value::Object(json)))
 }
 
+/// API: Chart aggregates from the **local** process Prometheus recorder (`GetDashboardMetrics` pipeline).
+///
+/// If `node_id` is set and does not match this process's configured node id, returns zeros with
+/// `scope: "remote"` (only the local recorder is available to this handler).
+async fn api_local_recorder_summary(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        service_locator,
+        dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let dashboard = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let requested = params.get("node_id").cloned().unwrap_or_default();
+    let local_id = service_locator
+        .get_node_config()
+        .await
+        .map(|c| c.id)
+        .unwrap_or_default();
+    if !requested.is_empty() && !local_id.is_empty() && requested != local_id {
+        return Ok(Json(serde_json::json!({
+            "scope": "remote",
+            "message_routing_latency_avg_ms": 0.0,
+            "message_routing_latency_max_ms": 0.0,
+            "actor_message_processing_latency_avg_ms": 0.0,
+            "actor_message_processing_latency_max_ms": 0.0,
+            "application_supervisors_total": 0,
+        })));
+    }
+
+    let req = dashboard_request(
+        GetDashboardMetricsRequest {
+            namespace: String::new(),
+            name_pattern: "*".to_string(),
+            label_filter: HashMap::new(),
+            include_definitions: false,
+            include_prometheus_text: true,
+        },
+        &headers,
+    );
+    let text = dashboard
+        .get_dashboard_metrics(req)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .into_inner()
+        .prometheus_text;
+    let s = local_prometheus_recorder_chart_summary(&text);
+    Ok(Json(serde_json::json!({
+        "scope": "local",
+        "message_routing_latency_avg_ms": s.message_routing_latency_avg_ms,
+        "message_routing_latency_max_ms": s.message_routing_latency_max_ms,
+        "actor_message_processing_latency_avg_ms": s.actor_message_processing_latency_avg_ms,
+        "actor_message_processing_latency_max_ms": s.actor_message_processing_latency_max_ms,
+        "application_supervisors_total": s.application_supervisors_total,
+    })))
+}
+
 /// API: Get applications
 async fn api_applications(
     axum::extract::State((
@@ -432,6 +618,7 @@ async fn api_applications(
         dashboard_service_opt,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
@@ -452,13 +639,16 @@ async fn api_applications(
         order_by: String::new(),
     });
 
-    let request = Request::new(GetApplicationsRequest {
-        node_id: _params.get("node_id").cloned().unwrap_or_default(),
-        tenant_id: _params.get("tenant_id").cloned().unwrap_or_default(),
-        namespace: _params.get("namespace").cloned().unwrap_or_default(),
-        name_pattern: _params.get("name_pattern").cloned().unwrap_or_default(),
-        page: page_request,
-    });
+    let request = dashboard_request(
+        GetApplicationsRequest {
+            node_id: _params.get("node_id").cloned().unwrap_or_default(),
+            tenant_id: _params.get("tenant_id").cloned().unwrap_or_default(),
+            namespace: _params.get("namespace").cloned().unwrap_or_default(),
+            name_pattern: _params.get("name_pattern").cloned().unwrap_or_default(),
+            page: page_request,
+        },
+        &headers,
+    );
 
     let response = dashboard_service
         .get_applications(request)
@@ -489,16 +679,13 @@ async fn api_applications(
             serde_json::Value::Number(app.status.into()),
         );
 
-        // Get namespace and tenant_id from ApplicationManager (stored in ApplicationInstance)
-        // Note: ApplicationManager is not available in HTTP handlers - use empty values
-        let (namespace, tenant_id) = (String::new(), String::new());
         app_json.insert(
             "namespace".to_string(),
-            serde_json::Value::String(namespace),
+            serde_json::Value::String(app.namespace.clone()),
         );
         app_json.insert(
             "tenant_id".to_string(),
-            serde_json::Value::String(tenant_id),
+            serde_json::Value::String(app.tenant_id.clone()),
         );
 
         if let Some(deployed_at) = &app.deployed_at {
@@ -544,6 +731,62 @@ async fn api_applications(
     Ok(Json(serde_json::Value::Object(json)))
 }
 
+/// API: List tenants visible to the current caller.
+async fn api_tenants(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        service_locator,
+        _dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Query(_params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let object_registry = service_locator
+        .get_object_registry()
+        .await
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let offset = _params
+        .get("offset")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(0)
+        .max(0) as usize;
+    let limit = _params
+        .get("limit")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(25)
+        .clamp(1, 1000) as usize;
+    let request = dashboard_request((), &headers);
+    let ctx =
+        request_context_from_grpc_request(request.metadata(), &HashMap::new(), &service_locator)
+            .await
+            .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let total_size = object_registry
+        .count_tenant_ids_by_object_type(&ctx, ObjectType::ObjectTypeApplication)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tenants = object_registry
+        .list_tenant_ids_by_object_type(&ctx, ObjectType::ObjectTypeApplication, offset, limit)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .into_iter()
+        .filter(|tenant_id| !tenant_id.is_empty())
+        .map(|tenant_id| serde_json::json!({ "tenant_id": tenant_id }))
+        .collect::<Vec<_>>();
+
+    Ok(Json(serde_json::json!({
+        "tenants": tenants,
+        "page": {
+            "total_size": total_size,
+            "offset": offset,
+            "limit": limit,
+            "has_next": offset + limit < total_size,
+        }
+    })))
+}
+
 /// Serialize [`ApplicationMetrics`] for HTTP JSON (matches WASM host / `application_metrics_add` shape).
 fn application_metrics_to_json(metrics: &ApplicationMetrics) -> serde_json::Value {
     serde_json::json!({
@@ -559,6 +802,88 @@ fn application_metrics_to_json(metrics: &ApplicationMetrics) -> serde_json::Valu
     })
 }
 
+fn actor_info_to_json(actor: &plexspaces_proto::dashboard::v1::ActorInfo) -> serde_json::Value {
+    let mut actor_json = serde_json::Map::new();
+    actor_json.insert(
+        "actor_id".to_string(),
+        serde_json::Value::String(actor.actor_id.clone()),
+    );
+    actor_json.insert(
+        "actor_type".to_string(),
+        serde_json::Value::String(actor.actor_type.clone()),
+    );
+    actor_json.insert(
+        "actor_group".to_string(),
+        serde_json::Value::String(actor.actor_group.clone()),
+    );
+    actor_json.insert(
+        "namespace".to_string(),
+        serde_json::Value::String(actor.namespace.clone()),
+    );
+    actor_json.insert(
+        "tenant_id".to_string(),
+        serde_json::Value::String(actor.tenant_id.clone()),
+    );
+    actor_json.insert(
+        "node_id".to_string(),
+        serde_json::Value::String(actor.node_id.clone()),
+    );
+    actor_json.insert(
+        "status".to_string(),
+        serde_json::Value::String(actor.status.clone()),
+    );
+    actor_json.insert(
+        "behavior_kind".to_string(),
+        serde_json::Value::String(actor.behavior_kind.clone()),
+    );
+    actor_json.insert(
+        "current_status".to_string(),
+        serde_json::Value::String(actor.status.clone()),
+    );
+    let exit_status = match actor.status.as_str() {
+        "failed" | "terminated" => actor.status.clone(),
+        _ => String::new(),
+    };
+    actor_json.insert(
+        "exit_status".to_string(),
+        serde_json::Value::String(exit_status),
+    );
+    actor_json.insert(
+        "journal_size_bytes".to_string(),
+        serde_json::Value::Number(actor.journal_size_bytes.into()),
+    );
+    if let Some(checkpoint) = &actor.last_checkpoint {
+        actor_json.insert(
+            "last_checkpoint".to_string(),
+            serde_json::json!({
+                "seconds": checkpoint.seconds,
+                "nanos": checkpoint.nanos,
+            }),
+        );
+    }
+    if let Some(created_at) = &actor.created_at {
+        actor_json.insert(
+            "created_at".to_string(),
+            serde_json::json!({
+                "seconds": created_at.seconds,
+                "nanos": created_at.nanos,
+            }),
+        );
+    }
+    actor_json.insert(
+        "metrics".to_string(),
+        serde_json::json!({
+            "messages_routed": actor.metrics.as_ref().map(|m| m.messages_routed).unwrap_or_default(),
+            "local_deliveries": actor.metrics.as_ref().map(|m| m.local_deliveries).unwrap_or_default(),
+            "remote_deliveries": actor.metrics.as_ref().map(|m| m.remote_deliveries).unwrap_or_default(),
+            "failed_deliveries": actor.metrics.as_ref().map(|m| m.failed_deliveries).unwrap_or_default(),
+            "error_total": actor.metrics.as_ref().map(|m| m.error_total).unwrap_or_default(),
+            "spawn_total": actor.metrics.as_ref().map(|m| m.spawn_total).unwrap_or_default(),
+        }),
+    );
+    serde_json::Value::Object(actor_json)
+}
+
 /// API: Get actors
 async fn api_actors(
     axum::extract::State((
@@ -569,6 +894,7 @@ async fn api_actors(
         dashboard_service_opt,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
@@ -589,17 +915,21 @@ async fn api_actors(
         order_by: String::new(),
     });
 
-    let request = Request::new(GetActorsRequest {
-        node_id: _params.get("node_id").cloned().unwrap_or_default(),
-        tenant_id: _params.get("tenant_id").cloned().unwrap_or_default(),
-        namespace: _params.get("namespace").cloned().unwrap_or_default(),
-        actor_id_pattern: _params.get("actor_id_pattern").cloned().unwrap_or_default(),
-        actor_group: _params.get("actor_group").cloned().unwrap_or_default(),
-        actor_type: _params.get("actor_type").cloned().unwrap_or_default(),
-        status: _params.get("status").cloned().unwrap_or_default(),
-        since: None,
-        page: page_request,
-    });
+    let request = dashboard_request(
+        GetActorsRequest {
+            node_id: _params.get("node_id").cloned().unwrap_or_default(),
+            tenant_id: _params.get("tenant_id").cloned().unwrap_or_default(),
+            namespace: _params.get("namespace").cloned().unwrap_or_default(),
+            actor_id_pattern: _params.get("actor_id_pattern").cloned().unwrap_or_default(),
+            actor_group: _params.get("actor_group").cloned().unwrap_or_default(),
+            actor_type: _params.get("actor_type").cloned().unwrap_or_default(),
+            status: _params.get("status").cloned().unwrap_or_default(),
+            since: None,
+            page: page_request,
+            behavior_kind: _params.get("behavior_kind").cloned().unwrap_or_default(),
+        },
+        &headers,
+    );
 
     let response = dashboard_service
         .get_actors(request)
@@ -608,22 +938,10 @@ async fn api_actors(
 
     let actors_response = response.into_inner();
 
-    // Convert actors to JSON manually
     let actors: Vec<serde_json::Value> = actors_response
         .actors
         .iter()
-        .map(|actor| {
-            let mut actor_json = serde_json::Map::new();
-            actor_json.insert(
-                "actor_id".to_string(),
-                serde_json::Value::String(actor.actor_id.clone()),
-            );
-            actor_json.insert(
-                "actor_type".to_string(),
-                serde_json::Value::String(actor.actor_type.clone()),
-            );
-            serde_json::Value::Object(actor_json)
-        })
+        .map(actor_info_to_json)
         .collect();
 
     let mut json = serde_json::Map::new();
@@ -654,271 +972,6 @@ async fn api_actors(
     Ok(Json(serde_json::Value::Object(json)))
 }
 
-/// API: Get workflows
-async fn api_workflows(
-    axum::extract::State((
-        _actor_svc,
-        _auth_disabled,
-        _jwt_secret,
-        _service_locator,
-        dashboard_service_opt,
-    )): axum::extract::State<HttpGatewayState>,
-    Query(_params): Query<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-
-    // Parse pagination params
-    let offset = _params
-        .get("offset")
-        .and_then(|s| s.parse::<i32>().ok())
-        .unwrap_or(0);
-    let limit = _params
-        .get("limit")
-        .and_then(|s| s.parse::<i32>().ok())
-        .unwrap_or(50);
-
-    let page_request = Some(PageRequest {
-        offset,
-        limit,
-        filter: String::new(),
-        order_by: String::new(),
-    });
-
-    let request = Request::new(GetWorkflowsRequest {
-        node_id: _params.get("node_id").cloned().unwrap_or_default(),
-        tenant_id: _params.get("tenant_id").cloned().unwrap_or_default(),
-        definition_id: _params.get("definition_id").cloned().unwrap_or_default(),
-        status: _params
-            .get("status")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0),
-        page: page_request,
-    });
-
-    let response = dashboard_service
-        .get_workflows(request)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let workflows_response = response.into_inner();
-
-    // Convert workflows to JSON manually
-    // WorkflowInfo has execution and definition fields
-    let workflows: Vec<serde_json::Value> = workflows_response
-        .workflows
-        .iter()
-        .map(|wf| {
-            let mut wf_json = serde_json::Map::new();
-            // Extract execution_id and definition_id from nested fields
-            let execution_id = if let Some(execution) = &wf.execution {
-                execution.execution_id.clone()
-            } else {
-                String::new()
-            };
-            let definition_id = if let Some(execution) = &wf.execution {
-                execution.definition_id.clone()
-            } else if let Some(definition) = &wf.definition {
-                definition.id.clone() // WorkflowDefinition uses 'id' not 'definition_id'
-            } else {
-                String::new()
-            };
-            let status: i32 = if let Some(execution) = &wf.execution {
-                execution.status as i32
-            } else {
-                0
-            };
-            let node_id = if let Some(execution) = &wf.execution {
-                execution.node_id.clone()
-            } else {
-                String::new()
-            };
-            let created_at = if let Some(execution) = &wf.execution {
-                execution.created_at.clone()
-            } else {
-                None
-            };
-            wf_json.insert(
-                "workflow_id".to_string(),
-                serde_json::Value::String(execution_id.clone()),
-            );
-            wf_json.insert(
-                "execution_id".to_string(),
-                serde_json::Value::String(execution_id),
-            );
-            wf_json.insert(
-                "definition_id".to_string(),
-                serde_json::Value::String(definition_id),
-            );
-            wf_json.insert("status".to_string(), serde_json::json!(status));
-            wf_json.insert("node_id".to_string(), serde_json::Value::String(node_id));
-            if let Some(ts) = created_at {
-                wf_json.insert(
-                    "created_at".to_string(),
-                    serde_json::json!({
-                        "seconds": ts.seconds,
-                        "nanos": ts.nanos,
-                    }),
-                );
-            }
-            serde_json::Value::Object(wf_json)
-        })
-        .collect();
-
-    // Note: Node counts for workflows are calculated on-demand in the detail endpoint
-    // to avoid async issues in the map closure
-
-    let mut json = serde_json::Map::new();
-    json.insert("workflows".to_string(), serde_json::Value::Array(workflows));
-
-    // Include page response
-    if let Some(page) = workflows_response.page {
-        let mut page_json = serde_json::Map::new();
-        page_json.insert(
-            "total_size".to_string(),
-            serde_json::Value::Number(page.total_size.into()),
-        );
-        page_json.insert(
-            "offset".to_string(),
-            serde_json::Value::Number(page.offset.into()),
-        );
-        page_json.insert(
-            "limit".to_string(),
-            serde_json::Value::Number(page.limit.into()),
-        );
-        page_json.insert(
-            "has_next".to_string(),
-            serde_json::Value::Bool(page.has_next),
-        );
-        json.insert("page".to_string(), serde_json::Value::Object(page_json));
-    }
-
-    Ok(Json(serde_json::Value::Object(json)))
-}
-
-/// API: Get workflow detail by definition ID
-async fn api_workflow_detail(
-    axum::extract::State((
-        _actor_svc,
-        _auth_disabled,
-        _jwt_secret,
-        _service_locator,
-        dashboard_service_opt,
-    )): axum::extract::State<HttpGatewayState>,
-    Path(definition_id): Path<String>,
-    Query(_params): Query<HashMap<String, String>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-
-    // Get workflows with this definition ID
-    let request = Request::new(GetWorkflowsRequest {
-        node_id: String::new(),
-        tenant_id: String::new(),
-        definition_id: definition_id.clone(),
-        status: 0,
-        page: None,
-    });
-
-    let response = dashboard_service
-        .get_workflows(request)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let workflows_response = response.into_inner();
-
-    if workflows_response.workflows.is_empty() {
-        return Err(StatusCode::NOT_FOUND);
-    }
-
-    // Get node count from object-registry
-    use plexspaces_core::RequestContext;
-    use plexspaces_proto::object_registry::v1::ObjectType;
-
-    // Dashboard API path: use empty tenant/namespace (tenant comes from auth, not config)
-    // NOTE: default_tenant_id and default_namespace have been removed from NodeConfig.
-    let ctx = RequestContext::new_without_auth(String::new(), String::new());
-    let node_count = if let Some(object_registry) = _service_locator.get_object_registry().await {
-        // Query object-registry directly for workflow nodes
-        let registrations_result: Result<Vec<plexspaces_core::ObjectRegistration>, _> =
-            object_registry
-                .discover(
-                    &ctx,
-                    Some(ObjectType::ObjectTypeWorkflow),
-                    Some(definition_id.clone()),
-                    None, // capabilities
-                    None, // labels
-                    None, // health_status
-                    0,    // offset
-                    1000, // limit
-                )
-                .await;
-        if let Ok(registrations) = registrations_result {
-            registrations.len() as u32
-        } else {
-            1
-        }
-    } else {
-        1
-    };
-
-    // Convert workflows to JSON
-    let workflows: Vec<serde_json::Value> = workflows_response
-        .workflows
-        .iter()
-        .map(|wf| {
-            let mut wf_json = serde_json::Map::new();
-            let execution_id = if let Some(execution) = &wf.execution {
-                execution.execution_id.clone()
-            } else {
-                String::new()
-            };
-            let status: i32 = if let Some(execution) = &wf.execution {
-                execution.status as i32
-            } else {
-                0
-            };
-            let node_id = if let Some(execution) = &wf.execution {
-                execution.node_id.clone()
-            } else {
-                String::new()
-            };
-            let created_at = if let Some(execution) = &wf.execution {
-                execution.created_at.clone()
-            } else {
-                None
-            };
-            wf_json.insert(
-                "workflow_id".to_string(),
-                serde_json::Value::String(execution_id),
-            );
-            wf_json.insert("status".to_string(), serde_json::json!(status));
-            wf_json.insert("node_id".to_string(), serde_json::Value::String(node_id));
-            if let Some(ts) = created_at {
-                wf_json.insert(
-                    "created_at".to_string(),
-                    serde_json::json!({
-                        "seconds": ts.seconds,
-                        "nanos": ts.nanos,
-                    }),
-                );
-            }
-            serde_json::Value::Object(wf_json)
-        })
-        .collect();
-
-    let mut json = serde_json::Map::new();
-    json.insert(
-        "definition_id".to_string(),
-        serde_json::Value::String(definition_id),
-    );
-    json.insert(
-        "node_count".to_string(),
-        serde_json::Value::Number(node_count.into()),
-    );
-    json.insert("workflows".to_string(), serde_json::Value::Array(workflows));
-
-    Ok(Json(serde_json::Value::Object(json)))
-}
-
 /// API: Get dependencies
 async fn api_dependencies(
     axum::extract::State((
@@ -929,6 +982,7 @@ async fn api_dependencies(
         dashboard_service_opt,
     )): axum::extract::State<HttpGatewayState>,
     Query(_params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
@@ -937,10 +991,13 @@ async fn api_dependencies(
         .and_then(|s| s.parse().ok())
         .unwrap_or(true);
 
-    let request = Request::new(GetDependencyHealthRequest {
-        node_id: _params.get("node_id").cloned().unwrap_or_default(),
-        include_non_critical,
-    });
+    let request = dashboard_request(
+        GetDependencyHealthRequest {
+            node_id: _params.get("node_id").cloned().unwrap_or_default(),
+            include_non_critical,
+        },
+        &headers,
+    );
 
     let response = DashboardService::get_dependency_health(dashboard_service.as_ref(), request)
         .await
@@ -997,17 +1054,21 @@ async fn api_application_detail(
     )): axum::extract::State<HttpGatewayState>,
     Path(name): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     // Get application info
-    let request = Request::new(GetApplicationsRequest {
-        node_id: String::new(),
-        tenant_id: String::new(),
-        namespace: String::new(),
-        name_pattern: name.clone(),
-        page: None,
-    });
+    let request = dashboard_request(
+        GetApplicationsRequest {
+            node_id: String::new(),
+            tenant_id: String::new(),
+            namespace: String::new(),
+            name_pattern: name.clone(),
+            page: None,
+        },
+        &headers,
+    );
 
     let response = dashboard_service
         .get_applications(request)
@@ -1016,8 +1077,11 @@ async fn api_application_detail(
 
     let apps_response = response.into_inner();
 
-    // Find the application by name
-    let app = apps_response.applications.iter().find(|a| a.name == name);
+    // Find the application by canonical id or display name.
+    let app = apps_response
+        .applications
+        .iter()
+        .find(|a| a.application_id == name || a.name == name);
 
     if app.is_none() {
         return Err(StatusCode::NOT_FOUND);
@@ -1026,17 +1090,21 @@ async fn api_application_detail(
     let app = app.unwrap();
 
     // Get actors for this application
-    let actors_request = Request::new(GetActorsRequest {
-        node_id: String::new(),
-        tenant_id: String::new(),
-        namespace: String::new(),
-        actor_id_pattern: String::new(),
-        actor_group: String::new(),
-        actor_type: String::new(),
-        status: String::new(),
-        since: None,
-        page: None,
-    });
+    let actors_request = dashboard_request(
+        GetActorsRequest {
+            node_id: String::new(),
+            tenant_id: app.tenant_id.clone(),
+            namespace: app.namespace.clone(),
+            actor_id_pattern: String::new(),
+            actor_group: String::new(),
+            actor_type: String::new(),
+            status: String::new(),
+            since: None,
+            page: None,
+            behavior_kind: String::new(),
+        },
+        &headers,
+    );
 
     let actors_response = dashboard_service
         .get_actors(actors_request)
@@ -1099,6 +1167,14 @@ async fn api_application_detail(
         "node_count".to_string(),
         serde_json::Value::Number(node_count.into()),
     );
+    app_json.insert(
+        "namespace".to_string(),
+        serde_json::Value::String(app.namespace.clone()),
+    );
+    app_json.insert(
+        "tenant_id".to_string(),
+        serde_json::Value::String(app.tenant_id.clone()),
+    );
     if let Some(deployed_at) = &app.deployed_at {
         app_json.insert(
             "deployed_at".to_string(),
@@ -1108,22 +1184,11 @@ async fn api_application_detail(
             }),
         );
     }
+    if let Some(metrics) = &app.metrics {
+        app_json.insert("metrics".to_string(), application_metrics_to_json(metrics));
+    }
 
-    let actors_json: Vec<serde_json::Value> = actors
-        .iter()
-        .map(|a| {
-            let mut actor_json = serde_json::Map::new();
-            actor_json.insert(
-                "actor_id".to_string(),
-                serde_json::Value::String(a.actor_id.clone()),
-            );
-            actor_json.insert(
-                "actor_type".to_string(),
-                serde_json::Value::String(a.actor_type.clone()),
-            );
-            serde_json::Value::Object(actor_json)
-        })
-        .collect();
+    let actors_json: Vec<serde_json::Value> = actors.iter().map(actor_info_to_json).collect();
 
     let mut json = serde_json::Map::new();
     json.insert(
@@ -1146,21 +1211,26 @@ async fn api_actor_detail(
     )): axum::extract::State<HttpGatewayState>,
     Path(actor_id): Path<String>,
     Query(_params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let dashboard_service = dashboard_service_opt.ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     // Get actor info
-    let request = Request::new(GetActorsRequest {
-        node_id: String::new(),
-        tenant_id: String::new(),
-        namespace: String::new(),
-        actor_id_pattern: actor_id.clone(),
-        actor_group: String::new(),
-        actor_type: String::new(),
-        status: String::new(),
-        since: None,
-        page: None,
-    });
+    let request = dashboard_request(
+        GetActorsRequest {
+            node_id: String::new(),
+            tenant_id: String::new(),
+            namespace: String::new(),
+            actor_id_pattern: actor_id.clone(),
+            actor_group: String::new(),
+            actor_type: String::new(),
+            status: String::new(),
+            since: None,
+            page: None,
+            behavior_kind: String::new(),
+        },
+        &headers,
+    );
 
     let response = dashboard_service
         .get_actors(request)
@@ -1210,6 +1280,10 @@ async fn api_actor_detail(
     actor_json.insert(
         "status".to_string(),
         serde_json::Value::String(actor.status.clone()),
+    );
+    actor_json.insert(
+        "behavior_kind".to_string(),
+        serde_json::Value::String(actor.behavior_kind.clone()),
     );
 
     // Add metrics if available
@@ -1263,6 +1337,42 @@ async fn api_actor_detail(
     json.insert("actor".to_string(), serde_json::Value::Object(actor_json));
 
     Ok(Json(serde_json::Value::Object(json)))
+}
+
+/// API: Stop actor
+async fn api_actor_stop(
+    axum::extract::State((
+        _actor_svc,
+        _auth_disabled,
+        _jwt_secret,
+        service_locator,
+        _dashboard_service_opt,
+    )): axum::extract::State<HttpGatewayState>,
+    Path(actor_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let parsed_actor_id =
+        ActorId::from_canonical(&actor_id).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let actor_factory = service_locator
+        .get_actor_factory()
+        .await
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let request = dashboard_request((), &headers);
+    let ctx =
+        request_context_from_grpc_request(request.metadata(), &HashMap::new(), &service_locator)
+            .await
+            .map_err(|_| StatusCode::UNAUTHORIZED)?
+            .with_namespace(parsed_actor_id.namespace().to_string());
+
+    actor_factory
+        .stop_actor(&ctx, &parsed_actor_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(serde_json::json!({
+        "actor_id": actor_id,
+        "stopped": true
+    })))
 }
 
 /// API: Get system info (version, build date, git commit)

@@ -356,15 +356,10 @@ async fn test_activate_virtual_actor_already_active() {
             None,
         )
         .await;
-    manager
-        .mark_activated(&actor_id)
-        .await
-        .unwrap();
+    manager.mark_activated(&actor_id).await.unwrap();
 
     // Try to activate - should return Ok immediately (actor is already active)
-    let result = factory
-        .activate_virtual_actor(&actor_id)
-        .await;
+    let result = factory.activate_virtual_actor(&actor_id).await;
     assert!(result.is_ok(), "Activation should succeed (already active)");
 }
 

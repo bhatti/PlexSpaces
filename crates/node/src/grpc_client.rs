@@ -120,6 +120,7 @@ impl RemoteActorClient {
         let request = tonic::Request::new(SendMessageRequest {
             namespace: String::new(),
             actor_type: message.receiver_id.clone(),
+            actor_name: String::new(),
             http_method: "POST".to_string(),
             payload: message.payload,
             headers: message.headers,

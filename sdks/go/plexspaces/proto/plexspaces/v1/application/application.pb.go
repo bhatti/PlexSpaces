@@ -1749,14 +1749,18 @@ type ApplicationInfo struct {
 	ApplicationId string `protobuf:"bytes,1,opt,name=application_id,json=applicationId,proto3" json:"application_id,omitempty"`
 	// Application name
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// Tenant ID for visibility and isolation.
+	TenantId string `protobuf:"bytes,3,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	// Namespace for application-scoped actors and filters.
+	Namespace string `protobuf:"bytes,4,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	// Application version
-	Version string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	Version string `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`
 	// Current status
-	Status ApplicationStatus `protobuf:"varint,4,opt,name=status,proto3,enum=plexspaces.application.v1.ApplicationStatus" json:"status,omitempty"`
+	Status ApplicationStatus `protobuf:"varint,6,opt,name=status,proto3,enum=plexspaces.application.v1.ApplicationStatus" json:"status,omitempty"`
 	// When the application was deployed
-	DeployedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=deployed_at,json=deployedAt,proto3" json:"deployed_at,omitempty"`
+	DeployedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=deployed_at,json=deployedAt,proto3" json:"deployed_at,omitempty"`
 	// Application metrics (optional)
-	Metrics       *ApplicationMetrics `protobuf:"bytes,6,opt,name=metrics,proto3,oneof" json:"metrics,omitempty"`
+	Metrics       *ApplicationMetrics `protobuf:"bytes,8,opt,name=metrics,proto3,oneof" json:"metrics,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1801,6 +1805,20 @@ func (x *ApplicationInfo) GetApplicationId() string {
 func (x *ApplicationInfo) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *ApplicationInfo) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *ApplicationInfo) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
 	}
 	return ""
 }
@@ -2202,15 +2220,17 @@ const file_plexspaces_v1_application_application_proto_rawDesc = "" +
 	"\rstatus_filter\x18\x01 \x01(\x0e2,.plexspaces.application.v1.ApplicationStatusH\x00R\fstatusFilter\x88\x01\x01B\x10\n" +
 	"\x0e_status_filter\"j\n" +
 	"\x18ListApplicationsResponse\x12N\n" +
-	"\fapplications\x18\x01 \x03(\v2*.plexspaces.application.v1.ApplicationInfoR\fapplications\"\xc3\x02\n" +
+	"\fapplications\x18\x01 \x03(\v2*.plexspaces.application.v1.ApplicationInfoR\fapplications\"\xfe\x02\n" +
 	"\x0fApplicationInfo\x12%\n" +
 	"\x0eapplication_id\x18\x01 \x01(\tR\rapplicationId\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\tR\aversion\x12D\n" +
-	"\x06status\x18\x04 \x01(\x0e2,.plexspaces.application.v1.ApplicationStatusR\x06status\x12;\n" +
-	"\vdeployed_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
+	"\ttenant_id\x18\x03 \x01(\tR\btenantId\x12\x1c\n" +
+	"\tnamespace\x18\x04 \x01(\tR\tnamespace\x12\x18\n" +
+	"\aversion\x18\x05 \x01(\tR\aversion\x12D\n" +
+	"\x06status\x18\x06 \x01(\x0e2,.plexspaces.application.v1.ApplicationStatusR\x06status\x12;\n" +
+	"\vdeployed_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"deployedAt\x12L\n" +
-	"\ametrics\x18\x06 \x01(\v2-.plexspaces.application.v1.ApplicationMetricsH\x00R\ametrics\x88\x01\x01B\n" +
+	"\ametrics\x18\b \x01(\v2-.plexspaces.application.v1.ApplicationMetricsH\x00R\ametrics\x88\x01\x01B\n" +
 	"\n" +
 	"\b_metrics\"\x89\b\n" +
 	"\x12ApplicationMetrics\x12a\n" +
